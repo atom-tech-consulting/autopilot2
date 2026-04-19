@@ -1,0 +1,22 @@
+jobs:
+  - name: status-report
+    interval: 2h
+    prompt: |
+      Read the last 50 events from events.jsonl and the last 20 lines of
+      progress.md. Post a concise summary to the mattermost channel identified
+      by AP2_MM_REPORT_CHANNEL (or #autopilot if unset). Cover: tasks completed,
+      tasks failed, pipelines/cron activity, open issues. Keep under 10 lines.
+    max_turns: 10
+    created_by: bootstrap
+
+  - name: ideation
+    interval: 6h
+    prompt: |
+      Read TASKS.md, CLAUDE.md, and progress.md. If Backlog has fewer than 3
+      workable tasks, propose new tasks aligned with the project's stated goals
+      and recent work. Add proposals to Backlog via board_edit (action:
+      add_backlog) with the `#proposed` tag so a human can review before they
+      get prepped. Do not add duplicates.
+    active_when: "sh:awk '/^## Backlog/{f=1;next}/^## /{f=0}f' TASKS.md | grep -c '^- \\[' | awk '{exit ($1>=3)}'"
+    max_turns: 15
+    created_by: bootstrap

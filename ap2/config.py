@@ -1,0 +1,121 @@
+"""Paths, constants, and project configuration for autopilot v2.
+
+All shared state lives under `.cc-autopilot/` (the v1 directory — v2 reuses it so
+projects don't need a migration). Paths can be overridden by the project's
+CLAUDE.md `## Autopilot` section.
+"""
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+
+AUTOPILOT_DIR_NAME = ".cc-autopilot"
+DEFAULT_TASKS_FILE = "TASKS.md"
+DEFAULT_PROGRESS_FILE = f"{AUTOPILOT_DIR_NAME}/progress.md"
+DEFAULT_TASKS_DIR = f"{AUTOPILOT_DIR_NAME}/tasks"
+EVENTS_FILE = f"{AUTOPILOT_DIR_NAME}/events.jsonl"
+CRON_FILE = f"{AUTOPILOT_DIR_NAME}/cron.yaml"
+PID_FILE = f"{AUTOPILOT_DIR_NAME}/daemon.pid"
+PAUSE_FLAG = f"{AUTOPILOT_DIR_NAME}/paused"
+CRON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/cron_state.json"
+MM_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/mm_state.json"
+
+DEFAULT_TICK_INTERVAL_S = 30
+DEFAULT_EVENT_CONTEXT_SIZE = 50
+
+
+@dataclass
+class Config:
+    """Resolved per-project configuration."""
+
+    project_root: Path
+    tasks_file: Path
+    progress_file: Path
+    tasks_dir: Path
+    events_file: Path
+    cron_file: Path
+    pid_file: Path
+    pause_flag: Path
+    cron_state_file: Path
+    mm_state_file: Path
+    next_task_id: int
+    tick_interval_s: int
+    event_context_size: int
+
+    @classmethod
+    def load(cls, project_root: str | Path | None = None) -> "Config":
+        root = Path(project_root or os.getcwd()).resolve()
+        autopilot_section = _read_autopilot_section(root / "CLAUDE.md")
+
+        tasks_file = _resolve(root, autopilot_section.get("task_list"), DEFAULT_TASKS_FILE)
+        progress_file = _resolve(
+            root, autopilot_section.get("progress_log"), DEFAULT_PROGRESS_FILE
+        )
+        tasks_dir = _resolve(root, autopilot_section.get("task_briefings"), DEFAULT_TASKS_DIR)
+
+        return cls(
+            project_root=root,
+            tasks_file=tasks_file,
+            progress_file=progress_file,
+            tasks_dir=tasks_dir,
+            events_file=root / EVENTS_FILE,
+            cron_file=root / CRON_FILE,
+            pid_file=root / PID_FILE,
+            pause_flag=root / PAUSE_FLAG,
+            cron_state_file=root / CRON_STATE_FILE,
+            mm_state_file=root / MM_STATE_FILE,
+            next_task_id=autopilot_section.get("next_task_id", 1),
+            tick_interval_s=int(os.environ.get("AP2_TICK_S", DEFAULT_TICK_INTERVAL_S)),
+            event_context_size=int(
+                os.environ.get("AP2_EVENT_CONTEXT", DEFAULT_EVENT_CONTEXT_SIZE)
+            ),
+        )
+
+    def ensure_dirs(self) -> None:
+        self.tasks_dir.mkdir(parents=True, exist_ok=True)
+        self.events_file.parent.mkdir(parents=True, exist_ok=True)
+        self.progress_file.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _resolve(root: Path, configured: str | None, default: str) -> Path:
+    p = Path(configured or default)
+    return p if p.is_absolute() else root / p
+
+
+def _read_autopilot_section(claude_md: Path) -> dict:
+    """Parse the `## Autopilot` section of CLAUDE.md into a dict."""
+    if not claude_md.exists():
+        return {}
+    text = claude_md.read_text()
+    m = re.search(r"^##\s+Autopilot\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+    if not m:
+        return {}
+    body = m.group(1)
+    result: dict = {}
+    for label, key in [
+        ("Task list", "task_list"),
+        ("Task briefings", "task_briefings"),
+        ("Progress log", "progress_log"),
+    ]:
+        mm = re.search(rf"- {re.escape(label)}:\s*`?([^`\n]+?)`?\s*$", body, re.M)
+        if mm:
+            result[key] = mm.group(1).strip()
+    mm = re.search(r"- Next task ID:\s*TB-(\d+)", body)
+    if mm:
+        result["next_task_id"] = int(mm.group(1))
+    return result
+
+
+def bump_next_task_id(claude_md: Path, new_next: int) -> None:
+    """Update the `- Next task ID: TB-N` line in CLAUDE.md."""
+    text = claude_md.read_text()
+    new_text, n = re.subn(
+        r"(- Next task ID:\s*TB-)(\d+)",
+        lambda _: f"- Next task ID: TB-{new_next}",
+        text,
+    )
+    if n:
+        claude_md.write_text(new_text)
