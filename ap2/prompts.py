@@ -46,6 +46,18 @@ Valid statuses:
 - `incomplete` — partial progress; document what remains in the summary.
 - `blocked`  — ran into a blocker you can't resolve; explain in summary.
 - `failed`   — tried and could not make progress.
+
+### Proposing recurring work (optional)
+If the work you did should become scheduled, include one or more `cron:` lines
+inside the RESULT block. Each is a single line, `key=value` pairs with shell
+quoting allowed:
+
+    cron: add name=<name> interval=<1h|2d|30m|...> prompt="what to run"
+    cron: remove name=<name>
+    cron: update name=<name> interval=<...>
+
+`add` requires `name`, `interval`, and `prompt`. Directives are applied only
+when `status: complete`. Malformed directives are logged and skipped.
 """
 
 

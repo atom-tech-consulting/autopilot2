@@ -35,6 +35,7 @@ from .tools import (
     TASK_AGENT_TOOLS,
     build_mcp_server,
     do_board_edit,
+    do_cron_edit,
 )
 
 
@@ -101,6 +102,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
         do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
         retry.reset_attempt(cfg.retry_state_file, task.id)
         _append_progress(cfg, task.id, parsed)
+        _dispatch_cron_directives(cfg, task.id, parsed.cron)
     else:
         _handle_failure(cfg, task, status=parsed.status, parsed=parsed)
     events.append(
@@ -135,6 +137,38 @@ def _handle_failure(
         do_board_edit(cfg, {"action": "move_to_backlog", "task_id": task.id})
     if parsed is not None:
         _append_attempts(cfg, task, parsed)
+
+
+def _dispatch_cron_directives(cfg: Config, task_id: str, directives: list[dict]) -> None:
+    """Apply any `cron:` directives from a successful RESULT via do_cron_edit."""
+    for d in directives:
+        if "_error" in d:
+            events.append(
+                cfg.events_file,
+                "cron_proposal_rejected",
+                task=task_id,
+                reason=d.get("_error"),
+                raw=d.get("_raw", "")[:200],
+            )
+            continue
+        res = do_cron_edit(cfg, d)
+        if res.get("isError"):
+            events.append(
+                cfg.events_file,
+                "cron_proposal_error",
+                task=task_id,
+                action=d.get("action"),
+                name=d.get("name"),
+                error=res["content"][0]["text"][:300],
+            )
+        else:
+            events.append(
+                cfg.events_file,
+                "cron_proposed",
+                task=task_id,
+                action=d.get("action"),
+                name=d.get("name"),
+            )
 
 
 def _recover_orphans(cfg: Config) -> None:
