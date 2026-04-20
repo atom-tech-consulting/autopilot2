@@ -100,7 +100,7 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     brief_path.write_text(briefing)
                     briefing_rel = str(brief_path.relative_to(cfg.project_root))
                 desc = description
-                if blocked_on and add_map[action] == "Frozen":
+                if blocked_on:
                     desc = (desc + " " if desc else "") + f"(blocked on: {blocked_on})"
                 board.add(
                     add_map[action],

@@ -77,6 +77,42 @@ def test_board_edit_move_missing_id(cfg):
     assert res.get("isError")
 
 
+def test_board_edit_add_ready_honors_blocked_on(cfg):
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_ready", "title": "Waiter", "blocked_on": "TB-5"},
+    )
+    body = _unwrap(res)
+    b = Board.load(cfg.tasks_file)
+    t = b.get(body["task_id"])
+    assert t is not None
+    assert "blocked on: TB-5" in t.description
+
+
+def test_board_edit_add_backlog_honors_blocked_on(cfg):
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_backlog", "title": "Waiter", "blocked_on": "TB-5"},
+    )
+    body = _unwrap(res)
+    b = Board.load(cfg.tasks_file)
+    t = b.get(body["task_id"])
+    assert t is not None
+    assert "blocked on: TB-5" in t.description
+
+
+def test_board_edit_add_frozen_still_honors_blocked_on(cfg):
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_frozen", "title": "Waiter", "blocked_on": "TB-5"},
+    )
+    body = _unwrap(res)
+    b = Board.load(cfg.tasks_file)
+    t = b.get(body["task_id"])
+    assert t is not None
+    assert "blocked on: TB-5" in t.description
+
+
 def test_cron_edit_add_and_remove(cfg):
     res = tools.do_cron_edit(
         cfg,
