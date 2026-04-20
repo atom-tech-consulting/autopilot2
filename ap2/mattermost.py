@@ -78,6 +78,7 @@ def check_new_messages(cfg: Config) -> list[dict]:
     cursors: dict = state.setdefault("cursors", {})
     name_cache: dict = state.setdefault("channel_names", {})
     user_cache: dict = state.setdefault("users", {})
+    thread_cache: dict = state.setdefault("thread_mentions", {})
     out: list[dict] = []
 
     for ch in channels:
@@ -92,6 +93,12 @@ def check_new_messages(cfg: Config) -> list[dict]:
             continue
         newest = order[0]
         newest_ts = posts[newest]["create_at"] if newest in posts else 0
+        # First poll for this channel: seed cursor to newest and skip replay.
+        # Agents should only see messages posted after the daemon came up.
+        if last_id is None:
+            cursors[ch] = newest
+            cursors[ch + ":ts"] = newest_ts
+            continue
         last_ts = cursors.get(ch + ":ts", 0)
         new: list[dict] = []
         for pid in order:
@@ -99,7 +106,7 @@ def check_new_messages(cfg: Config) -> list[dict]:
                 break
             p = posts.get(pid, {})
             # Fallback to timestamp if cursor id no longer in window.
-            if last_id and last_id not in order and p.get("create_at", 0) <= last_ts:
+            if last_id not in order and p.get("create_at", 0) <= last_ts:
                 continue
             if bot_id and p.get("user_id") == bot_id:
                 continue
@@ -110,7 +117,7 @@ def check_new_messages(cfg: Config) -> list[dict]:
             # Mention gate: only keep messages mentioning the bot, or thread replies
             # where the root or a sibling mentioned the bot.
             if mention not in text:
-                if not (root and _thread_has_mention(url, token, root, mention)):
+                if not (root and _thread_has_mention(url, token, root, mention, thread_cache)):
                     continue
             new.append(p)
 
@@ -120,11 +127,18 @@ def check_new_messages(cfg: Config) -> list[dict]:
         cursors[ch] = newest
         cursors[ch + ":ts"] = newest_ts
 
-    if out:
-        _save_state(cfg, state)
-    else:
-        _save_state(cfg, state)  # persist new cursor even if no relevant msgs
+    _trim_cache(thread_cache, max_size=500)
+    _save_state(cfg, state)
     return out
+
+
+def _trim_cache(cache: dict, max_size: int) -> None:
+    """Drop oldest entries (insertion order) if the cache exceeds `max_size`."""
+    excess = len(cache) - max_size
+    if excess <= 0:
+        return
+    for key in list(cache.keys())[:excess]:
+        del cache[key]
 
 
 def _normalize(url: str, token: str, post: dict, name_cache: dict, user_cache: dict) -> dict:
@@ -158,14 +172,30 @@ def _normalize(url: str, token: str, post: dict, name_cache: dict, user_cache: d
     }
 
 
-def _thread_has_mention(url: str, token: str, root_id: str, mention: str) -> bool:
+def _thread_has_mention(
+    url: str,
+    token: str,
+    root_id: str,
+    mention: str,
+    cache: dict,
+) -> bool:
+    """Return True if any post in `root_id`'s thread mentions the bot.
+
+    Cached by root_id to avoid O(N) thread fetches. Edge case: if a thread is
+    first seen without a mention and a later post adds one, non-mention replies
+    on that thread will be missed until the cache is cleared. The alternative
+    (no False caching) would re-fetch every non-mention reply on every tick.
+    """
+    if root_id in cache:
+        return cache[root_id]
     try:
         data = _api_get(url, token, f"/api/v4/posts/{root_id}/thread")
     except Exception:
+        # Don't cache transient API errors — retry on next poll.
         return False
     if not isinstance(data, dict):
+        cache[root_id] = False
         return False
-    for p in data.get("posts", {}).values():
-        if mention in p.get("message", ""):
-            return True
-    return False
+    hit = any(mention in p.get("message", "") for p in data.get("posts", {}).values())
+    cache[root_id] = hit
+    return hit
