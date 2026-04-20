@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import events, prompts
+from . import events, prompts, retry
 from .board import Board
 from .config import Config
 from .cron import CronJob, due_jobs, load_jobs, load_state, mark_run, save_state
@@ -48,9 +48,8 @@ async def run_task(cfg: Config, sdk, task) -> None:
     events.append(cfg.events_file, "task_start", task=task.id, title=task.title)
     do_board_edit(cfg, {"action": "move_to_active", "task_id": task.id})
 
-    result_text = ""
-    commit_hash = ""
-    try:
+    async def _consume() -> str:
+        text = ""
         async for msg in sdk.query(
             prompt=prompt,
             options=sdk.ClaudeAgentOptions(
@@ -62,9 +61,22 @@ async def run_task(cfg: Config, sdk, task) -> None:
                 setting_sources=["project"],
             ),
         ):
-            text = _extract_text(msg)
-            if text:
-                result_text = text
+            t = _extract_text(msg)
+            if t:
+                text = t
+        return text
+
+    try:
+        result_text = await asyncio.wait_for(_consume(), timeout=cfg.task_timeout_s)
+    except asyncio.TimeoutError:
+        events.append(
+            cfg.events_file,
+            "task_timeout",
+            task=task.id,
+            timeout_s=cfg.task_timeout_s,
+        )
+        _handle_failure(cfg, task, status="timeout")
+        return
     except Exception as e:  # noqa: BLE001
         events.append(
             cfg.events_file,
@@ -72,17 +84,17 @@ async def run_task(cfg: Config, sdk, task) -> None:
             task=task.id,
             error=f"{type(e).__name__}: {e}",
         )
-        do_board_edit(cfg, {"action": "move_to_backlog", "task_id": task.id})
+        _handle_failure(cfg, task, status="error")
         return
 
     parsed = parse_result(result_text)
     commit_hash = parsed.commit
     if parsed.status == "complete":
         do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
+        retry.reset_attempt(cfg.retry_state_file, task.id)
         _append_progress(cfg, task.id, parsed)
     else:
-        do_board_edit(cfg, {"action": "move_to_backlog", "task_id": task.id})
-        _append_attempts(cfg, task, parsed)
+        _handle_failure(cfg, task, status=parsed.status, parsed=parsed)
     events.append(
         cfg.events_file,
         "task_complete",
@@ -91,6 +103,41 @@ async def run_task(cfg: Config, sdk, task) -> None:
         commit=commit_hash,
         summary=parsed.summary[:300],
     )
+
+
+def _handle_failure(
+    cfg: Config,
+    task,
+    *,
+    status: str,
+    parsed: TaskResult | None = None,
+) -> None:
+    """Move a failed task to Backlog, or Frozen if it has exhausted retries."""
+    attempts = retry.bump_attempt(cfg.retry_state_file, task.id)
+    if attempts >= cfg.max_retries:
+        do_board_edit(cfg, {"action": "move_to_frozen", "task_id": task.id})
+        events.append(
+            cfg.events_file,
+            "retry_exhausted",
+            task=task.id,
+            attempts=attempts,
+            last_status=status,
+        )
+    else:
+        do_board_edit(cfg, {"action": "move_to_backlog", "task_id": task.id})
+    if parsed is not None:
+        _append_attempts(cfg, task, parsed)
+
+
+def _recover_orphans(cfg: Config) -> None:
+    """Move any task left in Active back to Ready (crashed mid-run)."""
+    if not cfg.tasks_file.exists():
+        return
+    board = Board.load(cfg.tasks_file)
+    orphans = [t.id for t in board.iter_tasks("Active")]
+    for tid in orphans:
+        do_board_edit(cfg, {"action": "move_to_ready", "task_id": tid})
+        events.append(cfg.events_file, "orphan_recovery", task=tid)
 
 
 async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
@@ -103,7 +150,8 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
         thread_id=msg.get("thread_id"),
         summary=(msg.get("text") or "")[:300],
     )
-    try:
+
+    async def _consume() -> None:
         async for _ in sdk.query(
             prompt=prompt,
             options=sdk.ClaudeAgentOptions(
@@ -116,6 +164,16 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
             ),
         ):
             pass
+
+    try:
+        await asyncio.wait_for(_consume(), timeout=cfg.control_timeout_s)
+    except asyncio.TimeoutError:
+        events.append(
+            cfg.events_file,
+            "mattermost_timeout",
+            timeout_s=cfg.control_timeout_s,
+            thread_id=msg.get("thread_id"),
+        )
     except Exception as e:  # noqa: BLE001
         events.append(
             cfg.events_file,
@@ -128,7 +186,8 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     prompt = prompts.build_cron_prompt(cfg, job.name, job.prompt)
     events.append(cfg.events_file, "cron_start", job=job.name)
     allowed = job.allowed_tools or CONTROL_AGENT_TOOLS
-    try:
+
+    async def _consume() -> None:
         async for _ in sdk.query(
             prompt=prompt,
             options=sdk.ClaudeAgentOptions(
@@ -141,6 +200,16 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
             ),
         ):
             pass
+
+    try:
+        await asyncio.wait_for(_consume(), timeout=cfg.control_timeout_s)
+    except asyncio.TimeoutError:
+        events.append(
+            cfg.events_file,
+            "cron_timeout",
+            job=job.name,
+            timeout_s=cfg.control_timeout_s,
+        )
     except Exception as e:  # noqa: BLE001
         events.append(
             cfg.events_file,
@@ -203,6 +272,7 @@ def _today() -> str:
 
 async def main_loop(cfg: Config) -> None:
     cfg.ensure_dirs()
+    _recover_orphans(cfg)
     _import_sdk_or_die()
     import claude_agent_sdk as sdk  # type: ignore
 

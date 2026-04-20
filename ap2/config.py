@@ -22,9 +22,13 @@ PID_FILE = f"{AUTOPILOT_DIR_NAME}/daemon.pid"
 PAUSE_FLAG = f"{AUTOPILOT_DIR_NAME}/paused"
 CRON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/cron_state.json"
 MM_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/mm_state.json"
+RETRY_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/retry_state.json"
 
 DEFAULT_TICK_INTERVAL_S = 30
 DEFAULT_EVENT_CONTEXT_SIZE = 50
+DEFAULT_TASK_TIMEOUT_S = 1200  # 20 min per SDK query
+DEFAULT_CONTROL_TIMEOUT_S = 300  # 5 min for mattermost/cron agents
+DEFAULT_MAX_RETRIES = 3
 
 
 @dataclass
@@ -41,9 +45,13 @@ class Config:
     pause_flag: Path
     cron_state_file: Path
     mm_state_file: Path
+    retry_state_file: Path
     next_task_id: int
     tick_interval_s: int
     event_context_size: int
+    task_timeout_s: int
+    control_timeout_s: int
+    max_retries: int
 
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
@@ -67,11 +75,19 @@ class Config:
             pause_flag=root / PAUSE_FLAG,
             cron_state_file=root / CRON_STATE_FILE,
             mm_state_file=root / MM_STATE_FILE,
+            retry_state_file=root / RETRY_STATE_FILE,
             next_task_id=autopilot_section.get("next_task_id", 1),
             tick_interval_s=int(os.environ.get("AP2_TICK_S", DEFAULT_TICK_INTERVAL_S)),
             event_context_size=int(
                 os.environ.get("AP2_EVENT_CONTEXT", DEFAULT_EVENT_CONTEXT_SIZE)
             ),
+            task_timeout_s=int(
+                os.environ.get("AP2_TASK_TIMEOUT_S", DEFAULT_TASK_TIMEOUT_S)
+            ),
+            control_timeout_s=int(
+                os.environ.get("AP2_CONTROL_TIMEOUT_S", DEFAULT_CONTROL_TIMEOUT_S)
+            ),
+            max_retries=int(os.environ.get("AP2_MAX_RETRIES", DEFAULT_MAX_RETRIES)),
         )
 
     def ensure_dirs(self) -> None:
