@@ -19,7 +19,15 @@ from pathlib import Path
 from . import events, prompts, retry
 from .board import Board
 from .config import Config
-from .cron import CronJob, due_jobs, load_jobs, load_state, mark_run, save_state
+from .cron import (
+    CronJob,
+    bootstrap as bootstrap_cron,
+    due_jobs,
+    load_jobs,
+    load_state,
+    mark_run,
+    save_state,
+)
 from .mattermost import check_new_messages
 from .result import TaskResult, parse as parse_result
 from .tools import (
@@ -272,6 +280,8 @@ def _today() -> str:
 
 async def main_loop(cfg: Config) -> None:
     cfg.ensure_dirs()
+    if bootstrap_cron(cfg.cron_file):
+        events.append(cfg.events_file, "cron_bootstrap", path=str(cfg.cron_file))
     _recover_orphans(cfg)
     _import_sdk_or_die()
     import claude_agent_sdk as sdk  # type: ignore

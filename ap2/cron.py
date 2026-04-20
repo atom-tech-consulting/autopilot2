@@ -92,6 +92,24 @@ def load_jobs(cron_file: Path) -> list[CronJob]:
     return [CronJob.from_dict(j) for j in jobs]
 
 
+_DEFAULT_CRON_FILE = Path(__file__).parent / "cron.default.yaml"
+
+
+def bootstrap(cron_file: Path) -> bool:
+    """Copy the packaged default cron.yaml into place if `cron_file` is missing.
+
+    Returns True if a copy was made, False if the file already existed or the
+    default is unavailable.
+    """
+    if cron_file.exists():
+        return False
+    if not _DEFAULT_CRON_FILE.exists():
+        return False
+    cron_file.parent.mkdir(parents=True, exist_ok=True)
+    cron_file.write_text(_DEFAULT_CRON_FILE.read_text())
+    return True
+
+
 def save_jobs(cron_file: Path, jobs: list[CronJob]) -> None:
     cron_file.parent.mkdir(parents=True, exist_ok=True)
     text = yaml.safe_dump(
