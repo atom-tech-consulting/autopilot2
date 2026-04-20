@@ -179,3 +179,62 @@ def test_successful_run_resets_attempt_counter(cfg):
     b2 = Board.load(cfg.tasks_file)
     assert b2.find("TB-5")[0] == "Complete"
     assert retry.attempt_count(cfg.retry_state_file, "TB-5") == 0
+
+
+# ---------- run_task invariants (TB-51) ----------
+
+
+def test_run_task_emits_start_and_complete_events(cfg):
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+    sdk = _sdk_yielding(
+        "RESULT:\nstatus: complete\ncommit: deadbeef\nsummary: done\n"
+    )
+    asyncio.run(run_task(cfg, sdk, task))
+    evts = events.tail(cfg.events_file, 20)
+    kinds = [e["type"] for e in evts]
+    assert "task_start" in kinds
+    assert "task_complete" in kinds
+    start = next(e for e in evts if e["type"] == "task_start")
+    end = next(e for e in reversed(evts) if e["type"] == "task_complete")
+    assert start["task"] == "TB-5"
+    assert start["title"] == "Victim"
+    assert end["task"] == "TB-5"
+    assert end["status"] == "complete"
+    assert end["commit"] == "deadbeef"
+
+
+def test_run_task_does_not_bump_next_task_id(cfg, tmp_path):
+    before = (tmp_path / "CLAUDE.md").read_text()
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+    sdk = _sdk_yielding("RESULT:\nstatus: complete\nsummary: ok\n")
+    asyncio.run(run_task(cfg, sdk, task))
+    after = (tmp_path / "CLAUDE.md").read_text()
+    assert "TB-10" in after
+    assert before == after
+
+
+def test_run_task_blocked_moves_to_backlog_and_writes_attempts(cfg, tmp_path):
+    # Swap the fixture briefing for a real file so _append_attempts can write.
+    brief = tmp_path / "brief.md"
+    brief.write_text("# Existing\n")
+    tasks_text = cfg.tasks_file.read_text().replace(
+        "[→ brief](brief.md)", f"[→ brief]({brief.name})"
+    )
+    cfg.tasks_file.write_text(tasks_text)
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+
+    sdk = _sdk_yielding(
+        "RESULT:\nstatus: blocked\nsummary: needs human input\n"
+    )
+    asyncio.run(run_task(cfg, sdk, task))
+
+    b2 = Board.load(cfg.tasks_file)
+    # max_retries=2 → first failure should park in Backlog, not Frozen.
+    assert b2.find("TB-5")[0] == "Backlog"
+    text = brief.read_text()
+    assert "## Attempts" in text
+    assert "blocked" in text
+    assert "needs human input" in text
