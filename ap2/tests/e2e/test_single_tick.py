@@ -93,3 +93,33 @@ def test_single_tick_blocked_status_goes_to_backlog(e2e_project):
 
     board = Board.load(cfg.tasks_file)
     assert board.find("TB-5")[0] == "Backlog"
+
+
+def test_single_tick_auto_promotes_backlog_when_ready_empty(e2e_project):
+    """If Ready is empty, top-of-Backlog is auto-promoted and dispatched."""
+    cfg = e2e_project()
+    board = Board.load(cfg.tasks_file)
+    board.add("Backlog", task_id="TB-7", title="First backlog item")
+    board.add("Backlog", task_id="TB-8", title="Second backlog item")
+    board.save()
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-7",
+        text_respond(
+            "RESULT:\nstatus: complete\ncommit: abc12345\nsummary: did it\n"
+        ),
+    )
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-7")[0] == "Complete"
+    assert board.find("TB-8")[0] == "Backlog"
+
+    evts = events.tail(cfg.events_file, 20)
+    kinds = [e["type"] for e in evts]
+    assert "backlog_auto_promoted" in kinds
+    assert kinds.index("backlog_auto_promoted") < kinds.index("task_start")
+    promo = next(e for e in evts if e["type"] == "backlog_auto_promoted")
+    assert promo["task"] == "TB-7"

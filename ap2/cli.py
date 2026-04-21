@@ -55,7 +55,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     # Fork into background via `python -m ap2 _run`.
     log = cfg.project_root / ".cc-autopilot" / "daemon.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "ap2", "_run", "--project", str(cfg.project_root)]
+    cmd = [sys.executable, "-m", "ap2", "--project", str(cfg.project_root), "_run"]
     with log.open("a") as f:
         proc = subprocess.Popen(
             cmd, stdout=f, stderr=f, stdin=subprocess.DEVNULL,

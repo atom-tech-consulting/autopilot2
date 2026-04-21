@@ -57,6 +57,15 @@ async def run_task(cfg: Config, sdk, task) -> None:
     events.append(cfg.events_file, "task_start", task=task.id, title=task.title)
     do_board_edit(cfg, {"action": "move_to_active", "task_id": task.id})
 
+    # Ring buffer for SDK subprocess stderr — without this the SDK raises
+    # ProcessError with a useless "Check stderr output for details" message.
+    stderr_lines: list[str] = []
+
+    def _stderr_sink(line: str) -> None:
+        stderr_lines.append(line)
+        if len(stderr_lines) > 200:
+            del stderr_lines[: len(stderr_lines) - 200]
+
     async def _consume() -> str:
         text = ""
         async for msg in sdk.query(
@@ -68,6 +77,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
                 permission_mode="bypassPermissions",
                 max_turns=int(os.environ.get("AP2_TASK_MAX_TURNS", 50)),
                 setting_sources=["project"],
+                stderr=_stderr_sink,
             ),
         ):
             t = _extract_text(msg)
@@ -83,6 +93,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
             "task_timeout",
             task=task.id,
             timeout_s=cfg.task_timeout_s,
+            stderr_tail="\n".join(stderr_lines[-30:]),
         )
         _handle_failure(cfg, task, status="timeout")
         return
@@ -92,6 +103,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
             "task_error",
             task=task.id,
             error=f"{type(e).__name__}: {e}",
+            stderr_tail="\n".join(stderr_lines[-30:]),
         )
         _handle_failure(cfg, task, status="error")
         return
@@ -361,10 +373,22 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "cron_error", error=f"{type(e).__name__}: {e}")
 
-    # 3. Next Ready task
+    # 3. Next Ready task (auto-promote top-of-Backlog if Ready is empty)
     try:
         board = Board.load(cfg.tasks_file)
         task = board.next_ready()
+        if task is None:
+            backlog = next(board.iter_tasks(section="Backlog"), None)
+            if backlog is not None:
+                do_board_edit(cfg, {"action": "move_to_ready", "task_id": backlog.id})
+                events.append(
+                    cfg.events_file,
+                    "backlog_auto_promoted",
+                    task=backlog.id,
+                    title=backlog.title,
+                )
+                board = Board.load(cfg.tasks_file)
+                task = board.next_ready()
         if task:
             await run_task(cfg, sdk, task)
     except Exception as e:  # noqa: BLE001

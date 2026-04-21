@@ -8,9 +8,11 @@ runbook rationale.
 """
 from __future__ import annotations
 
+import grp
 import os
 import platform
 import pwd
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -42,10 +44,43 @@ def _path_owner(path: Path) -> str:
 
 
 def _can_read_as(user: str, repo: Path) -> bool:
-    return subprocess.run(
-        ["sudo", "-n", "-u", user, "git", "-C", str(repo), "rev-parse", "HEAD"],
-        capture_output=True,
-    ).returncode == 0
+    """Best-effort stat check: does `user` have r+x on `repo` and x on ancestors?
+
+    Uses permission bits only — doesn't see macOS ACLs. If this returns False
+    but the real `git clone` actually succeeds (ACLs grant access), that's a
+    false alarm the caller can override. The check exists so the common case
+    ("both users in staff, dir is g+rx") gives a fast, clear error before we
+    start invoking sudo.
+    """
+    try:
+        pw = pwd.getpwnam(user)
+    except KeyError:
+        return False
+    uid = pw.pw_uid
+    groups = {pw.pw_gid} | {g.gr_gid for g in grp.getgrall() if user in g.gr_mem}
+
+    def _mode_ok(p: Path, *, need_read: bool) -> bool:
+        try:
+            st = os.stat(p)
+        except OSError:
+            return False
+        m = st.st_mode
+        if st.st_uid == uid:
+            req = stat.S_IXUSR | (stat.S_IRUSR if need_read else 0)
+        elif st.st_gid in groups:
+            req = stat.S_IXGRP | (stat.S_IRGRP if need_read else 0)
+        else:
+            req = stat.S_IXOTH | (stat.S_IROTH if need_read else 0)
+        return (m & req) == req
+
+    p = repo.resolve()
+    if not _mode_ok(p, need_read=True):
+        return False
+    while p != p.parent:
+        p = p.parent
+        if not _mode_ok(p, need_read=False):
+            return False
+    return True
 
 
 def _confirm(prompt: str, *, assume_yes: bool = False) -> bool:
@@ -284,10 +319,15 @@ def project_setup(source: Path, user: str = DEFAULT_USER, *, assume_yes: bool = 
         print(f"Fix: chmod -R g+rX {source}  (macOS: both users typically in 'staff')")
         return 1
 
+    # `-c safe.directory=*` is scoped to this single clone invocation — git
+    # otherwise refuses to read a repo owned by a different user (the human).
+    # We use `*` rather than the exact path because git matches against the
+    # gitdir (`<source>/.git`), not the worktree, and the exact form is
+    # awkward to get right across bare / non-bare / submodule cases.
     cmds = [
         ["sudo", "-u", user, "mkdir", "-p", str(home / "repos")],
-        ["sudo", "-u", user, "git", "clone", "--origin", "upstream",
-         str(source), str(dst)],
+        ["sudo", "-u", user, "git", "-c", "safe.directory=*",
+         "clone", "--origin", "upstream", str(source), str(dst)],
         ["sudo", "-u", user, "git", "-C", str(dst),
          "remote", "set-url", "--push", "upstream", "/dev/null"],
         ["sudo", "-u", user, "git", "init", "--bare", str(bare)],
