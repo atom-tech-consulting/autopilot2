@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import events
+from . import events, sandbox
 from .board import Board, locked_board
 from .config import Config
 from .cron import load_jobs, load_state
@@ -253,6 +253,30 @@ def build_parser() -> argparse.ArgumentParser:
     sub_cron = s.add_subparsers(dest="cron_cmd", required=True)
     sc = sub_cron.add_parser("list", help="list cron jobs")
     sc.set_defaults(func=cmd_cron_list)
+
+    s = sub.add_parser("sandbox", help="OS-level sandbox user + project helpers")
+    s.set_defaults(func=lambda cfg, a: (s.print_help() or 0))
+    sub_sbx = s.add_subparsers(dest="sbx_cmd")
+
+    sc = sub_sbx.add_parser("user-audit", help="verify sandbox user has no creds")
+    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
+    sc.set_defaults(func=sandbox.cmd_user_audit)
+
+    sc = sub_sbx.add_parser("user-setup", help="create sandbox user (prompts before running sudo)")
+    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
+    sc.add_argument("-y", "--yes", action="store_true", help="skip confirmation prompt")
+    sc.set_defaults(func=sandbox.cmd_user_setup)
+
+    sc = sub_sbx.add_parser("project-setup", help="clone <source> into ~<user>/repos/")
+    sc.add_argument("source", help="path to the source repo (human's clone)")
+    sc.add_argument("--user", default=sandbox.DEFAULT_USER)
+    sc.add_argument("-y", "--yes", action="store_true", help="skip confirmation prompt")
+    sc.set_defaults(func=sandbox.cmd_project_setup)
+
+    sc = sub_sbx.add_parser("project-audit", help="verify isolated project clone")
+    sc.add_argument("path")
+    sc.add_argument("--user", default=sandbox.DEFAULT_USER)
+    sc.set_defaults(func=sandbox.cmd_project_audit)
 
     return p
 
