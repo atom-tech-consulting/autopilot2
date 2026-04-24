@@ -23,6 +23,11 @@ TASK_LINE_RE = re.compile(
     r"(?:\s*\[→ brief\]\((?P<briefing>[^)]+)\))?\s*$"
 )
 
+# Matches a `(blocked on: TB-5, TB-7)` clause anywhere in a task's description.
+# Referenced IDs are extracted with _TASK_ID_RE (any `TB-\d+` tokens inside).
+_BLOCKED_CLAUSE_RE = re.compile(r"\(blocked on:\s*([^)]+)\)", re.IGNORECASE)
+_TASK_ID_RE = re.compile(r"TB-\d+")
+
 
 @dataclass
 class Task:
@@ -38,6 +43,18 @@ class Task:
     @property
     def num(self) -> int:
         return int(self.id.split("-")[1])
+
+    @property
+    def blocked_on(self) -> list[str]:
+        """Task IDs listed in a `(blocked on: TB-X, TB-Y)` clause in the description.
+
+        Empty for tasks without the clause — so dependency-aware selection is
+        a no-op for existing tasks that don't explicitly declare blockers.
+        """
+        m = _BLOCKED_CLAUSE_RE.search(self.description)
+        if not m:
+            return []
+        return _TASK_ID_RE.findall(m.group(1))
 
     def render(self) -> str:
         check = "x" if self.checked else " "
@@ -186,11 +203,28 @@ class Board:
                 if t:
                     yield t
 
+    def completed_ids(self) -> set[str]:
+        """Set of task IDs currently in the Complete section."""
+        return {t.id for t in self.iter_tasks("Complete")}
+
+    def _is_dispatchable(self, t: Task, completed: set[str]) -> bool:
+        """True iff every blocker declared on `t` is already in Complete."""
+        return all(b in completed for b in t.blocked_on)
+
     def next_ready(self) -> Task | None:
-        """Top of Ready queue, if any."""
-        for line in self.sections.get("Ready", []):
-            t = parse_task_line(line, "Ready")
-            if t:
+        """Top of Ready whose blockers are all satisfied (all in Complete).
+
+        Tasks with no declared blockers (the common case, and all pre-existing
+        tasks) are always dispatchable — so this is backward-compatible: any
+        board authored before dependency enforcement behaves exactly as before.
+        """
+        return self.next_dispatchable("Ready")
+
+    def next_dispatchable(self, section: str) -> Task | None:
+        """First task in `section` whose blockers are all in Complete."""
+        completed = self.completed_ids()
+        for t in self.iter_tasks(section):
+            if self._is_dispatchable(t, completed):
                 return t
         return None
 

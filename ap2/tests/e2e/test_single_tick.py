@@ -202,6 +202,37 @@ def test_tick_ideation_honors_cooldown(e2e_project, monkeypatch):
     assert "cron_start" not in kinds
 
 
+def test_tick_auto_promote_skips_blocked_backlog_task(e2e_project):
+    """Top-of-Backlog has unmet `blocked on:` → daemon picks next eligible."""
+    cfg = e2e_project()
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id="TB-7",
+        title="Depends on TB-99",
+        description="(blocked on: TB-99)",
+    )
+    board.add("Backlog", task_id="TB-8", title="Clear path")
+    board.save()
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-8",
+        text_respond("RESULT:\nstatus: complete\ncommit: def0\nsummary: ok\n"),
+    )
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-8")[0] == "Complete"
+    # TB-7 remained in Backlog because its blocker is unmet.
+    assert board.find("TB-7")[0] == "Backlog"
+
+    evts = events.tail(cfg.events_file, 20)
+    promo = next(e for e in evts if e["type"] == "backlog_auto_promoted")
+    assert promo["task"] == "TB-8"
+
+
 def test_tick_ideation_skipped_when_no_ideation_cron_configured(e2e_project):
     """If the project's cron.yaml has no `ideation` job, step-4 is a no-op."""
     cfg = e2e_project()

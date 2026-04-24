@@ -125,3 +125,142 @@ def test_roundtrip_preserves_sections(tmp_path):
     text = path.read_text()
     for s in SECTIONS:
         assert f"## {s}" in text
+
+
+# ---------------------------------------------------------------------------
+# Dependency enforcement: `(blocked on: TB-X)` in description gates promotion
+
+def _make(task_id: str, section: str, description: str = "") -> "Task":  # noqa: F821
+    from ap2.board import Task
+    return Task(id=task_id, title="t", section=section, description=description)
+
+
+def test_blocked_on_single_id():
+    t = _make("TB-2", "Backlog", "needs this (blocked on: TB-5)")
+    assert t.blocked_on == ["TB-5"]
+
+
+def test_blocked_on_multiple_ids_comma_separated():
+    t = _make("TB-2", "Backlog", "x (blocked on: TB-5, TB-7, TB-12) y")
+    assert t.blocked_on == ["TB-5", "TB-7", "TB-12"]
+
+
+def test_blocked_on_case_insensitive_and_natural_language():
+    # Humans might type "Blocked on: TB-5 and TB-7" — should still parse.
+    t = _make("TB-2", "Backlog", "(Blocked on: TB-5 and TB-7)")
+    assert t.blocked_on == ["TB-5", "TB-7"]
+
+
+def test_blocked_on_empty_when_no_clause():
+    t = _make("TB-2", "Backlog", "plain description, no blockers here")
+    assert t.blocked_on == []
+
+
+def test_blocked_on_empty_for_no_description():
+    t = _make("TB-2", "Backlog", "")
+    assert t.blocked_on == []
+
+
+def test_next_ready_skips_blocked_task(tmp_path):
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        - [ ] **TB-3** **needs TB-1** — go next after (blocked on: TB-1)
+        - [ ] **TB-4** **standalone** — no blockers
+
+        ## Backlog
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    t = b.next_ready()
+    assert t is not None
+    # Top of Ready is TB-3 but it's blocked — next_ready picks TB-4 instead.
+    assert t.id == "TB-4"
+
+
+def test_next_ready_returns_blocked_task_once_blocker_completes(tmp_path):
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        - [ ] **TB-3** **depends** — needs it (blocked on: TB-1)
+
+        ## Backlog
+
+        ## Complete
+
+        - [x] **TB-1** **blocker** — done
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    t = b.next_ready()
+    assert t is not None
+    assert t.id == "TB-3"
+
+
+def test_next_dispatchable_backlog_skips_blocked(tmp_path):
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        ## Backlog
+
+        - [ ] **TB-5** **first** — wants it (blocked on: TB-99)
+        - [ ] **TB-6** **second** — clear path
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    t = b.next_dispatchable("Backlog")
+    assert t is not None
+    assert t.id == "TB-6"
+
+
+def test_next_dispatchable_returns_none_when_all_blocked(tmp_path):
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        - [ ] **TB-3** **a** — (blocked on: TB-99)
+        - [ ] **TB-4** **b** — (blocked on: TB-99)
+
+        ## Backlog
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    assert b.next_ready() is None
+    assert b.next_dispatchable("Ready") is None

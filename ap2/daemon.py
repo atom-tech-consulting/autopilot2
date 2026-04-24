@@ -389,7 +389,10 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
         board = Board.load(cfg.tasks_file)
         task = board.next_ready()
         if task is None:
-            backlog = next(board.iter_tasks(section="Backlog"), None)
+            # next_dispatchable skips any Backlog task with unmet `blocked on:`
+            # references — backward-compatible: tasks with no declared blockers
+            # are always dispatchable.
+            backlog = board.next_dispatchable("Backlog")
             if backlog is not None:
                 do_board_edit(cfg, {"action": "move_to_ready", "task_id": backlog.id})
                 events.append(
