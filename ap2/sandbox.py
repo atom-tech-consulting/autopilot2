@@ -21,10 +21,12 @@ from pathlib import Path
 
 DEFAULT_USER = "claude-agent"
 
-# Marker lines used by install_oauth_token to make the block we own
-# replaceable on re-run without touching the rest of the user's .zshenv.
-_TOKEN_BEGIN = "# BEGIN ap2-managed: CLAUDE_CODE_OAUTH_TOKEN"
-_TOKEN_END = "# END ap2-managed: CLAUDE_CODE_OAUTH_TOKEN"
+# Labels used by the sentinel-block writer. One label per "topic" (OAuth token,
+# MM credentials, MM channel) so re-running any single flow replaces just its
+# block without touching others.
+_LBL_OAUTH = "CLAUDE_CODE_OAUTH_TOKEN"
+_LBL_MM_CREDS = "mattermost-credentials"
+_LBL_MM_CHANNEL = "mattermost-channel"
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +304,8 @@ def user_setup(
     *,
     assume_yes: bool = False,
     skip_token: bool = False,
+    mm_url: str | None = None,
+    mm_token: str | None = None,
 ) -> int:
     sysname = platform.system()
     already_existed = _user_exists(user)
@@ -329,6 +333,17 @@ def user_setup(
     elif not skip_token:
         print(f"\nSkipped interactive token prompt (--yes). Install later with:")
         print(f"  ap2 sandbox install-token {user}")
+
+    # Mattermost credentials — only install if both supplied; otherwise print
+    # the follow-up command. No interactive prompt: the `MATTERMOST_URL`/
+    # `_TOKEN` are usually already in the human's shell, so an explicit flag
+    # (or `install-mm` later) is the right UX — not another password prompt.
+    if mm_url and mm_token:
+        print()
+        install_mm_credentials(user, mm_url, mm_token)
+    else:
+        print(f"\nMattermost credentials not installed. To install later:")
+        print(f"  ap2 sandbox install-mm {user}")
 
     print(f"\nVerify: ap2 sandbox user-audit {user}")
     return 0
@@ -368,72 +383,193 @@ def _prompt_install_token(user: str) -> None:
     install_oauth_token(user, token)
 
 
-def install_oauth_token(user: str, token: str) -> int:
-    """Write/replace `CLAUDE_CODE_OAUTH_TOKEN` in ~<user>/.zshenv, chmod 0600.
+def _replace_sentinel_block(existing: str, label: str, body: str) -> str:
+    """Return `existing` with the `# BEGIN/END ap2-managed: <label>` block
+    replaced by `body` (no trailing newline on body). If the block is absent,
+    the new block is appended.
 
-    Idempotent: replaces the sentinel-bracketed block on re-run, leaving the
-    rest of `.zshenv` untouched. Returns 0 on success.
+    Pure string op — no I/O — so it's unit-testable without sudo.
+    """
+    begin = f"# BEGIN ap2-managed: {label}"
+    end = f"# END ap2-managed: {label}"
+    cleaned: list[str] = []
+    skipping = False
+    for line in existing.splitlines():
+        if line.strip() == begin:
+            skipping = True
+            continue
+        if skipping:
+            if line.strip() == end:
+                skipping = False
+            continue
+        cleaned.append(line)
+    prefix = "\n".join(cleaned).rstrip()
+    block = f"{begin}\n{body}\n{end}\n"
+    return (prefix + "\n\n" if prefix else "") + block
+
+
+def _write_sentinel_block(
+    file_path: Path,
+    user: str,
+    label: str,
+    body: str,
+) -> int:
+    """Atomically replace the `label` block in `file_path`, writing via sudo
+    as `user` so the file is owned by the sandbox user. chmod 600.
     """
     if not _user_exists(user):
         print(f"user {user!r} does not exist", file=sys.stderr)
         return 1
+    # Read via sudo (file may not exist — that's fine).
+    r = subprocess.run(
+        ["sudo", "-u", user, "sh", "-c",
+         f"test -f {file_path} && cat {file_path} || true"],
+        capture_output=True, text=True,
+    )
+    new_contents = _replace_sentinel_block(r.stdout, label, body)
+    # Ensure parent dir exists as the target user.
+    subprocess.run(
+        ["sudo", "-u", user, "mkdir", "-p", str(file_path.parent)],
+        check=False,
+    )
+    # Write via sudo tee, discarding stdout so secrets never echo.
+    w = subprocess.run(
+        ["sudo", "-u", user, "tee", str(file_path)],
+        input=new_contents, text=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    if w.returncode != 0:
+        print(f"failed to write {file_path}: {w.stderr}", file=sys.stderr)
+        return 1
+    c = subprocess.run(["sudo", "-u", user, "chmod", "600", str(file_path)])
+    if c.returncode != 0:
+        print(f"chmod 600 {file_path} failed", file=sys.stderr)
+        return 1
+    return 0
+
+
+def install_oauth_token(user: str, token: str) -> int:
+    """Write/replace `CLAUDE_CODE_OAUTH_TOKEN` in ~<user>/.zshenv, chmod 0600."""
     token = token.strip()
     if not token:
         print("empty token; refusing to write", file=sys.stderr)
         return 1
-
     home = _user_home(user)
     if home is None:
         print(f"cannot resolve home for {user!r}", file=sys.stderr)
         return 1
     zshenv = home / ".zshenv"
-
-    # Read current contents via sudo (file may not exist yet — that's fine).
-    r = subprocess.run(
-        ["sudo", "-u", user, "sh", "-c",
-         f"test -f {zshenv} && cat {zshenv} || true"],
-        capture_output=True, text=True,
+    rc = _write_sentinel_block(
+        zshenv, user, _LBL_OAUTH,
+        f"export CLAUDE_CODE_OAUTH_TOKEN={token}",
     )
-    existing = r.stdout
-
-    # Strip any previous ap2-managed block so rotating tokens doesn't accumulate.
-    cleaned: list[str] = []
-    skipping = False
-    for line in existing.splitlines():
-        if line.strip() == _TOKEN_BEGIN:
-            skipping = True
-            continue
-        if skipping:
-            if line.strip() == _TOKEN_END:
-                skipping = False
-            continue
-        cleaned.append(line)
-    prefix = "\n".join(cleaned).rstrip()
-    block = f"{_TOKEN_BEGIN}\nexport CLAUDE_CODE_OAUTH_TOKEN={token}\n{_TOKEN_END}\n"
-    new_contents = (prefix + "\n\n" if prefix else "") + block
-
-    # Write via sudo tee, discarding stdout so the token never echoes.
-    w = subprocess.run(
-        ["sudo", "-u", user, "tee", str(zshenv)],
-        input=new_contents, text=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-    )
-    if w.returncode != 0:
-        print(f"failed to write {zshenv}: {w.stderr}", file=sys.stderr)
-        return 1
-
-    c = subprocess.run(["sudo", "-u", user, "chmod", "600", str(zshenv)])
-    if c.returncode != 0:
-        print(f"chmod 600 {zshenv} failed", file=sys.stderr)
-        return 1
-
+    if rc != 0:
+        return rc
     print(f"wrote CLAUDE_CODE_OAUTH_TOKEN to {zshenv} (mode 0600)")
-    print(f"restart the daemon so the new env takes effect:")
+    print("restart the daemon so the new env takes effect:")
     print(f"  sudo -u {user} -i ap2 --project <repo> stop && ap2 --project <repo> start")
     return 0
 
 
-def project_setup(source: Path, user: str = DEFAULT_USER, *, assume_yes: bool = False) -> int:
+def install_mm_credentials(user: str, url: str, token: str) -> int:
+    """Write/replace `MATTERMOST_URL` + `MATTERMOST_TOKEN` in ~<user>/.zshenv."""
+    url, token = url.strip().rstrip("/"), token.strip()
+    if not url or not token:
+        print("empty mattermost url or token; refusing to write", file=sys.stderr)
+        return 1
+    home = _user_home(user)
+    if home is None:
+        print(f"cannot resolve home for {user!r}", file=sys.stderr)
+        return 1
+    zshenv = home / ".zshenv"
+    rc = _write_sentinel_block(
+        zshenv, user, _LBL_MM_CREDS,
+        f"export MATTERMOST_URL={url}\nexport MATTERMOST_TOKEN={token}",
+    )
+    if rc != 0:
+        return rc
+    print(f"wrote MATTERMOST_URL + MATTERMOST_TOKEN to {zshenv} (mode 0600)")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Mattermost API helpers — used to resolve channel NAME → ID at install time.
+#
+# Keeping them in sandbox.py (not mattermost.py) because (a) they're install-
+# time only and (b) they require auth from the *human's* env, not the daemon's.
+
+
+def _mm_api_get(url: str, token: str, path: str) -> dict | list:
+    import json
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(
+        url.rstrip("/") + path,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"mattermost {path} → HTTP {e.code}") from e
+
+
+def resolve_mm_channel(
+    url: str, token: str, channel_name: str, team_id: str | None = None,
+) -> tuple[str, str]:
+    """Resolve a channel name to (channel_id, team_id).
+
+    If `team_id` is None, uses the caller's first team from `/users/me/teams`.
+    Accepts names with or without a leading `#`.
+    """
+    name = channel_name.lstrip("#").strip()
+    if not name:
+        raise ValueError("empty channel name")
+    if team_id is None:
+        teams = _mm_api_get(url, token, "/api/v4/users/me/teams")
+        if not isinstance(teams, list) or not teams:
+            raise RuntimeError("user has no teams — set AP2_MM_TEAM_ID explicitly")
+        team_id = teams[0]["id"]
+    ch = _mm_api_get(url, token, f"/api/v4/teams/{team_id}/channels/name/{name}")
+    if not isinstance(ch, dict) or "id" not in ch:
+        raise RuntimeError(f"channel {name!r} not found in team {team_id}")
+    return ch["id"], team_id
+
+
+def install_project_channel(
+    project_root: Path,
+    user: str,
+    channel_id: str,
+    *,
+    channel_name: str | None = None,
+) -> int:
+    """Write AP2_MM_CHANNELS=<id> into <project>/.cc-autopilot/env.
+
+    Idempotent sentinel block, so re-running (or switching channels) replaces
+    cleanly. `channel_name` is only used for a comment line so humans reading
+    the file can tell what the ID refers to.
+    """
+    channel_id = channel_id.strip()
+    if not channel_id:
+        print("empty channel id; refusing to write", file=sys.stderr)
+        return 1
+    env_file = project_root / ".cc-autopilot" / "env"
+    note = f"# channel name: #{channel_name}\n" if channel_name else ""
+    body = f"{note}AP2_MM_CHANNELS={channel_id}"
+    rc = _write_sentinel_block(env_file, user, _LBL_MM_CHANNEL, body)
+    if rc != 0:
+        return rc
+    print(f"wrote AP2_MM_CHANNELS to {env_file} (mode 0600)")
+    return 0
+
+
+def project_setup(
+    source: Path,
+    user: str = DEFAULT_USER,
+    *,
+    assume_yes: bool = False,
+    mm_channel: str | None = None,
+) -> int:
     source = source.resolve()
     if not _user_exists(user):
         print(f"user {user!r} does not exist. Run: python -m ap2 sandbox user-setup {user}",
@@ -483,8 +619,38 @@ def project_setup(source: Path, user: str = DEFAULT_USER, *, assume_yes: bool = 
     )
     if rc != 0:
         return rc
+
+    # Optional mattermost channel install — resolves the name via the caller's
+    # own MM creds (MATTERMOST_URL/MATTERMOST_TOKEN from the human's env), then
+    # writes the resolved ID into <dst>/.cc-autopilot/env so the daemon picks
+    # it up at next start.
+    if mm_channel:
+        print()
+        rc = _install_channel_for_project(dst, user, mm_channel)
+        if rc != 0:
+            print("WARNING: channel install failed; project clone is otherwise OK")
+
     print()
     return _print_audit(project_audit(dst, user))
+
+
+def _install_channel_for_project(project_root: Path, user: str, channel_name: str) -> int:
+    """Resolve `channel_name` via the CALLER's MM env and install into project env."""
+    url = os.environ.get("MATTERMOST_URL", "").strip().rstrip("/")
+    token = os.environ.get("MATTERMOST_TOKEN", "").strip()
+    if not url or not token:
+        print("MATTERMOST_URL / MATTERMOST_TOKEN missing from current env; "
+              "cannot resolve channel name", file=sys.stderr)
+        return 1
+    team_id = os.environ.get("AP2_MM_TEAM_ID") or None
+    try:
+        channel_id, team_id = resolve_mm_channel(url, token, channel_name, team_id)
+    except (RuntimeError, ValueError) as e:
+        print(f"channel resolve failed: {e}", file=sys.stderr)
+        return 1
+    print(f"resolved #{channel_name.lstrip('#')} → {channel_id} (team {team_id})")
+    return install_project_channel(project_root, user, channel_id,
+                                    channel_name=channel_name.lstrip("#"))
 
 
 def _print_audit(res: AuditResult) -> int:
@@ -505,15 +671,62 @@ def cmd_user_audit(cfg, args) -> int:        # noqa: ARG001
 
 
 def cmd_user_setup(cfg, args) -> int:        # noqa: ARG001
+    mm_url, mm_token = _resolve_mm_url_token(args)
     return user_setup(
         args.user,
         assume_yes=args.yes,
         skip_token=getattr(args, "skip_token", False),
+        mm_url=mm_url,
+        mm_token=mm_token,
     )
 
 
 def cmd_project_setup(cfg, args) -> int:     # noqa: ARG001
-    return project_setup(Path(args.source), args.user, assume_yes=args.yes)
+    return project_setup(
+        Path(args.source),
+        args.user,
+        assume_yes=args.yes,
+        mm_channel=getattr(args, "mm_channel", None),
+    )
+
+
+def cmd_install_mm(cfg, args) -> int:        # noqa: ARG001
+    mm_url, mm_token = _resolve_mm_url_token(args)
+    if not mm_url or not mm_token:
+        print("MATTERMOST_URL / MATTERMOST_TOKEN not available (check --mm-url / "
+              "--mm-url-env / current env)", file=sys.stderr)
+        return 1
+    return install_mm_credentials(args.user, mm_url, mm_token)
+
+
+def cmd_install_channel(cfg, args) -> int:   # noqa: ARG001
+    root = Path(args.project).resolve()
+    if not (root / ".cc-autopilot").is_dir():
+        print(f"not an ap2 project root: {root}", file=sys.stderr)
+        return 1
+    return _install_channel_for_project(root, args.user, args.channel)
+
+
+def _resolve_mm_url_token(args) -> tuple[str | None, str | None]:
+    """Common flag/env resolution for MM url+token.
+
+    Priority: --mm-url/--mm-token, then --mm-url-env/--mm-token-env, then
+    the caller's MATTERMOST_URL / MATTERMOST_TOKEN env vars. Returns (None,
+    None) only if nothing is set.
+    """
+    url = getattr(args, "mm_url", None)
+    token = getattr(args, "mm_token", None)
+    if not url and getattr(args, "mm_url_env", None):
+        url = os.environ.get(args.mm_url_env)
+    if not token and getattr(args, "mm_token_env", None):
+        token = os.environ.get(args.mm_token_env)
+    if not url:
+        url = os.environ.get("MATTERMOST_URL")
+    if not token:
+        token = os.environ.get("MATTERMOST_TOKEN")
+    url = (url or "").strip() or None
+    token = (token or "").strip() or None
+    return url, token
 
 
 def cmd_project_audit(cfg, args) -> int:     # noqa: ARG001

@@ -351,8 +351,8 @@ def test_install_oauth_token_writes_fresh_block(monkeypatch, tmp_path):
 
     tee_write = next(w for w in captured_writes if "tee" in w[0])
     content = tee_write[1]
-    assert sandbox._TOKEN_BEGIN in content
-    assert sandbox._TOKEN_END in content
+    assert f"# BEGIN ap2-managed: {sandbox._LBL_OAUTH}" in content
+    assert f"# END ap2-managed: {sandbox._LBL_OAUTH}" in content
     assert "export CLAUDE_CODE_OAUTH_TOKEN=oatoken-abc" in content
     # Token trimmed — no trailing whitespace bleed.
     assert "oatoken-abc  " not in content
@@ -373,9 +373,9 @@ def test_install_oauth_token_replaces_existing_block(monkeypatch, tmp_path):
         "# user's existing line\n"
         "export PATH=/opt/bin:$PATH\n"
         "\n"
-        f"{sandbox._TOKEN_BEGIN}\n"
+        f"# BEGIN ap2-managed: {sandbox._LBL_OAUTH}\n"
         "export CLAUDE_CODE_OAUTH_TOKEN=old-token\n"
-        f"{sandbox._TOKEN_END}\n"
+        f"# END ap2-managed: {sandbox._LBL_OAUTH}\n"
         "# trailing user content\n"
         "export EDITOR=vim\n"
     )
@@ -398,7 +398,7 @@ def test_install_oauth_token_replaces_existing_block(monkeypatch, tmp_path):
     assert "export PATH=/opt/bin:$PATH" in content
     assert "export EDITOR=vim" in content
     # No duplicate block.
-    assert content.count(sandbox._TOKEN_BEGIN) == 1
+    assert content.count(f"# BEGIN ap2-managed: {sandbox._LBL_OAUTH}") == 1
 
 
 def test_install_oauth_token_propagates_tee_failure(monkeypatch, tmp_path, capsys):
@@ -475,3 +475,146 @@ def test_user_audit_token_missing_info_on_linux(monkeypatch, tmp_path):
     assert res.ok is True
     infos = [m for lvl, m in res.messages if lvl == "INFO"]
     assert any("CLAUDE_CODE_OAUTH_TOKEN" in m for m in infos)
+
+
+# ---------------------------------------------------------------------------
+# sentinel-block writer — pure string op
+
+def test_replace_sentinel_block_appends_when_absent():
+    out = sandbox._replace_sentinel_block("existing line\n", "X", "export FOO=1")
+    assert "existing line" in out
+    assert "# BEGIN ap2-managed: X" in out
+    assert "export FOO=1" in out
+    assert "# END ap2-managed: X" in out
+
+
+def test_replace_sentinel_block_replaces_in_place():
+    existing = (
+        "line A\n"
+        "# BEGIN ap2-managed: X\n"
+        "export FOO=old\n"
+        "# END ap2-managed: X\n"
+        "line B\n"
+    )
+    out = sandbox._replace_sentinel_block(existing, "X", "export FOO=new")
+    assert out.count("# BEGIN ap2-managed: X") == 1
+    assert "export FOO=new" in out
+    assert "export FOO=old" not in out
+    assert "line A" in out and "line B" in out
+
+
+def test_replace_sentinel_block_multiple_labels_coexist():
+    """Different labels shouldn't interfere with each other."""
+    existing = (
+        "# BEGIN ap2-managed: A\n"
+        "export A_VAR=1\n"
+        "# END ap2-managed: A\n"
+    )
+    out = sandbox._replace_sentinel_block(existing, "B", "export B_VAR=2")
+    assert "A_VAR=1" in out
+    assert "B_VAR=2" in out
+    assert out.count("# BEGIN ap2-managed:") == 2
+
+
+# ---------------------------------------------------------------------------
+# install_mm_credentials + install_project_channel
+
+def test_install_mm_credentials_writes_both_vars(monkeypatch, tmp_path):
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+    writes: list[str] = []
+
+    def fake_run(argv, *a, **kw):
+        if argv[:2] == ["sudo", "-u"] and "sh" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[:2] == ["sudo", "-u"] and "tee" in argv:
+            writes.append(kw.get("input", ""))
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    rc = sandbox.install_mm_credentials(
+        "claude-agent", "https://mm.example.com/", "tok-abc",
+    )
+    assert rc == 0
+    content = writes[0]
+    assert "# BEGIN ap2-managed: mattermost-credentials" in content
+    assert "export MATTERMOST_URL=https://mm.example.com" in content  # trailing / stripped
+    assert "export MATTERMOST_TOKEN=tok-abc" in content
+
+
+def test_install_mm_credentials_rejects_empty(monkeypatch, capsys):
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    assert sandbox.install_mm_credentials("claude-agent", "", "tok") == 1
+    assert sandbox.install_mm_credentials("claude-agent", "http://x", "") == 1
+
+
+def test_install_project_channel_writes_to_project_env(monkeypatch, tmp_path):
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    writes: list[tuple[tuple, str]] = []
+
+    def fake_run(argv, *a, **kw):
+        if argv[:2] == ["sudo", "-u"] and "sh" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[:2] == ["sudo", "-u"] and "tee" in argv:
+            writes.append((tuple(argv), kw.get("input", "")))
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    rc = sandbox.install_project_channel(
+        tmp_path, "claude-agent", "chan-id-123", channel_name="stoch",
+    )
+    assert rc == 0
+    tee_argv, content = writes[0]
+    assert tee_argv[-1] == str(tmp_path / ".cc-autopilot" / "env")
+    assert "AP2_MM_CHANNELS=chan-id-123" in content
+    assert "# channel name: #stoch" in content
+
+
+# ---------------------------------------------------------------------------
+# resolve_mm_channel — API helper
+
+def test_resolve_mm_channel_auto_discovers_team(monkeypatch):
+    calls: list[str] = []
+
+    def fake_api(url, token, path):
+        calls.append(path)
+        if path == "/api/v4/users/me/teams":
+            return [{"id": "team-1", "name": "primary"}]
+        if path == "/api/v4/teams/team-1/channels/name/stoch":
+            return {"id": "chan-42", "name": "stoch"}
+        raise AssertionError(f"unexpected path: {path}")
+    monkeypatch.setattr(sandbox, "_mm_api_get", fake_api)
+
+    ch_id, team_id = sandbox.resolve_mm_channel("http://mm", "tok", "#stoch")
+    assert ch_id == "chan-42"
+    assert team_id == "team-1"
+    assert calls[0] == "/api/v4/users/me/teams"
+
+
+def test_resolve_mm_channel_honors_explicit_team(monkeypatch):
+    def fake_api(url, token, path):
+        assert path == "/api/v4/teams/t-forced/channels/name/foo"
+        return {"id": "c-x", "name": "foo"}
+    monkeypatch.setattr(sandbox, "_mm_api_get", fake_api)
+
+    ch_id, team_id = sandbox.resolve_mm_channel(
+        "http://mm", "tok", "foo", team_id="t-forced",
+    )
+    assert (ch_id, team_id) == ("c-x", "t-forced")
+
+
+def test_resolve_mm_channel_raises_on_empty_name(monkeypatch):
+    monkeypatch.setattr(sandbox, "_mm_api_get",
+                        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not call")))
+    with pytest.raises(ValueError):
+        sandbox.resolve_mm_channel("http://mm", "tok", "   ")
+
+
+def test_resolve_mm_channel_raises_when_no_teams(monkeypatch):
+    monkeypatch.setattr(sandbox, "_mm_api_get", lambda *a, **kw: [])
+    with pytest.raises(RuntimeError):
+        sandbox.resolve_mm_channel("http://mm", "tok", "stoch")

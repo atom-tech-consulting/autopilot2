@@ -23,6 +23,7 @@ PAUSE_FLAG = f"{AUTOPILOT_DIR_NAME}/paused"
 CRON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/cron_state.json"
 MM_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/mm_state.json"
 RETRY_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/retry_state.json"
+ENV_FILE = f"{AUTOPILOT_DIR_NAME}/env"
 
 DEFAULT_TICK_INTERVAL_S = 30
 DEFAULT_EVENT_CONTEXT_SIZE = 50
@@ -56,6 +57,7 @@ class Config:
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
         root = Path(project_root or os.getcwd()).resolve()
+        load_project_env(root)
         autopilot_section = _read_autopilot_section(root / "CLAUDE.md")
 
         tasks_file = _resolve(root, autopilot_section.get("task_list"), DEFAULT_TASKS_FILE)
@@ -94,6 +96,36 @@ class Config:
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self.events_file.parent.mkdir(parents=True, exist_ok=True)
         self.progress_file.parent.mkdir(parents=True, exist_ok=True)
+
+
+def load_project_env(project_root: Path) -> dict[str, str]:
+    """Read `.cc-autopilot/env` (KEY=VALUE lines) and merge into `os.environ`.
+
+    Existing env vars win — the file only fills in keys not already set, so a
+    shell export still overrides the file (useful for one-off runs).
+    Blank lines and `#`-comments are ignored. Values may be wrapped in single
+    or double quotes. Returns the dict of keys that were actually applied.
+    """
+    env_file = project_root / ENV_FILE
+    if not env_file.exists():
+        return {}
+    applied: dict[str, str] = {}
+    for raw in env_file.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if val and val[0] == val[-1] and val[0] in ('"', "'"):
+            val = val[1:-1]
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = val
+        applied[key] = val
+    return applied
 
 
 def _resolve(root: Path, configured: str | None, default: str) -> Path:

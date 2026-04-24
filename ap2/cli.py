@@ -205,6 +205,23 @@ def _short(v, limit=120) -> str:
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
+def _add_mm_url_token_args(p: argparse.ArgumentParser) -> None:
+    """Shared --mm-* flags for user-setup / install-mm.
+
+    Precedence (resolved in sandbox._resolve_mm_url_token): explicit --mm-url/
+    --mm-token, then --mm-url-env/--mm-token-env env-var names, then the
+    caller's own MATTERMOST_URL/MATTERMOST_TOKEN from the environment.
+    """
+    p.add_argument("--mm-url", metavar="URL",
+                   help="MATTERMOST_URL to install into ~user/.zshenv")
+    p.add_argument("--mm-token", metavar="TOKEN",
+                   help="MATTERMOST_TOKEN to install (prefer --mm-token-env)")
+    p.add_argument("--mm-url-env", metavar="VAR",
+                   help="read MATTERMOST_URL from this env var instead")
+    p.add_argument("--mm-token-env", metavar="VAR",
+                   help="read MATTERMOST_TOKEN from this env var instead")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="autopilot", description="Autopilot v2 CLI.")
     p.add_argument("--project", default=None, help="project root (default: cwd)")
@@ -267,6 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("-y", "--yes", action="store_true", help="skip confirmation prompt")
     sc.add_argument("--skip-token", action="store_true",
                     help="don't prompt for CLAUDE_CODE_OAUTH_TOKEN post-creation")
+    _add_mm_url_token_args(sc)
     sc.set_defaults(func=sandbox.cmd_user_setup)
 
     sc = sub_sbx.add_parser(
@@ -279,11 +297,32 @@ def build_parser() -> argparse.ArgumentParser:
                     help="read token from this env var instead of prompting")
     sc.set_defaults(func=sandbox.cmd_install_token)
 
+    sc = sub_sbx.add_parser(
+        "install-mm",
+        help="install MATTERMOST_URL + MATTERMOST_TOKEN into ~<user>/.zshenv",
+    )
+    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
+    _add_mm_url_token_args(sc)
+    sc.set_defaults(func=sandbox.cmd_install_mm)
+
     sc = sub_sbx.add_parser("project-setup", help="clone <source> into ~<user>/repos/")
     sc.add_argument("source", help="path to the source repo (human's clone)")
     sc.add_argument("--user", default=sandbox.DEFAULT_USER)
     sc.add_argument("-y", "--yes", action="store_true", help="skip confirmation prompt")
+    sc.add_argument("--mm-channel", metavar="NAME",
+                    help="resolve #NAME via MATTERMOST_URL/TOKEN in current env and "
+                         "write AP2_MM_CHANNELS=<id> into <project>/.cc-autopilot/env")
     sc.set_defaults(func=sandbox.cmd_project_setup)
+
+    sc = sub_sbx.add_parser(
+        "install-channel",
+        help="resolve a MM channel name to an ID and write "
+             "AP2_MM_CHANNELS into <project>/.cc-autopilot/env",
+    )
+    sc.add_argument("project", help="path to an existing ap2 project clone")
+    sc.add_argument("channel", help="channel name (with or without leading #)")
+    sc.add_argument("--user", default=sandbox.DEFAULT_USER)
+    sc.set_defaults(func=sandbox.cmd_install_channel)
 
     sc = sub_sbx.add_parser("project-audit", help="verify isolated project clone")
     sc.add_argument("path")
