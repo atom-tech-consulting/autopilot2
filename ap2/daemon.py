@@ -405,6 +405,42 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "task_error", error=f"{type(e).__name__}: {e}")
 
+    # 4. Auto-ideation when the working board (Active+Ready+Backlog) is empty.
+    # Throttled by AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S (default 3600) to avoid
+    # running the ideation agent on every 30s tick. Reuses the `ideation` cron
+    # job's prompt/max_turns/allowed_tools; shares cron_state.json so a normal
+    # scheduled ideation run ALSO satisfies the cooldown.
+    try:
+        await _maybe_auto_ideate(cfg, sdk, mcp_server)
+    except Exception as e:  # noqa: BLE001
+        events.append(cfg.events_file, "ideation_error", error=f"{type(e).__name__}: {e}")
+
+
+async def _maybe_auto_ideate(cfg: Config, sdk, mcp_server) -> None:
+    board = Board.load(cfg.tasks_file)
+    has_work = any(
+        next(board.iter_tasks(section=s), None) is not None
+        for s in ("Active", "Ready", "Backlog")
+    )
+    if has_work:
+        return
+    jobs = load_jobs(cfg.cron_file)
+    ideation = next((j for j in jobs if j.name == "ideation"), None)
+    if ideation is None:
+        return
+    cooldown_s = int(os.environ.get("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", 3600))
+    state = load_state(cfg.cron_state_file)
+    last = state.get("ideation", 0.0)
+    if time.time() - last < cooldown_s:
+        return
+    events.append(
+        cfg.events_file,
+        "ideation_empty_board",
+        cooldown_s=cooldown_s,
+        seconds_since_last=int(time.time() - last) if last else None,
+    )
+    await run_cron(cfg, sdk, mcp_server, ideation)
+
 
 def _import_sdk_or_die() -> None:
     try:
