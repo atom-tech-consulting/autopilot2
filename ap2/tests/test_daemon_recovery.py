@@ -215,6 +215,47 @@ def test_run_task_does_not_bump_next_task_id(cfg, tmp_path):
     assert before == after
 
 
+def test_run_task_appends_progress_section_on_complete(cfg):
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+    sdk = _sdk_yielding(
+        "RESULT:\n"
+        "status: complete\n"
+        "commit: deadbeef1234\n"
+        "summary: Added X to Y\n"
+        "files_changed: a.py, b.py\n"
+        "tests_passed: true\n"
+    )
+    asyncio.run(run_task(cfg, sdk, task))
+
+    text = cfg.progress_file.read_text()
+    # Section header with task id + title — not a bare bullet.
+    assert "## [" in text
+    assert "TB-5: Victim" in text
+    # Commit truncated to 8 chars.
+    assert "deadbeef" in text
+    assert "deadbeef1234" not in text
+    # Summary + files + tests surfaced.
+    assert "Added X to Y" in text
+    assert "a.py, b.py" in text
+    assert "Tests:** pass" in text
+
+
+def test_run_task_progress_skips_empty_fields(cfg):
+    """Only include fields that the RESULT actually populated."""
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+    sdk = _sdk_yielding("RESULT:\nstatus: complete\nsummary: short\n")
+    asyncio.run(run_task(cfg, sdk, task))
+    text = cfg.progress_file.read_text()
+    assert "TB-5: Victim" in text
+    assert "short" in text
+    # No Commit / Files / Tests lines when those fields are absent.
+    assert "Commit:" not in text
+    assert "Files:" not in text
+    assert "Tests:" not in text
+
+
 def test_run_task_applies_cron_add_on_complete(cfg):
     from ap2.cron import load_jobs
 

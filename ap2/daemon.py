@@ -113,7 +113,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
     if parsed.status == "complete":
         do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
         retry.reset_attempt(cfg.retry_state_file, task.id)
-        _append_progress(cfg, task.id, parsed)
+        _append_progress(cfg, task, parsed)
         _dispatch_cron_directives(cfg, task.id, parsed.cron)
     else:
         _handle_failure(cfg, task, status=parsed.status, parsed=parsed)
@@ -290,13 +290,24 @@ def _extract_text(msg) -> str:
     return ""
 
 
-def _append_progress(cfg: Config, task_id: str, r: TaskResult) -> None:
+def _append_progress(cfg: Config, task, r: TaskResult) -> None:
+    """Append a complete task entry to progress.md as a self-contained section.
+
+    Section header is `## [YYYY-MM-DD] TB-N: Title` so the log stays a coherent
+    reverse-time-ordered log and tools can parse sections cleanly.
+    """
     cfg.progress_file.parent.mkdir(parents=True, exist_ok=True)
-    line = f"- {_today()}: {task_id} — {r.summary}"
+    lines = [f"\n## [{_today()}] {task.id}: {task.title}"]
     if r.commit:
-        line += f" ({r.commit[:8]})"
+        lines.append(f"- **Commit:** `{r.commit[:8]}`")
+    if r.summary:
+        lines.append(f"- **Summary:** {r.summary}")
+    if r.files_changed:
+        lines.append(f"- **Files:** {', '.join(r.files_changed)}")
+    if r.tests_passed is not None:
+        lines.append(f"- **Tests:** {'pass' if r.tests_passed else 'fail'}")
     with cfg.progress_file.open("a") as f:
-        f.write(line + "\n")
+        f.write("\n".join(lines) + "\n")
 
 
 def _append_attempts(cfg: Config, task, r: TaskResult) -> None:

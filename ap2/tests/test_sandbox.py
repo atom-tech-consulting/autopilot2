@@ -263,17 +263,31 @@ def test_user_setup_declines_and_runs_nothing(monkeypatch, capsys):
 
 def test_user_setup_already_exists(monkeypatch, capsys):
     monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
-    rc = sandbox.user_setup("existing")
+    # skip_token avoids the interactive getpass prompt in test runs.
+    rc = sandbox.user_setup("existing", skip_token=True)
     assert rc == 0
-    assert "already exists" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "already exists" in out
+    # skip_token should suppress both the prompt and the "install-token later" nudge.
+    assert "install-token" not in out
 
 
 def test_user_setup_unsupported_os(monkeypatch, capsys):
     monkeypatch.setattr(sandbox, "_user_exists", lambda u: False)
     monkeypatch.setattr(sandbox.platform, "system", lambda: "Windows")
-    rc = sandbox.user_setup("fakeuser")
+    rc = sandbox.user_setup("fakeuser", skip_token=True)
     assert rc == 1
     assert "unsupported OS" in capsys.readouterr().err
+
+
+def test_user_setup_yes_mode_prints_token_hint(monkeypatch, capsys):
+    """`--yes` can't run the interactive token flow — we nudge instead."""
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    rc = sandbox.user_setup("existing", assume_yes=True)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "already exists" in out
+    assert "ap2 sandbox install-token existing" in out
 
 
 # ---------------------------------------------------------------------------
@@ -292,3 +306,172 @@ def test_project_setup_rejects_non_repo(monkeypatch, tmp_path, capsys):
     rc = sandbox.project_setup(tmp_path / "plain", "claude-agent")
     assert rc == 1
     assert "not a git repo" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# install_oauth_token
+
+def test_install_oauth_token_refuses_unknown_user(monkeypatch, capsys):
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: False)
+    rc = sandbox.install_oauth_token("nobody", "tok")
+    assert rc == 1
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_install_oauth_token_refuses_empty_token(monkeypatch, capsys):
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    rc = sandbox.install_oauth_token("claude-agent", "   ")
+    assert rc == 1
+    assert "empty token" in capsys.readouterr().err
+
+
+def test_install_oauth_token_writes_fresh_block(monkeypatch, tmp_path):
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+
+    captured_writes: list[tuple[tuple[str, ...], str]] = []
+
+    def fake_run(argv, *a, **kw):
+        if argv[:2] == ["sudo", "-u"] and "sh" in argv:
+            # cat .zshenv — file doesn't exist yet.
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[:3] == ["sudo", "-u", "claude-agent"] and argv[3] == "tee":
+            captured_writes.append((tuple(argv), kw.get("input", "")))
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        if argv[:3] == ["sudo", "-u", "claude-agent"] and argv[3] == "chmod":
+            captured_writes.append((tuple(argv), ""))
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    rc = sandbox.install_oauth_token("claude-agent", "oatoken-abc  ")
+    assert rc == 0
+
+    tee_write = next(w for w in captured_writes if "tee" in w[0])
+    content = tee_write[1]
+    assert sandbox._TOKEN_BEGIN in content
+    assert sandbox._TOKEN_END in content
+    assert "export CLAUDE_CODE_OAUTH_TOKEN=oatoken-abc" in content
+    # Token trimmed — no trailing whitespace bleed.
+    assert "oatoken-abc  " not in content
+    # chmod 600 was issued on the right file.
+    chmod = next(w for w in captured_writes if "chmod" in w[0])
+    assert chmod[0][-1] == str(home / ".zshenv")
+    assert "600" in chmod[0]
+
+
+def test_install_oauth_token_replaces_existing_block(monkeypatch, tmp_path):
+    """Re-running with a new token replaces the prior block, doesn't append."""
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+
+    existing = (
+        "# user's existing line\n"
+        "export PATH=/opt/bin:$PATH\n"
+        "\n"
+        f"{sandbox._TOKEN_BEGIN}\n"
+        "export CLAUDE_CODE_OAUTH_TOKEN=old-token\n"
+        f"{sandbox._TOKEN_END}\n"
+        "# trailing user content\n"
+        "export EDITOR=vim\n"
+    )
+    writes: list[str] = []
+
+    def fake_run(argv, *a, **kw):
+        if argv[:2] == ["sudo", "-u"] and "sh" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=existing, stderr="")
+        if argv[:2] == ["sudo", "-u"] and "tee" in argv:
+            writes.append(kw.get("input", ""))
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert sandbox.install_oauth_token("claude-agent", "new-token") == 0
+    content = writes[0]
+    # Old token is gone, new one is present, and the user's other lines survive.
+    assert "old-token" not in content
+    assert "new-token" in content
+    assert "export PATH=/opt/bin:$PATH" in content
+    assert "export EDITOR=vim" in content
+    # No duplicate block.
+    assert content.count(sandbox._TOKEN_BEGIN) == 1
+
+
+def test_install_oauth_token_propagates_tee_failure(monkeypatch, tmp_path, capsys):
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+
+    def fake_run(argv, *a, **kw):
+        if "tee" in argv:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="denied")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    rc = sandbox.install_oauth_token("claude-agent", "tok")
+    assert rc == 1
+    assert "failed to write" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# user_audit: token presence/absence
+
+def _audit_env_stub(token_value: str = ""):
+    """Build a subprocess.run stub that returns `token_value` for the token
+    lookup, and empty for every other env var (a clean user).
+    """
+    def fake(argv, *a, **kw):
+        cmdline = " ".join(argv)
+        if "printenv CLAUDE_CODE_OAUTH_TOKEN" in cmdline:
+            return subprocess.CompletedProcess(argv, 0, stdout=token_value, stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    return fake
+
+
+def test_user_audit_token_set_is_ok(monkeypatch, tmp_path):
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+    monkeypatch.setattr(subprocess, "run", _audit_env_stub("sk-ant-oat01-xxx\n"))
+
+    res = sandbox.user_audit("fakeuser")
+    assert res.ok is True
+    assert any(
+        lvl == "OK" and "CLAUDE_CODE_OAUTH_TOKEN" in m
+        for lvl, m in res.messages
+    )
+
+
+def test_user_audit_token_missing_warns_on_darwin(monkeypatch, tmp_path):
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+    monkeypatch.setattr(sandbox.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(subprocess, "run", _audit_env_stub(""))
+
+    res = sandbox.user_audit("fakeuser")
+    # WARN is non-fatal — the audit still passes but the message surfaces.
+    assert res.ok is True
+    warns = [m for lvl, m in res.messages if lvl == "WARN"]
+    assert any("CLAUDE_CODE_OAUTH_TOKEN" in m and "Keychain" in m for m in warns)
+
+
+def test_user_audit_token_missing_info_on_linux(monkeypatch, tmp_path):
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+    monkeypatch.setattr(sandbox.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(subprocess, "run", _audit_env_stub(""))
+
+    res = sandbox.user_audit("fakeuser")
+    assert res.ok is True
+    infos = [m for lvl, m in res.messages if lvl == "INFO"]
+    assert any("CLAUDE_CODE_OAUTH_TOKEN" in m for m in infos)

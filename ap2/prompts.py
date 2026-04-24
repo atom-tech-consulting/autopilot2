@@ -18,12 +18,20 @@ from .config import Config
 _TASK_HEADER = """\
 You are an autopilot v2 task agent. You have ONE task: implement the briefing
 below, then emit a RESULT block. You are a fresh session — the daemon orchestrates
-the loop, not you. Do not try to pick up other tasks or touch TASKS.md yourself.
+the loop, not you.
 
 ## Safety
 - Commit your work with a short, descriptive message. Do NOT push.
 - Avoid irreversible operations outside the repo.
 - Prefer minimal diffs. Don't refactor unrelated code.
+
+## What the daemon handles (do NOT touch)
+The daemon manages state files for you — do not edit them:
+- `TASKS.md` — the daemon moves this task Active → Complete (or Backlog on failure) using the fields from your RESULT block.
+- `.cc-autopilot/progress.md` — the daemon appends a section for your task on completion using RESULT fields.
+- `.cc-autopilot/events.jsonl` — append-only daemon log.
+
+Do not `Edit` or `Write` to any of the above. Just commit your code changes and emit the RESULT block; the daemon records everything from there.
 """
 
 _TASK_FOOTER = """\

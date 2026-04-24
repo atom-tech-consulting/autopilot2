@@ -265,7 +265,19 @@ def build_parser() -> argparse.ArgumentParser:
     sc = sub_sbx.add_parser("user-setup", help="create sandbox user (prompts before running sudo)")
     sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
     sc.add_argument("-y", "--yes", action="store_true", help="skip confirmation prompt")
+    sc.add_argument("--skip-token", action="store_true",
+                    help="don't prompt for CLAUDE_CODE_OAUTH_TOKEN post-creation")
     sc.set_defaults(func=sandbox.cmd_user_setup)
+
+    sc = sub_sbx.add_parser(
+        "install-token",
+        help="install CLAUDE_CODE_OAUTH_TOKEN into ~<user>/.zshenv "
+             "(obtain via `claude setup-token`)",
+    )
+    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
+    sc.add_argument("--token-env", metavar="VAR",
+                    help="read token from this env var instead of prompting")
+    sc.set_defaults(func=sandbox.cmd_install_token)
 
     sc = sub_sbx.add_parser("project-setup", help="clone <source> into ~<user>/repos/")
     sc.add_argument("source", help="path to the source repo (human's clone)")
