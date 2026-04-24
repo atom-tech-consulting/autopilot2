@@ -66,3 +66,20 @@ def text_respond(text: str) -> Callable:
         return _single_text(text)
 
     return factory
+
+
+def crash_respond(exc: Exception) -> Callable:
+    """Return an async-gen factory that raises `exc` mid-iteration — simulates
+    the "SDK subprocess died with exit 1" pattern where the agent had already
+    been streaming messages before the crash.
+    """
+
+    async def _gen() -> AsyncIterator[_FakeMsg]:
+        # Yield one in-progress message to populate the stream log, then crash.
+        yield _FakeMsg("(working...)")
+        raise exc
+
+    def factory(prompt, options):  # noqa: ARG001
+        return _gen()
+
+    return factory

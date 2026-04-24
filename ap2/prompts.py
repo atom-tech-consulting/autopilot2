@@ -21,7 +21,11 @@ below, then emit a RESULT block. You are a fresh session — the daemon orchestr
 the loop, not you.
 
 ## Safety
-- Commit your work with a short, descriptive message. Do NOT push.
+- Commit your work with a subject line that STARTS WITH the task ID shown
+  in `## Task` below, followed by `: <short description>` (e.g. `TB-42:
+  add the foo helper`). The daemon falls back to parsing your commit subject
+  if your RESULT block is malformed or missing, so the prefix is load-bearing.
+- Do NOT push.
 - Avoid irreversible operations outside the repo.
 - Prefer minimal diffs. Don't refactor unrelated code.
 

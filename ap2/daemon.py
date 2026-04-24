@@ -113,33 +113,75 @@ async def run_task(cfg: Config, sdk, task) -> None:
     try:
         result_text = await asyncio.wait_for(_consume(), timeout=cfg.task_timeout_s)
     except asyncio.TimeoutError:
-        events.append(
-            cfg.events_file,
-            "task_timeout",
-            task=task.id,
-            timeout_s=cfg.task_timeout_s,
-            stderr_tail="\n".join(stderr_lines[-30:]),
-            last_messages=stream_log[-10:],
-            prompt_dump=str(prompt_dump),
-            stream_dump=str(stream_dump),
-        )
-        _handle_failure(cfg, task, status="timeout")
-        return
+        # Even on timeout, the agent may have committed before stalling — check
+        # HEAD before declaring failure. Same recovery path as the post-run
+        # status=unknown fallback below.
+        inferred = _infer_result_from_head(cfg, task)
+        if inferred is not None:
+            events.append(
+                cfg.events_file, "task_implicit_commit",
+                task=task.id, commit=inferred.commit,
+                subject=inferred.summary, reason="timeout_recovered",
+            )
+            result_text = ""  # bypass parse_result; the fallback below uses inferred
+            parsed_override = inferred  # type: ignore[assignment]
+        else:
+            events.append(
+                cfg.events_file,
+                "task_timeout",
+                task=task.id,
+                timeout_s=cfg.task_timeout_s,
+                stderr_tail="\n".join(stderr_lines[-30:]),
+                last_messages=stream_log[-10:],
+                prompt_dump=str(prompt_dump),
+                stream_dump=str(stream_dump),
+            )
+            _handle_failure(cfg, task, status="timeout")
+            return
     except Exception as e:  # noqa: BLE001
-        events.append(
-            cfg.events_file,
-            "task_error",
-            task=task.id,
-            error=f"{type(e).__name__}: {e}",
-            stderr_tail="\n".join(stderr_lines[-30:]),
-            last_messages=stream_log[-10:],
-            prompt_dump=str(prompt_dump),
-            stream_dump=str(stream_dump),
-        )
-        _handle_failure(cfg, task, status="error")
-        return
+        # Same logic for an opaque SDK subprocess crash (the "exit code 1 /
+        # empty stderr_tail" pattern observed on stoch's TB-58/59). If the
+        # agent reached the commit turn before the crash, HEAD will name the
+        # task and we can salvage the run.
+        inferred = _infer_result_from_head(cfg, task)
+        if inferred is not None:
+            events.append(
+                cfg.events_file, "task_implicit_commit",
+                task=task.id, commit=inferred.commit,
+                subject=inferred.summary, reason="error_recovered",
+            )
+            result_text = ""
+            parsed_override = inferred  # type: ignore[assignment]
+        else:
+            events.append(
+                cfg.events_file,
+                "task_error",
+                task=task.id,
+                error=f"{type(e).__name__}: {e}",
+                stderr_tail="\n".join(stderr_lines[-30:]),
+                last_messages=stream_log[-10:],
+                prompt_dump=str(prompt_dump),
+                stream_dump=str(stream_dump),
+            )
+            _handle_failure(cfg, task, status="error")
+            return
 
-    parsed = parse_result(result_text)
+    # If we recovered from a crash/timeout via HEAD, parsed_override is set;
+    # otherwise parse the agent's RESULT block as usual and try the fallback
+    # for the status=unknown case.
+    parsed = parsed_override if 'parsed_override' in locals() else parse_result(result_text)
+    if parsed.status not in _VALID_RESULT_STATUSES:
+        inferred = _infer_result_from_head(cfg, task)
+        if inferred is not None:
+            events.append(
+                cfg.events_file,
+                "task_implicit_commit",
+                task=task.id,
+                commit=inferred.commit,
+                subject=inferred.summary,
+                reason="status_unknown",
+            )
+            parsed = inferred
     commit_hash = parsed.commit
     if parsed.status == "complete":
         do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
@@ -383,6 +425,52 @@ def _today() -> str:
     import datetime as dt
 
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+# parse_result returns one of these for a well-formed RESULT block. Anything
+# else (most often "unknown") triggers the commit-inference fallback below.
+_VALID_RESULT_STATUSES = {"complete", "incomplete", "blocked", "failed"}
+
+
+def _infer_result_from_head(cfg: Config, task) -> "TaskResult | None":
+    """Synthesize a TaskResult from HEAD if its commit subject names `task.id`.
+
+    Used as a fallback when the agent's RESULT block is malformed or absent.
+    Returns None if not a git repo, log fails, or HEAD's subject doesn't
+    mention the task ID — keeping the existing failure path untouched.
+    """
+    if not (cfg.project_root / ".git").exists():
+        return None
+    root = str(cfg.project_root)
+    log = subprocess.run(
+        ["git", "-C", root, "log", "-1", "--format=%H%x00%s"],
+        capture_output=True, text=True,
+    )
+    if log.returncode != 0:
+        return None
+    out = log.stdout.strip()
+    if "\x00" not in out:
+        return None
+    sha, subject = out.split("\x00", 1)
+    if task.id not in subject:
+        return None
+    show = subprocess.run(
+        ["git", "-C", root, "show", "--name-only", "--format=", sha],
+        capture_output=True, text=True,
+    )
+    files = (
+        [l for l in show.stdout.splitlines() if l.strip()]
+        if show.returncode == 0 else None
+    )
+    return TaskResult(
+        status="complete",
+        commit=sha[:8],
+        summary=subject,
+        files_changed=files,
+        tests_passed=None,
+        cron=[],
+        raw=f"<inferred from HEAD {sha[:8]}>",
+    )
 
 
 def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path]:

@@ -16,7 +16,7 @@ from ap2 import events
 from ap2.board import Board
 from ap2.daemon import _commit_state_files, _tick
 
-from ap2.tests.e2e._fakes import FakeSDK, text_respond
+from ap2.tests.e2e._fakes import FakeSDK, crash_respond, text_respond
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -134,6 +134,104 @@ def test_successful_task_cleans_up_debug_dumps(e2e_project):
     debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
     leftover = list(debug_dir.glob("*TB-5*")) if debug_dir.exists() else []
     assert leftover == []
+
+
+def test_implicit_commit_recovery_on_unknown_status(e2e_project):
+    """If the agent committed with `<TB-N>:` subject but emitted no RESULT,
+    daemon infers complete from HEAD and records a `task_implicit_commit` event."""
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+    _git_init(cfg.project_root)
+    # Pre-stage and commit the agent's "work" with a properly-tagged subject.
+    work = cfg.project_root / "work.py"
+    work.write_text("# work\n")
+    _git(["add", "TASKS.md", "CLAUDE.md", "work.py"], cfg.project_root)
+    _git(["commit", "-m", "TB-5: implement the thing"], cfg.project_root)
+
+    sdk = FakeSDK()
+    # Agent talks but doesn't emit a RESULT block — parse_result → status=unknown.
+    sdk.on(
+        "## Task\nTB-5",
+        text_respond("All done — committed and tests pass.\n"),
+    )
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Complete"
+
+    evts = events.tail(cfg.events_file, 30)
+    kinds = [e["type"] for e in evts]
+    assert "task_implicit_commit" in kinds
+    implicit = next(e for e in evts if e["type"] == "task_implicit_commit")
+    assert implicit["task"] == "TB-5"
+    assert "TB-5" in implicit["subject"]
+
+
+def test_implicit_commit_recovers_from_sdk_crash(e2e_project):
+    """SDK subprocess raises mid-stream after the agent has committed —
+    daemon should still recognize task as complete via HEAD inference."""
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+    _git_init(cfg.project_root)
+    work = cfg.project_root / "work.py"
+    work.write_text("# work\n")
+    _git(["add", "TASKS.md", "CLAUDE.md", "work.py"], cfg.project_root)
+    _git(["commit", "-m", "TB-5: real work"], cfg.project_root)
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-5",
+        crash_respond(RuntimeError("Command failed with exit code 1")),
+    )
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Complete"
+
+    evts = events.tail(cfg.events_file, 30)
+    implicit = [e for e in evts if e["type"] == "task_implicit_commit"]
+    assert implicit, "expected task_implicit_commit on crash recovery"
+    assert implicit[-1]["reason"] == "error_recovered"
+    # task_error should NOT have fired — the recovery suppressed it.
+    assert not any(e["type"] == "task_error" for e in evts)
+
+
+def test_sdk_crash_without_matching_commit_falls_through_to_error(e2e_project):
+    """Same crash, but HEAD doesn't mention the task — daemon must NOT auto-
+    promote; falls through to task_error/Backlog as before."""
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+    _git_init(cfg.project_root)
+    _git(["add", "TASKS.md", "CLAUDE.md"], cfg.project_root)
+    _git(["commit", "-m", "unrelated"], cfg.project_root)
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-5",
+        crash_respond(RuntimeError("Command failed with exit code 1")),
+    )
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Backlog"
+    evts = events.tail(cfg.events_file, 30)
+    assert any(e["type"] == "task_error" for e in evts)
+    assert all(e["type"] != "task_implicit_commit" for e in evts)
+
+
+def test_implicit_commit_skipped_when_subject_missing_task_id(e2e_project):
+    """HEAD's subject without the task ID → no implicit-complete; standard
+    failure path takes over (move to Backlog, retry counter bumped)."""
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+    _git_init(cfg.project_root)
+    _git(["add", "TASKS.md", "CLAUDE.md"], cfg.project_root)
+    _git(["commit", "-m", "unrelated change"], cfg.project_root)
+
+    sdk = FakeSDK()
+    sdk.on("## Task\nTB-5", text_respond("oops\n"))
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Backlog"
+    evts = events.tail(cfg.events_file, 30)
+    assert all(e["type"] != "task_implicit_commit" for e in evts)
 
 
 def test_blocked_task_keeps_debug_dumps(e2e_project):
