@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -125,6 +126,13 @@ async def run_task(cfg: Config, sdk, task) -> None:
         commit=commit_hash,
         summary=parsed.summary[:300],
     )
+    # Commit state-file updates (TASKS.md, progress.md, CLAUDE.md) right after
+    # the task agent's own source-code commit. Reflects the post-task board
+    # location so reverts/bisects stay semantic.
+    board_after = Board.load(cfg.tasks_file)
+    loc = board_after.find(task.id)
+    dest = loc[0] if loc else "?"
+    _commit_state_files(cfg, f"state: {task.id} → {dest}")
 
 
 def _handle_failure(
@@ -192,6 +200,8 @@ def _recover_orphans(cfg: Config) -> None:
     for tid in orphans:
         do_board_edit(cfg, {"action": "move_to_ready", "task_id": tid})
         events.append(cfg.events_file, "orphan_recovery", task=tid)
+    if orphans:
+        _commit_state_files(cfg, f"state: recovered {len(orphans)} orphan(s): {', '.join(orphans)}")
 
 
 async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
@@ -274,6 +284,9 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     finally:
         mark_run(cfg.cron_state_file, job.name)
         events.append(cfg.events_file, "cron_complete", job=job.name)
+        # No-op for crons that didn't touch the board (e.g. status-report).
+        # Ideation proposals add Backlog tasks via board_edit, so commit those.
+        _commit_state_files(cfg, f"state: cron {job.name}")
 
 
 def _extract_text(msg) -> str:
@@ -333,6 +346,54 @@ def _today() -> str:
     import datetime as dt
 
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+# Files the daemon is authoritative for. Committed together per semantic unit
+# (a completed task, a cron ideation run, an orphan recovery) so the git log
+# tracks board evolution alongside the task agents' source-code commits.
+_STATE_FILE_NAMES = ("TASKS.md", ".cc-autopilot/progress.md", "CLAUDE.md")
+
+
+def _commit_state_files(cfg: Config, message: str) -> None:
+    """Stage + commit the daemon-owned state files if any are modified.
+
+    Silently no-ops when nothing is staged (e.g. a status-report cron that
+    didn't touch the board). Failures emit `state_commit_error` events but
+    don't raise — a broken commit shouldn't wedge the daemon.
+    """
+    # Silent no-op when the project isn't a git repo — lets tests and non-git
+    # experimentation use ap2 without every tick emitting a commit error.
+    if not (cfg.project_root / ".git").exists():
+        return
+    rel_paths: list[str] = []
+    for name in _STATE_FILE_NAMES:
+        p = cfg.project_root / name
+        if p.exists():
+            rel_paths.append(name)
+    if not rel_paths:
+        return
+    root = str(cfg.project_root)
+    add = subprocess.run(
+        ["git", "-C", root, "add", "--"] + rel_paths,
+        capture_output=True, text=True,
+    )
+    if add.returncode != 0:
+        events.append(cfg.events_file, "state_commit_error",
+                      stage="add", message=message, error=add.stderr[:300])
+        return
+    diff = subprocess.run(
+        ["git", "-C", root, "diff", "--cached", "--quiet", "--"] + rel_paths,
+        capture_output=True,
+    )
+    if diff.returncode == 0:
+        return  # nothing staged is actually different from HEAD
+    commit = subprocess.run(
+        ["git", "-C", root, "commit", "-m", message, "--"] + rel_paths,
+        capture_output=True, text=True,
+    )
+    if commit.returncode != 0:
+        events.append(cfg.events_file, "state_commit_error",
+                      stage="commit", message=message, error=commit.stderr[:300])
 
 
 async def main_loop(cfg: Config) -> None:
