@@ -58,6 +58,13 @@ async def run_task(cfg: Config, sdk, task) -> None:
     events.append(cfg.events_file, "task_start", task=task.id, title=task.title)
     do_board_edit(cfg, {"action": "move_to_active", "task_id": task.id})
 
+    # Pre-flight debug dump: if the SDK subprocess crashes with an empty
+    # stderr (observed on stoch's TB-58/TB-59), these files are the only way
+    # to reproduce the failure. Dumped BEFORE the query starts so even a
+    # SIGKILL-before-write leaves us the prompt.
+    prompt_dump, stream_dump = _prep_debug_dumps(cfg, task.id)
+    prompt_dump.write_text(prompt)
+
     # Ring buffer for SDK subprocess stderr — without this the SDK raises
     # ProcessError with a useless "Check stderr output for details" message.
     stderr_lines: list[str] = []
@@ -66,6 +73,22 @@ async def run_task(cfg: Config, sdk, task) -> None:
         stderr_lines.append(line)
         if len(stderr_lines) > 200:
             del stderr_lines[: len(stderr_lines) - 200]
+
+    # Ring buffer of stream-message descriptors so we can attach the last few
+    # messages to the error event; dumps to disk for full history.
+    stream_log: list[dict] = []
+
+    def _log_message(msg) -> None:
+        entry = {
+            "type": type(msg).__name__,
+            "text_preview": _extract_text(msg)[:500] or None,
+        }
+        stream_log.append(entry)
+        if len(stream_log) > 200:
+            del stream_log[: len(stream_log) - 200]
+        with stream_dump.open("a") as f:
+            import json as _json
+            f.write(_json.dumps(entry) + "\n")
 
     async def _consume() -> str:
         text = ""
@@ -81,6 +104,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
                 stderr=_stderr_sink,
             ),
         ):
+            _log_message(msg)
             t = _extract_text(msg)
             if t:
                 text = t
@@ -95,6 +119,9 @@ async def run_task(cfg: Config, sdk, task) -> None:
             task=task.id,
             timeout_s=cfg.task_timeout_s,
             stderr_tail="\n".join(stderr_lines[-30:]),
+            last_messages=stream_log[-10:],
+            prompt_dump=str(prompt_dump),
+            stream_dump=str(stream_dump),
         )
         _handle_failure(cfg, task, status="timeout")
         return
@@ -105,6 +132,9 @@ async def run_task(cfg: Config, sdk, task) -> None:
             task=task.id,
             error=f"{type(e).__name__}: {e}",
             stderr_tail="\n".join(stderr_lines[-30:]),
+            last_messages=stream_log[-10:],
+            prompt_dump=str(prompt_dump),
+            stream_dump=str(stream_dump),
         )
         _handle_failure(cfg, task, status="error")
         return
@@ -116,6 +146,13 @@ async def run_task(cfg: Config, sdk, task) -> None:
         retry.reset_attempt(cfg.retry_state_file, task.id)
         _append_progress(cfg, task, parsed)
         _dispatch_cron_directives(cfg, task.id, parsed.cron)
+        # Delete the per-run debug dumps on success — only keep evidence for
+        # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
+        for p in (prompt_dump, stream_dump):
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
     else:
         _handle_failure(cfg, task, status=parsed.status, parsed=parsed)
     events.append(
@@ -346,6 +383,23 @@ def _today() -> str:
     import datetime as dt
 
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path]:
+    """Build paths for the per-run prompt + stream dumps.
+
+    `.cc-autopilot/debug/` isn't tracked. Files named with UTC timestamp +
+    task id so concurrent tasks (if ever allowed) don't clobber each other.
+    Failures keep the files; `run_task` deletes them on successful complete.
+    """
+    import datetime as dt
+
+    debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    ts = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    prompt = debug_dir / f"{ts}-{task_id}.prompt.md"
+    stream = debug_dir / f"{ts}-{task_id}.stream.jsonl"
+    return prompt, stream
 
 
 # Files the daemon is authoritative for. Committed together per semantic unit

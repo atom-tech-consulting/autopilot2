@@ -117,3 +117,41 @@ def test_tick_state_commit_reflects_backlog_on_blocked_task(e2e_project):
 
     log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
     assert "state: TB-5 → Backlog" in log
+
+
+# ---------------------------------------------------------------------------
+# Per-task debug dumps (instrumentation for "empty stderr_tail" crashes)
+
+def test_successful_task_cleans_up_debug_dumps(e2e_project):
+    cfg = e2e_project(ready_task=("TB-5", "t"))
+
+    sdk = FakeSDK()
+    sdk.on("## Task\nTB-5",
+           text_respond("RESULT:\nstatus: complete\nsummary: ok\n"))
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
+    leftover = list(debug_dir.glob("*TB-5*")) if debug_dir.exists() else []
+    assert leftover == []
+
+
+def test_blocked_task_keeps_debug_dumps(e2e_project):
+    cfg = e2e_project(ready_task=("TB-5", "t"))
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-5",
+        text_respond("RESULT:\nstatus: blocked\nsummary: stuck\n"),
+    )
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
+    prompt_dumps = list(debug_dir.glob("*TB-5.prompt.md"))
+    stream_dumps = list(debug_dir.glob("*TB-5.stream.jsonl"))
+    assert len(prompt_dumps) == 1
+    assert len(stream_dumps) == 1
+    assert "TB-5" in prompt_dumps[0].read_text()
+    stream_lines = [l for l in stream_dumps[0].read_text().splitlines() if l.strip()]
+    assert len(stream_lines) >= 1
