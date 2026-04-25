@@ -29,6 +29,30 @@ the loop, not you.
 - Avoid irreversible operations outside the repo.
 - Prefer minimal diffs. Don't refactor unrelated code.
 
+## Before you start: check for prior work
+This may be a retry of a task that previously crashed mid-run, possibly AFTER
+the prior agent had already committed work. Always run first:
+
+    git log --grep="<TASK_ID>" --oneline
+
+If you find one or more matching commits:
+1. Inspect them with `git show <sha>` and compare the diff against THIS task's
+   briefing — every numbered scope item, file, test, doc note.
+2. If the existing commits genuinely cover the full briefing: do NOT redo the
+   work. Emit a RESULT with status=complete, commit=<existing-sha>, and a
+   summary that says "previously committed in <sha>" plus a one-line audit of
+   how you verified completeness (e.g. "ran pytest -q, all tests pass; diff
+   covers scope items 1-8").
+3. If the existing commits are partial (some scope items missing or broken):
+   extend them with ONE more commit that closes the gaps. Reference the prior
+   sha in your commit message body.
+4. If nothing matches, proceed normally and implement from scratch.
+
+DO NOT declare status=complete based on commit existence alone. Verify the
+work actually satisfies the briefing — read the diff, run the tests, check
+the files exist and have the expected shape. The daemon's separate fallback
+trusts the commit subject naively; you, as the agent, must do better.
+
 ## What the daemon handles (do NOT touch)
 The daemon manages state files for you — do not edit them:
 - `TASKS.md` — the daemon moves this task Active → Complete (or Backlog on failure) using the fields from your RESULT block.
