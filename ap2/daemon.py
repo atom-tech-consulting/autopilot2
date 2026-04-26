@@ -29,7 +29,6 @@ from .cron import (
     load_jobs,
     load_state,
     mark_run,
-    save_state,
 )
 from .mattermost import check_new_messages
 from .result import TaskResult, parse as parse_result

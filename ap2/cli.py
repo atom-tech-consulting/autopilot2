@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from . import doctor, events, sandbox
-from .board import Board, locked_board
+from .board import Board
 from .config import Config
 from .cron import load_jobs, load_state
 from .init import init_project

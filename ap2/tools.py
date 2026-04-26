@@ -15,8 +15,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from . import events
 from .board import Board, locked_board

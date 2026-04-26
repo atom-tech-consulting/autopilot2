@@ -12,7 +12,6 @@ import os
 import ssl
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 from .config import Config
 
