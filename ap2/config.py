@@ -23,6 +23,7 @@ PAUSE_FLAG = f"{AUTOPILOT_DIR_NAME}/paused"
 CRON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/cron_state.json"
 MM_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/mm_state.json"
 RETRY_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/retry_state.json"
+AUTO_DIAGNOSE_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/auto_diagnose_state.json"
 ENV_FILE = f"{AUTOPILOT_DIR_NAME}/env"
 
 DEFAULT_TICK_INTERVAL_S = 30
@@ -31,6 +32,8 @@ DEFAULT_TASK_TIMEOUT_S = 1200  # 20 min per SDK query
 DEFAULT_CONTROL_TIMEOUT_S = 300  # 5 min for mattermost/cron agents
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_VERIFY_TIMEOUT_S = 600  # 10 min for the project-wide verify gate
+DEFAULT_AUTO_DIAGNOSE_IDLE_THRESHOLD_S = 10800  # 3h — TB-71 watchdog
+DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S = 21600  # 6h — re-fire spam guard
 
 
 @dataclass
@@ -48,6 +51,7 @@ class Config:
     cron_state_file: Path
     mm_state_file: Path
     retry_state_file: Path
+    auto_diagnose_state_file: Path
     next_task_id: int
     tick_interval_s: int
     event_context_size: int
@@ -56,6 +60,8 @@ class Config:
     max_retries: int
     verify_cmd: str
     verify_timeout_s: int
+    auto_diagnose_idle_threshold_s: int
+    auto_diagnose_cooldown_s: int
 
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
@@ -81,6 +87,7 @@ class Config:
             cron_state_file=root / CRON_STATE_FILE,
             mm_state_file=root / MM_STATE_FILE,
             retry_state_file=root / RETRY_STATE_FILE,
+            auto_diagnose_state_file=root / AUTO_DIAGNOSE_STATE_FILE,
             next_task_id=autopilot_section.get("next_task_id", 1),
             tick_interval_s=int(os.environ.get("AP2_TICK_S", DEFAULT_TICK_INTERVAL_S)),
             event_context_size=int(
@@ -96,6 +103,18 @@ class Config:
             verify_cmd=os.environ.get("AP2_VERIFY_CMD", "").strip(),
             verify_timeout_s=int(
                 os.environ.get("AP2_VERIFY_TIMEOUT_S", DEFAULT_VERIFY_TIMEOUT_S)
+            ),
+            auto_diagnose_idle_threshold_s=int(
+                os.environ.get(
+                    "AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S",
+                    DEFAULT_AUTO_DIAGNOSE_IDLE_THRESHOLD_S,
+                )
+            ),
+            auto_diagnose_cooldown_s=int(
+                os.environ.get(
+                    "AP2_AUTO_DIAGNOSE_COOLDOWN_S",
+                    DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S,
+                )
             ),
         )
 

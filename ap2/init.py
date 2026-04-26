@@ -73,6 +73,7 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
         "cron_state.json",
         "mm_state.json",
         "retry_state.json",
+        "auto_diagnose_state.json",
     ]),
     ("Per-run prompt + stream dumps for failure diagnosis (kept only on failure)", [
         "debug/",

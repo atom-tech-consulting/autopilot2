@@ -10,6 +10,7 @@ Each unit of work is a fresh SDK `query()` call, so contexts never accumulate.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import subprocess
@@ -18,7 +19,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import events, prompts, retry
+from . import diagnose, events, prompts, retry, tools
 from .board import Board
 from .config import Config
 from .cron import (
@@ -740,6 +741,17 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "ideation_error", error=f"{type(e).__name__}: {e}")
 
+    # 5. Idle watchdog (TB-71) — when nothing meaningful has happened for
+    # AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S (default 3h), build a self-diagnose
+    # report and post it to AP2_MM_CHANNELS[0]. Throttled by
+    # AP2_AUTO_DIAGNOSE_COOLDOWN_S (default 6h) to avoid spamming when idle
+    # persists. Skips silently when MM env is unset (after one warning).
+    try:
+        _maybe_auto_diagnose(cfg)
+    except Exception as e:  # noqa: BLE001
+        events.append(cfg.events_file, "auto_diagnose_error",
+                      error=f"{type(e).__name__}: {e}")
+
 
 async def _maybe_auto_ideate(cfg: Config, sdk, mcp_server) -> None:
     board = Board.load(cfg.tasks_file)
@@ -765,6 +777,104 @@ async def _maybe_auto_ideate(cfg: Config, sdk, mcp_server) -> None:
         seconds_since_last=int(time.time() - last) if last else None,
     )
     await run_cron(cfg, sdk, mcp_server, ideation)
+
+
+def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
+    """Idle-watchdog hook (TB-71). See `_tick` step 5 for context.
+
+    Inspects events.jsonl for the most recent meaningful event. If the gap
+    exceeds `cfg.auto_diagnose_idle_threshold_s` AND we haven't fired within
+    `cfg.auto_diagnose_cooldown_s`, post `diagnose.render_markdown` to
+    `AP2_MM_CHANNELS[0]` via `tools._mm_post`. Updates persistent state in
+    `cfg.auto_diagnose_state_file`.
+
+    `now` parameter exists so tests can drive a fake clock; production uses
+    `time.time()`.
+    """
+    if now is None:
+        now = time.time()
+
+    state = _load_diagnose_state(cfg)
+    report = diagnose.build_report(cfg, now=now)
+
+    # No meaningful events yet (fresh daemon) → can't be idle. Skip.
+    if report.since_last_activity_s is None:
+        return
+
+    if report.since_last_activity_s < cfg.auto_diagnose_idle_threshold_s:
+        return
+
+    if now - state.get("last_fired", 0.0) < cfg.auto_diagnose_cooldown_s:
+        return
+
+    channel = _first_mm_channel()
+    if not channel:
+        # Without a destination there's nowhere to post. Warn ONCE per run
+        # of "AP2_MM_CHANNELS is unset"; the flag is sticky in state so we
+        # don't fill events.jsonl with the same line every tick.
+        if not state.get("warned_no_destination"):
+            events.append(
+                cfg.events_file,
+                "auto_diagnose_no_destination",
+                reason="AP2_MM_CHANNELS unset",
+                idle_s=report.since_last_activity_s,
+            )
+            state["warned_no_destination"] = True
+            _save_diagnose_state(cfg, state)
+        return
+
+    text = diagnose.render_markdown(report)
+    try:
+        post_id = tools._mm_post(channel, text)
+    except Exception as e:  # noqa: BLE001
+        events.append(
+            cfg.events_file,
+            "auto_diagnose_post_error",
+            channel=channel,
+            error=f"{type(e).__name__}: {e}",
+        )
+        return
+
+    events.append(
+        cfg.events_file,
+        "auto_diagnose_fired",
+        channel=channel,
+        post_id=post_id,
+        idle_s=report.since_last_activity_s,
+        report_summary=text[:500],
+    )
+    state["last_fired"] = now
+    state["warned_no_destination"] = False  # reset — destination is back
+    _save_diagnose_state(cfg, state)
+
+
+def _first_mm_channel() -> str:
+    """Return the first channel id from `AP2_MM_CHANNELS`, or empty string.
+
+    Mirrors `mattermost._channels_to_watch` parsing so the watchdog and the
+    inbound poller agree on which env var defines "the project's channel(s)".
+    """
+    raw = os.environ.get("AP2_MM_CHANNELS", "").strip()
+    for c in raw.split(","):
+        c = c.strip()
+        if c:
+            return c
+    return ""
+
+
+def _load_diagnose_state(cfg: Config) -> dict:
+    if not cfg.auto_diagnose_state_file.exists():
+        return {}
+    try:
+        data = json.loads(cfg.auto_diagnose_state_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_diagnose_state(cfg: Config, state: dict) -> None:
+    cfg.auto_diagnose_state_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.auto_diagnose_state_file.write_text(json.dumps(state, indent=2, sort_keys=True))
 
 
 def _import_sdk_or_die() -> None:

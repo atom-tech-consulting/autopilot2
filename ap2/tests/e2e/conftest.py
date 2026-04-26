@@ -35,6 +35,9 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
         # the project-wide gate against a tmp_path that has no test target.
         "AP2_VERIFY_CMD",
         "AP2_VERIFY_TIMEOUT_S",
+        # Scrub watchdog env so unrelated e2e tests don't fire diagnose posts.
+        "AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S",
+        "AP2_AUTO_DIAGNOSE_COOLDOWN_S",
     ):
         monkeypatch.delenv(k, raising=False)
 
