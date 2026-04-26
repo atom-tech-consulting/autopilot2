@@ -41,6 +41,45 @@ CLAUDE_AUTOPILOT_TEMPLATE = (
 # template is intentionally short — humans fill it in. Empty/skeleton values
 # are tolerated by the ideation prompt, which falls back to inferring goals
 # from CLAUDE.md + progress.md when the file is missing or all-placeholder.
+BRIEFING_TEMPLATE = (
+    "# {task_id} — {title}\n\n"
+    "## Goal\n\n"
+    "{description}\n\n"
+    "## Scope\n\n"
+    "- (file / module to change)\n\n"
+    "## Design\n\n"
+    "(filled in by /tb prep or by the ideation agent)\n\n"
+    "## Verification\n\n"
+    "Concrete acceptance criteria the daemon's per-task verifier (TB-69)\n"
+    "runs after the agent's commit. Shell-command bullets (backtick-fenced\n"
+    "at the start of the bullet) are run automatically; prose bullets are\n"
+    "judged by an SDK call against the diff.\n\n"
+    "- `uv run pytest -q` — full suite passes\n"
+    "- (additional shell or prose bullets)\n\n"
+    "## Out of scope\n\n"
+    "- (filled in)\n"
+)
+
+
+def render_briefing(
+    *,
+    task_id: str,
+    title: str,
+    description: str = "",
+) -> str:
+    """Fill `BRIEFING_TEMPLATE` for a new task. Used by `do_board_edit`'s
+    `add_backlog` path when no explicit briefing payload is provided (TB-69).
+
+    Pure formatter — no side effects, idempotent for the same inputs.
+    """
+    desc = description.strip() or "(one-paragraph description of what success looks like)"
+    return BRIEFING_TEMPLATE.format(
+        task_id=task_id,
+        title=title,
+        description=desc,
+    )
+
+
 GOAL_TEMPLATE = (
     "# Project Goals\n\n"
     "## Mission\n"

@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import diagnose, events, prompts, retry, tools
+from . import diagnose, events, prompts, retry, tools, verify
 from .board import Board
 from .config import Config
 from .cron import (
@@ -200,31 +200,63 @@ async def run_task(cfg: Config, sdk, task) -> None:
         # agent's HEAD already represents the recovered state and we don't
         # want a verify failure to mask a successful recovery — see
         # _infer_result_from_head).
-        verify = _run_verify(cfg, task)
-        if verify is not None and not verify.passed:
+        verify_res = _run_verify(cfg, task)
+        if verify_res is not None and not verify_res.passed:
             events.append(
                 cfg.events_file,
                 "verification_failed",
                 task=task.id,
-                command=verify.command,
-                exit_code=verify.exit_code,
-                stderr_tail=verify.stderr_tail,
-                duration_s=round(verify.duration_s, 2),
+                command=verify_res.command,
+                exit_code=verify_res.exit_code,
+                stderr_tail=verify_res.stderr_tail,
+                duration_s=round(verify_res.duration_s, 2),
             )
             _handle_failure(cfg, task, status="verification_failed")
             final_status = "verification_failed"
         else:
-            do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
-            retry.reset_attempt(cfg.retry_state_file, task.id)
-            _append_progress(cfg, task, parsed)
-            _dispatch_cron_directives(cfg, task.id, parsed.cron)
-            # Delete the per-run debug dumps on success — only keep evidence for
-            # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
-            for p in (prompt_dump, stream_dump):
-                try:
-                    p.unlink()
-                except FileNotFoundError:
-                    pass
+            # Per-task verification (TB-69): run the briefing's `## Verification`
+            # bullets after the project-wide gate (TB-66) but before
+            # move_to_complete. Skip when no briefing or no section.
+            per_verdict = await _maybe_per_task_verify(cfg, sdk, task)
+            if per_verdict is not None and per_verdict.overall == "fail":
+                events.append(
+                    cfg.events_file,
+                    "verification_failed",
+                    task=task.id,
+                    kind="per_task",
+                    overall=per_verdict.overall,
+                    criteria=[
+                        {"kind": c.kind, "status": c.status,
+                         "bullet": c.bullet[:200], "notes": c.notes[:200]}
+                        for c in per_verdict.criteria
+                    ],
+                    duration_s=round(per_verdict.duration_s, 2),
+                )
+                _handle_failure(cfg, task, status="verification_failed")
+                final_status = "verification_failed"
+            else:
+                if per_verdict is not None and per_verdict.overall == "partial":
+                    events.append(
+                        cfg.events_file,
+                        "verification_partial",
+                        task=task.id,
+                        criteria=[
+                            {"kind": c.kind, "status": c.status,
+                             "bullet": c.bullet[:200], "notes": c.notes[:200]}
+                            for c in per_verdict.criteria
+                        ],
+                    )
+                do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
+                retry.reset_attempt(cfg.retry_state_file, task.id)
+                _append_progress(cfg, task, parsed)
+                _dispatch_cron_directives(cfg, task.id, parsed.cron)
+                # Delete the per-run debug dumps on success — only keep evidence for
+                # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
+                for p in (prompt_dump, stream_dump):
+                    try:
+                        p.unlink()
+                    except FileNotFoundError:
+                        pass
     else:
         _handle_failure(cfg, task, status=parsed.status, parsed=parsed)
     events.append(
@@ -575,6 +607,26 @@ def _run_verify(cfg: Config, task) -> "VerifyResult | None":
         stderr_tail=proc.stderr[-2000:],
         stdout_tail=proc.stdout[-2000:],
         duration_s=time.monotonic() - t0,
+    )
+
+
+async def _maybe_per_task_verify(cfg: Config, sdk, task) -> "verify.VerifyVerdict | None":
+    """Run the per-task verifier (TB-69) for `task` if its briefing has a
+    `## Verification` section. Returns None to mean "skip" (legacy task or
+    no concrete criteria) — the caller proceeds to move_to_complete unchanged.
+    """
+    if not task.briefing:
+        return None
+    p = Path(task.briefing)
+    full = p if p.is_absolute() else cfg.project_root / p
+    if not full.exists():
+        return None
+    text = full.read_text()
+    return await verify.verify_task(
+        briefing_text=text,
+        project_root=cfg.project_root,
+        timeout_s=cfg.verify_timeout_s,
+        sdk=sdk,
     )
 
 

@@ -43,6 +43,17 @@ jobs:
       Propose the top 3 via board_edit (action: add_backlog) with a
       structured briefing. The daemon will pick them up automatically on the
       next tick — no human review gate. Do not add duplicates.
+
+      ## Briefing requirements (load-bearing — TB-69 verifier reads these)
+      Every briefing you write MUST include a `## Verification` section with
+      concrete acceptance bullets that the per-task verifier can evaluate:
+        - Prefer backtick-fenced shell commands at the START of the bullet
+          (e.g. `- \`uv run pytest -q\` — full suite passes`); the verifier
+          runs them automatically and exit 0 = pass.
+        - Prose bullets are allowed for criteria a shell command can't
+          express; they're judged by an SDK call against the diff.
+      A briefing with no `## Verification` section will be skipped by the
+      verifier (legacy compat). New work should not opt into that path.
     active_when: "sh:awk '/^## Backlog/{f=1;next}/^## /{f=0}f' TASKS.md | grep -c '^- \\[' | awk '{exit ($1>=3)}'"
     max_turns: 15
     created_by: bootstrap

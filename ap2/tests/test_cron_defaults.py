@@ -95,3 +95,17 @@ def test_ideation_prompt_keeps_active_when():
     assert aw.startswith("sh:")
     assert "Backlog" in aw
     assert "$1>=3" in aw  # the under-full threshold
+
+
+def test_ideation_prompt_instructs_verification_section_population():
+    """TB-69 contract: every ideation-proposed briefing must include a
+    `## Verification` section with concrete bullets the verifier can run.
+    Pin the prompt language so a future rewrite can't drop this."""
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    assert "## Verification" in prompt
+    # The prompt should mention shell bullets (the preferred form).
+    lower = prompt.lower()
+    assert "shell" in lower
+    # And acknowledge the legacy skip path so the agent knows what NOT to do.
+    assert "legacy" in lower or "skip" in lower

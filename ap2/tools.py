@@ -22,6 +22,7 @@ from . import events
 from .board import Board, locked_board
 from .config import Config, bump_next_task_id
 from .cron import update_job
+from .init import render_briefing
 
 
 def slugify(text: str, max_len: int = 40) -> str:
@@ -87,6 +88,16 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 if not title:
                     return _err("title is required for add actions")
                 new_id = _allocate_id(board, cfg)
+                # TB-69: when add_backlog is called without an explicit briefing
+                # payload, auto-fill the briefing with the standard template so
+                # every newly-discovered task lands with a load-bearing
+                # `## Verification` section. add_ready / add_frozen still pass
+                # through — those are for cases where the briefing is being
+                # explicitly managed by the caller.
+                if action == "add_backlog" and not (briefing or "").strip():
+                    briefing = render_briefing(
+                        task_id=new_id, title=title, description=description,
+                    )
                 briefing_rel = None
                 if briefing:
                     slug = slugify(title)
