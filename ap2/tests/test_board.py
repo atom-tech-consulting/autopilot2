@@ -264,3 +264,46 @@ def test_next_dispatchable_returns_none_when_all_blocked(tmp_path):
     b = Board.load(path)
     assert b.next_ready() is None
     assert b.next_dispatchable("Ready") is None
+
+
+def test_malformed_complete_line_is_surfaced(tmp_path):
+    """A line like `**TB-9** (sha) **Title**` (manual edit injecting an
+    annotation between ID and title) doesn't match TASK_LINE_RE — so the task
+    is invisible to `completed_ids()` and silently blocks anything that depends
+    on it. The parser should record it in `malformed_lines` so the daemon can
+    emit a warning instead of mysteriously refusing to dispatch.
+    """
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        ## Backlog
+
+        - [ ] **TB-10** **needs TB-9** — (blocked on: TB-9)
+
+        ## Complete
+
+        - [x] **TB-9** (abc1234) **Old task** — was done with sha annotation.
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    assert b.malformed_lines, "expected the (abc1234)-annotated TB-9 line to be flagged"
+    section, line = b.malformed_lines[0]
+    assert section == "Complete"
+    assert "TB-9" in line and "(abc1234)" in line
+    # And the consequence: TB-9 isn't seen as completed, so TB-10 stays blocked.
+    assert "TB-9" not in b.completed_ids()
+    assert b.next_dispatchable("Backlog") is None
+
+
+def test_clean_board_has_no_malformed_lines(tmp_path):
+    path = _write_board(tmp_path, SAMPLE)
+    b = Board.load(path)
+    assert b.malformed_lines == []

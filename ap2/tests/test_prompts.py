@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ap2.board import Task
 from ap2.config import Config
-from ap2.prompts import build_task_prompt
+from ap2.prompts import build_mattermost_prompt, build_task_prompt
 
 
 def _cfg(tmp_path: Path) -> Config:
@@ -51,3 +51,29 @@ def test_prompt_pins_state_file_fence(tmp_path):
     assert "What the daemon handles (do NOT touch)" in p
     for f in ("TASKS.md", "progress.md", "events.jsonl"):
         assert f in p
+
+
+def test_mattermost_prompt_pins_explicit_thread_id(tmp_path):
+    """The handler agent must reply in the user's thread, not in some thread_id
+    it picks up from the recent-events block (which often contains an unrelated
+    cron status-report thread). The fix wires the literal thread_id into the
+    prompt as the value to pass to `mattermost_reply`.
+    """
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "stoch",
+        "user": "li.zhang",
+        "text": "@claude-bot status?",
+        "thread_id": "",  # top-level message
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    assert 'channel: "ch-abc"' in p
+    assert 'thread_id: ""' in p
+    assert "do NOT pull" in p
+
+    # Threaded reply: the handler should use the thread root.
+    msg_threaded = dict(msg, thread_id="root-xyz")
+    p2 = build_mattermost_prompt(cfg, msg_threaded)
+    assert 'thread_id: "root-xyz"' in p2

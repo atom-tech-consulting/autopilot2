@@ -15,8 +15,8 @@ jobs:
       Read TASKS.md, CLAUDE.md, and progress.md. If Backlog has fewer than 3
       workable tasks, propose new tasks aligned with the project's stated goals
       and recent work. Add proposals to Backlog via board_edit (action:
-      add_backlog) with the `#proposed` tag so a human can review before they
-      get prepped. Do not add duplicates.
+      add_backlog). The daemon will pick them up automatically on the next
+      tick — no human review gate. Do not add duplicates.
     active_when: "sh:awk '/^## Backlog/{f=1;next}/^## /{f=0}f' TASKS.md | grep -c '^- \\[' | awk '{exit ($1>=3)}'"
     max_turns: 15
     created_by: bootstrap

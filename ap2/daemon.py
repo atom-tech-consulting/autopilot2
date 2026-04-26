@@ -42,6 +42,10 @@ from .tools import (
 
 RUNNING = True
 
+# Module-level dedup so we don't re-emit board_malformed_line every tick for
+# the same offending line. Cleared on daemon restart.
+_SEEN_MALFORMED: set[str] = set()
+
 
 def _handle_signal(signum, frame):  # noqa: ARG001
     global RUNNING
@@ -590,6 +594,21 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # 3. Next Ready task (auto-promote top-of-Backlog if Ready is empty)
     try:
         board = Board.load(cfg.tasks_file)
+        # Surface task-shaped lines that fail the parser. A common cause is a
+        # manual edit inserting `(<sha>)` between **TB-N** and **Title**, which
+        # makes the task invisible to `completed_ids()` and silently blocks
+        # every Backlog task that depends on it.
+        for section, line in board.malformed_lines:
+            sig = f"{section}:{line}"
+            if sig in _SEEN_MALFORMED:
+                continue
+            _SEEN_MALFORMED.add(sig)
+            events.append(
+                cfg.events_file,
+                "board_malformed_line",
+                section=section,
+                line=line[:240],
+            )
         task = board.next_ready()
         if task is None:
             # next_dispatchable skips any Backlog task with unmet `blocked on:`

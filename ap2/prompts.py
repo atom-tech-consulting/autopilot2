@@ -143,14 +143,15 @@ def build_mattermost_prompt(cfg: Config, msg: dict) -> str:
         {"id": "...", "channel_id": "...", "channel_name": "dev",
          "user": "sarah", "text": "start the pipeline", "thread_id": "..."}
     """
-    channel = msg.get("channel_name") or msg.get("channel_id", "?")
+    channel_id = msg.get("channel_id", "")
+    channel_name = msg.get("channel_name") or channel_id or "?"
     user = msg.get("user") or msg.get("user_id", "?")
     text = msg.get("text", "")
     thread = msg.get("thread_id") or msg.get("root_id") or ""
     parts = [
         _CONTROL_HEADER,
         "\n## Incoming mattermost message",
-        f"- channel: {channel}",
+        f"- channel: {channel_name}",
         f"- from: {user}",
         f"- thread: {thread or '(top-level)'}",
         "",
@@ -163,8 +164,17 @@ def build_mattermost_prompt(cfg: Config, msg: dict) -> str:
         "- If the user asks for work: add tasks via `board_edit`.",
         "- If the user asks for monitoring: add a job via `cron_edit`.",
         "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
-        "- Always acknowledge on the same channel/thread via `mattermost_reply` when you act.",
         "- Log anything noteworthy via `log_event`.",
+        "",
+        "## Replying — exact arguments to use",
+        "When you call `mattermost_reply`, pass these EXACT values (do NOT pull",
+        "thread_ids from the recent events block — those are unrelated cron threads):",
+        "",
+        f'- channel: "{channel_id}"',
+        f'- thread_id: "{thread}"',
+        "",
+        "An empty thread_id posts at the top level of the channel; a non-empty",
+        "thread_id continues that specific thread. Match the user's context.",
         "",
         _events_block(cfg),
     ]

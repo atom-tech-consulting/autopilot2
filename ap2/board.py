@@ -82,6 +82,12 @@ class Board:
     path: Path
     sections: dict[str, list[str]] = field(default_factory=dict)
     header: str = "# Tasks\n"
+    # Lines that look like task lines (start with `- [`) but don't match
+    # TASK_LINE_RE — typically a manual edit added junk between **TB-N** and
+    # **Title**, e.g. `**TB-59** (7735de2) **Title**`. The daemon surfaces
+    # these so a malformed line doesn't silently strand a Backlog task whose
+    # blocker now appears uncompleted to the parser.
+    malformed_lines: list[tuple[str, str]] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> "Board":
@@ -109,6 +115,8 @@ class Board:
                 if line.strip() == "" or line.strip().startswith("<!--"):
                     continue
                 self.sections[section].append(line)
+                if line.lstrip().startswith("- [") and not TASK_LINE_RE.match(line):
+                    self.malformed_lines.append((section, line))
 
     def render(self) -> str:
         parts = [self.header.rstrip() + "\n\n"]
