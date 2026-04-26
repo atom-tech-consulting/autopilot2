@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ap2.config import Config
 from ap2.init import (
     NESTED_GITIGNORE_BLOCKS,
     ROOT_GITIGNORE_BLOCKS,
@@ -120,6 +121,78 @@ def test_existing_tasks_dir_not_clobbered(tmp_path: Path):
 
     assert report.tasks_dir_created is False
     assert brief.read_text() == "# old briefing"
+
+
+def test_creates_tasks_md_with_5_section_template(tmp_path: Path):
+    report = init_project(tmp_path)
+
+    tasks = tmp_path / "TASKS.md"
+    assert tasks.exists()
+    assert report.tasks_md_created is True
+    text = tasks.read_text()
+    for section in ("## Active", "## Ready", "## Backlog", "## Complete", "## Frozen"):
+        assert section in text
+
+
+def test_creates_progress_md(tmp_path: Path):
+    report = init_project(tmp_path)
+    progress = tmp_path / ".cc-autopilot" / "progress.md"
+    assert progress.exists()
+    assert progress.read_text().startswith("# Progress")
+    assert report.progress_md_created is True
+
+
+def test_creates_claude_md_when_missing(tmp_path: Path):
+    report = init_project(tmp_path)
+    claude_md = tmp_path / "CLAUDE.md"
+    assert claude_md.exists()
+    assert report.claude_md_created is True
+    text = claude_md.read_text()
+    assert "## Autopilot" in text
+    assert "Next task ID: TB-1" in text
+
+
+def test_appends_autopilot_to_existing_claude_md(tmp_path: Path):
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# Pre-existing\n\nSome content.\n")
+
+    report = init_project(tmp_path)
+
+    assert report.claude_md_created is False
+    assert report.claude_md_autopilot_added is True
+    text = claude_md.read_text()
+    assert "# Pre-existing" in text
+    assert "Some content." in text
+    assert "## Autopilot" in text
+
+
+def test_does_not_re_append_autopilot_section(tmp_path: Path):
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# Project\n\n## Autopilot\n\n- Task list: `TASKS.md`\n")
+
+    report = init_project(tmp_path)
+
+    assert report.claude_md_autopilot_added is False
+    assert claude_md.read_text().count("## Autopilot") == 1
+
+
+def test_does_not_overwrite_existing_tasks_md(tmp_path: Path):
+    tasks = tmp_path / "TASKS.md"
+    tasks.write_text("# Tasks\n\n## Active\n\n- [ ] **TB-7** **existing** — keep me\n")
+
+    report = init_project(tmp_path)
+
+    assert report.tasks_md_created is False
+    assert "TB-7" in tasks.read_text()
+
+
+def test_init_output_is_loadable_by_config(tmp_path: Path):
+    """End-to-end: a freshly-init'd project must `Config.load()` cleanly."""
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+    assert cfg.tasks_file == (tmp_path / "TASKS.md").resolve()
+    assert cfg.tasks_file.exists()
+    assert (tmp_path / ".cc-autopilot" / "progress.md").exists()
 
 
 def test_partial_state_only_appends_missing(tmp_path: Path):

@@ -1,18 +1,41 @@
-"""Project-init scaffolding: gitignores, dirs, marker files for ap2.
+"""Project-init scaffolding: gitignores, dirs, marker files, board templates.
 
 The single source of truth for what an ap2-managed project should ignore vs.
-track. Replaces the manual transcribe-from-skill-markdown flow that left
-stoch's `cron.yaml` untracked for weeks and silently accumulated `.lock` /
-`.bak` files in the working tree.
+track, and what the bare minimum on-disk skeleton looks like. Replaces the
+manual transcribe-from-skill-markdown flow that left stoch's `cron.yaml`
+untracked for weeks and silently accumulated `.lock` / `.bak` files.
 
-Idempotent: re-running unions with whatever already exists.
+Idempotent: re-running unions gitignores, never touches existing TASKS.md /
+progress.md / CLAUDE.md content (only writes if missing or appends a new
+`## Autopilot` block to a CLAUDE.md that lacks one).
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import AUTOPILOT_DIR_NAME
+
+
+TASKS_TEMPLATE = (
+    "# Tasks\n\n"
+    "## Active\n\n"
+    "## Ready\n\n"
+    "## Backlog\n\n"
+    "## Complete\n\n"
+    "## Frozen\n"
+)
+
+PROGRESS_TEMPLATE = "# Progress\n"
+
+CLAUDE_AUTOPILOT_TEMPLATE = (
+    "## Autopilot\n\n"
+    "- Task list: `TASKS.md`\n"
+    "- Task briefings: `.cc-autopilot/tasks/`\n"
+    "- Progress log: `.cc-autopilot/progress.md`\n"
+    "- Next task ID: TB-1\n"
+)
 
 
 # Lines that go into <project>/.cc-autopilot/.gitignore. Grouped by purpose so
@@ -62,6 +85,10 @@ class InitReport:
     nested_gitignore_added: list[str] = field(default_factory=list)
     root_gitignore_added: list[str] = field(default_factory=list)
     tasks_dir_created: bool = False
+    tasks_md_created: bool = False
+    progress_md_created: bool = False
+    claude_md_created: bool = False
+    claude_md_autopilot_added: bool = False
 
     def print(self) -> None:
         if self.nested_gitignore_added:
@@ -76,10 +103,15 @@ class InitReport:
                 print(f"    + {line}")
         else:
             print("  .gitignore: up to date")
-        if self.tasks_dir_created:
-            print(f"  .cc-autopilot/tasks/: created")
+        print(f"  .cc-autopilot/tasks/: {'created' if self.tasks_dir_created else 'exists'}")
+        print(f"  TASKS.md: {'created' if self.tasks_md_created else 'exists'}")
+        print(f"  .cc-autopilot/progress.md: {'created' if self.progress_md_created else 'exists'}")
+        if self.claude_md_created:
+            print(f"  CLAUDE.md: created (with ## Autopilot)")
+        elif self.claude_md_autopilot_added:
+            print(f"  CLAUDE.md: appended ## Autopilot section")
         else:
-            print("  .cc-autopilot/tasks/: exists")
+            print(f"  CLAUDE.md: ## Autopilot section already present")
 
 
 def _existing_entries(text: str) -> set[str]:
@@ -122,8 +154,45 @@ def _union_gitignore(path: Path, blocks: list[tuple[str, list[str]]]) -> list[st
     return added
 
 
+_AUTOPILOT_HEADER_RE = re.compile(r"^##\s+Autopilot\s*$", re.M)
+
+
+def _ensure_file(path: Path, content: str) -> bool:
+    """Write `content` to `path` only if `path` does not already exist."""
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return True
+
+
+def _ensure_claude_md_autopilot(claude_md: Path) -> tuple[bool, bool]:
+    """Ensure CLAUDE.md exists and has a `## Autopilot` section.
+
+    Returns `(claude_md_created, autopilot_appended)`:
+    - `(True, False)` — CLAUDE.md was missing; created with header + Autopilot.
+    - `(False, True)` — CLAUDE.md existed without Autopilot; we appended.
+    - `(False, False)` — Autopilot section already present; nothing changed.
+    """
+    if not claude_md.exists():
+        claude_md.parent.mkdir(parents=True, exist_ok=True)
+        claude_md.write_text("# CLAUDE.md\n\n" + CLAUDE_AUTOPILOT_TEMPLATE)
+        return True, False
+    text = claude_md.read_text()
+    if _AUTOPILOT_HEADER_RE.search(text):
+        return False, False
+    sep = "" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
+    claude_md.write_text(text + sep + CLAUDE_AUTOPILOT_TEMPLATE)
+    return False, True
+
+
 def init_project(project_root: Path) -> InitReport:
-    """Scaffold ap2 ignore lists + tasks dir for `project_root`. Idempotent."""
+    """Scaffold ap2 gitignores, tasks dir, board template, autopilot config.
+
+    Idempotent — every step skips if the target already exists. Never clobbers
+    user content; CLAUDE.md only gains a fresh `## Autopilot` block when the
+    file lacks one entirely.
+    """
     project_root = project_root.resolve()
     autopilot_dir = project_root / AUTOPILOT_DIR_NAME
 
@@ -131,12 +200,20 @@ def init_project(project_root: Path) -> InitReport:
     root_added = _union_gitignore(project_root / ".gitignore", ROOT_GITIGNORE_BLOCKS)
 
     tasks_dir = autopilot_dir / "tasks"
-    created = not tasks_dir.exists()
+    tasks_dir_created = not tasks_dir.exists()
     tasks_dir.mkdir(parents=True, exist_ok=True)
+
+    tasks_md_created = _ensure_file(project_root / "TASKS.md", TASKS_TEMPLATE)
+    progress_md_created = _ensure_file(autopilot_dir / "progress.md", PROGRESS_TEMPLATE)
+    claude_md_created, autopilot_added = _ensure_claude_md_autopilot(project_root / "CLAUDE.md")
 
     return InitReport(
         project_root=project_root,
         nested_gitignore_added=nested_added,
         root_gitignore_added=root_added,
-        tasks_dir_created=created,
+        tasks_dir_created=tasks_dir_created,
+        tasks_md_created=tasks_md_created,
+        progress_md_created=progress_md_created,
+        claude_md_created=claude_md_created,
+        claude_md_autopilot_added=autopilot_added,
     )

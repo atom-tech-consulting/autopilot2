@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import events, sandbox
+from . import doctor, events, sandbox
 from .board import Board, locked_board
 from .config import Config
 from .cron import load_jobs, load_state
@@ -161,6 +161,14 @@ def cmd_init(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
+    """One-shot environment-readiness check (project skeleton + sandbox + CLI)."""
+    user = args.user or sandbox.DEFAULT_USER
+    rep = doctor.diagnose(cfg.project_root, user)
+    rep.print()
+    return 0 if rep.ok else 1
+
+
 def cmd_logs(cfg: Config, args: argparse.Namespace) -> int:
     n = args.n
     evts = events.tail(cfg.events_file, n=n)
@@ -265,6 +273,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("init", help="scaffold gitignores + .cc-autopilot/tasks/ (idempotent)")
     s.set_defaults(func=cmd_init)
+
+    s = sub.add_parser("doctor", help="check ap2 readiness (project skeleton + sandbox)")
+    s.add_argument("--user", default=None, help="sandbox user (default: claude-agent)")
+    s.set_defaults(func=cmd_doctor)
 
     s = sub.add_parser("logs", help="show recent events")
     s.add_argument("-n", type=int, default=40)
