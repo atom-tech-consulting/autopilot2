@@ -60,3 +60,38 @@ def test_bootstrap_creates_parent_dir(tmp_path: Path):
     target = tmp_path / "sub" / "deeper" / "cron.yaml"
     assert bootstrap(target) is True
     assert target.exists()
+
+
+# ---------------------------------------------------------------------------
+# TB-70: ideation prompt now reads goal.md and scans Complete for follow-ups.
+# These tests pin the load-bearing phrases so a future prompt rewrite can't
+# silently drop them.
+
+def test_ideation_prompt_mentions_goal_md():
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    assert "goal.md" in prompt
+    # Fallback path documented for projects that don't have goal.md yet.
+    lower = prompt.lower()
+    assert "absent" in lower or "fall back" in lower or "infer" in lower
+
+
+def test_ideation_prompt_mentions_followup_scan():
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    lower = prompt.lower()
+    # The agent must be told to look at Complete (not just propose greenfield).
+    assert "complete" in lower
+    # And must understand the intent: discover follow-ups.
+    assert "follow-up" in lower or "follow up" in lower
+
+
+def test_ideation_prompt_keeps_active_when():
+    """TB-49 set the Backlog<3 gate; TB-70 must NOT change when ideation runs.
+    The prompt content evolves but the firing condition is load-bearing.
+    """
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    aw = jobs["ideation"].active_when or ""
+    assert aw.startswith("sh:")
+    assert "Backlog" in aw
+    assert "$1>=3" in aw  # the under-full threshold

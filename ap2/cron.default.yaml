@@ -12,11 +12,37 @@ jobs:
   - name: ideation
     interval: 6h
     prompt: |
-      Read TASKS.md, CLAUDE.md, and progress.md. If Backlog has fewer than 3
-      workable tasks, propose new tasks aligned with the project's stated goals
-      and recent work. Add proposals to Backlog via board_edit (action:
-      add_backlog). The daemon will pick them up automatically on the next
-      tick — no human review gate. Do not add duplicates.
+      Goal: keep Backlog populated with high-leverage, goal-aligned tasks.
+
+      Read these files in order:
+      1. goal.md — project mission, current focus, non-goals, constraints.
+         If absent OR all sections are still placeholders, infer goals from
+         CLAUDE.md + progress.md instead.
+      2. TASKS.md — current board state (do not duplicate existing tasks).
+      3. progress.md — recent completed work, for follow-up discovery.
+      4. CLAUDE.md — project conventions and any Autopilot config.
+
+      Propose new tasks ONLY if Backlog has fewer than 3 workable items.
+
+      ## Follow-up discovery (do this BEFORE greenfield ideation)
+      Look at the most recent ~10 entries in TASKS.md `## Complete` and the
+      matching sections in progress.md. For each, ask:
+        - What natural next step did this completion enable?
+        - What edge case wasn't addressed?
+        - What instrumentation does this new feature need?
+      Collect follow-up candidates from this scan first. Only fall back to
+      greenfield ideas if you're short of 3 candidates afterwards.
+
+      ## Ranking
+      Rank candidates by:
+        - alignment with goal.md (Mission, Current focus; respect Non-goals)
+        - impact relative to current project state
+        - freshness of the seed (a follow-up to yesterday's task beats one
+          to last month's)
+
+      Propose the top 3 via board_edit (action: add_backlog) with a
+      structured briefing. The daemon will pick them up automatically on the
+      next tick — no human review gate. Do not add duplicates.
     active_when: "sh:awk '/^## Backlog/{f=1;next}/^## /{f=0}f' TASKS.md | grep -c '^- \\[' | awk '{exit ($1>=3)}'"
     max_turns: 15
     created_by: bootstrap

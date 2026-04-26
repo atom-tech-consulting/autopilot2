@@ -37,6 +37,24 @@ CLAUDE_AUTOPILOT_TEMPLATE = (
     "- Next task ID: TB-1\n"
 )
 
+# Project-level goals/non-goals anchor read by the ideation cron (TB-70). The
+# template is intentionally short — humans fill it in. Empty/skeleton values
+# are tolerated by the ideation prompt, which falls back to inferring goals
+# from CLAUDE.md + progress.md when the file is missing or all-placeholder.
+GOAL_TEMPLATE = (
+    "# Project Goals\n\n"
+    "## Mission\n"
+    "(one-sentence statement of what this project is FOR)\n\n"
+    "## Current focus\n"
+    "- (area or theme actively in flight now)\n\n"
+    "## Non-goals\n"
+    "- (explicit things this project is NOT trying to do, so ideation\n"
+    "  doesn't propose them)\n\n"
+    "## Constraints\n"
+    "- (hard constraints — tech stack, deadlines, dependencies,\n"
+    "  blast-radius limits)\n"
+)
+
 
 # Lines that go into <project>/.cc-autopilot/.gitignore. Grouped by purpose so
 # diffs against an existing file are minimal and readable.
@@ -89,6 +107,7 @@ class InitReport:
     progress_md_created: bool = False
     claude_md_created: bool = False
     claude_md_autopilot_added: bool = False
+    goal_md_created: bool = False
 
     def print(self) -> None:
         if self.nested_gitignore_added:
@@ -106,6 +125,7 @@ class InitReport:
         print(f"  .cc-autopilot/tasks/: {'created' if self.tasks_dir_created else 'exists'}")
         print(f"  TASKS.md: {'created' if self.tasks_md_created else 'exists'}")
         print(f"  .cc-autopilot/progress.md: {'created' if self.progress_md_created else 'exists'}")
+        print(f"  goal.md: {'created (template — fill in)' if self.goal_md_created else 'exists'}")
         if self.claude_md_created:
             print(f"  CLAUDE.md: created (with ## Autopilot)")
         elif self.claude_md_autopilot_added:
@@ -205,6 +225,7 @@ def init_project(project_root: Path) -> InitReport:
 
     tasks_md_created = _ensure_file(project_root / "TASKS.md", TASKS_TEMPLATE)
     progress_md_created = _ensure_file(autopilot_dir / "progress.md", PROGRESS_TEMPLATE)
+    goal_md_created = _ensure_file(project_root / "goal.md", GOAL_TEMPLATE)
     claude_md_created, autopilot_added = _ensure_claude_md_autopilot(project_root / "CLAUDE.md")
 
     return InitReport(
@@ -216,4 +237,5 @@ def init_project(project_root: Path) -> InitReport:
         progress_md_created=progress_md_created,
         claude_md_created=claude_md_created,
         claude_md_autopilot_added=autopilot_added,
+        goal_md_created=goal_md_created,
     )

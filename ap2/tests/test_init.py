@@ -195,6 +195,43 @@ def test_init_output_is_loadable_by_config(tmp_path: Path):
     assert (tmp_path / ".cc-autopilot" / "progress.md").exists()
 
 
+def test_creates_goal_md_when_missing(tmp_path: Path):
+    """Fresh project gets a templated goal.md so the ideation cron has an
+    explicit project-level anchor to read (TB-70)."""
+    report = init_project(tmp_path)
+    goal = tmp_path / "goal.md"
+    assert goal.exists()
+    assert report.goal_md_created is True
+    text = goal.read_text()
+    # Pin the four sections the ideation prompt expects to find.
+    for section in ("# Project Goals", "## Mission", "## Current focus",
+                    "## Non-goals", "## Constraints"):
+        assert section in text
+
+
+def test_does_not_overwrite_existing_goal_md(tmp_path: Path):
+    """Pre-existing goal.md with custom content survives init unchanged."""
+    goal = tmp_path / "goal.md"
+    goal.write_text("# Custom\n\n## Mission\nMake widgets.\n")
+
+    report = init_project(tmp_path)
+
+    assert report.goal_md_created is False
+    assert goal.read_text() == "# Custom\n\n## Mission\nMake widgets.\n"
+
+
+def test_goal_md_idempotent(tmp_path: Path):
+    """Second init_project call is a no-op for goal.md."""
+    init_project(tmp_path)
+    goal = tmp_path / "goal.md"
+    first = goal.read_text()
+
+    report2 = init_project(tmp_path)
+
+    assert report2.goal_md_created is False
+    assert goal.read_text() == first
+
+
 def test_partial_state_only_appends_missing(tmp_path: Path):
     """If init had been run before but the template was extended later
     (e.g. we added *.lock and *.bak in TB-68), re-running picks up just the
