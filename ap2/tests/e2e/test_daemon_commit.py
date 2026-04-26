@@ -79,6 +79,64 @@ def test_commit_state_files_commits_dirty_files(e2e_project):
     assert status == ""
 
 
+def test_commit_state_files_includes_briefing_dir(e2e_project):
+    """TB-73: a briefing written under .cc-autopilot/tasks/ during a tick
+    rides along with the state-file commit, so reverts/bisects keep the
+    TASKS.md briefing-link semantically intact."""
+    cfg = e2e_project()
+    _git_init(cfg.project_root)
+    _git(["add", "TASKS.md", "CLAUDE.md"], cfg.project_root)
+    _git(["commit", "-m", "baseline"], cfg.project_root)
+
+    # Simulate a freshly-written briefing (e.g. from add_backlog auto-fill).
+    cfg.tasks_dir.mkdir(parents=True, exist_ok=True)
+    brief = cfg.tasks_dir / "auto-filled-brief.md"
+    brief.write_text("# TB-99 — Auto-filled\n\n## Verification\n- `true`\n")
+    # Also dirty TASKS.md so the commit fires (paranoid pin: TASKS.md change
+    # is the typical sibling of a new briefing).
+    (cfg.project_root / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n"
+        "- [ ] **TB-99** **Auto** [→ brief](.cc-autopilot/tasks/auto-filled-brief.md)\n"
+        "\n## Complete\n\n## Frozen\n"
+    )
+
+    _commit_state_files(cfg, "state: cron ideation")
+
+    log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
+    assert "state: cron ideation" in log
+    # Briefing file is now tracked.
+    tracked = _git(["ls-files", ".cc-autopilot/tasks/"], cfg.project_root).stdout
+    assert "auto-filled-brief.md" in tracked
+    # Working tree clean — both TASKS.md and the briefing landed in one commit.
+    status = _git(["status", "--porcelain"], cfg.project_root).stdout.strip()
+    assert status == ""
+
+
+def test_commit_state_files_picks_up_briefing_only_change(e2e_project):
+    """A briefing edit with NO state-file change still triggers a commit —
+    e.g. a task agent's `_append_attempts` hook updates a briefing during
+    a failure path even when the daemon hasn't moved the task yet."""
+    cfg = e2e_project()
+    _git_init(cfg.project_root)
+    cfg.tasks_dir.mkdir(parents=True, exist_ok=True)
+    brief = cfg.tasks_dir / "evolving.md"
+    brief.write_text("# evolving briefing\n\nfirst draft\n")
+    _git(["add", "TASKS.md", "CLAUDE.md", ".cc-autopilot/tasks/evolving.md"],
+         cfg.project_root)
+    _git(["commit", "-m", "baseline"], cfg.project_root)
+
+    # Modify only the briefing, not TASKS.md / CLAUDE.md / progress.md.
+    brief.write_text(brief.read_text() + "\n## Attempts\n- second draft\n")
+
+    _commit_state_files(cfg, "state: TB-1 → Backlog")
+
+    log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
+    assert "state: TB-1 → Backlog" in log
+    # Confirm the diff actually includes the briefing change.
+    diff = _git(["log", "-1", "--name-only", "--format="], cfg.project_root).stdout
+    assert "evolving.md" in diff
+
+
 def test_tick_creates_state_commit_on_task_complete(e2e_project):
     cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
     _git_init(cfg.project_root)

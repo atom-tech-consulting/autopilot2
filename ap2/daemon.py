@@ -650,6 +650,12 @@ def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path]:
 # (a completed task, a cron ideation run, an orphan recovery) so the git log
 # tracks board evolution alongside the task agents' source-code commits.
 _STATE_FILE_NAMES = ("TASKS.md", ".cc-autopilot/progress.md", "CLAUDE.md")
+# Directories whose contents are also daemon-owned audit trail. Staged with
+# `git add <dir>` so new briefings (from `add_backlog` auto-fill, ideation
+# proposals, or `/tb prep`) and accumulated `## Attempts` edits ride along
+# with the state-file commit (TB-73). Briefings get linked from TASKS.md, so
+# bundling them keeps reverts/bisects semantically intact.
+_STATE_DIRS = (".cc-autopilot/tasks",)
 
 
 def _commit_state_files(cfg: Config, message: str) -> None:
@@ -667,6 +673,14 @@ def _commit_state_files(cfg: Config, message: str) -> None:
     for name in _STATE_FILE_NAMES:
         p = cfg.project_root / name
         if p.exists():
+            rel_paths.append(name)
+    for name in _STATE_DIRS:
+        p = cfg.project_root / name
+        # Skip empty dirs — `git commit -- <empty_dir>` errors with
+        # "pathspec did not match" since there's nothing tracked or staged
+        # under it. Any contents (including untracked files about to be
+        # `git add`'d below) is enough for the pathspec to match.
+        if p.exists() and any(p.iterdir()):
             rel_paths.append(name)
     if not rel_paths:
         return
