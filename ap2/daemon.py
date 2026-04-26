@@ -513,7 +513,16 @@ def _infer_result_from_head(cfg: Config, task) -> "TaskResult | None":
     if "\x00" not in out:
         return None
     sha, subject = out.split("\x00", 1)
-    if task.id not in subject:
+    # Tightened (TB-74): the prompt-side convention (TB-65) requires the
+    # commit subject to START with `<TB-N>: <description>`. We mirror that
+    # here — any subject whose first colon-or-whitespace-delimited token
+    # isn't exactly `task.id` is rejected. This avoids the false-positive
+    # surfaced live on stoch when a sync commit subject mentioned the same
+    # numeric task ID from a different project (`ap2 sync: ... (TB-70) ...`
+    # collided with stoch's TB-70).
+    import re as _re
+    first_token = _re.split(r"[:\s]", subject, maxsplit=1)[0]
+    if first_token != task.id:
         return None
     show = subprocess.run(
         ["git", "-C", root, "show", "--name-only", "--format=", sha],

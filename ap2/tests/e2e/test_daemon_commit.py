@@ -274,6 +274,38 @@ def test_sdk_crash_without_matching_commit_falls_through_to_error(e2e_project):
     assert all(e["type"] != "task_implicit_commit" for e in evts)
 
 
+def test_implicit_commit_skipped_when_subject_mentions_id_but_not_at_start(e2e_project):
+    """TB-74 regression: a commit subject that *mentions* the task id but
+    doesn't start with `<TB-N>:` (or `<TB-N> `) must NOT trigger the
+    implicit-complete fallback. This surfaced live on stoch: a manual sync
+    commit `ap2 sync: ideation prompt (TB-70) + goal.md ...` (claude-tools'
+    TB-70) collided with stoch's TB-70 dispatch, falsely marking it complete.
+    """
+    cfg = e2e_project(ready_task=("TB-70", "Stoch's TB-70"))
+    _git_init(cfg.project_root)
+    _git(["add", "TASKS.md", "CLAUDE.md"], cfg.project_root)
+    # The cross-project subject that triggered the original false-positive.
+    _git(
+        ["commit", "-m", "ap2 sync: ideation prompt (TB-70) + goal.md"],
+        cfg.project_root,
+    )
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-70",
+        crash_respond(RuntimeError("Control request timeout: initialize")),
+    )
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    # Must NOT have been promoted to Complete on the false-positive match.
+    assert board.find("TB-70")[0] == "Backlog"
+    evts = events.tail(cfg.events_file, 30)
+    # The implicit-commit event must NOT fire — failure path takes over.
+    assert all(e["type"] != "task_implicit_commit" for e in evts)
+    assert any(e["type"] == "task_error" for e in evts)
+
+
 def test_implicit_commit_skipped_when_subject_missing_task_id(e2e_project):
     """HEAD's subject without the task ID → no implicit-complete; standard
     failure path takes over (move to Backlog, retry counter bumped)."""
