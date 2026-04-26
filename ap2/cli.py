@@ -17,6 +17,7 @@ from . import events, sandbox
 from .board import Board, locked_board
 from .config import Config
 from .cron import load_jobs, load_state
+from .init import init_project
 from .tools import do_board_edit
 
 
@@ -148,6 +149,18 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_init(cfg: Config, args: argparse.Namespace) -> int:
+    """Idempotent project scaffolding: gitignore entries + tasks dir.
+
+    `cfg.project_root` is already resolved by Config.load() — we don't take a
+    DIR argument because every other ap2 subcommand operates on the same root.
+    """
+    report = init_project(cfg.project_root)
+    print(f"ap2 init: {report.project_root}")
+    report.print()
+    return 0
+
+
 def cmd_logs(cfg: Config, args: argparse.Namespace) -> int:
     n = args.n
     evts = events.tail(cfg.events_file, n=n)
@@ -249,6 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-d", "--description", default="")
     s.add_argument("--briefing-file", help="path to a briefing markdown file")
     s.set_defaults(func=cmd_add)
+
+    s = sub.add_parser("init", help="scaffold gitignores + .cc-autopilot/tasks/ (idempotent)")
+    s.set_defaults(func=cmd_init)
 
     s = sub.add_parser("logs", help="show recent events")
     s.add_argument("-n", type=int, default=40)
