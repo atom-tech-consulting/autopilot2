@@ -10,10 +10,12 @@ the setup-project skill.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .config import DEFAULT_VERIFY_TIMEOUT_S
 from .sandbox import (
     AuditResult,
     DEFAULT_USER,
@@ -97,10 +99,34 @@ def _sandbox_clone_path(project_root: Path, user: str) -> Path | None:
     return home / "repos" / project_root.resolve().name
 
 
+def _verify_gate_state() -> AuditResult:
+    """Report whether AP2_VERIFY_CMD is configured (project-wide regression gate).
+
+    The gate is opt-in — unset is the documented default and not a problem;
+    an INFO line just tells the operator how to enable it. When set, OK with
+    the resolved command + timeout so the human can verify what the daemon
+    will actually run.
+    """
+    res = AuditResult()
+    cmd = os.environ.get("AP2_VERIFY_CMD", "").strip()
+    timeout = int(os.environ.get("AP2_VERIFY_TIMEOUT_S", DEFAULT_VERIFY_TIMEOUT_S))
+    if not cmd:
+        res.add(
+            "INFO",
+            "AP2_VERIFY_CMD unset — project-wide verify gate disabled. "
+            "To enable, add e.g. `AP2_VERIFY_CMD=uv run pytest -q` to "
+            ".cc-autopilot/env.",
+        )
+    else:
+        res.add("OK", f"AP2_VERIFY_CMD: {cmd!r} (timeout {timeout}s)")
+    return res
+
+
 def diagnose(project_root: Path, user: str = DEFAULT_USER) -> DoctorReport:
     report = DoctorReport()
 
     report.sections.append(("project skeleton", _project_init_state(project_root)))
+    report.sections.append(("verify gate", _verify_gate_state()))
     report.sections.append((f"sandbox user ({user})", user_audit(user)))
     report.sections.append((f"ap2 CLI for {user}", _ap2_installed_for_user(user)))
 

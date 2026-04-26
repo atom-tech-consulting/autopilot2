@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import events, prompts, retry
@@ -187,25 +188,49 @@ async def run_task(cfg: Config, sdk, task) -> None:
             )
             parsed = inferred
     commit_hash = parsed.commit
+    final_status = parsed.status
     if parsed.status == "complete":
-        do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
-        retry.reset_attempt(cfg.retry_state_file, task.id)
-        _append_progress(cfg, task, parsed)
-        _dispatch_cron_directives(cfg, task.id, parsed.cron)
-        # Delete the per-run debug dumps on success — only keep evidence for
-        # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
-        for p in (prompt_dump, stream_dump):
-            try:
-                p.unlink()
-            except FileNotFoundError:
-                pass
+        # Project-wide regression gate: when AP2_VERIFY_CMD is set, run it
+        # against HEAD (post-agent-commit) before declaring Complete. Failure
+        # routes through `_handle_failure` like any other task failure
+        # (Backlog → retry → Frozen on exhaustion). Skipped when the env var
+        # is empty, when the task carries `#no-verify`, or when an explicit
+        # crash-recovery / timeout-recovery path produced this result (the
+        # agent's HEAD already represents the recovered state and we don't
+        # want a verify failure to mask a successful recovery — see
+        # _infer_result_from_head).
+        verify = _run_verify(cfg, task)
+        if verify is not None and not verify.passed:
+            events.append(
+                cfg.events_file,
+                "verification_failed",
+                task=task.id,
+                command=verify.command,
+                exit_code=verify.exit_code,
+                stderr_tail=verify.stderr_tail,
+                duration_s=round(verify.duration_s, 2),
+            )
+            _handle_failure(cfg, task, status="verification_failed")
+            final_status = "verification_failed"
+        else:
+            do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
+            retry.reset_attempt(cfg.retry_state_file, task.id)
+            _append_progress(cfg, task, parsed)
+            _dispatch_cron_directives(cfg, task.id, parsed.cron)
+            # Delete the per-run debug dumps on success — only keep evidence for
+            # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
+            for p in (prompt_dump, stream_dump):
+                try:
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
     else:
         _handle_failure(cfg, task, status=parsed.status, parsed=parsed)
     events.append(
         cfg.events_file,
         "task_complete",
         task=task.id,
-        status=parsed.status,
+        status=final_status,
         commit=commit_hash,
         summary=parsed.summary[:300],
     )
@@ -474,6 +499,81 @@ def _infer_result_from_head(cfg: Config, task) -> "TaskResult | None":
         tests_passed=None,
         cron=[],
         raw=f"<inferred from HEAD {sha[:8]}>",
+    )
+
+
+@dataclass
+class VerifyResult:
+    """Outcome of running the project-wide AP2_VERIFY_CMD against HEAD.
+
+    Returned by `_run_verify` when the gate is configured. `exit_code=None`
+    means the command exceeded `AP2_VERIFY_TIMEOUT_S`. stderr/stdout are
+    tail-truncated to 2k chars to keep events.jsonl entries bounded.
+    """
+
+    passed: bool
+    command: str
+    exit_code: int | None
+    stderr_tail: str
+    stdout_tail: str
+    duration_s: float
+
+
+def _run_verify(cfg: Config, task) -> "VerifyResult | None":
+    """Execute the project-wide regression gate, returning a result or None.
+
+    Returns None (skip path) when:
+      - AP2_VERIFY_CMD is unset or blank — the default; preserves pre-TB-66
+        behavior so projects that haven't opted in see no change.
+      - The task carries `#no-verify` — operator opt-out for tasks the gate
+        can't meaningfully check (docs-only, infra changes the project's
+        test command can't see, etc.).
+
+    Otherwise runs `cfg.verify_cmd` via `shell=True` in `cfg.project_root`
+    and returns a `VerifyResult`. Note `shell=True` is intentional: the
+    command is operator-supplied configuration (not agent-supplied input),
+    so shell parsing of forms like `uv run pytest -q` is the desired
+    behavior, not an injection risk.
+    """
+    if not cfg.verify_cmd:
+        return None
+    if "#no-verify" in (task.tags or []):
+        return None
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(
+            cfg.verify_cmd,
+            shell=True,
+            cwd=str(cfg.project_root),
+            capture_output=True,
+            text=True,
+            timeout=cfg.verify_timeout_s,
+        )
+    except subprocess.TimeoutExpired as e:
+        # `e.stderr` and `e.stdout` may be bytes or str depending on Python
+        # version + capture path. Normalize to str so callers don't care.
+        def _to_str(x) -> str:
+            if x is None:
+                return ""
+            if isinstance(x, bytes):
+                return x.decode("utf-8", errors="replace")
+            return x
+
+        return VerifyResult(
+            passed=False,
+            command=cfg.verify_cmd,
+            exit_code=None,
+            stderr_tail=_to_str(e.stderr)[-2000:],
+            stdout_tail=_to_str(e.stdout)[-2000:],
+            duration_s=time.monotonic() - t0,
+        )
+    return VerifyResult(
+        passed=proc.returncode == 0,
+        command=cfg.verify_cmd,
+        exit_code=proc.returncode,
+        stderr_tail=proc.stderr[-2000:],
+        stdout_tail=proc.stdout[-2000:],
+        duration_s=time.monotonic() - t0,
     )
 
 

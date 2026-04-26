@@ -31,6 +31,10 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
         "MATTERMOST_TOKEN",
         "AP2_MM_BOT_USER_ID",
         "AP2_MM_MENTION",
+        # Scrub verify-gate env so unrelated e2e tests never accidentally run
+        # the project-wide gate against a tmp_path that has no test target.
+        "AP2_VERIFY_CMD",
+        "AP2_VERIFY_TIMEOUT_S",
     ):
         monkeypatch.delenv(k, raising=False)
 

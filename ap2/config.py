@@ -30,6 +30,7 @@ DEFAULT_EVENT_CONTEXT_SIZE = 50
 DEFAULT_TASK_TIMEOUT_S = 1200  # 20 min per SDK query
 DEFAULT_CONTROL_TIMEOUT_S = 300  # 5 min for mattermost/cron agents
 DEFAULT_MAX_RETRIES = 3
+DEFAULT_VERIFY_TIMEOUT_S = 600  # 10 min for the project-wide verify gate
 
 
 @dataclass
@@ -53,6 +54,8 @@ class Config:
     task_timeout_s: int
     control_timeout_s: int
     max_retries: int
+    verify_cmd: str
+    verify_timeout_s: int
 
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
@@ -90,6 +93,10 @@ class Config:
                 os.environ.get("AP2_CONTROL_TIMEOUT_S", DEFAULT_CONTROL_TIMEOUT_S)
             ),
             max_retries=int(os.environ.get("AP2_MAX_RETRIES", DEFAULT_MAX_RETRIES)),
+            verify_cmd=os.environ.get("AP2_VERIFY_CMD", "").strip(),
+            verify_timeout_s=int(
+                os.environ.get("AP2_VERIFY_TIMEOUT_S", DEFAULT_VERIFY_TIMEOUT_S)
+            ),
         )
 
     def ensure_dirs(self) -> None:

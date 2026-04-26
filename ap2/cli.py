@@ -131,12 +131,20 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     briefing = None
     if args.briefing_file:
         briefing = Path(args.briefing_file).read_text()
+    tags = list(args.tags or [])
+    # --no-verify becomes a `#no-verify` tag on the task line. The daemon
+    # checks for this tag in `_run_verify` to skip the project-wide gate
+    # for tasks the operator already knows can't be meaningfully verified
+    # by AP2_VERIFY_CMD (docs, infra, etc.). Tags survive the round-trip
+    # through TASK_LINE_RE so the marker persists across daemon restarts.
+    if getattr(args, "no_verify", False) and "#no-verify" not in tags:
+        tags.append("#no-verify")
     res = do_board_edit(
         cfg,
         {
             "action": action,
             "title": title,
-            "tags": args.tags or [],
+            "tags": tags,
             "description": args.description or "",
             "briefing": briefing,
         },
@@ -269,6 +277,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-t", "--tags", nargs="*")
     s.add_argument("-d", "--description", default="")
     s.add_argument("--briefing-file", help="path to a briefing markdown file")
+    s.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="skip the AP2_VERIFY_CMD project-wide test gate for this task "
+             "(adds `#no-verify` to its tags)",
+    )
     s.set_defaults(func=cmd_add)
 
     s = sub.add_parser("init", help="scaffold gitignores + .cc-autopilot/tasks/ (idempotent)")
