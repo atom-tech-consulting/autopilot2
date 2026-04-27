@@ -454,9 +454,16 @@ def build_mcp_server(cfg: Config):
     async def pipeline_task_start(args):
         return do_pipeline_task_start(cfg, args)
 
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    try:
+        version = _pkg_version("claude-automation")
+    except PackageNotFoundError:
+        version = "unknown"
+
     return create_sdk_mcp_server(
         name="autopilot",
-        version="0.1.0",
+        version=version,
         tools=[
             board_edit,
             cron_edit,

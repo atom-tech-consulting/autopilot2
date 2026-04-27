@@ -313,8 +313,26 @@ def _add_mm_url_token_args(p: argparse.ArgumentParser) -> None:
                    help="read MATTERMOST_TOKEN from this env var instead")
 
 
+def _version_string() -> str:
+    """Read the installed `claude-automation` version. Single source of truth
+    is `pyproject.toml`; we read it via importlib so the CLI tracks the
+    installed build and we don't have to keep two version strings in sync.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("claude-automation")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="autopilot", description="Autopilot v2 CLI.")
+    p.add_argument(
+        "--version",
+        action="version",
+        version=f"ap2 {_version_string()}",
+    )
     p.add_argument("--project", default=None, help="project root (default: cwd)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
