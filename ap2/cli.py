@@ -366,6 +366,8 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("-y", "--yes", action="store_true", help="skip confirmation prompt")
     sc.add_argument("--skip-token", action="store_true",
                     help="don't prompt for CLAUDE_CODE_OAUTH_TOKEN post-creation")
+    sc.add_argument("--skip-statusline", action="store_true",
+                    help="don't install the project's statusline into ~user/.claude/")
     _add_mm_url_token_args(sc)
     sc.set_defaults(func=sandbox.cmd_user_setup)
 
@@ -378,6 +380,14 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--token-env", metavar="VAR",
                     help="read token from this env var instead of prompting")
     sc.set_defaults(func=sandbox.cmd_install_token)
+
+    sc = sub_sbx.add_parser(
+        "install-statusline",
+        help="copy hooks/statusline-command.sh into ~<user>/.claude/ + "
+             "wire it into ~<user>/.claude/settings.json",
+    )
+    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
+    sc.set_defaults(func=sandbox.cmd_install_statusline)
 
     sc = sub_sbx.add_parser(
         "install-mm",

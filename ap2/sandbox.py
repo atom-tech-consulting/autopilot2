@@ -304,6 +304,7 @@ def user_setup(
     *,
     assume_yes: bool = False,
     skip_token: bool = False,
+    skip_statusline: bool = False,
     mm_url: str | None = None,
     mm_token: str | None = None,
 ) -> int:
@@ -333,6 +334,17 @@ def user_setup(
     elif not skip_token:
         print(f"\nSkipped interactive token prompt (--yes). Install later with:")
         print(f"  ap2 sandbox install-token {user}")
+
+    # Statusline (TB-78) — copy the project's statusline script into the
+    # sandbox user's ~/.claude/ and wire it into their settings.json. Quiet
+    # by default; --skip-statusline opts out (e.g. for users that don't run
+    # `claude` interactively).
+    if not skip_statusline:
+        print()
+        install_statusline(user)
+    else:
+        print(f"\nSkipped statusline install (--skip-statusline). Run later with:")
+        print(f"  ap2 sandbox install-statusline {user}")
 
     # Mattermost credentials — only install if both supplied; otherwise print
     # the follow-up command. No interactive prompt: the `MATTERMOST_URL`/
@@ -468,6 +480,105 @@ def install_oauth_token(user: str, token: str) -> int:
     print(f"wrote CLAUDE_CODE_OAUTH_TOKEN to {zshenv} (mode 0600)")
     print("restart the daemon so the new env takes effect:")
     print(f"  sudo -u {user} -i ap2 --project <repo> stop && ap2 --project <repo> start")
+    return 0
+
+
+def _statusline_source() -> Path:
+    """Path to the canonical statusline script in this repo (TB-78).
+
+    `__file__` is `ap2/sandbox.py`; parent.parent is the repo root, where
+    `hooks/statusline-command.sh` lives.
+    """
+    return Path(__file__).resolve().parent.parent / "hooks" / "statusline-command.sh"
+
+
+def install_statusline(user: str) -> int:
+    """Install the project's statusline into ~<user>/.claude/ (TB-78).
+
+    Two writes, both as the target user:
+      1. Copy `hooks/statusline-command.sh` to `~<user>/.claude/statusline-command.sh`
+         (mode 0755).
+      2. Merge `statusLine: {type: command, command: "bash <abspath>"}` into
+         `~<user>/.claude/settings.json`, preserving every other key.
+
+    Idempotent: a re-run on a correctly-configured user is a no-op write
+    (still chmods/owns to be safe). Returns 0 on success.
+    """
+    import json
+
+    if not _user_exists(user):
+        print(f"user {user!r} does not exist", file=sys.stderr)
+        return 1
+    home = _user_home(user)
+    if home is None:
+        print(f"cannot resolve home for {user!r}", file=sys.stderr)
+        return 1
+
+    src = _statusline_source()
+    if not src.exists():
+        print(f"statusline source missing: {src}", file=sys.stderr)
+        return 1
+    src_content = src.read_text()
+
+    claude_dir = home / ".claude"
+    target_script = claude_dir / "statusline-command.sh"
+    target_settings = claude_dir / "settings.json"
+
+    # Ensure ~<user>/.claude exists, owned by user.
+    subprocess.run(
+        ["sudo", "-u", user, "mkdir", "-p", str(claude_dir)], check=False,
+    )
+
+    # Step 1: write the script via sudo tee, chmod 0755.
+    w = subprocess.run(
+        ["sudo", "-u", user, "tee", str(target_script)],
+        input=src_content, text=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    if w.returncode != 0:
+        print(f"failed to write {target_script}: {w.stderr}", file=sys.stderr)
+        return 1
+    c = subprocess.run(
+        ["sudo", "-u", user, "chmod", "0755", str(target_script)],
+    )
+    if c.returncode != 0:
+        print(f"chmod 0755 {target_script} failed", file=sys.stderr)
+        return 1
+
+    # Step 2: merge `statusLine` into settings.json without touching other keys.
+    r = subprocess.run(
+        ["sudo", "-u", user, "sh", "-c",
+         f"test -f {target_settings} && cat {target_settings} || echo '{{}}'"],
+        capture_output=True, text=True,
+    )
+    try:
+        settings = json.loads(r.stdout) if r.stdout.strip() else {}
+    except json.JSONDecodeError as e:
+        print(f"failed to parse {target_settings}: {e}", file=sys.stderr)
+        return 1
+    if not isinstance(settings, dict):
+        print(f"{target_settings} is not a JSON object", file=sys.stderr)
+        return 1
+
+    desired = {
+        "type": "command",
+        "command": f"bash {target_script}",
+    }
+    if settings.get("statusLine") != desired:
+        settings["statusLine"] = desired
+        rendered = json.dumps(settings, indent=2) + "\n"
+        w2 = subprocess.run(
+            ["sudo", "-u", user, "tee", str(target_settings)],
+            input=rendered, text=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        if w2.returncode != 0:
+            print(f"failed to write {target_settings}: {w2.stderr}",
+                  file=sys.stderr)
+            return 1
+        print(f"installed statusline + updated {target_settings}")
+    else:
+        print(f"statusline already current in {target_settings} (no-op)")
     return 0
 
 
@@ -676,9 +787,14 @@ def cmd_user_setup(cfg, args) -> int:        # noqa: ARG001
         args.user,
         assume_yes=args.yes,
         skip_token=getattr(args, "skip_token", False),
+        skip_statusline=getattr(args, "skip_statusline", False),
         mm_url=mm_url,
         mm_token=mm_token,
     )
+
+
+def cmd_install_statusline(cfg, args) -> int:  # noqa: ARG001
+    return install_statusline(args.user)
 
 
 def cmd_project_setup(cfg, args) -> int:     # noqa: ARG001
