@@ -164,6 +164,72 @@ def _drain(proc):
         proc.wait(timeout=5)
 
 
+# ---------------------------------------------------------------------------
+# TB-90: ideation_state_write — narrow MCP tool for overwriting the
+# .cc-autopilot/ideation_state.md assessment file from the cron agent.
+
+def test_ideation_state_write_happy_path(cfg):
+    body = (
+        "# Ideation State\n\n_Last updated: 2026-04-27T20:00:00Z by ideation cron_\n\n"
+        "## Mission alignment\nServing the Mission per TB-87 / TB-89.\n"
+    )
+    res = tools.do_ideation_state_write(cfg, {"content": body})
+    out = _unwrap(res)
+    assert out["bytes"] == len(body)
+    target = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    assert target.exists()
+    assert target.read_text() == body
+
+
+def test_ideation_state_write_emits_event(cfg):
+    body = "# Ideation State\n\n## Mission alignment\nGrounded.\n"
+    tools.do_ideation_state_write(cfg, {"content": body})
+    from ap2.events import tail
+
+    evts = tail(cfg.events_file, 5)
+    updates = [e for e in evts if e["type"] == "ideation_state_updated"]
+    assert len(updates) == 1
+    assert updates[0]["bytes"] == len(body)
+
+
+def test_ideation_state_write_overwrites_prior_content(cfg):
+    target = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# Old assessment\n\nstale content\n")
+    body = "# Fresh\n\n## Mission alignment\nNew text.\n"
+    tools.do_ideation_state_write(cfg, {"content": body})
+    assert target.read_text() == body
+    assert "stale content" not in target.read_text()
+
+
+def test_ideation_state_write_rejects_empty_content(cfg):
+    res = tools.do_ideation_state_write(cfg, {"content": ""})
+    assert res.get("isError")
+    res = tools.do_ideation_state_write(cfg, {"content": "   \n  "})
+    assert res.get("isError")
+    res = tools.do_ideation_state_write(cfg, {})
+    assert res.get("isError")
+
+
+def test_ideation_state_write_rejects_oversized_content(cfg):
+    body = "x" * 60_000
+    res = tools.do_ideation_state_write(cfg, {"content": body})
+    assert res.get("isError")
+    target = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    # Did NOT write the file when oversized.
+    assert not target.exists() or "x" * 60_000 not in target.read_text()
+
+
+def test_ideation_state_write_atomic_no_partial_on_failure(cfg, monkeypatch):
+    """The tmpfile + rename pattern means a reader never sees a partial
+    write. Hard to test directly without race injection, but we can verify
+    no `.tmp` lingers after a successful write."""
+    body = "# Ideation State\n\n## Mission alignment\nok.\n"
+    tools.do_ideation_state_write(cfg, {"content": body})
+    target_dir = cfg.project_root / ".cc-autopilot"
+    assert not (target_dir / "ideation_state.md.tmp").exists()
+
+
 def test_pipeline_task_start_happy_path(cfg, tmp_path):
     res = tools.do_pipeline_task_start(
         cfg,

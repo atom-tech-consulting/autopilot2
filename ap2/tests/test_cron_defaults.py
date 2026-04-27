@@ -178,6 +178,28 @@ def test_ideation_prompt_pins_step05_insights_read():
     assert "ONE per cycle" in prompt or "ONE `#evaluation`" in prompt
 
 
+def test_ideation_prompt_pins_ideation_state_write_tool():
+    """TB-90: the prompt must call out the `ideation_state_write` MCP tool
+    by name in Step 0. The cron agent doesn't have Write/Edit; the tool is
+    the only way to land the assessment file. Without this pin, a future
+    rewrite could silently regress to "OVERWRITE the file" without naming
+    the tool, leaving the agent unable to do it (the actual TB-87 bug)."""
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    # Tool name verbatim — agents call it by name.
+    assert "ideation_state_write" in prompt
+    # Argument name surfaced so the agent passes the right shape.
+    assert "`content`" in prompt or "content arg" in prompt or "content`" in prompt
+    # Negative — block the Bash heredoc workaround (which would bypass the
+    # atomic write + event emission). Forces tool use. Rendered YAML wraps
+    # the phrase across lines, so search for the load-bearing keywords
+    # rather than the exact string.
+    assert "tee" in prompt
+    assert "Write/Edit access" in prompt
+    # Reads still go through Read tool — no need for a separate read tool.
+    assert "Read" in prompt
+
+
 def test_ideation_prompt_pins_step0_assessment(tmp_path=None):
     """TB-87: ideation must write a structured progress assessment to
     `.cc-autopilot/ideation_state.md` BEFORE proposing tasks. Pins the

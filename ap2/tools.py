@@ -270,6 +270,49 @@ def do_cron_edit(cfg: Config, args: dict) -> dict:
         return _err(f"{type(e).__name__}: {e}")
 
 
+def do_ideation_state_write(cfg: Config, args: dict) -> dict:
+    """Overwrite `.cc-autopilot/ideation_state.md` with a fresh assessment (TB-90).
+
+    Called by the ideation cron in Step 0 to land the per-cycle progress
+    assessment introduced by TB-87. The content is written verbatim — schema
+    correctness is the prompt's responsibility, not the tool's. Atomic write
+    (tmpfile + rename) so a concurrent reader can't observe a partial file.
+
+    Reads stay through the existing `Read` tool — this tool only wraps the
+    write path. Same pattern as `board_edit` / `cron_edit`: broad reads,
+    narrow writes.
+    """
+    content = args.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return _err("content is required")
+    # Soft cap to surface runaway prompts. The TB-87 schema aims for ~200
+    # lines (~10-20KB); 50KB leaves headroom for legitimate verbose
+    # assessments without letting the file grow unbounded.
+    if len(content) > 50_000:
+        return _err(
+            f"content too long ({len(content)} bytes); aim for <50KB. "
+            "Trim to highest-signal items per the prompt's length cap."
+        )
+    target = (
+        cfg.project_root
+        / ".cc-autopilot"
+        / "ideation_state.md"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".md.tmp")
+    tmp.write_text(content)
+    tmp.replace(target)
+    events.append(
+        cfg.events_file,
+        "ideation_state_updated",
+        bytes=len(content),
+    )
+    return _ok(
+        f"wrote {len(content)} bytes to ideation_state.md",
+        bytes=len(content),
+    )
+
+
 def do_log_event(cfg: Config, args: dict) -> dict:
     typ = args.get("type") or "info"
     summary = args.get("summary") or ""
@@ -439,6 +482,17 @@ def build_mcp_server(cfg: Config):
         return do_daemon_control(cfg, args)
 
     @tool(
+        "ideation_state_write",
+        "Overwrite .cc-autopilot/ideation_state.md with a fresh per-cycle "
+        "progress assessment (TB-87 Step 0). Body is written verbatim — the "
+        "ideation prompt is responsible for schema correctness. Returns the "
+        "byte count written. Path is fixed; no path arg.",
+        {"content": str},
+    )
+    async def ideation_state_write(args):
+        return do_ideation_state_write(cfg, args)
+
+    @tool(
         "pipeline_task_start",
         "Atomically launch a long-running pipeline as a detached OS process "
         "and create a single Backlog validation task gated on the process's "
@@ -470,6 +524,7 @@ def build_mcp_server(cfg: Config):
             mattermost_reply,
             log_event,
             daemon_control,
+            ideation_state_write,
             pipeline_task_start,
         ],
     )
@@ -485,6 +540,7 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__mattermost_reply",
     "mcp__autopilot__log_event",
     "mcp__autopilot__daemon_control",
+    "mcp__autopilot__ideation_state_write",
 ]
 
 # `pipeline_task_start` is the first MCP tool task agents can call directly
