@@ -122,6 +122,39 @@ def test_ideation_prompt_includes_pipeline_task_start_for_long_work():
     assert "progress bar" in lower or "fans out" in lower
 
 
+def test_ideation_prompt_pins_step15_failure_review():
+    """TB-88: ideation must scan up to 5 most-recent failed tasks (Frozen +
+    recent verification_failed/retry_exhausted events) and classify each
+    into edit-briefing / split / follow-up / abandon. Pins the heuristics
+    so future prompt rewrites can't drop them.
+    """
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    lower = prompt.lower()
+    # Step 1.5 framing.
+    assert "step 1.5" in lower or "1.5" in prompt
+    assert "failure review" in lower or "failed task" in lower
+    # The cap on failed-task scan size — keeps prompt budget sane.
+    assert "5 most-recent" in prompt or "up to 5" in prompt
+    # All four classification labels.
+    for label in ("edit-briefing", "split", "follow-up", "abandon"):
+        assert label in prompt, f"missing classification {label!r}"
+    # Heuristics anchors — concrete patterns observed in stoch.
+    assert "exit=127" in prompt  # shell-shape failure pattern
+    assert ">7 criteria" in prompt or "7 criteria" in prompt  # split heuristic
+    assert "git log --grep" in prompt  # prior-work check before edit-briefing
+    # Inputs to scan.
+    assert "Frozen" in prompt
+    assert "verification_failed" in prompt
+    assert "retry_exhausted" in prompt
+    # Action verbs / nouns that pin behavior.
+    assert "#fix-briefing" in prompt  # tag for edit-briefing meta tasks
+    # Abandon writes to TB-87's open-questions section.
+    assert "Recommend abandoning" in prompt
+    # Critical operator-safety rule: no auto-unfreeze.
+    assert "Do NOT auto-unfreeze" in prompt or "do not auto-unfreeze" in lower
+
+
 def test_ideation_prompt_pins_step05_insights_read():
     """TB-89: ideation must read `.cc-autopilot/insights/_index.md` and
     propose reactive `#evaluation`-tagged tasks when an assessment gap

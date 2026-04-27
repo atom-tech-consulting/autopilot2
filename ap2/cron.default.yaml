@@ -125,6 +125,80 @@ jobs:
       Collect follow-up candidates from this scan first. Only fall back to
       greenfield ideas if you're short of 3 candidates afterwards.
 
+      ## Step 1.5: failure review (TB-88 — do this between Complete-scan and ranking)
+      Scan up to 5 most-recent failed tasks. Sources:
+        - All TB-Ns currently in TASKS.md `## Frozen` (retry-exhausted).
+        - Tasks with recent `verification_failed` or `retry_exhausted` events
+          in the prompt's events block (those are still in retry budget;
+          they may be back in Backlog now).
+
+      For each failed task, READ:
+        - Its briefing file (path in the `[→ brief](...)` link).
+        - The matching `verification_failed` event(s) — note which criterion
+          failed and the `notes` field (often shows `exit=127`, `No such file
+          or directory`, etc.).
+        - Any prior commits via `git log --grep="<TASK_ID>" --oneline` —
+          the agent may have committed partial work even if verification
+          failed, so the implementation may already be on disk.
+
+      CLASSIFY each into ONE of:
+
+      1. **edit-briefing** — implementation work was correct but a shell
+         pitfall or ambiguous criterion in the briefing's `## Verification`
+         caused the failure. Heuristic: every `verification_failed` event
+         shows the same bullet failing with `exit=127` / `command not found`
+         / `No such file or directory` / similar shell shape, AND
+         `git log --grep` shows commits with file changes that plausibly
+         cover the briefing scope. Action: propose ONE meta fix-task
+         tagged `#fix-briefing` whose briefing instructs the agent to
+         rewrite the broken bullets in the original briefing file. Cite
+         the failed criterion verbatim and explain the fix. After it lands,
+         note in `ideation_state.md` "Open questions for operator" that
+         the original task is ready for `ap2 unfreeze TB-N`.
+
+      2. **split** — briefing scope was too large or mixed distinct
+         concerns. Heuristic: briefing's `## Verification` has >7 criteria,
+         OR the briefing's `## Scope` says something like "implement X AND
+         launch Y AND update Z" (the TB-78-stoch anti-pattern: "implement
+         infrastructure and launch sweep pipeline"). Action: propose 2-3
+         narrower Backlog tasks each with a focused `## Verification`
+         covering a slice of the original. Don't modify the original
+         task's line — note in `ideation_state.md` "Considered & deferred"
+         that the original is superseded by the new TB-Ns and can be
+         operator-deleted.
+
+      3. **follow-up** — failure mode was environmental, conceptual, or
+         exposes an unanticipated requirement. Heuristic: the failure is
+         neither a shell-shape issue NOR a scope-overflow issue.
+         Example: TB-91-stoch's verification called `python -m stoch
+         daily-pipeline` but `daily-pipeline` isn't a real subcommand —
+         the right next step isn't "fix the bullet" or "split the task",
+         it's "investigate which CLI subcommand actually wires the
+         intended flow before re-attempting." Action: propose a NEW
+         Backlog task that takes the right next step. The original
+         stays Frozen until the new task surfaces something actionable.
+
+      4. **abandon** — the task is no longer worth pursuing (goal
+         exhausted, approach fundamentally flawed, area now covered by
+         goal.md Non-goals). Heuristic: significant overlap with
+         already-Complete TB-Ns, OR `goal.md` Non-goals appears to
+         cover the area, OR the approach was fundamentally infeasible.
+         Action: do NOT delete (operator owns deletes). Write a one-line
+         entry in your `ideation_state.md` "Open questions for operator"
+         section: `Recommend abandoning TB-N — reason: <X>`. Do NOT
+         auto-add a remediation task.
+
+      When uncertain between edit-briefing and follow-up, default to
+      edit-briefing (cheaper to attempt).
+
+      Failure-remediation proposals compete with greenfield against the
+      same Backlog<3 budget — they're not special-cased. Rank them by
+      the same goal-alignment / impact / freshness criteria as any
+      other proposal.
+
+      Do NOT auto-unfreeze the original task. Operator decides via
+      `ap2 unfreeze TB-N` after reviewing the fix or replacement.
+
       ## Ranking
       Rank candidates by:
         - alignment with goal.md (Mission, Current focus; respect Non-goals)
