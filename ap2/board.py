@@ -91,11 +91,23 @@ class Board:
     path: Path
     sections: dict[str, list[str]] = field(default_factory=dict)
     header: str = "# Tasks\n"
-    # Lines that look like task lines (start with `- [`) but don't match
-    # TASK_LINE_RE — typically a manual edit added junk between **TB-N** and
-    # **Title**, e.g. `**TB-59** (7735de2) **Title**`. The daemon surfaces
-    # these so a malformed line doesn't silently strand a Backlog task whose
-    # blocker now appears uncompleted to the parser.
+    # Lines in a section that don't parse as a canonical task line. Two
+    # distinct shapes hit this:
+    #   1. Lines that LOOK like task lines (`- [`-prefixed) but don't match
+    #      TASK_LINE_RE — typically a manual edit added junk between
+    #      **TB-N** and **Title**, e.g. `**TB-59** (7735de2) **Title**`.
+    #      Risk: the malformed task disappears from `iter_tasks` so a
+    #      depending task's blocker check silently treats it as
+    #      uncompleted.
+    #   2. Non-task lines that wedged into a section — e.g. unfinalized
+    #      `/tb prep` text whose author never wrapped it in a `- [ ]`
+    #      bullet. These don't appear in `iter_tasks` (correct) but
+    #      previously inflated `len(sections[s])` and got reported as
+    #      "Backlog tasks" by `ap2 status` (TB-92 — diagnosed in stoch
+    #      where 3 lines of orphan README prose showed up as `3B`).
+    # The daemon's TB-68 hook emits dedup'd `board_malformed_line`
+    # events for both shapes, surfacing them on the operator-visible
+    # event log instead of silently passing.
     malformed_lines: list[tuple[str, str]] = field(default_factory=list)
 
     @classmethod
@@ -124,7 +136,10 @@ class Board:
                 if line.strip() == "" or line.strip().startswith("<!--"):
                     continue
                 self.sections[section].append(line)
-                if line.lstrip().startswith("- [") and not TASK_LINE_RE.match(line):
+                # Flag ANY non-task-shaped line — not just `- [`-prefixed
+                # ones — so orphan prose (TB-92) gets surfaced rather than
+                # silently inflating section counts.
+                if not TASK_LINE_RE.match(line):
                     self.malformed_lines.append((section, line))
 
     def render(self) -> str:

@@ -303,6 +303,51 @@ def test_malformed_complete_line_is_surfaced(tmp_path):
     assert b.next_dispatchable("Backlog") is None
 
 
+def test_orphan_non_task_lines_are_flagged_malformed(tmp_path):
+    """TB-92: non-task lines that wedge into a section (e.g. unfinalized
+    `/tb prep` prose that never got wrapped in a `- [ ]` bullet) must show
+    up in `malformed_lines`. Otherwise they silently inflate `ap2 status`
+    section counts — diagnosed live in stoch where 3 lines of orphan
+    README scope text were reported as `3B` Backlog tasks despite
+    `iter_tasks('Backlog')` returning 0.
+    """
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        ## Backlog
+
+          README.md: one-line purpose (swing equity backtester, 7-14 day holds), install
+          configs/baseline_momentum.yaml), data cache layout, current baseline snapshot
+          (stoch/{data,engine,strategy,metrics,reports,io,sweep}), link to project.md.
+
+        ## Complete
+
+        - [x] **TB-1** **first** — done
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    # All 3 orphan prose lines flagged.
+    backlog_malformed = [(s, line) for (s, line) in b.malformed_lines if s == "Backlog"]
+    assert len(backlog_malformed) == 3
+    assert all("README.md" in line or "configs/" in line or "stoch/" in line
+               for _, line in backlog_malformed), backlog_malformed
+    # Dispatch path remains correct: orphan lines are not iter_tasks-visible.
+    assert list(b.iter_tasks("Backlog")) == []
+    assert b.next_dispatchable("Backlog") is None
+    # The legitimate task in Complete still parses and isn't flagged.
+    assert any(t.id == "TB-1" for t in b.iter_tasks("Complete"))
+    complete_malformed = [(s, line) for (s, line) in b.malformed_lines if s == "Complete"]
+    assert complete_malformed == []
+
+
 def test_clean_board_has_no_malformed_lines(tmp_path):
     path = _write_board(tmp_path, SAMPLE)
     b = Board.load(path)
