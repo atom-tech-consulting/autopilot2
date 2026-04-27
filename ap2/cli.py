@@ -40,6 +40,33 @@ def _is_running(pid: int | None) -> bool:
         return False
 
 
+def _require_oauth_token() -> int:
+    """Refuse to start the daemon when CLAUDE_CODE_OAUTH_TOKEN isn't in env (TB-79).
+
+    Without the token the SDK control protocol times out on handshake and the
+    daemon idles through `Control request timeout: initialize` events — the
+    failure mode is silent because `claude` exits before printing anything to
+    stderr. Returns 1 + prints remediation; the source-of-truth for env
+    delivery is operator policy (login shell, sudoers env_keep, project env
+    file), so ap2 stays out of guessing.
+    """
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
+        return 0
+    print(
+        "ap2: refusing to start — CLAUDE_CODE_OAUTH_TOKEN is not in the env.\n"
+        "Without it the SDK control protocol will silently time out at\n"
+        "initialize. Pick one:\n"
+        "  - launch via login shell:  sudo -u <user> -i ap2 start\n"
+        "  - install token first:     ap2 sandbox install-token <user>\n"
+        "                             (then re-launch via -i, or set\n"
+        "                             CLAUDE_CODE_OAUTH_TOKEN explicitly)\n"
+        "  - one-off env pass:        sudo --preserve-env=CLAUDE_CODE_OAUTH_TOKEN \\\n"
+        "                                 -u <user> ap2 start",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     pid = _read_pid(cfg)
     if _is_running(pid):
@@ -48,6 +75,9 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     # stale pid file
     if cfg.pid_file.exists():
         cfg.pid_file.unlink()
+    rc = _require_oauth_token()
+    if rc != 0:
+        return rc
     if args.foreground:
         from .daemon import run
 

@@ -1,9 +1,7 @@
-"""Tests for the ap2 CLI subcommands (TB-77).
+"""Tests for the ap2 CLI subcommands (TB-77, TB-79).
 
 Lightweight unit tests that call cmd_* directly with an argparse.Namespace
-rather than spawning a subprocess. Covers the new `backlog` (rename of
-`skip`) and `unfreeze` commands and their interactions with the board /
-retry-state / events log.
+rather than spawning a subprocess.
 """
 from __future__ import annotations
 
@@ -14,7 +12,7 @@ import pytest
 
 from ap2 import events, retry
 from ap2.board import Board
-from ap2.cli import cmd_backlog, cmd_unfreeze
+from ap2.cli import _require_oauth_token, cmd_backlog, cmd_start, cmd_unfreeze
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -130,3 +128,47 @@ def test_unfreeze_unknown_task_returns_error(tmp_path: Path, capsys):
     rc = cmd_unfreeze(cfg, Namespace(task_id="TB-999"))
     assert rc == 1
     assert "not on board" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# cmd_start oauth-token precondition (TB-79)
+
+
+def test_require_oauth_token_passes_when_set(monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
+    assert _require_oauth_token() == 0
+
+
+def test_require_oauth_token_refuses_when_unset(monkeypatch, capsys):
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    rc = _require_oauth_token()
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in err
+    # Operator-side remediation hints surfaced in the message.
+    assert "sudo -u" in err
+    assert "install-token" in err
+
+
+def test_require_oauth_token_refuses_when_blank(monkeypatch):
+    """Whitespace-only token = absent (the SDK would still fail). Refuse."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "   ")
+    assert _require_oauth_token() == 1
+
+
+def test_cmd_start_refuses_without_token(tmp_path: Path, monkeypatch, capsys):
+    """End-to-end: cmd_start exits 1 + does NOT spawn a subprocess when
+    the token is missing. Pinned via subprocess.Popen monkeypatch raising
+    if called — the precondition must short-circuit before fork."""
+    cfg = _project(tmp_path)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    # Sentinel: if Popen ever runs, fail loudly.
+    import subprocess as _sp
+    def boom(*a, **kw):
+        raise AssertionError("Popen called despite missing token — precondition is broken")
+    monkeypatch.setattr(_sp, "Popen", boom)
+
+    rc = cmd_start(cfg, Namespace(foreground=False))
+    assert rc == 1
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in capsys.readouterr().err
