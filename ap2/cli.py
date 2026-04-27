@@ -13,8 +13,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import doctor, events, sandbox
-from .board import Board
+from . import doctor, events, retry, sandbox
+from .board import Board, locked_board
 from .config import Config
 from .cron import load_jobs, load_state
 from .init import init_project
@@ -193,13 +193,45 @@ def cmd_logs(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_skip(cfg: Config, args: argparse.Namespace) -> int:
-    """Move a task back to Backlog (skip it for now)."""
+def cmd_backlog(cfg: Config, args: argparse.Namespace) -> int:
+    """Move a task to Backlog from any section.
+
+    Replaces the older `cmd_skip` (TB-77) — same code path, name now matches
+    the underlying `move_to_backlog` action instead of the historical
+    "skip in queue" use case.
+    """
     res = do_board_edit(cfg, {"action": "move_to_backlog", "task_id": args.task_id})
     if res.get("isError"):
         print(res["content"][0]["text"], file=sys.stderr)
         return 1
     print(f"moved {args.task_id} to Backlog")
+    return 0
+
+
+def cmd_unfreeze(cfg: Config, args: argparse.Namespace) -> int:
+    """Move a Frozen task back to Backlog and clear its retry counter.
+
+    Validation + move happen inside `locked_board()` so the section check is
+    atomic w.r.t. the daemon. Retry reset and event emission run after lock
+    release — they have their own fcntl-locked state files.
+    """
+    with locked_board(cfg.tasks_file) as board:
+        loc = board.find(args.task_id)
+        if loc is None:
+            print(f"{args.task_id} not on board", file=sys.stderr)
+            return 1
+        section, _ = loc
+        if section != "Frozen":
+            print(
+                f"{args.task_id} is in {section}, not Frozen — "
+                f"use `ap2 backlog {args.task_id}` for non-frozen moves",
+                file=sys.stderr,
+            )
+            return 1
+        board.move(args.task_id, "Backlog", check=None)
+    retry.reset_attempt(cfg.retry_state_file, args.task_id)
+    events.append(cfg.events_file, "task_unfrozen", task=args.task_id)
+    print(f"unfroze {args.task_id} → Backlog (retry counter reset)")
     return 0
 
 
@@ -297,9 +329,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_logs)
 
-    s = sub.add_parser("skip", help="move a task to Backlog")
+    s = sub.add_parser("backlog", help="move a task to Backlog from any section")
     s.add_argument("task_id")
-    s.set_defaults(func=cmd_skip)
+    s.set_defaults(func=cmd_backlog)
+
+    s = sub.add_parser(
+        "unfreeze",
+        help="move a Frozen task to Backlog + clear its retry counter "
+             "(refuses if the task isn't currently in Frozen)",
+    )
+    s.add_argument("task_id")
+    s.set_defaults(func=cmd_unfreeze)
 
     s = sub.add_parser("pause", help="pause the daemon (sets a flag)")
     s.add_argument("--reason", default="")
