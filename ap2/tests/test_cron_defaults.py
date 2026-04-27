@@ -122,6 +122,32 @@ def test_ideation_prompt_includes_pipeline_task_start_for_long_work():
     assert "progress bar" in lower or "fans out" in lower
 
 
+def test_ideation_prompt_pins_two_tier_verification_split():
+    """TB-86: pipeline-launch ideation must steer output-artifact checks into
+    `validation_briefing` (the validation task's verification, runs AFTER the
+    pipeline dies) and keep the launch task's top-level `## Verification`
+    section limited to checks that pass at launch-completion time. Stoch's
+    TB-83/TB-92 retry-exhausted because their launch-task verifications had
+    `test -f reports/<name>/grid.csv` bullets that ran while the pipeline
+    was still computing — every bullet exited 1.
+    """
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    lower = prompt.lower()
+    # The two-tier framing must be named so future rewrites don't drop it.
+    assert "two-tier" in lower or "where output checks belong" in lower
+    # The destination for output checks must be called out by parameter name.
+    assert "validation_briefing" in prompt
+    # Negative instruction — the load-bearing "DO NOT" that prevents the
+    # TB-83/TB-92 failure mode.
+    assert "DO NOT put output" in prompt or "do not put output" in lower
+    # Concrete grounding: agents need to know what counts as an output check
+    # vs a launch-time check. The template-style examples must survive.
+    assert "test -f reports/" in prompt
+    # The "running detached" rationale connects the rule to its reason.
+    assert "running detached" in lower or "still running" in lower
+
+
 def test_ideation_prompt_warns_off_bare_python_and_path_pitfalls():
     """TB-76: live stoch tasks (TB-71, TB-73) verification_failed solely
     because their shell bullets used bare `python` (claude-agent's env has

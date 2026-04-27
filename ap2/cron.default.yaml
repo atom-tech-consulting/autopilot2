@@ -84,6 +84,33 @@ jobs:
       section so the per-task verifier (TB-69) can score the pipeline's
       output once it auto-promotes.
 
+      ### Two-tier verification: where output checks belong (TB-86)
+      The launch task and the validation task each get their own
+      `## Verification` section, and they verify DIFFERENT things. Splitting
+      them wrong is what made stoch's TB-83 / TB-92 retry-exhaust into Frozen.
+
+      Launch task's top-level `## Verification` — checks that pass at
+      LAUNCH-COMPLETION time, BEFORE the detached pipeline has produced
+      anything. Examples:
+        - `uv run pytest tests/test_<feature>.py -q` — new unit tests pass.
+        - `uv run python scripts/<name>.py --help` — CLI parses cleanly.
+        - `test -f stoch/sweep/<feature>.py` — implementation file present.
+        - `uv run python -c "from stoch.sweep.<feature> import enumerate_grid; assert len(enumerate_grid())==18"` — grid enumeration imports + has expected size.
+
+      `validation_briefing`'s `## Verification` (the briefing you pass to
+      `pipeline_task_start`) — checks that run AFTER the pipeline dies and
+      the validation task auto-promotes. Examples:
+        - `test -f reports/<name>/grid.csv` — pipeline OUTPUT exists.
+        - `test -f reports/<name>/best.json` — output artifact exists.
+        - `uv run python -c "import json; d=json.load(open('reports/<name>/best.json')); assert 'sharpe' in d"` — output schema check.
+
+      DO NOT put output-artifact checks in the launch task's
+      `## Verification` — when the per-task verifier runs them, the pipeline
+      is still running detached and the files don't exist yet. Every such
+      bullet exits 1 / "No such file or directory", and the launch task
+      retry-exhausts into Frozen even though the pipeline is fine. Output
+      checks ALWAYS go in `validation_briefing`.
+
       Heuristic for "more than 10 min": grid sweeps with >5 parameter
       combinations on minute-bar data; full-history backtests on >10
       tickers; anything that fans out across many subprocesses; anything
