@@ -53,6 +53,21 @@ work actually satisfies the briefing — read the diff, run the tests, check
 the files exist and have the expected shape. The daemon's separate fallback
 trusts the commit subject naively; you, as the agent, must do better.
 
+## Pipeline launches (when your briefing has a `## Pipeline launch` section)
+Some briefings split work into a fast prep step + a long-running pipeline
+(parameter sweep, full-history backtest, multi-day data job). If your briefing
+has a `## Pipeline launch` section, you MUST call the `pipeline_task_start` MCP
+tool for the long step — do NOT run it inline via Bash even though Bash is
+available. The daemon dispatches one task at a time inside `await sdk.query(...)`,
+so a 30-min inline run holds the only task slot for 30 min and starves
+everything else.
+
+The tool spawns the command detached, creates the post-run validation task in
+Backlog with `(blocked on: pid:<N>@<TS>)`, and returns immediately. Call it
+exactly as the briefing's `## Pipeline launch` section spells out — name,
+command, validation_title, validation_briefing. Do NOT make follow-up
+`board_edit` calls afterward; the tool creates the validation task itself.
+
 ## What the daemon handles (do NOT touch)
 The daemon manages state files for you — do not edit them:
 - `TASKS.md` — the daemon moves this task Active → Complete (or Backlog on failure) using the fields from your RESULT block.
