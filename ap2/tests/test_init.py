@@ -197,6 +197,40 @@ def test_init_output_is_loadable_by_config(tmp_path: Path):
     assert (tmp_path / ".cc-autopilot" / "progress.md").exists()
 
 
+def test_creates_insights_dir_with_placeholder_index(tmp_path: Path):
+    """TB-89: bootstrap creates `.cc-autopilot/insights/` + placeholder index."""
+    report = init_project(tmp_path)
+    insights_dir = tmp_path / ".cc-autopilot" / "insights"
+    assert insights_dir.is_dir()
+    assert report.insights_dir_created is True
+    index = insights_dir / "_index.md"
+    assert index.exists()
+    text = index.read_text()
+    assert "Insights index" in text
+    assert "no insights yet" in text
+
+
+def test_does_not_overwrite_existing_insights_index(tmp_path: Path):
+    """A pre-existing `_index.md` written by ap2 in a prior cycle survives
+    re-running `init_project` unchanged. The lazy regen path will rebuild
+    it on the next ideation cron tick if files have changed."""
+    autopilot = tmp_path / ".cc-autopilot"
+    insights_dir = autopilot / "insights"
+    insights_dir.mkdir(parents=True)
+    index = insights_dir / "_index.md"
+    index.write_text("# Insights index\n\n- `kept.md` — already-here entry\n")
+
+    init_project(tmp_path)
+
+    assert index.read_text() == "# Insights index\n\n- `kept.md` — already-here entry\n"
+
+
+def test_insights_dir_idempotent(tmp_path: Path):
+    init_project(tmp_path)
+    report2 = init_project(tmp_path)
+    assert report2.insights_dir_created is False
+
+
 def test_creates_ideation_state_md_when_missing(tmp_path: Path):
     """TB-87: bootstrap places a placeholder `ideation_state.md` so first-cycle
     reads succeed before ideation has run.

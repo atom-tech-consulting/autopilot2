@@ -122,6 +122,29 @@ def test_ideation_prompt_includes_pipeline_task_start_for_long_work():
     assert "progress bar" in lower or "fans out" in lower
 
 
+def test_ideation_prompt_pins_step05_insights_read():
+    """TB-89: ideation must read `.cc-autopilot/insights/_index.md` and
+    propose reactive `#evaluation`-tagged tasks when an assessment gap
+    needs grounding. Pins the load-bearing phrases."""
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    # Index path mentioned by exact path so the agent reads the right file.
+    assert ".cc-autopilot/insights/_index.md" in prompt
+    # Step 0.5 framing.
+    lower = prompt.lower()
+    assert "step 0.5" in lower or "0.5" in prompt
+    # Front-matter contract + the four required keys.
+    assert "front matter" in lower or "yaml" in lower
+    for key in ("tldr", "updated_by", "cites"):
+        assert key in prompt
+    # Reactive evaluation rule — load-bearing prevents auto-cascade.
+    assert "#evaluation" in prompt
+    assert "reactively" in lower or "reactive" in lower
+    assert "auto-cascade" in lower or "don't auto" in lower or "do NOT" in prompt
+    # Per-cycle cap so the prompt budget stays sane.
+    assert "ONE per cycle" in prompt or "ONE `#evaluation`" in prompt
+
+
 def test_ideation_prompt_pins_step0_assessment(tmp_path=None):
     """TB-87: ideation must write a structured progress assessment to
     `.cc-autopilot/ideation_state.md` BEFORE proposing tasks. Pins the
