@@ -149,3 +149,108 @@ def test_daemon_pause_resume(cfg):
     assert cfg.pause_flag.exists()
     tools.do_daemon_control(cfg, {"action": "resume"})
     assert not cfg.pause_flag.exists()
+
+
+# ---------------------------------------------------------------------------
+# TB-81: pipeline_task_start atomically launches a detached process and
+# creates a Backlog validation task gated on the process's liveness.
+
+def _drain(proc):
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def test_pipeline_task_start_happy_path(cfg, tmp_path):
+    res = tools.do_pipeline_task_start(
+        cfg,
+        {
+            "name": "demo",
+            "command": "sleep 30",
+            "validation_title": "Validate demo output",
+            "validation_briefing": "# Validate\n\n## Verification\n- `true`\n",
+        },
+    )
+    body = _unwrap(res)
+    pid = body["pid"]
+    started_at = body["started_at"]
+    val_id = body["validation_id"]
+    log = body["log"]
+
+    try:
+        # Validation task lands in Backlog with the right blocked_on token.
+        b = Board.load(cfg.tasks_file)
+        loc = b.find(val_id)
+        assert loc is not None and loc[0] == "Backlog"
+        t = b.get(val_id)
+        assert t.blocked_on == [f"pid:{pid}@{started_at}"]
+        # Briefing file written under .cc-autopilot/tasks/.
+        assert t.briefing
+        brief_path = cfg.project_root / t.briefing
+        assert brief_path.exists()
+        assert "Validate" in brief_path.read_text()
+        # Log file ended up in the conventional location.
+        assert log.endswith(f"demo-{pid}.log")
+        # pipeline_start event was appended.
+        from ap2.events import tail
+
+        evts = tail(cfg.events_file, 20)
+        kinds = [e["type"] for e in evts]
+        assert "pipeline_start" in kinds
+        starting = [e for e in evts if e["type"] == "pipeline_start"][-1]
+        assert starting["pid"] == pid
+        assert starting["validation"] == val_id
+        assert starting["name"] == "demo"
+    finally:
+        # Clean up the spawned process so the test doesn't leak.
+        import os, signal
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+
+def test_pipeline_task_start_missing_args_errors(cfg):
+    res = tools.do_pipeline_task_start(cfg, {"name": "x"})
+    assert res.get("isError")
+    res = tools.do_pipeline_task_start(
+        cfg, {"name": "x", "command": "true", "validation_title": ""}
+    )
+    assert res.get("isError")
+
+
+def test_pipeline_task_start_assigns_id_via_locked_board(cfg):
+    """The validation task gets a fresh TB-N via _allocate_id, same as
+    add_backlog. Two back-to-back launches should produce different ids.
+    """
+    r1 = tools.do_pipeline_task_start(
+        cfg,
+        {
+            "name": "p1",
+            "command": "sleep 30",
+            "validation_title": "validate p1",
+            "validation_briefing": "x",
+        },
+    )
+    r2 = tools.do_pipeline_task_start(
+        cfg,
+        {
+            "name": "p2",
+            "command": "sleep 30",
+            "validation_title": "validate p2",
+            "validation_briefing": "x",
+        },
+    )
+    body1 = _unwrap(r1)
+    body2 = _unwrap(r2)
+    assert body1["validation_id"] != body2["validation_id"]
+
+    import os, signal
+    for pid in (body1["pid"], body2["pid"]):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass

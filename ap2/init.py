@@ -117,6 +117,9 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
     ("Per-run prompt + stream dumps for failure diagnosis (kept only on failure)", [
         "debug/",
     ]),
+    ("Pipeline log dirs (TB-81) — local debug-only, never committed", [
+        "pipelines/",
+    ]),
     ("Local/sandbox-specific env (secrets, channel IDs) — keep out of git", [
         "env",
     ]),

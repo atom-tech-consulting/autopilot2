@@ -55,51 +55,34 @@ jobs:
       A briefing with no `## Verification` section will be skipped by the
       verifier (legacy compat). New work should not opt into that path.
 
-      ## Long-running work — propose as a pipeline pattern (TB-80)
+      ## Long-running work — propose as a pipeline launch (TB-81)
       If the proposed work plausibly takes more than ~10 minutes as a single
       agent dispatch (parameter sweeps, multi-day backtests, large data
       preprocessing), DO NOT propose it as one mega-task. The daemon dispatches
       tasks one at a time inside `await sdk.query(...)` — a 30-min task holds
-      the only task slot for 30 min. Propose as THREE coordinated tasks +
-      a self-removing cron, leveraging TB-62's `blocked_on` enforcement:
+      the only task slot for 30 min.
 
-      1. **Launch task (TB-A)** — fast (<2 min). The agent's job is to
-         spawn the long work as an OS-level background process and exit:
-            `nohup uv run python -m foo sweep ... > out.log 2>&1 &`
-            `echo $! > .cc-autopilot/pipelines/<name>.pid`
-         Plus, before exiting, the agent calls `board_edit` twice to set up
-         the dependent tasks below, then includes a `cron: add ...` directive
-         in its RESULT block to register the monitor.
+      Instead, propose a fast (<2 min) launch task whose briefing instructs
+      the agent to call ONE MCP tool, `pipeline_task_start`:
 
-      2. **Stub completion task (TB-A_done)** — created by TB-A via
-         `board_edit add_frozen title="<name> pipeline complete"`. Lives in
-         Frozen as a semantic anchor — its existence-in-Frozen means
-         "pipeline still running"; moving it to Complete means "pipeline done".
+          pipeline_task_start(
+              name="<pipeline-name>",
+              command="<shell command, e.g. uv run python -m foo sweep ...>",
+              validation_title="Validate <pipeline-name> output",
+              validation_briefing="<full markdown briefing for the post-run review>",
+          )
 
-      3. **Validation task (TB-B)** — created by TB-A via
-         `board_edit add_backlog title="Validate <name> output" briefing=...
-         blocked_on=<TB-A_done's id>`. Sits in Backlog gated by
-         `next_dispatchable` until TB-A_done is in Complete. Its briefing
-         describes whatever review/report-generation work follows the run.
+      The tool spawns the command as a detached OS process, creates the
+      validation task in Backlog with `(blocked on: pid:<N>@<TS>)`, and
+      returns. The validation task auto-promotes when the OS process dies
+      (the next dispatch tick consults `pipelines.is_blocking` for the
+      `pid:` blocker — no monitor cron, no Frozen stub, no PID file).
 
-      4. **Monitor cron** — registered by TB-A via the RESULT `cron: add`
-         directive. Pattern:
-            `cron: add name=monitor-<name> interval=10m
-             active_when="sh:test -f .cc-autopilot/pipelines/<name>.pid"
-             prompt="Read .cc-autopilot/pipelines/<name>.pid; if kill -0 \$pid
-             succeeds the pipeline is still running — log_event and exit. If
-             kill -0 fails AND the output dir is populated, the pipeline is
-             done — call board_edit move_to_complete TB-<A_done's id> (which
-             auto-unblocks the validation task via TB-62), then cron_edit
-             remove name=monitor-<name>. If kill -0 fails AND output is
-             missing/empty, the pipeline crashed — log_event severity=error
-             and still move TB-<A_done's id> to Complete so the validation
-             task fires and surfaces the failure in its own diff."`
-
-      The validation task auto-promotes Backlog → Ready once the monitor
-      moves TB-A_done to Complete, so the daemon picks it up on the next
-      tick — no manual unfreeze needed (the original plan-doc design used
-      Frozen+manual-unfreeze, which TB-62 makes obsolete).
+      Launch-task RESULT block needs only `status=complete` plus the usual
+      `commit:` line — no `cron:` directives, no follow-up `board_edit`
+      calls. The validation briefing must include its own `## Verification`
+      section so the per-task verifier (TB-69) can score the pipeline's
+      output once it auto-promotes.
 
       Heuristic for "more than 10 min": grid sweeps with >5 parameter
       combinations on minute-bar data; full-history backtests on >10

@@ -23,10 +23,13 @@ TASK_LINE_RE = re.compile(
     r"(?:\s*\[→ brief\]\((?P<briefing>[^)]+)\))?\s*$"
 )
 
-# Matches a `(blocked on: TB-5, TB-7)` clause anywhere in a task's description.
-# Referenced IDs are extracted with _TASK_ID_RE (any `TB-\d+` tokens inside).
+# Matches a `(blocked on: ...)` clause anywhere in a task's description.
+# Tokens inside are comma-separated; each is either a TB-N task id or a
+# `<scheme>:<value>` external blocker (TB-81 — currently `pid:<N>@<TS>`).
 _BLOCKED_CLAUSE_RE = re.compile(r"\(blocked on:\s*([^)]+)\)", re.IGNORECASE)
-_TASK_ID_RE = re.compile(r"TB-\d+")
+# Token splitter: comma OR `and` (case-insensitive) so natural-language phrases
+# like "TB-5 and TB-7" still parse. Whitespace-only fragments are dropped.
+_BLOCKED_TOKEN_SPLIT_RE = re.compile(r",|\band\b", re.IGNORECASE)
 
 
 @dataclass
@@ -46,15 +49,21 @@ class Task:
 
     @property
     def blocked_on(self) -> list[str]:
-        """Task IDs listed in a `(blocked on: TB-X, TB-Y)` clause in the description.
+        """Tokens listed in a `(blocked on: ...)` clause in the description.
 
-        Empty for tasks without the clause — so dependency-aware selection is
-        a no-op for existing tasks that don't explicitly declare blockers.
+        Each token is either a `TB-N` task id or a `<scheme>:<value>` blocker
+        (currently only `pid:<N>@<TS>` is consumed by the daemon — see TB-81).
+        Empty list for tasks without the clause, so the dependency check is a
+        no-op for existing tasks that don't explicitly declare blockers.
         """
         m = _BLOCKED_CLAUSE_RE.search(self.description)
         if not m:
             return []
-        return _TASK_ID_RE.findall(m.group(1))
+        return [
+            tok.strip()
+            for tok in _BLOCKED_TOKEN_SPLIT_RE.split(m.group(1))
+            if tok.strip()
+        ]
 
     def render(self) -> str:
         check = "x" if self.checked else " "
@@ -215,9 +224,26 @@ class Board:
         """Set of task IDs currently in the Complete section."""
         return {t.id for t in self.iter_tasks("Complete")}
 
+    def _is_blocker_satisfied(self, blocker: str, completed: set[str]) -> bool:
+        """Per-scheme dispatch.
+
+        - `TB-N` blockers are satisfied iff the id is in Complete (legacy).
+        - `pid:<N>[@<TS>]` blockers consult `pipelines.is_blocking` (TB-81).
+        - Unknown schemes fail-safe to "not satisfied" — silently dispatching
+          on a typo would be worse than stranding the task until an operator
+          fixes it.
+        """
+        if blocker.startswith("TB-"):
+            return blocker in completed
+        if blocker.startswith("pid:"):
+            from . import pipelines
+
+            return not pipelines.is_blocking(blocker)
+        return False
+
     def _is_dispatchable(self, t: Task, completed: set[str]) -> bool:
-        """True iff every blocker declared on `t` is already in Complete."""
-        return all(b in completed for b in t.blocked_on)
+        """True iff every blocker declared on `t` is satisfied."""
+        return all(self._is_blocker_satisfied(b, completed) for b in t.blocked_on)
 
     def next_ready(self) -> Task | None:
         """Top of Ready whose blockers are all satisfied (all in Complete).

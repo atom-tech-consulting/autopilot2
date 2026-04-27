@@ -307,3 +307,83 @@ def test_clean_board_has_no_malformed_lines(tmp_path):
     path = _write_board(tmp_path, SAMPLE)
     b = Board.load(path)
     assert b.malformed_lines == []
+
+
+# ---------------------------------------------------------------------------
+# TB-81: blocked_on now returns ALL comma-separated tokens — TB-N and external
+# `<scheme>:<value>` schemes (currently `pid:<N>@<TS>`).
+
+def test_blocked_on_returns_pid_scheme_token():
+    t = _make("TB-2", "Backlog", "(blocked on: pid:12345@1700000000)")
+    assert t.blocked_on == ["pid:12345@1700000000"]
+
+
+def test_blocked_on_returns_mixed_tb_and_pid_tokens():
+    t = _make(
+        "TB-2",
+        "Backlog",
+        "(blocked on: TB-5, pid:99@1700000000)",
+    )
+    assert t.blocked_on == ["TB-5", "pid:99@1700000000"]
+
+
+def test_is_blocker_satisfied_tb_in_completed(tmp_path):
+    path = _write_board(tmp_path, SAMPLE)
+    b = Board.load(path)
+    assert b._is_blocker_satisfied("TB-9", {"TB-9"}) is True
+    assert b._is_blocker_satisfied("TB-99", {"TB-9"}) is False
+
+
+def test_is_blocker_satisfied_pid_delegates_to_pipelines(tmp_path, monkeypatch):
+    path = _write_board(tmp_path, SAMPLE)
+    b = Board.load(path)
+
+    from ap2 import pipelines
+
+    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: True)
+    assert b._is_blocker_satisfied("pid:1@2", set()) is False  # still blocking
+
+    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: False)
+    assert b._is_blocker_satisfied("pid:1@2", set()) is True  # unblocked
+
+
+def test_is_blocker_satisfied_unknown_scheme_fails_safe(tmp_path):
+    path = _write_board(tmp_path, SAMPLE)
+    b = Board.load(path)
+    # Typo / unknown prefix → treat as unsatisfied so the task stays put
+    # rather than silently dispatching.
+    assert b._is_blocker_satisfied("pidd:1@2", set()) is False
+    assert b._is_blocker_satisfied("file:/tmp/foo", set()) is False
+
+
+def test_next_dispatchable_with_pid_blocker(tmp_path, monkeypatch):
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        ## Backlog
+
+        - [ ] **TB-5** **validate** — runs after the pipeline (blocked on: pid:12345@1700000000)
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+
+    from ap2 import pipelines
+
+    # Pipeline still running → task still blocked.
+    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: True)
+    assert b.next_dispatchable("Backlog") is None
+
+    # Pipeline ended → task auto-unblocks on the very next dispatch tick.
+    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: False)
+    t = b.next_dispatchable("Backlog")
+    assert t is not None and t.id == "TB-5"

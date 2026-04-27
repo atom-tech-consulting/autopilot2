@@ -56,6 +56,8 @@ def test_load_bearing_entries_present(tmp_path: Path):
     assert "*.lock" in nested
     # On-disk backups created during ap2 upgrades.
     assert "*.bak" in nested
+    # Pipeline log dirs (TB-81) — debug-only, never committed.
+    assert "pipelines/" in nested
     # Board lock at project root, NOT under .cc-autopilot/.
     assert "TASKS.md.lock" in root
 

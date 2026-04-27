@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -148,6 +149,103 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
             return _err(f"unknown action {action!r}")
     except Exception as e:  # noqa: BLE001
         return _err(f"{type(e).__name__}: {e}")
+
+
+def do_pipeline_task_start(cfg: Config, args: dict) -> dict:
+    """Atomically launch a long-running pipeline + create a Backlog validation
+    task gated on the pipeline's PID liveness (TB-81).
+
+    The launch agent's responsibility collapses from the TB-80 8-step recipe
+    (launch + Frozen stub + Backlog validation + monitor cron) to ONE call.
+    The validation task auto-promotes when the OS process dies, via
+    `Board.next_dispatchable` consulting `pipelines.is_blocking`.
+    """
+    name = (args.get("name") or "").strip()
+    command = (args.get("command") or "").strip()
+    validation_title = (args.get("validation_title") or "").strip()
+    validation_briefing = args.get("validation_briefing") or ""
+    if not name or not command or not validation_title:
+        return _err("name, command, and validation_title are required")
+
+    log_dir = cfg.project_root / ".cc-autopilot" / "pipelines"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_tmp = log_dir / f"{name}.log.tmp"
+    log_handle = log_tmp.open("a")
+    try:
+        # `start_new_session=True` puts the child in its own session/process
+        # group so a parent (daemon) exit doesn't take it down.
+        proc = subprocess.Popen(
+            command,
+            shell=True,
+            cwd=str(cfg.project_root),
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=log_handle,
+            start_new_session=True,
+        )
+    finally:
+        log_handle.close()
+
+    try:
+        import psutil
+
+        started_at = int(psutil.Process(proc.pid).create_time())
+    except Exception:  # noqa: BLE001
+        # Process may have died instantly, or psutil isn't importable. Fall
+        # back to wall clock so we still record SOMETHING — the validation
+        # task may unblock erroneously on PID recycling, but this branch is
+        # rare and operator-debuggable from the log file.
+        started_at = int(time.time())
+
+    log_path = log_dir / f"{name}-{proc.pid}.log"
+    try:
+        log_tmp.rename(log_path)
+    except OSError:
+        log_path = log_tmp
+
+    blocker = f"pid:{proc.pid}@{started_at}"
+    description = f"(blocked on: {blocker})"
+
+    # Mirror add_backlog briefing-write logic: one file per task, slug-named,
+    # collision-suffixed. Briefing payloads from launch agents are typically
+    # full markdown; pass them through as-is.
+    slug = slugify(validation_title)
+    brief_path = cfg.tasks_dir / f"{slug}.md"
+    n = 2
+    while brief_path.exists():
+        brief_path = cfg.tasks_dir / f"{slug}-{n}.md"
+        n += 1
+    brief_path.parent.mkdir(parents=True, exist_ok=True)
+    brief_path.write_text(validation_briefing)
+    briefing_rel = str(brief_path.relative_to(cfg.project_root))
+
+    with locked_board(cfg.tasks_file) as board:
+        val_id = _allocate_id(board, cfg)
+        board.add(
+            "Backlog",
+            task_id=val_id,
+            title=validation_title,
+            description=description,
+            briefing=briefing_rel,
+        )
+
+    events.append(
+        cfg.events_file,
+        "pipeline_start",
+        name=name,
+        pid=proc.pid,
+        started_at=started_at,
+        command=command,
+        validation=val_id,
+        log=str(log_path),
+    )
+    return _ok(
+        f"pipeline {name!r} started (pid {proc.pid})",
+        pid=proc.pid,
+        started_at=started_at,
+        validation_id=val_id,
+        log=str(log_path),
+    )
 
 
 def do_cron_edit(cfg: Config, args: dict) -> dict:
@@ -340,10 +438,33 @@ def build_mcp_server(cfg: Config):
     async def daemon_control(args):
         return do_daemon_control(cfg, args)
 
+    @tool(
+        "pipeline_task_start",
+        "Atomically launch a long-running pipeline as a detached OS process "
+        "and create a single Backlog validation task gated on the process's "
+        "liveness. The validation task auto-promotes when the process dies. "
+        "Use for work that would take >10 minutes as a single agent dispatch.",
+        {
+            "name": str,
+            "command": str,
+            "validation_title": str,
+            "validation_briefing": str,
+        },
+    )
+    async def pipeline_task_start(args):
+        return do_pipeline_task_start(cfg, args)
+
     return create_sdk_mcp_server(
         name="autopilot",
         version="0.1.0",
-        tools=[board_edit, cron_edit, mattermost_reply, log_event, daemon_control],
+        tools=[
+            board_edit,
+            cron_edit,
+            mattermost_reply,
+            log_event,
+            daemon_control,
+            pipeline_task_start,
+        ],
     )
 
 
@@ -359,6 +480,12 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__daemon_control",
 ]
 
+# `pipeline_task_start` is the first MCP tool task agents can call directly
+# (TB-81). The privilege increase is narrow: one tool, atomic, well-scoped to
+# launching long-running work that the daemon can't host inside a single
+# `await sdk.query(...)` slot. Keep this list otherwise minimal — task agents
+# are not control agents and shouldn't gain blanket access to `board_edit`,
+# `cron_edit`, etc. via this list.
 TASK_AGENT_TOOLS = [
     "Read",
     "Write",
@@ -366,4 +493,5 @@ TASK_AGENT_TOOLS = [
     "Glob",
     "Grep",
     "Bash",
+    "mcp__autopilot__pipeline_task_start",
 ]

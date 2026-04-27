@@ -93,7 +93,12 @@ def _fake_mm_api(new_post_create_at: int = 1000):
 
 def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
     cfg = e2e_project(
-        frozen_task=("TB-6", "Follow-up", "Pipeline"),
+        # `blocked_on=TB-10` — the pipeline task gets TB-10 via the seeded
+        # next_task_id. Once it lands in Complete (tick 1), TB-6 becomes
+        # dispatchable. (Pre-TB-81 the parser only matched `TB-N` so any
+        # narrative string here was a silent no-op; the new parser treats
+        # all comma-separated tokens as real blockers.)
+        frozen_task=("TB-6", "Follow-up", "TB-10"),
         cron_jobs=[
             {
                 "name": "status-report",
