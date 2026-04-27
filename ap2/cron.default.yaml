@@ -54,6 +54,23 @@ jobs:
           express; they're judged by an SDK call against the diff.
       A briefing with no `## Verification` section will be skipped by the
       verifier (legacy compat). New work should not opt into that path.
+
+      ## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)
+      The verifier runs each shell bullet via `/bin/sh -c <bullet>` in the
+      project root. Common mistakes that fail with exit 127 / 126 even when
+      the underlying work is correct:
+        - **Bare `python`** — the daemon's environment has `uv run python`,
+          `python3`, `.venv/bin/python` — but typically NOT bare `python`
+          on PATH. Use `\`uv run python ...\`` (preferred for repos using uv)
+          or `\`python3 ...\``, never bare `\`python ...\``.
+        - **Bare path as command** — `\`reports/foo/README.md\`` makes shell
+          try to *execute* the markdown file (exit 126). For existence
+          checks use `\`test -f reports/foo/README.md\``; for line-count
+          bounds use `\`[ "$(wc -l < reports/foo/README.md)" -le 30 ]\``.
+        - **Multi-line shell bullets** — keep the bullet's command on one
+          line. Wrap multiple steps in `\`bash -c '...'\`` or `&&`-chain.
+      Prefer running concrete project commands (e.g. `uv run pytest -q`,
+      `uv run python -m stoch ...`) over inventing new ones.
     active_when: "sh:awk '/^## Backlog/{f=1;next}/^## /{f=0}f' TASKS.md | grep -c '^- \\[' | awk '{exit ($1>=3)}'"
     max_turns: 15
     created_by: bootstrap

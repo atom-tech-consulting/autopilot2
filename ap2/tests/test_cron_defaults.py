@@ -97,6 +97,21 @@ def test_ideation_prompt_keeps_active_when():
     assert "$1>=3" in aw  # the under-full threshold
 
 
+def test_ideation_prompt_warns_off_bare_python_and_path_pitfalls():
+    """TB-76: live stoch tasks (TB-71, TB-73) verification_failed solely
+    because their shell bullets used bare `python` (claude-agent's env has
+    `uv run python` / `python3` only) or treated paths as executable. Pin
+    the prompt's guidance so future ideation runs steer agents away.
+    """
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    # Bare-python warning — must explicitly recommend uv run python / python3.
+    assert "uv run python" in prompt
+    assert "python3" in prompt
+    # Path-existence-check guidance — must mention `test -f`.
+    assert "test -f" in prompt
+
+
 def test_ideation_prompt_instructs_verification_section_population():
     """TB-69 contract: every ideation-proposed briefing must include a
     `## Verification` section with concrete bullets the verifier can run.
