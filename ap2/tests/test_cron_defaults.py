@@ -97,6 +97,30 @@ def test_ideation_prompt_keeps_active_when():
     assert "$1>=3" in aw  # the under-full threshold
 
 
+def test_ideation_prompt_includes_pipeline_pattern_for_long_work():
+    """TB-80: ideation must steer long work (>10 min) into the pipeline
+    pattern (launch + Frozen stub + blocked Backlog validation + monitor
+    cron) instead of a single mega-task that holds the daemon's task slot.
+    Pin the load-bearing terms so a future prompt rewrite can't drop them.
+    """
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    lower = prompt.lower()
+    # The pattern must be named.
+    assert "pipeline" in lower
+    # Threshold guidance — a number of minutes the agent uses to decide.
+    assert "10 minutes" in lower or "10 min" in lower
+    # The three task pieces of the pattern.
+    assert "launch task" in lower
+    assert "stub" in lower or "completion task" in lower
+    assert "validation task" in lower
+    # The TB-62 blocked_on hookup is the new design relative to the original
+    # plan-doc Frozen + manual-unfreeze approach.
+    assert "blocked_on" in prompt or "blocked on" in lower
+    # Self-removing monitor cron — both words present (line-folded in yaml).
+    assert "cron_edit" in prompt and "remove" in prompt
+
+
 def test_ideation_prompt_warns_off_bare_python_and_path_pitfalls():
     """TB-76: live stoch tasks (TB-71, TB-73) verification_failed solely
     because their shell bullets used bare `python` (claude-agent's env has
