@@ -122,6 +122,53 @@ def test_ideation_prompt_includes_pipeline_task_start_for_long_work():
     assert "progress bar" in lower or "fans out" in lower
 
 
+def test_ideation_prompt_pins_step0_assessment(tmp_path=None):
+    """TB-87: ideation must write a structured progress assessment to
+    `.cc-autopilot/ideation_state.md` BEFORE proposing tasks. Pins the
+    schema headers + citation rule + load-bearing phrases against drift.
+    """
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    # File path mentioned by exact path so the agent knows where to write.
+    assert ".cc-autopilot/ideation_state.md" in prompt
+    # Step 0 framing — load-bearing.
+    assert "Step 0" in prompt or "step 0" in prompt
+    # The schema's section headers must all be present in the prompt so the
+    # agent knows the structure to follow.
+    for section in (
+        "## Mission alignment",
+        "## Current focus assessment",
+        "## Non-goal risk check",
+        "## Considered & deferred",
+        "## Open questions for operator",
+        "## Proposals this cycle",
+    ):
+        assert section in prompt, f"missing schema section {section!r}"
+    # The three status values for focus items.
+    for status in ("in-progress", "exhausted-needs-operator", "deferred"):
+        assert status in prompt, f"missing status value {status!r}"
+    # Citation rule — load-bearing prevents hallucinated progress claims.
+    lower = prompt.lower()
+    assert "cite" in lower
+    assert "tb-n" in lower
+    assert "forbidden" in lower or "vague claims" in lower
+    # The "OVERWRITE" word — file is a snapshot, not append-only.
+    assert "OVERWRITE" in prompt or "overwrite" in lower
+
+
+def test_ideation_prompt_lists_ideation_state_first_in_read_order():
+    """The prompt's read-order list must start with `.cc-autopilot/ideation_state.md`
+    so the agent has cross-cycle memory before reading anything else."""
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    prompt = jobs["ideation"].prompt
+    # Find the "Read these files in order:" block and check the first item.
+    idx = prompt.find("Read these files in order:")
+    assert idx >= 0
+    block = prompt[idx:idx + 600]
+    # The first numbered item should mention ideation_state.md.
+    assert "1. .cc-autopilot/ideation_state.md" in block
+
+
 def test_ideation_prompt_pins_two_tier_verification_split():
     """TB-86: pipeline-launch ideation must steer output-artifact checks into
     `validation_briefing` (the validation task's verification, runs AFTER the

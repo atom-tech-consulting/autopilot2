@@ -112,6 +112,35 @@ def test_commit_state_files_includes_briefing_dir(e2e_project):
     assert status == ""
 
 
+def test_commit_state_files_includes_ideation_state_md(e2e_project):
+    """TB-87: `.cc-autopilot/ideation_state.md` is in `_STATE_FILE_NAMES`, so
+    a fresh assessment written by ideation rides along with state-file
+    commits — git history captures every cycle's progress reasoning.
+    """
+    cfg = e2e_project()
+    _git_init(cfg.project_root)
+    autopilot_dir = cfg.project_root / ".cc-autopilot"
+    autopilot_dir.mkdir(exist_ok=True)
+    state_md = autopilot_dir / "ideation_state.md"
+    state_md.write_text("# Ideation State\n\n_placeholder_\n")
+    _git(["add", "TASKS.md", "CLAUDE.md", ".cc-autopilot/ideation_state.md"],
+         cfg.project_root)
+    _git(["commit", "-m", "baseline"], cfg.project_root)
+
+    # Simulate ideation overwriting with a fresh assessment (the only change).
+    state_md.write_text(
+        "# Ideation State\n\n_Last updated: 2026-04-27T15:30Z by ideation cron_\n\n"
+        "## Mission alignment\nServing the Mission per TB-87 / TB-89.\n"
+    )
+
+    _commit_state_files(cfg, "state: cron ideation")
+
+    log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
+    assert "state: cron ideation" in log
+    diff = _git(["log", "-1", "--name-only", "--format="], cfg.project_root).stdout
+    assert ".cc-autopilot/ideation_state.md" in diff
+
+
 def test_commit_state_files_picks_up_briefing_only_change(e2e_project):
     """A briefing edit with NO state-file change still triggers a commit —
     e.g. a task agent's `_append_attempts` hook updates a briefing during

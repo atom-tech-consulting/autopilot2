@@ -15,14 +15,80 @@ jobs:
       Goal: keep Backlog populated with high-leverage, goal-aligned tasks.
 
       Read these files in order:
-      1. goal.md — project mission, current focus, non-goals, constraints.
+      1. .cc-autopilot/ideation_state.md — last cycle's progress assessment
+         (if it exists). This is YOUR cross-cycle memory — what was
+         considered, what was deferred, where prior cycles thought the
+         current focus stood.
+      2. goal.md — project mission, current focus, non-goals, constraints.
          If absent OR all sections are still placeholders, infer goals from
          CLAUDE.md + progress.md instead.
-      2. TASKS.md — current board state (do not duplicate existing tasks).
-      3. progress.md — recent completed work, for follow-up discovery.
-      4. CLAUDE.md — project conventions and any Autopilot config.
+      3. TASKS.md — current board state (do not duplicate existing tasks).
+      4. progress.md — recent completed work, for follow-up discovery.
+      5. CLAUDE.md — project conventions and any Autopilot config.
 
       Propose new tasks ONLY if Backlog has fewer than 3 workable items.
+
+      ## Step 0: write the progress assessment FIRST (TB-87)
+      Before proposing anything, OVERWRITE `.cc-autopilot/ideation_state.md`
+      with a fresh assessment. This is load-bearing: the file's structure
+      forces you to ground proposals in cited evidence and gives the next
+      cycle's ideation memory of what you considered. Use this exact schema:
+
+          # Ideation State
+
+          _Last updated: <UTC ISO-8601 timestamp> by ideation cron_
+
+          ## Mission alignment
+          One paragraph: are recent completes still serving goal.md's
+          Mission? Cite the 3-5 most recent Completes you considered
+          (TB-N + one-line summary).
+
+          ## Current focus assessment
+          For each item in goal.md's "Current focus" section:
+
+          - **<focus item verbatim from goal.md>**
+            - Progress so far: <what shipped against this — cite TB-N for
+              EVERY claim; vague claims like "good progress" are forbidden>
+            - Gaps: <what's not yet addressed; concrete, actionable>
+            - Status: `in-progress` | `exhausted-needs-operator` | `deferred`
+            - Reasoning: <one sentence on why that status>
+
+          If a focus item has no Complete TB-Ns yet, status MUST be
+          `in-progress`. If every reasonable next step has shipped and you
+          can't identify a non-trivial gap, status is
+          `exhausted-needs-operator` — write a one-liner about what the
+          operator should decide next.
+
+          ## Non-goal risk check
+          Quick scan of in-flight + recent work: is anything drifting into
+          goal.md's Non-goals? List specific concerns or write "none".
+
+          ## Considered & deferred this cycle
+          - **<task idea title>**: <why you didn't propose it this cycle —
+            e.g., "covered by TB-95 still in flight", "lower impact than
+            the 3 ranked ahead of it", "would conflict with non-goal X">
+
+          ## Open questions for operator
+          - (Surfaced when a focus item is `exhausted-needs-operator`,
+            when goal.md appears to need updating, OR when you noticed a
+            gap outside any current focus item.)
+
+          ## Proposals this cycle
+          List the 3 task TB-Ns you're about to add (or fewer if Backlog
+          already has ≥3 workable items, in which case write
+          "Backlog already populated; no proposals this cycle").
+
+      Citation rule: every "Progress so far" / "Gaps" bullet MUST cite
+      at least one TB-N (`TB-79`, `TB-85`). Vague claims without TB-N
+      citations are forbidden — they hide hallucination.
+
+      Length cap: keep the file under ~200 lines. If you can't, the
+      assessment is too verbose; trim to the highest-signal items.
+
+      Only AFTER writing the assessment, do follow-up discovery + ranking
+      below. Each proposal you make should map to a specific gap line in
+      your assessment (you don't need 1:1 — sometimes one task addresses
+      multiple gaps — but every proposal must be traceable to a gap).
 
       ## Follow-up discovery (do this BEFORE greenfield ideation)
       Look at the most recent ~10 entries in TASKS.md `## Complete` and the

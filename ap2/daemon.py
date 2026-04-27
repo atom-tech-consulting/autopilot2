@@ -823,7 +823,16 @@ def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path, Path]:
 # Files the daemon is authoritative for. Committed together per semantic unit
 # (a completed task, a cron ideation run, an orphan recovery) so the git log
 # tracks board evolution alongside the task agents' source-code commits.
-_STATE_FILE_NAMES = ("TASKS.md", ".cc-autopilot/progress.md", "CLAUDE.md")
+# `ideation_state.md` is the per-cycle progress assessment ideation
+# overwrites at the start of every cron run (TB-87) — committing it with
+# the rest of the state files keeps the assessment recoverable from git
+# history for retrospectives.
+_STATE_FILE_NAMES = (
+    "TASKS.md",
+    ".cc-autopilot/progress.md",
+    "CLAUDE.md",
+    ".cc-autopilot/ideation_state.md",
+)
 # Directories whose contents are also daemon-owned audit trail. Staged with
 # `git add <dir>` so new briefings (from `add_backlog` auto-fill, ideation
 # proposals, or `/tb prep`) and accumulated `## Attempts` edits ride along

@@ -95,6 +95,20 @@ GOAL_TEMPLATE = (
 )
 
 
+# Living progress assessment maintained by ideation each cycle (TB-87).
+# Ideation reads the prior assessment + goal.md + Complete tail, then
+# OVERWRITES this file with a fresh assessment that grounds the cycle's
+# proposals in cited TB-Ns. Schema is fixed by the cron prompt — this is
+# just a placeholder so first-cycle reads don't fail.
+IDEATION_STATE_TEMPLATE = (
+    "# Ideation State\n\n"
+    "_Not yet generated. Will be written on the next ideation cron tick.\n"
+    "Schema (set by `ap2/cron.default.yaml`'s ideation prompt):\n"
+    "Mission alignment / Current focus assessment / Non-goal risk check /\n"
+    "Considered & deferred / Open questions for operator / Proposals._\n"
+)
+
+
 # Lines that go into <project>/.cc-autopilot/.gitignore. Grouped by purpose so
 # diffs against an existing file are minimal and readable.
 NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
@@ -151,6 +165,7 @@ class InitReport:
     claude_md_created: bool = False
     claude_md_autopilot_added: bool = False
     goal_md_created: bool = False
+    ideation_state_md_created: bool = False
 
     def print(self) -> None:
         if self.nested_gitignore_added:
@@ -169,6 +184,7 @@ class InitReport:
         print(f"  TASKS.md: {'created' if self.tasks_md_created else 'exists'}")
         print(f"  .cc-autopilot/progress.md: {'created' if self.progress_md_created else 'exists'}")
         print(f"  goal.md: {'created (template — fill in)' if self.goal_md_created else 'exists'}")
+        print(f"  .cc-autopilot/ideation_state.md: {'created (placeholder)' if self.ideation_state_md_created else 'exists'}")
         if self.claude_md_created:
             print(f"  CLAUDE.md: created (with ## Autopilot)")
         elif self.claude_md_autopilot_added:
@@ -269,6 +285,9 @@ def init_project(project_root: Path) -> InitReport:
     tasks_md_created = _ensure_file(project_root / "TASKS.md", TASKS_TEMPLATE)
     progress_md_created = _ensure_file(autopilot_dir / "progress.md", PROGRESS_TEMPLATE)
     goal_md_created = _ensure_file(project_root / "goal.md", GOAL_TEMPLATE)
+    ideation_state_md_created = _ensure_file(
+        autopilot_dir / "ideation_state.md", IDEATION_STATE_TEMPLATE,
+    )
     claude_md_created, autopilot_added = _ensure_claude_md_autopilot(project_root / "CLAUDE.md")
 
     return InitReport(
@@ -281,4 +300,5 @@ def init_project(project_root: Path) -> InitReport:
         claude_md_created=claude_md_created,
         claude_md_autopilot_added=autopilot_added,
         goal_md_created=goal_md_created,
+        ideation_state_md_created=ideation_state_md_created,
     )

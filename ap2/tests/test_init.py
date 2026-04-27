@@ -197,6 +197,45 @@ def test_init_output_is_loadable_by_config(tmp_path: Path):
     assert (tmp_path / ".cc-autopilot" / "progress.md").exists()
 
 
+def test_creates_ideation_state_md_when_missing(tmp_path: Path):
+    """TB-87: bootstrap places a placeholder `ideation_state.md` so first-cycle
+    reads succeed before ideation has run.
+    """
+    report = init_project(tmp_path)
+    state = tmp_path / ".cc-autopilot" / "ideation_state.md"
+    assert state.exists()
+    assert report.ideation_state_md_created is True
+    text = state.read_text()
+    assert "# Ideation State" in text
+    assert "Not yet generated" in text
+
+
+def test_does_not_overwrite_existing_ideation_state_md(tmp_path: Path):
+    """A pre-existing `ideation_state.md` written by a prior ideation cycle
+    must survive `init_project` re-run unchanged (idempotency)."""
+    autopilot = tmp_path / ".cc-autopilot"
+    autopilot.mkdir()
+    state = autopilot / "ideation_state.md"
+    state.write_text("# Custom\n\n## Mission alignment\nReal assessment here.\n")
+
+    report = init_project(tmp_path)
+
+    assert report.ideation_state_md_created is False
+    assert state.read_text() == "# Custom\n\n## Mission alignment\nReal assessment here.\n"
+
+
+def test_ideation_state_md_idempotent(tmp_path: Path):
+    """Second init_project call is a no-op for ideation_state.md."""
+    init_project(tmp_path)
+    state = tmp_path / ".cc-autopilot" / "ideation_state.md"
+    first = state.read_text()
+
+    report2 = init_project(tmp_path)
+
+    assert report2.ideation_state_md_created is False
+    assert state.read_text() == first
+
+
 def test_creates_goal_md_when_missing(tmp_path: Path):
     """Fresh project gets a templated goal.md so the ideation cron has an
     explicit project-level anchor to read (TB-70)."""
