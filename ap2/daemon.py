@@ -67,7 +67,13 @@ async def run_task(cfg: Config, sdk, task) -> None:
     # stderr (observed on stoch's TB-58/TB-59), these files are the only way
     # to reproduce the failure. Dumped BEFORE the query starts so even a
     # SIGKILL-before-write leaves us the prompt.
-    prompt_dump, stream_dump = _prep_debug_dumps(cfg, task.id)
+    #
+    # Two-layer message log (TB-85): `.stream.jsonl` holds compact per-envelope
+    # summaries (first 200 chars of any text block, tool name + truncated args,
+    # tool-result preview) for at-a-glance reading. `.messages.jsonl` mirrors
+    # the same `seq` ordering with FULL content. Diagnose by scanning the
+    # stream, then `jq 'select(.seq==N)'` on messages.jsonl for the full body.
+    prompt_dump, stream_dump, messages_dump = _prep_debug_dumps(cfg, task.id)
     prompt_dump.write_text(prompt)
 
     # Ring buffer for SDK subprocess stderr — without this the SDK raises
@@ -79,21 +85,24 @@ async def run_task(cfg: Config, sdk, task) -> None:
         if len(stderr_lines) > 200:
             del stderr_lines[: len(stderr_lines) - 200]
 
-    # Ring buffer of stream-message descriptors so we can attach the last few
+    # Ring buffer of stream-message summaries so we can attach the last few
     # messages to the error event; dumps to disk for full history.
     stream_log: list[dict] = []
+    seq = [0]  # mutable closure counter
 
     def _log_message(msg) -> None:
-        entry = {
-            "type": type(msg).__name__,
-            "text_preview": _extract_text(msg)[:500] or None,
-        }
-        stream_log.append(entry)
+        idx = seq[0]
+        seq[0] += 1
+        summary = {"seq": idx, **_summarize_message(msg)}
+        stream_log.append(summary)
         if len(stream_log) > 200:
             del stream_log[: len(stream_log) - 200]
+        import json as _json
         with stream_dump.open("a") as f:
-            import json as _json
-            f.write(_json.dumps(entry) + "\n")
+            f.write(_json.dumps(summary, default=str) + "\n")
+        with messages_dump.open("a") as f:
+            full = {"seq": idx, **_serialize_message_full(msg)}
+            f.write(_json.dumps(full, default=str) + "\n")
 
     async def _consume() -> str:
         text = ""
@@ -140,6 +149,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
                 last_messages=stream_log[-10:],
                 prompt_dump=str(prompt_dump),
                 stream_dump=str(stream_dump),
+                messages_dump=str(messages_dump),
             )
             _handle_failure(cfg, task, status="timeout")
             return
@@ -167,6 +177,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
                 last_messages=stream_log[-10:],
                 prompt_dump=str(prompt_dump),
                 stream_dump=str(stream_dump),
+                messages_dump=str(messages_dump),
             )
             _handle_failure(cfg, task, status="error")
             return
@@ -251,7 +262,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
                 _dispatch_cron_directives(cfg, task.id, parsed.cron)
                 # Delete the per-run debug dumps on success — only keep evidence for
                 # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
-                for p in (prompt_dump, stream_dump):
+                for p in (prompt_dump, stream_dump, messages_dump):
                     try:
                         p.unlink()
                     except FileNotFoundError:
@@ -441,6 +452,152 @@ def _extract_text(msg) -> str:
     if isinstance(result, str):
         return result
     return ""
+
+
+# TB-85: per-envelope debug logging. Walks the SDK message's content blocks to
+# surface text + tool_use + tool_result without dumping full payloads (that
+# goes to .messages.jsonl). The previous instrumentation only captured
+# `_extract_text(msg)[:500]` which returned None for most envelopes since the
+# SDK emits many AssistantMessage envelopes that are pure tool_use with no
+# text — leaving the stream dump useless for diagnosing the
+# "exit code 1 / empty stderr" crash class.
+
+def _truncate(s: str, n: int) -> str:
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def _stringify_block_content(c) -> str:
+    """Best-effort one-line stringify of a ToolResultBlock.content payload.
+
+    Real shapes seen: a bare string (e.g., a Bash tool's output), or a list of
+    sub-blocks (e.g., text + image). We only need a preview, so flatten to a
+    string and let callers truncate.
+    """
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list):
+        parts = []
+        for b in c:
+            t = getattr(b, "text", None)
+            parts.append(t if isinstance(t, str) else str(b))
+        return " ".join(parts)
+    return str(c)
+
+
+def _walk_blocks(msg, *, full: bool) -> dict:
+    """Walk a Message's `.content` blocks. Returns extracted fields ready to
+    merge into a dict by `_summarize_message` / `_serialize_message_full`.
+
+    `full=False` truncates text to 200 chars and tool args to 200 chars (for
+    .stream.jsonl); `full=True` returns untruncated content (.messages.jsonl).
+    """
+    import json as _json
+
+    out: dict = {}
+    content = getattr(msg, "content", None)
+    if not isinstance(content, list):
+        return out
+
+    text_parts: list[str] = []
+    tool_calls: list[dict] = []
+    tool_results: list[dict] = []
+    blocks_full: list[dict] = []
+
+    for part in content:
+        block_full: dict = {"block_type": type(part).__name__}
+
+        text = getattr(part, "text", None)
+        if isinstance(text, str):
+            if text.strip():
+                text_parts.append(text)
+            block_full["text"] = text
+
+        # ToolUseBlock: has `name` + `input` + `id`.
+        name = getattr(part, "name", None)
+        inp = getattr(part, "input", None)
+        if name is not None and inp is not None:
+            args_json = _json.dumps(inp, default=str)
+            tool_calls.append({
+                "name": name,
+                "args_preview": _truncate(args_json, 200),
+            })
+            block_full["name"] = name
+            block_full["input"] = inp
+            tool_id = getattr(part, "id", None)
+            if tool_id is not None:
+                block_full["id"] = tool_id
+
+        # ToolResultBlock: has `tool_use_id` + `content` (str or list of blocks).
+        tu_id = getattr(part, "tool_use_id", None)
+        if tu_id is not None:
+            tr_content = getattr(part, "content", None)
+            preview_str = _stringify_block_content(tr_content)
+            is_err = bool(getattr(part, "is_error", False))
+            tool_results.append({
+                "tool_use_id": tu_id,
+                "is_error": is_err,
+                "preview": _truncate(preview_str, 200),
+            })
+            block_full["tool_use_id"] = tu_id
+            block_full["is_error"] = is_err
+            if tr_content is not None:
+                block_full["content"] = preview_str if isinstance(tr_content, str) else _stringify_block_content(tr_content)
+
+        blocks_full.append(block_full)
+
+    if not full:
+        if text_parts:
+            out["text_preview"] = _truncate(text_parts[-1], 200)
+        if tool_calls:
+            out["tool_calls"] = tool_calls
+        if tool_results:
+            out["tool_results"] = tool_results
+    else:
+        out["content"] = blocks_full
+
+    return out
+
+
+def _summarize_message(msg) -> dict:
+    """Compact per-envelope summary for `.stream.jsonl` (TB-85).
+
+    Returns: `{type, text_preview?, tool_calls?, tool_results?, stop_reason?,
+    num_turns?, total_cost_usd?, subtype?}`. Optional fields are omitted when
+    absent so the dump stays scannable. `seq` is added by the caller.
+    """
+    out: dict = {"type": type(msg).__name__}
+    out.update(_walk_blocks(msg, full=False))
+
+    # ResultMessage carries usage / cost / stop_reason at the message level.
+    for k in ("stop_reason", "num_turns", "total_cost_usd"):
+        v = getattr(msg, k, None)
+        if v is not None:
+            out[k] = v
+    sub = getattr(msg, "subtype", None)
+    if sub is not None:
+        out["subtype"] = sub
+    # Some ResultMessage variants carry text in `.result` rather than via
+    # content blocks.
+    if "text_preview" not in out:
+        result = getattr(msg, "result", None)
+        if isinstance(result, str) and result.strip():
+            out["text_preview"] = _truncate(result, 200)
+    return out
+
+
+def _serialize_message_full(msg) -> dict:
+    """Full-content per-envelope record for `.messages.jsonl` (TB-85).
+
+    Same shape as `_summarize_message` but without truncation. Cross-reference
+    with the stream summary by `seq`.
+    """
+    out: dict = {"type": type(msg).__name__}
+    out.update(_walk_blocks(msg, full=True))
+    for k in ("stop_reason", "num_turns", "total_cost_usd", "subtype", "result"):
+        v = getattr(msg, k, None)
+        if v is not None:
+            out[k] = v
+    return out
 
 
 def _append_progress(cfg: Config, task, r: TaskResult) -> None:
@@ -638,12 +795,19 @@ async def _maybe_per_task_verify(cfg: Config, sdk, task) -> "verify.VerifyVerdic
     )
 
 
-def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path]:
-    """Build paths for the per-run prompt + stream dumps.
+def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path, Path]:
+    """Build paths for the per-run prompt + stream + messages dumps (TB-85).
 
     `.cc-autopilot/debug/` isn't tracked. Files named with UTC timestamp +
     task id so concurrent tasks (if ever allowed) don't clobber each other.
-    Failures keep the files; `run_task` deletes them on successful complete.
+    Failures keep all three files; `run_task` deletes them on successful
+    complete.
+
+    Files:
+      - <ts>-<task>.prompt.md     full prompt sent to the SDK
+      - <ts>-<task>.stream.jsonl  per-envelope summary (preview text + tool
+                                  calls + tool results); cheap to scan
+      - <ts>-<task>.messages.jsonl  full content per envelope, mirrored by `seq`
     """
     import datetime as dt
 
@@ -652,7 +816,8 @@ def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path]:
     ts = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     prompt = debug_dir / f"{ts}-{task_id}.prompt.md"
     stream = debug_dir / f"{ts}-{task_id}.stream.jsonl"
-    return prompt, stream
+    messages = debug_dir / f"{ts}-{task_id}.messages.jsonl"
+    return prompt, stream, messages
 
 
 # Files the daemon is authoritative for. Committed together per semantic unit

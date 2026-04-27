@@ -338,8 +338,13 @@ def test_blocked_task_keeps_debug_dumps(e2e_project):
     debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
     prompt_dumps = list(debug_dir.glob("*TB-5.prompt.md"))
     stream_dumps = list(debug_dir.glob("*TB-5.stream.jsonl"))
+    messages_dumps = list(debug_dir.glob("*TB-5.messages.jsonl"))
     assert len(prompt_dumps) == 1
     assert len(stream_dumps) == 1
+    assert len(messages_dumps) == 1  # TB-85: full-content sibling file
     assert "TB-5" in prompt_dumps[0].read_text()
     stream_lines = [l for l in stream_dumps[0].read_text().splitlines() if l.strip()]
+    messages_lines = [l for l in messages_dumps[0].read_text().splitlines() if l.strip()]
     assert len(stream_lines) >= 1
+    # Same `seq` ordering across the two files — caller jq-joins by seq.
+    assert len(stream_lines) == len(messages_lines)
