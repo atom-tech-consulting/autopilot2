@@ -77,11 +77,21 @@ def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
 
     An empty section (header present but no bullets) returns `[]`, which
     callers can treat as "skip" (no concrete criteria to check).
+
+    Picks the LAST `## Verification` section in the briefing — TB-91. TB-86
+    pipeline-launch briefings include an inline `validation_briefing`
+    sub-document (the briefing for the auto-created post-pipeline validation
+    task), which has its own `## Verification` containing output-artifact
+    checks. That sub-document is placed near Scope/Approach where the
+    `pipeline_task_start` call is described, so the launch task's own
+    `## Verification` always comes after it. Picking the last match correctly
+    targets the launch task's verification. For single-Verification briefings
+    (the common case) last == first, so behavior is unchanged.
     """
-    m = _VERIFICATION_HEADER_RE.search(briefing_text)
-    if not m:
+    matches = list(_VERIFICATION_HEADER_RE.finditer(briefing_text))
+    if not matches:
         return None
-    body = m.group(1)
+    body = matches[-1].group(1)
     bullets: list[VerifyBullet] = []
     for bm in _BULLET_RE.finditer(body):
         raw = bm.group(1).strip()
