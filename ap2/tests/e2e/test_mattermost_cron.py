@@ -133,7 +133,7 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
     # Register most-specific first so task prompts (which never contain these
     # headers) aren't misrouted.
     sdk.on("## Incoming mattermost message", _mm_handler_adds_pipeline(cfg))
-    sdk.on("## Scheduled job: status-report",
+    sdk.on("## Control job: status-report",
            _cron_unfreeze_pipeline_follow_up(cfg, "TB-6"))
     sdk.on(
         "**Pipeline**",  # unique to the pipeline task prompt title

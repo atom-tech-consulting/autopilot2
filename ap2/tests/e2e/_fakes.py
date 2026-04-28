@@ -24,7 +24,7 @@ class FakeSDK:
     Usage:
         sdk = FakeSDK()
         sdk.on("## Task\\nTB-5", text_respond("RESULT:\\nstatus: complete\\n..."))
-        sdk.on("## Scheduled job: status-report", my_cron_responder)
+        sdk.on("## Control job: status-report", my_cron_responder)
         async for msg in sdk.query(prompt=p, options=sdk.ClaudeAgentOptions(...)):
             ...
 

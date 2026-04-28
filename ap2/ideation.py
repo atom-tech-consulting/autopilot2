@@ -110,11 +110,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     from . import prompts
     from .tools import CONTROL_AGENT_TOOLS
 
-    # Reuse the control-agent prompt header so the existing ideation
-    # default keeps its `## Scheduled job: ideation` framing — the prompt
-    # was tuned against that header and rebuilding it here would drift
-    # from `prompts._CONTROL_HEADER`.
-    full_prompt = prompts.build_cron_prompt(cfg, IDEATION_NAME, load_prompt(cfg))
+    full_prompt = prompts.build_control_prompt(cfg, IDEATION_NAME, load_prompt(cfg))
     max_turns = int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT))
     timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
         cfg,

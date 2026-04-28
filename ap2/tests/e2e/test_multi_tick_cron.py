@@ -75,7 +75,7 @@ def test_multi_tick_cron_unfreezes_follow_up(e2e_project, clock):
         ),
     )
     sdk.on(
-        "## Scheduled job: status-report",
+        "## Control job: status-report",
         _cron_unfreeze_when_pipeline_done(cfg, "TB-5", "TB-6"),
     )
 
@@ -144,7 +144,7 @@ def test_cron_noop_when_pipeline_still_running(e2e_project, clock):
         text_respond("RESULT:\nstatus: incomplete\nsummary: still working\n"),
     )
     sdk.on(
-        "## Scheduled job: status-report",
+        "## Control job: status-report",
         _cron_unfreeze_when_pipeline_done(cfg, "TB-5", "TB-6"),
     )
 

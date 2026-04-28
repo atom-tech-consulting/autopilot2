@@ -196,10 +196,17 @@ def build_mattermost_prompt(cfg: Config, msg: dict) -> str:
     return "\n".join(parts)
 
 
-def build_cron_prompt(cfg: Config, job_name: str, job_prompt: str) -> str:
+def build_control_prompt(cfg: Config, job_name: str, job_prompt: str) -> str:
+    """Build the prompt for a control-agent run (cron job or ideation cycle).
+
+    Used by `daemon.run_cron` (status-report and any future cron jobs) and
+    `ideation._maybe_ideate`. The `## Control job` framing replaces the
+    old `## Scheduled job` framing — ideation isn't on a schedule, and
+    "control job" matches the broader CONTROL_AGENT_TOOLS partition.
+    """
     parts = [
         _CONTROL_HEADER,
-        f"\n## Scheduled job: {job_name}",
+        f"\n## Control job: {job_name}",
         "",
         job_prompt,
         "",

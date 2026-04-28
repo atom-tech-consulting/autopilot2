@@ -457,7 +457,7 @@ async def _run_control_agent(
 
 
 async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
-    prompt = prompts.build_cron_prompt(cfg, job.name, job.prompt)
+    prompt = prompts.build_control_prompt(cfg, job.name, job.prompt)
     events.append(cfg.events_file, "cron_start", job=job.name)
     timed_out, error, stderr_tail, prompt_dump = await _run_control_agent(
         cfg,

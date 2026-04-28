@@ -37,13 +37,13 @@ There are four kinds of SDK queries, each with its own prompt builder, tool allo
 | Kind | Trigger | Prompt builder | Tools | Timeout |
 |---|---|---|---|---|
 | **Task** | `run_task` (step 3) | `prompts.build_task_prompt` | `TASK_AGENT_TOOLS` (Read/Edit/Write/Bash + `pipeline_task_start`) | `AP2_TASK_TIMEOUT_S` (1200s) |
-| **Cron** | `run_cron` (step 2) | `prompts.build_cron_prompt` | `CONTROL_AGENT_TOOLS` (board/cron/mm/log_event/daemon_control/ideation_state_write) | `AP2_CONTROL_TIMEOUT_S` (300s) |
+| **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/cron/mm/log_event/daemon_control/ideation_state_write) | `AP2_CONTROL_TIMEOUT_S` (300s) |
 | **Mattermost** | `handle_message` (step 1) | `prompts.build_mattermost_prompt` | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
-| **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_cron_prompt` (reused header) + `ap2/ideation.default.md` | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
+| **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
 
 Task agents are the only kind that gets `Write`/`Edit`. They commit code; everything else mutates state through MCP tools.
 
-Ideation reuses the cron prompt header (`## Scheduled job: ideation` framing) but is no longer a cron job — it has its own lifecycle and event vocabulary (see "TB-98" below).
+Ideation and cron share the same prompt builder (`build_control_prompt`) — the framing is `## Control job: <name>`, deliberately neutral on whether the run is on a schedule. Ideation has its own lifecycle and event vocabulary on top of that shared prompt (see "TB-98" below).
 
 ### Shared SDK plumbing
 
@@ -127,7 +127,7 @@ ap2/
 │                     # do_log_event, do_daemon_control, do_ideation_state_write,
 │                     # do_pipeline_task_start
 ├── pipelines.py      # is_blocking (pid:N@TS dependency check)
-├── prompts.py        # build_task_prompt, build_cron_prompt, build_mattermost_prompt
+├── prompts.py        # build_task_prompt, build_control_prompt, build_mattermost_prompt
 ├── mattermost.py     # check_new_messages (one-shot poll), reply
 ├── result.py         # parse RESULT block (status/commit/summary/files/cron)
 ├── init.py           # init_project (gitignores, dirs, board templates)
