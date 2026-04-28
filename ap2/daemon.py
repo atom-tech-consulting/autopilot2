@@ -598,8 +598,11 @@ def _summarize_message(msg) -> dict:
     out: dict = {"type": type(msg).__name__}
     out.update(_walk_blocks(msg, full=False))
 
-    # ResultMessage carries usage / cost / stop_reason at the message level.
-    for k in ("stop_reason", "num_turns", "total_cost_usd"):
+    # AssistantMessage carries the model string; ResultMessage carries usage /
+    # cost / stop_reason at the message level. Capture both so the stream is
+    # debuggable end-to-end (which model produced this turn? what stop_reason
+    # ended it?).
+    for k in ("model", "stop_reason", "num_turns", "total_cost_usd"):
         v = getattr(msg, k, None)
         if v is not None:
             out[k] = v
@@ -623,7 +626,7 @@ def _serialize_message_full(msg) -> dict:
     """
     out: dict = {"type": type(msg).__name__}
     out.update(_walk_blocks(msg, full=True))
-    for k in ("stop_reason", "num_turns", "total_cost_usd", "subtype", "result"):
+    for k in ("model", "stop_reason", "num_turns", "total_cost_usd", "subtype", "result"):
         v = getattr(msg, k, None)
         if v is not None:
             out[k] = v

@@ -125,6 +125,14 @@ def test_summarize_system_message_subtype():
     assert out["subtype"] == "init"
 
 
+def test_summarize_assistant_message_model():
+    """AssistantMessage.model — captured for the stream so a debugger can
+    tell which Claude variant produced any given turn (TB-97)."""
+    m = _msg(_text("hello"), model="claude-opus-4-7-1m")
+    out = daemon._summarize_message(m)
+    assert out["model"] == "claude-opus-4-7-1m"
+
+
 # ---------------- _serialize_message_full ----------------
 
 
