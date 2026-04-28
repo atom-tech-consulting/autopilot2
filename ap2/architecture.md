@@ -128,9 +128,10 @@ ap2/
 │                     # do_pipeline_task_start
 ├── pipelines.py      # is_blocking (pid:N@TS dependency check)
 ├── prompts.py        # build_task_prompt, build_control_prompt, build_mattermost_prompt
-├── web.py            # local read-only web UI (TB-99): http.server-based,
-│                     # /, /events, /tasks, /task/<TB-N>; full event payloads
-│                     # (vs `ap2 logs` which truncates at 120 chars).
+├── web.py            # local read-only web UI (TB-99 + TB-93 thaw):
+│                     # /, /events, /tasks, /task/<TB-N>, /pipelines,
+│                     # /insights, /insight/<name>, /ideation_state, /commits.
+│                     # Full event payloads (vs `ap2 logs` which truncates).
 ├── mattermost.py     # check_new_messages (one-shot poll), reply
 ├── result.py         # parse RESULT block (status/commit/summary/files/cron)
 ├── init.py           # init_project (gitignores, dirs, board templates)

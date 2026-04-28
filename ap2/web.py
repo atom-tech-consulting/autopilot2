@@ -1,17 +1,22 @@
 """Local read-only web UI for ap2 daemon state.
 
-Closes TB-93 (Frozen "console tool for human review") in web form. Pure
-stdlib (`http.server`), no JS framework, no auth. Bound to 127.0.0.1 by
-default; only the operator on the box should be reading it.
+Closes TB-93 (the "console tool for human review" backlog item) in web
+form. Pure stdlib (`http.server`), no JS framework, no auth. Bound to
+127.0.0.1 by default; only the operator on the box should be reading it.
 
 Read-only by design — every mutation still goes through the `ap2` CLI or
 custom MCP tools. The web UI is a window onto state, not a control panel.
 
 Pages:
-  /            overview: daemon status, board counts, last 30 events
-  /events      full event log, filterable by ?type=X&n=N (default 200)
-  /tasks       all tasks grouped by section
-  /task/<TB-N> one task: briefing + related events + raw line
+  /                  overview: daemon status, board counts, last 30 events
+  /events            full event log, filterable by ?type=X&n=N (default 200)
+  /tasks             all tasks grouped by section
+  /task/<TB-N>       one task: briefing + related events + raw line
+  /pipelines         in-flight + recent pipelines from pipeline_start events
+  /insights          insights index — front matter summaries + links
+  /insight/<name>    one insight file, full content
+  /ideation_state    latest ideation_state.md assessment
+  /commits           recent git log (subjects link to /task/TB-N when matched)
 """
 from __future__ import annotations
 
@@ -19,11 +24,13 @@ import html
 import http.server
 import json
 import os
+import re
 import socketserver
+import subprocess
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import diagnose, events as ev_mod
+from . import diagnose, events as ev_mod, insights as ins_mod
 from .board import Board
 from .config import Config
 
@@ -102,7 +109,11 @@ def _layout(title: str, body: str) -> str:
         "</head><body>"
         '<nav><a href="/">overview</a> '
         '<a href="/events">events</a> '
-        '<a href="/tasks">tasks</a></nav>'
+        '<a href="/tasks">tasks</a> '
+        '<a href="/pipelines">pipelines</a> '
+        '<a href="/insights">insights</a> '
+        '<a href="/ideation_state">ideation_state</a> '
+        '<a href="/commits">commits</a></nav>'
         f"{body}"
         "</body></html>"
     )
@@ -305,6 +316,234 @@ def _render_task(cfg: Config, tb_id: str) -> str:
     return _layout(task.id, body)
 
 
+# ------------- pipelines / insights / ideation_state / commits -------------
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def _render_pipelines(cfg: Config) -> str:
+    """Latest 50 pipeline_start events with liveness + log-size + tail link.
+
+    Discovery via events.jsonl (not directory scan) so we see the command,
+    validation task, and started_at — the directory only has logs.
+    """
+    evts = ev_mod.tail(cfg.events_file, n=20000)
+    pipes = [e for e in evts if e.get("type") == "pipeline_start"]
+    pipes.reverse()
+    pipes = pipes[:50]
+    if not pipes:
+        body = "<h1>pipelines</h1><p><em>no pipeline_start events on file</em></p>"
+        return _layout("pipelines", body)
+
+    rows = []
+    for e in pipes:
+        pid = e.get("pid")
+        alive = isinstance(pid, int) and _pid_alive(pid)
+        log_path = e.get("log", "")
+        log_size = ""
+        log_mtime = ""
+        if log_path:
+            p = Path(log_path)
+            if p.exists():
+                st = p.stat()
+                log_size = f"{st.st_size:,} B"
+                import datetime as _dt
+                log_mtime = _dt.datetime.fromtimestamp(st.st_mtime, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        status = '<span class="running">alive</span>' if alive else '<span class="meta">dead/exited</span>'
+        validation = e.get("validation", "")
+        validation_html = (
+            f'<a href="/task/{html.escape(validation)}">{html.escape(validation)}</a>'
+            if validation else "—"
+        )
+        cmd = e.get("command", "")
+        rows.append(
+            f"<tr>"
+            f'<td class="ts">{html.escape(e.get("ts",""))}</td>'
+            f'<td class="type">{html.escape(str(e.get("name","?")))}</td>'
+            f'<td class="meta">{pid if pid is not None else "?"} ({status})</td>'
+            f'<td>{validation_html}</td>'
+            f'<td><span class="meta">{html.escape(log_size)} · {html.escape(log_mtime)}</span><br>'
+            f'<span class="meta">{html.escape(log_path)}</span></td>'
+            f'<td><pre style="margin:0;white-space:pre-wrap">{html.escape(cmd)}</pre></td>'
+            f"</tr>"
+        )
+    table = (
+        "<table><thead>"
+        "<tr><th>started</th><th>name</th><th>pid</th><th>validation</th>"
+        "<th>log</th><th>command</th></tr>"
+        "</thead><tbody>" + "".join(rows) + "</tbody></table>"
+    )
+    body = f"<h1>pipelines <span class=\"meta\">— {len(pipes)} most recent</span></h1>{table}"
+    return _layout("pipelines", body)
+
+
+def _render_insights(cfg: Config) -> str:
+    dir_ = ins_mod.insights_dir(cfg)
+    if not dir_.exists():
+        return _layout(
+            "insights",
+            "<h1>insights</h1><p><em>no insights dir</em></p>",
+        )
+    files = ins_mod._list_insight_files(dir_)
+    if not files:
+        return _layout(
+            "insights",
+            f"<h1>insights</h1>"
+            f'<p class="meta">{html.escape(str(dir_.relative_to(cfg.project_root)))}/ — '
+            f"empty</p>",
+        )
+    summaries = sorted(
+        (ins_mod._summarize_file(f) for f in files),
+        key=lambda s: s.updated or "",
+        reverse=True,
+    )
+    rows = []
+    for s in summaries:
+        cite_str = ", ".join(s.cites) if s.cites else "—"
+        date = (s.updated or "").split("T")[0] or "?"
+        rows.append(
+            f"<tr>"
+            f'<td><a href="/insight/{html.escape(s.filename)}">{html.escape(s.filename)}</a></td>'
+            f"<td>{html.escape(s.tldr or '(no tldr)')}</td>"
+            f'<td class="meta">{html.escape(s.updated_by or "?")}</td>'
+            f'<td class="ts">{html.escape(date)}</td>'
+            f'<td class="meta">{html.escape(cite_str)}</td>'
+            f"</tr>"
+        )
+    table = (
+        "<table><thead>"
+        "<tr><th>file</th><th>tldr</th><th>by</th><th>updated</th><th>cites</th></tr>"
+        "</thead><tbody>" + "".join(rows) + "</tbody></table>"
+    )
+    body = (
+        f"<h1>insights <span class=\"meta\">— {len(summaries)} files</span></h1>"
+        f'<p class="meta">{html.escape(str(dir_.relative_to(cfg.project_root)))}/</p>'
+        f"{table}"
+    )
+    return _layout("insights", body)
+
+
+def _render_insight(cfg: Config, name: str) -> str:
+    # Defend against path traversal — only basename, must be under insights dir.
+    safe = Path(name).name
+    if safe != name:
+        return _layout("insight", "<p>invalid name</p>")
+    path = ins_mod.insights_dir(cfg) / safe
+    if not path.is_file():
+        return _layout(
+            f"insight {name}",
+            f"<h1>{html.escape(safe)}</h1>"
+            f'<p>not found. <a href="/insights">all insights</a></p>',
+        )
+    text = path.read_text()
+    body = (
+        f"<h1>{html.escape(safe)}</h1>"
+        f'<p class="meta">{html.escape(str(path.relative_to(cfg.project_root)))}</p>'
+        f"<pre>{html.escape(text)}</pre>"
+    )
+    return _layout(safe, body)
+
+
+def _render_ideation_state(cfg: Config) -> str:
+    path = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    # Most recent ideation_complete summary — agent's per-cycle wrap-up.
+    evts = ev_mod.tail(cfg.events_file, n=2000)
+    last_complete = None
+    for e in reversed(evts):
+        if e.get("type") == "ideation_complete":
+            last_complete = e
+            break
+    last_updated = None
+    for e in reversed(evts):
+        if e.get("type") == "ideation_state_updated":
+            last_updated = e
+            break
+    summary_html = ""
+    if last_complete:
+        summary_html = (
+            f"<h2>last ideation_complete summary "
+            f"<span class=\"meta\">— {html.escape(last_complete.get('ts',''))}</span></h2>"
+            f"<pre>{html.escape(str(last_complete.get('summary','(no summary)')))}</pre>"
+        )
+    if last_updated:
+        summary_html += (
+            f'<p class="meta">last ideation_state_updated: '
+            f'{html.escape(last_updated.get("ts",""))} '
+            f'({last_updated.get("bytes","?")} bytes)</p>'
+        )
+
+    if not path.exists():
+        body = (
+            "<h1>ideation state</h1>"
+            f'<p class="meta">{html.escape(str(path.relative_to(cfg.project_root)))} '
+            f"— not yet written</p>{summary_html}"
+        )
+        return _layout("ideation_state", body)
+    text = path.read_text()
+    body = (
+        "<h1>ideation state</h1>"
+        f'<p class="meta">{html.escape(str(path.relative_to(cfg.project_root)))}'
+        f" ({len(text):,} chars)</p>"
+        f"{summary_html}"
+        f"<h2>full assessment</h2>"
+        f"<pre>{html.escape(text)}</pre>"
+    )
+    return _layout("ideation_state", body)
+
+
+_TB_PREFIX_RE = re.compile(r"^(TB-\d+)[: ]")
+
+
+def _render_commits(cfg: Config) -> str:
+    """`git log --oneline -50` with TB-N subjects linked to /task/<id>.
+
+    Read-only: shells out to git rather than touching .git internals so the
+    output matches what an operator would see at the terminal.
+    """
+    if not (cfg.project_root / ".git").exists():
+        return _layout("commits", "<h1>commits</h1><p><em>not a git repo</em></p>")
+    try:
+        out = subprocess.run(
+            ["git", "-c", "safe.directory=*", "-C", str(cfg.project_root),
+             "log", "--oneline", "-50"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return _layout("commits", "<h1>commits</h1><p>git log timed out</p>")
+    if out.returncode != 0:
+        return _layout(
+            "commits",
+            f"<h1>commits</h1><p>git log failed</p>"
+            f"<pre>{html.escape(out.stderr)}</pre>",
+        )
+    rows = []
+    for line in out.stdout.splitlines():
+        sha, _, subject = line.partition(" ")
+        subject_html = html.escape(subject)
+        m = _TB_PREFIX_RE.match(subject)
+        if m:
+            tb = m.group(1)
+            subject_html = subject_html.replace(
+                tb, f'<a href="/task/{tb}">{tb}</a>', 1,
+            )
+        rows.append(
+            f'<tr><td class="type">{html.escape(sha)}</td>'
+            f'<td>{subject_html}</td></tr>'
+        )
+    table = (
+        "<table><thead><tr><th>sha</th><th>subject</th></tr></thead>"
+        f'<tbody>{"".join(rows)}</tbody></table>'
+    )
+    body = f"<h1>commits <span class=\"meta\">— last 50</span></h1>{table}"
+    return _layout("commits", body)
+
+
 # ------------- HTTP handler -------------
 
 
@@ -331,6 +570,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             elif path.startswith("/task/"):
                 tb_id = path[len("/task/"):]
                 body = _render_task(self.cfg, tb_id)
+            elif path == "/pipelines":
+                body = _render_pipelines(self.cfg)
+            elif path == "/insights":
+                body = _render_insights(self.cfg)
+            elif path.startswith("/insight/"):
+                name = path[len("/insight/"):]
+                body = _render_insight(self.cfg, name)
+            elif path == "/ideation_state":
+                body = _render_ideation_state(self.cfg)
+            elif path == "/commits":
+                body = _render_commits(self.cfg)
             else:
                 self.send_response(404)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")

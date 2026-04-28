@@ -119,6 +119,97 @@ def test_task_detail_404_for_missing(project: Config):
     assert "Not on the board" in html
 
 
+# --------- TB-93 thaw: pipelines / insights / ideation_state / commits ---------
+
+
+def test_pipelines_lists_pipeline_starts(project: Config):
+    ev_mod.append(
+        project.events_file, "pipeline_start",
+        name="my-sweep", pid=99999, command="uv run python scripts/sweep.py",
+        validation="TB-7", log="/tmp/my-sweep-99999.log",
+    )
+    html = web._render_pipelines(project)
+    assert "my-sweep" in html
+    assert "TB-7" in html
+    assert "/task/TB-7" in html
+    assert "uv run python scripts/sweep.py" in html
+    # PID 99999 is almost certainly not alive in CI
+    assert "dead/exited" in html
+
+
+def test_pipelines_empty_state(project: Config):
+    html = web._render_pipelines(project)
+    assert "no pipeline_start events" in html
+
+
+def test_insights_shows_files(project: Config, tmp_path):
+    insights_dir = tmp_path / ".cc-autopilot" / "insights"
+    insights_dir.mkdir(parents=True, exist_ok=True)
+    (insights_dir / "alpha.md").write_text(
+        "---\n"
+        "tldr: Alpha decay observed in regime X\n"
+        "updated: 2026-04-28T10:00:00Z\n"
+        "updated_by: TB-50\n"
+        "cites: [TB-49, TB-50]\n"
+        "---\n\n"
+        "Body content.\n"
+    )
+    html = web._render_insights(project)
+    assert "alpha.md" in html
+    assert "Alpha decay observed in regime X" in html
+    assert "TB-50" in html
+
+
+def test_insights_empty_state(project: Config):
+    html = web._render_insights(project)
+    assert "no insights dir" in html or "empty" in html
+
+
+def test_insight_detail_shows_full_content(project: Config, tmp_path):
+    insights_dir = tmp_path / ".cc-autopilot" / "insights"
+    insights_dir.mkdir(parents=True, exist_ok=True)
+    body = "---\ntldr: x\nupdated: 2026-04-28\nupdated_by: op\ncites: []\n---\n# Header\n\nBody.\n"
+    (insights_dir / "alpha.md").write_text(body)
+    html = web._render_insight(project, "alpha.md")
+    assert "Header" in html
+    assert "Body." in html
+
+
+def test_insight_404(project: Config):
+    html = web._render_insight(project, "nonexistent.md")
+    assert "not found" in html
+
+
+def test_insight_blocks_path_traversal(project: Config):
+    html = web._render_insight(project, "../../../../etc/passwd")
+    assert "invalid" in html.lower()
+
+
+def test_ideation_state_shows_file_and_summary(project: Config, tmp_path):
+    state_path = tmp_path / ".cc-autopilot" / "ideation_state.md"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text("# Ideation State\n\n## Mission alignment\nAll good.\n")
+    ev_mod.append(
+        project.events_file, "ideation_complete",
+        summary="Cycle 4: proposed TB-100, TB-101, TB-102.",
+    )
+    ev_mod.append(project.events_file, "ideation_state_updated", bytes=120)
+    html = web._render_ideation_state(project)
+    assert "All good." in html
+    assert "Cycle 4" in html
+    assert "120" in html
+
+
+def test_ideation_state_no_file(project: Config):
+    html = web._render_ideation_state(project)
+    assert "not yet written" in html or "ideation_state.md" in html
+
+
+def test_commits_in_non_git_dir(project: Config):
+    html = web._render_commits(project)
+    assert "not a git repo" in html
+
+
 def test_event_extra_handles_dict_and_list(project: Config):
     """Nested values — common shape for stderr_tail, last_messages,
     files_changed — render as JSON not raw repr, and don't break HTML."""
