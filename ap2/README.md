@@ -78,6 +78,7 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 pause --reason "..."` | Set the pause flag (daemon stops dispatching, stays running). |
 | `ap2 resume` | Clear the pause flag. |
 | `ap2 cron list` | List cron jobs + last-fired timestamps. |
+| `ap2 web` | Start a local read-only web UI (default `127.0.0.1:7820`). Surfaces full event payloads (no truncation), board sections, per-task briefings, related events. |
 | `ap2 sandbox …` | OS-level sandbox-user + project-clone helpers (see below). |
 | `ap2 --version` | Print installed `claude-automation` version. |
 

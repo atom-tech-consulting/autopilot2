@@ -291,6 +291,19 @@ def cmd_cron_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_web(cfg: Config, args: argparse.Namespace) -> int:
+    """Start the local read-only web UI for daemon state and event log.
+
+    Defaults to 127.0.0.1 so the (no-auth) page can't leak full event
+    payloads — briefings, prompt-dump paths, Mattermost message bodies —
+    off the box. Override with --host at your own risk.
+    """
+    from . import web
+
+    web.serve(cfg, host=args.host, port=args.port)
+    return 0
+
+
 def _short(v, limit=120) -> str:
     s = str(v)
     return s if len(s) <= limit else s[: limit - 1] + "…"
@@ -395,6 +408,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("resume", help="clear the pause flag")
     s.set_defaults(func=cmd_resume)
+
+    s = sub.add_parser(
+        "web",
+        help="start a local read-only web UI for status + events "
+             "(127.0.0.1 by default; no auth — local-only)",
+    )
+    s.add_argument("--host", default="127.0.0.1",
+                   help="bind address (default: 127.0.0.1)")
+    s.add_argument("--port", type=int, default=7820,
+                   help="bind port (default: 7820)")
+    s.set_defaults(func=cmd_web)
 
     s = sub.add_parser("cron", help="cron utilities")
     sub_cron = s.add_subparsers(dest="cron_cmd", required=True)
