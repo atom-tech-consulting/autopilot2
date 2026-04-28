@@ -1016,13 +1016,15 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "task_error", error=f"{type(e).__name__}: {e}")
 
-    # 4. Auto-ideation when the working board (Active+Ready+Backlog) is empty.
-    # Throttled by AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S (default 3600) to avoid
-    # running the ideation agent on every 30s tick. Reuses the `ideation` cron
-    # job's prompt/max_turns/allowed_tools; shares cron_state.json so a normal
-    # scheduled ideation run ALSO satisfies the cooldown.
+    # 4. Run any cron jobs marked `trigger: empty_board` when the working
+    # board (Active+Ready+Backlog) is fully empty. Throttled per-job by
+    # AP2_EMPTY_BOARD_COOLDOWN_S (default 3600) to avoid firing on every 30s
+    # tick. Shares cron_state.json so a normal scheduled run satisfies the
+    # cooldown and vice versa. Historically this only fired the `ideation`
+    # job (hence the ideation_empty_board event name); the trigger field
+    # generalizes the mechanism to any job that wants the same semantics.
     try:
-        await _maybe_auto_ideate(cfg, sdk, mcp_server)
+        await _maybe_run_empty_board_jobs(cfg, sdk, mcp_server)
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "ideation_error", error=f"{type(e).__name__}: {e}")
 
@@ -1038,7 +1040,7 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
                       error=f"{type(e).__name__}: {e}")
 
 
-async def _maybe_auto_ideate(cfg: Config, sdk, mcp_server) -> None:
+async def _maybe_run_empty_board_jobs(cfg: Config, sdk, mcp_server) -> None:
     """Fire any cron job with `trigger: empty_board` when the working board
     (Active+Ready+Backlog) is fully empty. Throttled per-job by
     `AP2_EMPTY_BOARD_COOLDOWN_S` (default 3600), with the legacy
