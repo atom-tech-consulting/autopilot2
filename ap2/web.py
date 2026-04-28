@@ -82,14 +82,16 @@ _CSS = """<style>
   tr.lifecycle td.type { color: #2a8 }
   .ts { color: #888; font-family: ui-monospace, monospace; font-size: 12px; white-space: nowrap }
   .type { font-family: ui-monospace, monospace; font-weight: 500 }
-  /* Tables fill the viewport and never horizontally scroll. Auto layout
-     allocates column widths from content; `overflow-wrap: anywhere` on
-     every cell wraps long unbroken strings (URLs, base64, json blobs)
-     at any character so the cell stays within its share. `.ts` opts out
-     so timestamps stay on one line. Combined with the `pre` rules below,
-     no row pushes the page wider than its container. */
+  /* `table-layout: fixed` is what actually makes `<pre>` inside a `<td>`
+     wrap. With auto layout the column expands to fit the JSON's longest
+     line and `overflow-wrap` never triggers. Fixed layout caps each
+     column at its declared/derived width and forces inner content to
+     wrap. Combined with the wrap rules below, no row pushes the page
+     wider than its container. */
+  table { table-layout: fixed }
   td, th { overflow-wrap: anywhere; word-break: break-word }
-  .ts { white-space: nowrap }
+  .ts { white-space: nowrap; width: 12em }
+  .type { width: 14em }
   .summary { color: #444 }
   /* `pre-wrap` preserves newlines (JSON indentation, briefing layout)
      but lets long lines wrap at whitespace; `overflow-wrap: anywhere`
