@@ -77,6 +77,8 @@ _CSS = """<style>
   th { background: #fafafa; color: #666; font-weight: 500; font-size: 11px; text-transform: uppercase }
   tr.failure { background: #fff7f7 }
   tr.failure td.type { color: #c33 }
+  tr.warning { background: #fffbea }
+  tr.warning td.type { color: #b87000 }
   tr.lifecycle td.type { color: #2a8 }
   .ts { color: #888; font-family: ui-monospace, monospace; font-size: 12px; white-space: nowrap }
   .type { font-family: ui-monospace, monospace; font-weight: 500 }
@@ -119,9 +121,21 @@ def _layout(title: str, body: str) -> str:
     )
 
 
+# Web-UI-only "warning" tier — events that aren't failures (the task still
+# landed in Complete, the daemon is healthy) but the operator should notice.
+# Deliberately NOT added to diagnose.FAILURE_EVENT_TYPES: that set drives the
+# watchdog's "is the daemon broken?" Mattermost report, where these would be
+# false positives.
+_WARNING_EVENT_TYPES = frozenset({
+    "verification_partial",
+})
+
+
 def _row_class(typ: str) -> str:
     if typ in diagnose.FAILURE_EVENT_TYPES:
         return "failure"
+    if typ in _WARNING_EVENT_TYPES:
+        return "warning"
     if typ in {"task_start", "task_complete", "cron_start", "cron_complete",
                "ideation_empty_board", "ideation_complete", "daemon_start",
                "daemon_stop", "backlog_auto_promoted"}:
@@ -239,7 +253,8 @@ def _render_events(cfg: Config, *, typ: str | None, n: int) -> str:
     # Quick-filter buttons for the most common types.
     quick = ["task_complete", "task_error", "cron_complete", "cron_error",
              "ideation_empty_board", "ideation_complete", "ideation_error",
-             "verification_failed", "backlog_auto_promoted", "daemon_start"]
+             "verification_failed", "verification_partial",
+             "backlog_auto_promoted", "daemon_start"]
     filt = '<div class="filter">filter:'
     filt += f' <a href="/events?n={n}" class="{"on" if not typ else ""}">all</a>'
     for k in quick:

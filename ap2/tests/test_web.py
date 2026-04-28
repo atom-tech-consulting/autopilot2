@@ -53,6 +53,30 @@ def test_home_marks_failure_class(project: Config):
     assert 'class="failure"' in html
 
 
+def test_verification_partial_gets_warning_tint(project: Config):
+    """`verification_partial` lands tasks in Complete, so it's not a daemon-
+    health failure (and isn't in diagnose.FAILURE_EVENT_TYPES). But the
+    operator should still notice it — partial verdicts often signal a prose
+    bullet the SDK judge can't evaluate. Web UI gives it a `warning` class
+    distinct from `failure`."""
+    ev_mod.append(project.events_file, "verification_partial",
+                  task="TB-3", criterion="some prose claim")
+    html = web._render_events(project, typ=None, n=50)
+    assert 'class="warning"' in html
+    # Sanity: verification_partial did NOT also pick up the failure class.
+    rows = html.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    partial_row = next(r for r in rows.split("<tr ") if "verification_partial" in r)
+    assert 'class="warning"' in partial_row
+    assert 'class="failure"' not in partial_row
+
+
+def test_verification_partial_in_quick_filters(project: Config):
+    """The events page exposes a `verification_partial` quick-filter button so
+    the operator can see all of them at once without typing the URL."""
+    html = web._render_events(project, typ=None, n=10)
+    assert "?type=verification_partial" in html
+
+
 def test_events_renders_full_text(project: Config):
     """Truncation-free rendering — long values land verbatim in the page.
 
