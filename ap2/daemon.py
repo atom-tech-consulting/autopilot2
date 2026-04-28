@@ -414,6 +414,18 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     events.append(cfg.events_file, "cron_start", job=job.name)
     allowed = job.allowed_tools or CONTROL_AGENT_TOOLS
 
+    # Mirror run_task's debug capture so an opaque SDK subprocess crash
+    # (exit 1 with no propagated stderr) leaves us the prompt + stderr tail.
+    prompt_dump, _, _ = _prep_debug_dumps(cfg, f"cron-{job.name}")
+    prompt_dump.write_text(prompt)
+
+    stderr_lines: list[str] = []
+
+    def _stderr_sink(line: str) -> None:
+        stderr_lines.append(line)
+        if len(stderr_lines) > 200:
+            del stderr_lines[: len(stderr_lines) - 200]
+
     async def _consume() -> None:
         async for _ in sdk.query(
             prompt=prompt,
@@ -424,6 +436,7 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
                 permission_mode="bypassPermissions",
                 max_turns=job.max_turns,
                 setting_sources=["project"],
+                stderr=_stderr_sink,
             ),
         ):
             pass
@@ -436,6 +449,8 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
             "cron_timeout",
             job=job.name,
             timeout_s=cfg.control_timeout_s,
+            stderr_tail="\n".join(stderr_lines[-30:]),
+            prompt_dump=str(prompt_dump),
         )
     except Exception as e:  # noqa: BLE001
         events.append(
@@ -443,6 +458,8 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
             "cron_error",
             job=job.name,
             error=f"{type(e).__name__}: {e}",
+            stderr_tail="\n".join(stderr_lines[-30:]),
+            prompt_dump=str(prompt_dump),
         )
     finally:
         mark_run(cfg.cron_state_file, job.name)
