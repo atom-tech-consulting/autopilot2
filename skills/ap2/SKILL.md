@@ -48,7 +48,7 @@ daemon:   running (pid <N>, up <ETIME>)  OR  stopped (stale pid file / no pid fi
 
 ### 3. Recent events — tail `.cc-autopilot/events.jsonl`
 
-Show the last 10 events of interesting types (`task_start`, `task_complete`, `task_error`, `task_timeout`, `retry_exhausted`, `backlog_auto_promoted`, `cron_complete`, `daemon_start`, `daemon_stop`, `mattermost*`). Skip noisy `cron_start`. Format one line per event:
+Show the last 10 events of interesting types (`task_start`, `task_complete`, `task_error`, `task_timeout`, `retry_exhausted`, `backlog_auto_promoted`, `cron_complete`, `ideation_empty_board`, `ideation_complete`, `ideation_error`, `ideation_timeout`, `daemon_start`, `daemon_stop`, `mattermost*`). Skip noisy `cron_start`. Format one line per event:
 
 ```
 <ts>  <type>  <key=val key=val...>
