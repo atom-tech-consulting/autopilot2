@@ -16,8 +16,8 @@ Configuration:
 - Default prompt: `ap2/ideation.default.md` shipped with the package.
 - Project override (optional): `.cc-autopilot/ideation_prompt.md` in the
   project root — when present, it replaces the default verbatim.
-- Cooldown: `AP2_IDEATION_COOLDOWN_S` (default 3600), with the legacy
-  `AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S` and intermediate
+- Cooldown: `AP2_IDEATION_COOLDOWN_S` (default 7200 — 2h), with the
+  legacy `AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S` and intermediate
   `AP2_EMPTY_BOARD_COOLDOWN_S` env vars honored as fallbacks.
 - Max turns: `AP2_IDEATION_MAX_TURNS` (default 30 — bumped from the legacy
   cron-default 15 because the assessment + failure-review + proposal flow
@@ -37,6 +37,7 @@ from .cron import CronJob, load_state
 
 IDEATION_NAME = "ideation"
 IDEATION_MAX_TURNS_DEFAULT = 30
+IDEATION_COOLDOWN_DEFAULT_S = 7200  # 2h between fires when board stays empty
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
 _PROJECT_PROMPT_REL = ".cc-autopilot/ideation_prompt.md"
@@ -65,7 +66,7 @@ def _cooldown_s() -> int:
                 return int(v)
             except ValueError:
                 continue
-    return 3600
+    return IDEATION_COOLDOWN_DEFAULT_S
 
 
 async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
