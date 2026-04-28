@@ -82,8 +82,21 @@ _CSS = """<style>
   tr.lifecycle td.type { color: #2a8 }
   .ts { color: #888; font-family: ui-monospace, monospace; font-size: 12px; white-space: nowrap }
   .type { font-family: ui-monospace, monospace; font-weight: 500 }
-  .summary { color: #444; word-break: break-word }
-  pre { background: #f5f5f5; padding: 0.6rem; border-radius: 4px; overflow-x: auto;
+  /* Tables fill the viewport and never horizontally scroll. Auto layout
+     allocates column widths from content; `overflow-wrap: anywhere` on
+     every cell wraps long unbroken strings (URLs, base64, json blobs)
+     at any character so the cell stays within its share. `.ts` opts out
+     so timestamps stay on one line. Combined with the `pre` rules below,
+     no row pushes the page wider than its container. */
+  td, th { overflow-wrap: anywhere; word-break: break-word }
+  .ts { white-space: nowrap }
+  .summary { color: #444 }
+  /* `pre-wrap` preserves newlines (JSON indentation, briefing layout)
+     but lets long lines wrap at whitespace; `overflow-wrap: anywhere`
+     on the `pre` itself breaks rare unbroken strings (long URL, base64)
+     at any character so nothing escapes the cell. */
+  pre { background: #f5f5f5; padding: 0.6rem; border-radius: 4px;
+        white-space: pre-wrap; overflow-wrap: anywhere;
         font-size: 12px; line-height: 1.4; font-family: ui-monospace, monospace }
   details summary { cursor: pointer; color: #06c; font-size: 12px; user-select: none }
   details[open] summary { margin-bottom: 0.3rem }
