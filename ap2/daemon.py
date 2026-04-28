@@ -57,7 +57,7 @@ signal.signal(signal.SIGTERM, _handle_signal)
 signal.signal(signal.SIGINT, _handle_signal)
 
 
-async def run_task(cfg: Config, sdk, task) -> None:
+async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     """Execute a single Ready task in an isolated SDK query()."""
     prompt = prompts.build_task_prompt(cfg, task)
     events.append(cfg.events_file, "task_start", task=task.id, title=task.title)
@@ -110,6 +110,7 @@ async def run_task(cfg: Config, sdk, task) -> None:
             prompt=prompt,
             options=sdk.ClaudeAgentOptions(
                 cwd=str(cfg.project_root),
+                mcp_servers={"autopilot": mcp_server},
                 allowed_tools=TASK_AGENT_TOOLS,
                 disallowed_tools=["Bash(git push*)", "Bash(rm -rf *)"],
                 permission_mode="bypassPermissions",
@@ -1012,7 +1013,7 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
                 board = Board.load(cfg.tasks_file)
                 task = board.next_ready()
         if task:
-            await run_task(cfg, sdk, task)
+            await run_task(cfg, sdk, mcp_server, task)
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "task_error", error=f"{type(e).__name__}: {e}")
 

@@ -124,7 +124,7 @@ def test_task_timeout_moves_to_backlog(cfg, monkeypatch):
     task = board.get("TB-5")
 
     sdk = _sdk_hanging(sleep_s=5)
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
 
     b2 = Board.load(cfg.tasks_file)
     # After 1 failure (max_retries=2), task should be in Backlog, not Frozen.
@@ -146,7 +146,7 @@ def test_retry_exhaustion_moves_to_frozen(cfg):
     sdk = _sdk_raising(RuntimeError("boom"))
 
     # Run once. Task goes to Backlog.
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
     b = Board.load(cfg.tasks_file)
     assert b.find("TB-5")[0] == "Backlog"
     assert retry.attempt_count(cfg.retry_state_file, "TB-5") == 1
@@ -155,7 +155,7 @@ def test_retry_exhaustion_moves_to_frozen(cfg):
     from ap2.tools import do_board_edit
     do_board_edit(cfg, {"action": "move_to_ready", "task_id": "TB-5"})
     task2 = Board.load(cfg.tasks_file).get("TB-5")
-    asyncio.run(run_task(cfg, sdk, task2))
+    asyncio.run(run_task(cfg, sdk, None, task2))
 
     b2 = Board.load(cfg.tasks_file)
     assert b2.find("TB-5")[0] == "Frozen"
@@ -174,7 +174,7 @@ def test_successful_run_resets_attempt_counter(cfg):
     sdk = _sdk_yielding(
         "RESULT:\nstatus: complete\ncommit: abc12345\nsummary: did it\n"
     )
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
 
     b2 = Board.load(cfg.tasks_file)
     assert b2.find("TB-5")[0] == "Complete"
@@ -190,7 +190,7 @@ def test_run_task_emits_start_and_complete_events(cfg):
     sdk = _sdk_yielding(
         "RESULT:\nstatus: complete\ncommit: deadbeef\nsummary: done\n"
     )
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
     evts = events.tail(cfg.events_file, 20)
     kinds = [e["type"] for e in evts]
     assert "task_start" in kinds
@@ -209,7 +209,7 @@ def test_run_task_does_not_bump_next_task_id(cfg, tmp_path):
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
     sdk = _sdk_yielding("RESULT:\nstatus: complete\nsummary: ok\n")
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
     after = (tmp_path / "CLAUDE.md").read_text()
     assert "TB-10" in after
     assert before == after
@@ -226,7 +226,7 @@ def test_run_task_appends_progress_section_on_complete(cfg):
         "files_changed: a.py, b.py\n"
         "tests_passed: true\n"
     )
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
 
     text = cfg.progress_file.read_text()
     # Section header with task id + title — not a bare bullet.
@@ -246,7 +246,7 @@ def test_run_task_progress_skips_empty_fields(cfg):
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
     sdk = _sdk_yielding("RESULT:\nstatus: complete\nsummary: short\n")
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
     text = cfg.progress_file.read_text()
     assert "TB-5: Victim" in text
     assert "short" in text
@@ -268,7 +268,7 @@ def test_run_task_applies_cron_add_on_complete(cfg):
         "summary: wired it up\n"
         "cron: add name=newjob interval=2h prompt=\"do thing\"\n"
     )
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
 
     jobs = {j.name: j for j in load_jobs(cfg.cron_file)}
     assert "newjob" in jobs
@@ -291,7 +291,7 @@ def test_run_task_skips_cron_on_incomplete(cfg):
         "summary: stuck\n"
         "cron: add name=shouldnotappear interval=1h prompt=\"noop\"\n"
     )
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
 
     jobs = load_jobs(cfg.cron_file)
     assert not any(j.name == "shouldnotappear" for j in jobs)
@@ -306,7 +306,7 @@ def test_run_task_logs_rejected_cron_directive(cfg):
         "summary: tried a bad directive\n"
         "cron: bogus-action name=x\n"
     )
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
     evts = events.tail(cfg.events_file, 20)
     assert any(
         e["type"] == "cron_proposal_rejected" and "bogus-action" in e.get("reason", "")
@@ -328,7 +328,7 @@ def test_run_task_blocked_moves_to_backlog_and_writes_attempts(cfg, tmp_path):
     sdk = _sdk_yielding(
         "RESULT:\nstatus: blocked\nsummary: needs human input\n"
     )
-    asyncio.run(run_task(cfg, sdk, task))
+    asyncio.run(run_task(cfg, sdk, None, task))
 
     b2 = Board.load(cfg.tasks_file)
     # max_retries=2 → first failure should park in Backlog, not Frozen.
