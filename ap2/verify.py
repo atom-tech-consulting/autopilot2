@@ -42,8 +42,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+# `^##\s+Verification\b[^\n]*$` matches any heading that STARTS with
+# `## Verification` — bare (`## Verification`) or with any trailing
+# disambiguator (`## Verification (launch-task)`, `## Verification: launch`,
+# `## Verification — output artifacts`, etc.). The `\b` keeps `## Verifications`
+# (plural) and `## VerificationTable` from matching. TB-91 fix relied on the
+# launch task's heading being exactly `## Verification`; ideation agents have
+# been adding parentheticals like `(launch-task — ...)` for clarity, which
+# silently fell through to the validation_briefing's inner heading and ran
+# pipeline-output checks at launch time (TB-146 retry-exhausted into Frozen
+# this way 2026-04-28).
 _VERIFICATION_HEADER_RE = re.compile(
-    r"^##\s+Verification\s*$(.*?)(?=^##\s|\Z)", re.M | re.S
+    r"^##\s+Verification\b[^\n]*$(.*?)(?=^##\s|\Z)", re.M | re.S
 )
 # Bullet starts with `- ` then optional backtick command at the start.
 _BULLET_RE = re.compile(r"^\s*-\s+(.*?)(?=\n\s*-\s+|\n\s*\n|\Z)", re.S | re.M)

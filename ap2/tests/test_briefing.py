@@ -116,6 +116,70 @@ def test_parse_verification_picks_last_section_for_pipeline_launch_briefings():
     assert not any("reports/x/best.json" in c for c in commands), commands
 
 
+def test_parse_verification_picks_last_section_with_parenthetical_heading():
+    """TB-146 regression: ideation agents add parenthetical disambiguators
+    to the launch task's heading like `## Verification (launch-task — ...)`.
+    The original TB-91 regex `^##\\s+Verification\\s*$` required nothing-but-
+    whitespace until EOL, so the parenthetical heading didn't match — only
+    the bare validation_briefing heading did, and the verifier ran pipeline-
+    output checks at launch time. Stoch's TB-146 retry-exhausted into Frozen
+    this way on 2026-04-28 even though the launch agent had committed
+    correctly and called pipeline_task_start.
+
+    The fix tolerates any trailing content after `## Verification` so the
+    last-match still lands on the launch task's heading.
+    """
+    text = (
+        "# TB-X: Pipeline launch\n\n"
+        "## Scope\n"
+        "Call pipeline_task_start with validation_briefing.\n\n"
+        "## validation_briefing content\n\n"
+        "```\n"
+        "## Verification\n\n"
+        "- `test -f reports/x/out.json` — output artifact exists\n"
+        "- `bash -c \"grep -q 'WFO' reports/x/out.md\"` — content check\n"
+        "```\n\n"
+        "## Verification (launch-task — checks at LAUNCH-COMPLETION time, before pipeline output exists)\n\n"
+        "- `uv run pytest tests/test_x.py -q` — unit tests pass\n"
+        "- `test -f scripts/run_x.py` — script present\n"
+    )
+    bullets = parse_verification_section(text)
+    assert bullets is not None
+    commands = [b.command for b in bullets]
+    # Launch-time bullets should be picked.
+    assert any("pytest" in c for c in commands), commands
+    assert any("scripts/run_x.py" in c for c in commands), commands
+    # Pipeline-output bullets must NOT be picked.
+    assert not any("reports/x/out.json" in c for c in commands), commands
+    assert not any("WFO" in c for c in commands), commands
+
+
+def test_parse_verification_picks_last_with_other_trailing_disambiguators():
+    """Same regex tolerance check with a few other shapes the agent might
+    write — colons, em-dashes, simple phrases."""
+    for trailer in (": launch-time", " — output", " (post-launch)", "  "):
+        text = (
+            "## Verification\n- `pre-bullet`\n\n"
+            f"## Verification{trailer}\n- `final-bullet`\n"
+        )
+        bullets = parse_verification_section(text)
+        assert bullets is not None and len(bullets) == 1, (trailer, bullets)
+        assert bullets[0].command == "final-bullet", (trailer, bullets[0])
+
+
+def test_parse_verification_word_boundary_excludes_lookalikes():
+    """Don't match `## Verifications` (plural) or `## VerificationTable`;
+    `\\b` enforces word boundary after `Verification`."""
+    text = (
+        "## Verifications\n- `nope`\n\n"
+        "## VerificationTable\n- `also-nope`\n\n"
+        "## Verification\n- `yes`\n"
+    )
+    bullets = parse_verification_section(text)
+    assert bullets is not None and len(bullets) == 1
+    assert bullets[0].command == "yes"
+
+
 def test_parse_verification_single_section_unchanged():
     """For ordinary single-`## Verification` briefings (the common case),
     last-match equals first-match — TB-91 should not change behavior.
