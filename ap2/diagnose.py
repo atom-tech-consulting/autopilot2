@@ -70,6 +70,7 @@ FAILURE_EVENT_TYPES = frozenset({
     "mattermost_error",
     "mm_poll_error",
     "ideation_error",
+    "ideation_timeout",
     "auto_diagnose_post_error",
 })
 

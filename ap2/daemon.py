@@ -398,26 +398,36 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
         )
 
 
-async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
-    # Refresh the insights index before any cron job — ideation reads it
-    # for grounding, status-report may surface insight summaries, future
-    # cron jobs ditto. Lazy: no-op when nothing changed (TB-89).
-    try:
-        from . import insights
+async def _run_control_agent(
+    cfg: Config,
+    sdk,
+    mcp_server,
+    *,
+    label: str,
+    prompt: str,
+    allowed_tools,
+    max_turns: int,
+) -> tuple[str | None, str, Path]:
+    """Run a control-agent SDK query with prompt-dump + stderr capture.
 
-        insights.maybe_regenerate_index(cfg)
-    except Exception:  # noqa: BLE001
-        # Insight index regen failure must NOT block cron execution.
-        # The daemon proceeds with whatever index already exists.
-        pass
+    Shared plumbing for `run_cron` (scheduled jobs like status-report) and
+    `ideation._maybe_ideate` (empty-board ideation runs). The caller owns
+    the surrounding event vocabulary, cooldown bookkeeping, and state
+    commit so each call site can name its lifecycle events appropriately
+    (`cron_*` vs `ideation_*`) without the helper deciding for it.
 
-    prompt = prompts.build_cron_prompt(cfg, job.name, job.prompt)
-    events.append(cfg.events_file, "cron_start", job=job.name)
-    allowed = job.allowed_tools or CONTROL_AGENT_TOOLS
-
+    Returns ``(error, stderr_tail, prompt_dump_path)``:
+      - ``error`` is None on success, ``"timeout"`` on TimeoutError, or
+        ``"<ExceptionType>: <msg>"`` for any other exception.
+      - ``stderr_tail`` is the last 30 lines of the SDK subprocess stderr
+        (empty string on success in the common path).
+      - ``prompt_dump_path`` is the file under
+        ``.cc-autopilot/debug/`` the caller can include in a failure
+        event so the prompt is recoverable for offline diagnosis.
+    """
     # Mirror run_task's debug capture so an opaque SDK subprocess crash
     # (exit 1 with no propagated stderr) leaves us the prompt + stderr tail.
-    prompt_dump, _, _ = _prep_debug_dumps(cfg, f"cron-{job.name}")
+    prompt_dump, _, _ = _prep_debug_dumps(cfg, label)
     prompt_dump.write_text(prompt)
 
     stderr_lines: list[str] = []
@@ -433,9 +443,9 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
             options=sdk.ClaudeAgentOptions(
                 cwd=str(cfg.project_root),
                 mcp_servers={"autopilot": mcp_server},
-                allowed_tools=allowed,
+                allowed_tools=allowed_tools,
                 permission_mode="bypassPermissions",
-                max_turns=job.max_turns,
+                max_turns=max_turns,
                 setting_sources=["project"],
                 stderr=_stderr_sink,
             ),
@@ -445,29 +455,46 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     try:
         await asyncio.wait_for(_consume(), timeout=cfg.control_timeout_s)
     except asyncio.TimeoutError:
+        return "timeout", "\n".join(stderr_lines[-30:]), prompt_dump
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}", "\n".join(stderr_lines[-30:]), prompt_dump
+    return None, "", prompt_dump
+
+
+async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
+    prompt = prompts.build_cron_prompt(cfg, job.name, job.prompt)
+    events.append(cfg.events_file, "cron_start", job=job.name)
+    err, stderr_tail, prompt_dump = await _run_control_agent(
+        cfg,
+        sdk,
+        mcp_server,
+        label=f"cron-{job.name}",
+        prompt=prompt,
+        allowed_tools=job.allowed_tools or CONTROL_AGENT_TOOLS,
+        max_turns=job.max_turns,
+    )
+    if err == "timeout":
         events.append(
             cfg.events_file,
             "cron_timeout",
             job=job.name,
             timeout_s=cfg.control_timeout_s,
-            stderr_tail="\n".join(stderr_lines[-30:]),
+            stderr_tail=stderr_tail,
             prompt_dump=str(prompt_dump),
         )
-    except Exception as e:  # noqa: BLE001
+    elif err is not None:
         events.append(
             cfg.events_file,
             "cron_error",
             job=job.name,
-            error=f"{type(e).__name__}: {e}",
-            stderr_tail="\n".join(stderr_lines[-30:]),
+            error=err,
+            stderr_tail=stderr_tail,
             prompt_dump=str(prompt_dump),
         )
-    finally:
-        mark_run(cfg.cron_state_file, job.name)
-        events.append(cfg.events_file, "cron_complete", job=job.name)
-        # No-op for crons that didn't touch the board (e.g. status-report).
-        # Ideation proposals add Backlog tasks via board_edit, so commit those.
-        _commit_state_files(cfg, f"state: cron {job.name}")
+    mark_run(cfg.cron_state_file, job.name)
+    events.append(cfg.events_file, "cron_complete", job=job.name)
+    # No-op for crons that didn't touch the board (e.g. status-report).
+    _commit_state_files(cfg, f"state: cron {job.name}")
 
 
 def _extract_text(msg) -> str:

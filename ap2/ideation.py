@@ -30,7 +30,7 @@ from pathlib import Path
 from . import events
 from .board import Board
 from .config import Config
-from .cron import CronJob, load_state
+from .cron import load_state, mark_run
 
 
 IDEATION_NAME = "ideation"
@@ -63,11 +63,13 @@ def _cooldown_s() -> int:
 async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     """Fire ideation when the board is fully empty and the cooldown elapsed.
 
-    Reuses `daemon.run_cron` so prompt-dump, stderr capture, and event
-    logging are identical to scheduled cron jobs. The job name is
-    `ideation`, so cron_state.json's `ideation` key tracks the cooldown
-    just as it did under the old cron-yaml-driven design (and migrations
-    from that design preserve the cooldown across the cutover).
+    Reuses `daemon._run_control_agent` for SDK plumbing (prompt-dump,
+    stderr capture, MCP wiring) but owns its own event vocabulary —
+    `ideation_empty_board` on entry, `ideation_error` / `ideation_timeout`
+    on failure, and the agent's own `ideation_complete` log_event call as
+    the success-end marker. Cooldown is still tracked under the
+    `ideation` key in cron_state.json so the TB-95 migration from the
+    cron-yaml-driven design is unaffected.
 
     Set `AP2_IDEATION_DISABLED=1` to opt out entirely (the tests use this
     by default; it's also useful for projects that want to drive ideation
@@ -94,13 +96,50 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
         cooldown_s=cooldown,
         seconds_since_last=int(now - last) if last else None,
     )
-    job = CronJob(
-        name=IDEATION_NAME,
-        interval_s=0,  # not on a schedule — this code path is the only firer
-        prompt=load_prompt(cfg),
-        max_turns=int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT)),
-    )
-    # Lazy import to avoid daemon ↔ ideation circular dependency at module load.
-    from . import daemon as _daemon
+    # Refresh the insights index — ideation Step 0.5 reads
+    # `.cc-autopilot/insights/_index.md` for grounding (TB-89). Lazy:
+    # no-op when nothing changed. A failure here must NOT block the run.
+    try:
+        from . import insights
 
-    await _daemon.run_cron(cfg, sdk, mcp_server, job)
+        insights.maybe_regenerate_index(cfg)
+    except Exception:  # noqa: BLE001
+        pass
+    # Lazy imports to avoid daemon ↔ ideation circular dependency.
+    from . import daemon as _daemon
+    from . import prompts
+    from .tools import CONTROL_AGENT_TOOLS
+
+    # Reuse the control-agent prompt header so the existing ideation
+    # default keeps its `## Scheduled job: ideation` framing — the prompt
+    # was tuned against that header and rebuilding it here would drift
+    # from `prompts._CONTROL_HEADER`.
+    full_prompt = prompts.build_cron_prompt(cfg, IDEATION_NAME, load_prompt(cfg))
+    max_turns = int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT))
+    err, stderr_tail, prompt_dump = await _daemon._run_control_agent(
+        cfg,
+        sdk,
+        mcp_server,
+        label="ideation",
+        prompt=full_prompt,
+        allowed_tools=CONTROL_AGENT_TOOLS,
+        max_turns=max_turns,
+    )
+    if err == "timeout":
+        events.append(
+            cfg.events_file,
+            "ideation_timeout",
+            timeout_s=cfg.control_timeout_s,
+            stderr_tail=stderr_tail,
+            prompt_dump=str(prompt_dump),
+        )
+    elif err is not None:
+        events.append(
+            cfg.events_file,
+            "ideation_error",
+            error=err,
+            stderr_tail=stderr_tail,
+            prompt_dump=str(prompt_dump),
+        )
+    mark_run(cfg.cron_state_file, IDEATION_NAME)
+    _daemon._commit_state_files(cfg, "state: ideation")
