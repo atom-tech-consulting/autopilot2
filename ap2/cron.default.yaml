@@ -10,7 +10,7 @@ jobs:
     created_by: bootstrap
 
   - name: ideation
-    interval: 6h
+    trigger: empty_board
     prompt: |
       Goal: keep Backlog populated with high-leverage, goal-aligned tasks.
 
@@ -307,6 +307,5 @@ jobs:
           line. Wrap multiple steps in `\`bash -c '...'\`` or `&&`-chain.
       Prefer running concrete project commands (e.g. `uv run pytest -q`,
       `uv run python -m stoch ...`) over inventing new ones.
-    active_when: "sh:awk '/^## Backlog/{f=1;next}/^## /{f=0}f' TASKS.md | grep -c '^- \\[' | awk '{exit ($1>=3)}'"
     max_turns: 15
     created_by: bootstrap

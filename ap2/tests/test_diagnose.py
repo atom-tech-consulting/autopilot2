@@ -160,23 +160,25 @@ def test_render_markdown_skips_no_data_when_empty(tmp_path: Path):
 
 
 def test_cron_status_overdue_detection(tmp_path: Path):
-    """A cron job whose `last_fired` is more than 2 intervals ago is overdue."""
+    """`overdue` only applies to interval-triggered jobs; empty-board jobs
+    are reactive and can't be 'late' regardless of how long since last fire.
+    """
     cfg = _project(tmp_path)
-    # Bootstrap default cron.yaml so we have jobs to inspect.
-    from ap2.cron import bootstrap, mark_run, save_state, load_jobs, load_state
+    from ap2.cron import bootstrap, save_state, load_state
     bootstrap(cfg.cron_file)
 
-    # Force "ideation last fired 5h ago" — interval is 6h, so 5h is fine
-    # (under 2x). 13h would be overdue.
+    # status-report is interval=2h; ideation is empty-board triggered.
     fake_now = time.time()
     state = load_state(cfg.cron_state_file)
-    state["ideation"] = fake_now - (5 * 3600)  # 5h ago
-    state["status-report"] = fake_now - (5 * 3600)  # 5h ago, interval 2h → overdue (5h > 4h)
+    state["ideation"] = fake_now - (5 * 3600)  # 5h ago — would be "overdue" under the old rule
+    state["status-report"] = fake_now - (5 * 3600)  # 5h > 2h*2 = 4h → overdue
     cfg.cron_state_file.write_text(json.dumps(state))
 
     report = diagnose.build_report(cfg, now=fake_now)
     by_name = {c["name"]: c for c in report.cron_status}
-    assert by_name["ideation"]["overdue"] is False  # 5h < 12h (2 * 6h)
+    assert by_name["ideation"]["overdue"] is False  # empty-board never overdue
+    assert by_name["ideation"]["trigger"] == "empty_board"
+    assert by_name["ideation"]["interval_s"] is None
     assert by_name["status-report"]["overdue"] is True  # 5h > 4h (2 * 2h)
 
 

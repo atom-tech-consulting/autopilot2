@@ -26,17 +26,17 @@ def test_default_cron_parses_cleanly():
 
 def test_default_cron_intervals_are_sane():
     jobs = {j.name: j for j in load_jobs(DEFAULT)}
-    # 10 min → 4 h envelope for status-report; 1 h → 12 h for ideation.
+    # 10 min → 4 h envelope for status-report. Ideation no longer has an
+    # interval — it's empty-board triggered.
     assert 600 <= jobs["status-report"].interval_s <= 4 * 3600
-    assert 3600 <= jobs["ideation"].interval_s <= 12 * 3600
 
 
-def test_ideation_has_backlog_guard():
-    """The ideation job should only fire when the Backlog is under-full."""
+def test_ideation_uses_empty_board_trigger():
+    """Ideation fires only when the board (Active+Ready+Backlog) is fully
+    empty — no separate Backlog<3 cron gate. The empty-board trigger
+    subsumes the previous active_when guard."""
     jobs = {j.name: j for j in load_jobs(DEFAULT)}
-    aw = jobs["ideation"].active_when or ""
-    assert aw.startswith("sh:"), aw
-    assert "Backlog" in aw
+    assert jobs["ideation"].trigger == "empty_board"
 
 
 def test_bootstrap_copies_default(tmp_path: Path):
@@ -86,15 +86,15 @@ def test_ideation_prompt_mentions_followup_scan():
     assert "follow-up" in lower or "follow up" in lower
 
 
-def test_ideation_prompt_keeps_active_when():
-    """TB-49 set the Backlog<3 gate; TB-70 must NOT change when ideation runs.
-    The prompt content evolves but the firing condition is load-bearing.
+def test_ideation_firing_condition_is_load_bearing():
+    """TB-49 set a Backlog<3 cron gate; the empty-board refactor replaced
+    that with `trigger: empty_board` (fires when board is fully empty).
+    Pin the trigger value so the firing condition can't silently regress.
     """
     jobs = {j.name: j for j in load_jobs(DEFAULT)}
-    aw = jobs["ideation"].active_when or ""
-    assert aw.startswith("sh:")
-    assert "Backlog" in aw
-    assert "$1>=3" in aw  # the under-full threshold
+    assert jobs["ideation"].trigger == "empty_board"
+    # No active_when needed — the trigger is the gate.
+    assert jobs["ideation"].active_when in (None, "")
 
 
 def test_ideation_prompt_includes_pipeline_task_start_for_long_work():

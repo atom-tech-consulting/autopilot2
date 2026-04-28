@@ -255,13 +255,17 @@ def _cron_status(cfg: Config, now: float) -> list[dict]:
     out: list[dict] = []
     for j in jobs:
         last = state.get(j.name, 0.0) or 0.0
-        # Overdue if no last-fired AND been alive long enough; or last_fired
-        # is more than 2 intervals ago. "More than 2x" rather than "1x past
-        # the interval" so a normal scheduling jitter doesn't flip it.
-        overdue = bool(last and (now - last) > j.interval_s * 2)
+        # Overdue only applies to interval-triggered jobs. Empty-board jobs
+        # fire reactively when the board drains, not on a schedule, so a long
+        # gap since last fire just means the board has been busy — not late.
+        if j.trigger == "interval":
+            overdue = bool(last and (now - last) > j.interval_s * 2)
+        else:
+            overdue = False
         out.append({
             "name": j.name,
-            "interval_s": j.interval_s,
+            "trigger": j.trigger,
+            "interval_s": j.interval_s if j.trigger == "interval" else None,
             "last_fired": int(last) if last else None,
             "seconds_since_last": int(now - last) if last else None,
             "overdue": overdue,

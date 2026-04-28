@@ -129,19 +129,14 @@ def test_single_tick_auto_promotes_backlog_when_ready_empty(e2e_project):
 
 _IDEATION_CRON = {
     "name": "ideation",
-    "interval": "6h",
+    "trigger": "empty_board",
     "prompt": "Propose new tasks.",
     "max_turns": 5,
 }
 
 
 def test_tick_runs_ideation_when_board_is_empty(e2e_project):
-    """Empty board + cooldown elapsed → step-4 fires ideation via run_cron.
-
-    We seed cron_state with a timestamp 2h ago so the normal cron interval
-    (6h) still treats the job as not-yet-due in step 2, and only step-4's
-    empty-board path can fire it.
-    """
+    """Empty board + cooldown elapsed → step-4 fires ideation via run_cron."""
     import time
     from ap2.cron import save_state
 
@@ -177,17 +172,17 @@ def test_tick_skips_ideation_if_ready_has_work(e2e_project):
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
     evts = events.tail(cfg.events_file, 20)
-    # Cron step-2 fires normally (first run, no prior state). Step-4 marks
-    # cooldown unsatisfied because that same run just stamped cron_state.
-    # What we're verifying: no *separate* empty-board-triggered event.
     kinds = [e["type"] for e in evts]
+    # No empty-board fire because the task slot was occupied. With the
+    # `trigger: empty_board` design, no separate interval cron fires either.
     assert "ideation_empty_board" not in kinds
+    assert "cron_start" not in kinds
 
 
 def test_tick_ideation_honors_cooldown(e2e_project, monkeypatch):
     """A recent ideation run in cron_state.json suppresses the empty-board trigger."""
     import time
-    monkeypatch.setenv("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", "3600")
+    monkeypatch.setenv("AP2_EMPTY_BOARD_COOLDOWN_S", "3600")
     cfg = e2e_project(cron_jobs=[_IDEATION_CRON])
 
     from ap2.cron import save_state
@@ -198,6 +193,47 @@ def test_tick_ideation_honors_cooldown(e2e_project, monkeypatch):
 
     evts = events.tail(cfg.events_file, 20)
     kinds = [e["type"] for e in evts]
+    assert "ideation_empty_board" not in kinds
+    assert "cron_start" not in kinds
+
+
+def test_tick_ideation_legacy_cooldown_env_var(e2e_project, monkeypatch):
+    """Legacy AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S still honored as fallback."""
+    import time
+    monkeypatch.delenv("AP2_EMPTY_BOARD_COOLDOWN_S", raising=False)
+    monkeypatch.setenv("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", "3600")
+    cfg = e2e_project(cron_jobs=[_IDEATION_CRON])
+
+    from ap2.cron import save_state
+    save_state(cfg.cron_state_file, {"ideation": time.time() - 10})
+
+    sdk = FakeSDK()
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
+    assert "ideation_empty_board" not in kinds
+
+
+def test_tick_interval_trigger_does_not_fire_via_empty_board(e2e_project):
+    """Job with `trigger: interval` (default) is NOT picked up by empty-board path."""
+    import time
+    from ap2.cron import save_state
+
+    cron = {
+        "name": "ideation",
+        "interval": "6h",
+        "prompt": "Propose new tasks.",
+        "max_turns": 5,
+    }
+    cfg = e2e_project(cron_jobs=[cron])
+    # Make the interval not-yet-due so step-2 is a no-op; under the new
+    # design the empty-board path also skips because trigger != empty_board.
+    save_state(cfg.cron_state_file, {"ideation": time.time() - 60})
+
+    sdk = FakeSDK()
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
     assert "ideation_empty_board" not in kinds
     assert "cron_start" not in kinds
 

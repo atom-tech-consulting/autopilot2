@@ -1039,6 +1039,13 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
 
 
 async def _maybe_auto_ideate(cfg: Config, sdk, mcp_server) -> None:
+    """Fire any cron job with `trigger: empty_board` when the working board
+    (Active+Ready+Backlog) is fully empty. Throttled per-job by
+    `AP2_EMPTY_BOARD_COOLDOWN_S` (default 3600), with the legacy
+    `AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S` env var honored as a fallback for
+    back-compat. Reuses cron_state.json so per-job cooldown counts elapse from
+    any prior fire (including legacy interval-triggered runs).
+    """
     board = Board.load(cfg.tasks_file)
     has_work = any(
         next(board.iter_tasks(section=s), None) is not None
@@ -1047,21 +1054,33 @@ async def _maybe_auto_ideate(cfg: Config, sdk, mcp_server) -> None:
     if has_work:
         return
     jobs = load_jobs(cfg.cron_file)
-    ideation = next((j for j in jobs if j.name == "ideation"), None)
-    if ideation is None:
+    empty_board_jobs = [j for j in jobs if j.trigger == "empty_board"]
+    if not empty_board_jobs:
         return
-    cooldown_s = int(os.environ.get("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", 3600))
-    state = load_state(cfg.cron_state_file)
-    last = state.get("ideation", 0.0)
-    if time.time() - last < cooldown_s:
-        return
-    events.append(
-        cfg.events_file,
-        "ideation_empty_board",
-        cooldown_s=cooldown_s,
-        seconds_since_last=int(time.time() - last) if last else None,
+    cooldown_s = int(
+        os.environ.get(
+            "AP2_EMPTY_BOARD_COOLDOWN_S",
+            os.environ.get("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", 3600),
+        )
     )
-    await run_cron(cfg, sdk, mcp_server, ideation)
+    state = load_state(cfg.cron_state_file)
+    now = time.time()
+    for job in empty_board_jobs:
+        last = state.get(job.name, 0.0)
+        if now - last < cooldown_s:
+            continue
+        # Event name kept (`ideation_empty_board`) so the audit / status-report
+        # consumers built around the original ideation-only mechanism keep
+        # parsing it. `job` field added for cases where a project marks more
+        # than one job with `trigger: empty_board`.
+        events.append(
+            cfg.events_file,
+            "ideation_empty_board",
+            job=job.name,
+            cooldown_s=cooldown_s,
+            seconds_since_last=int(now - last) if last else None,
+        )
+        await run_cron(cfg, sdk, mcp_server, job)
 
 
 def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
