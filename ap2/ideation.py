@@ -16,9 +16,7 @@ Configuration:
 - Default prompt: `ap2/ideation.default.md` shipped with the package.
 - Project override (optional): `.cc-autopilot/ideation_prompt.md` in the
   project root — when present, it replaces the default verbatim.
-- Cooldown: `AP2_IDEATION_COOLDOWN_S` (default 7200 — 2h), with the
-  legacy `AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S` and intermediate
-  `AP2_EMPTY_BOARD_COOLDOWN_S` env vars honored as fallbacks.
+- Cooldown: `AP2_IDEATION_COOLDOWN_S` (default 7200 — 2h).
 - Max turns: `AP2_IDEATION_MAX_TURNS` (default 30 — bumped from the legacy
   cron-default 15 because the assessment + failure-review + proposal flow
   routinely needs ~10-15 turns and 15 was running close to the wire).
@@ -52,20 +50,13 @@ def load_prompt(cfg: Config) -> str:
 
 
 def _cooldown_s() -> int:
-    """Effective cooldown (seconds). Honors the new env var first, then the
-    transitional name from the empty-board generalization, then the legacy
-    name from the original empty-board ideation hook."""
-    for var in (
-        "AP2_IDEATION_COOLDOWN_S",
-        "AP2_EMPTY_BOARD_COOLDOWN_S",
-        "AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S",
-    ):
-        v = os.environ.get(var)
-        if v:
-            try:
-                return int(v)
-            except ValueError:
-                continue
+    """Effective cooldown (seconds), env-overridable."""
+    v = os.environ.get("AP2_IDEATION_COOLDOWN_S")
+    if v:
+        try:
+            return int(v)
+        except ValueError:
+            pass
     return IDEATION_COOLDOWN_DEFAULT_S
 
 

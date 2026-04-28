@@ -193,25 +193,6 @@ def test_tick_ideation_honors_cooldown(e2e_project, monkeypatch):
     assert "cron_start" not in kinds
 
 
-def test_tick_ideation_legacy_cooldown_env_var(e2e_project, monkeypatch):
-    """Legacy AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S still honored as fallback."""
-    import time
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.delenv("AP2_IDEATION_COOLDOWN_S", raising=False)
-    monkeypatch.delenv("AP2_EMPTY_BOARD_COOLDOWN_S", raising=False)
-    monkeypatch.setenv("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", "3600")
-    cfg = e2e_project(ideation_prompt=_TEST_IDEATION_PROMPT)
-
-    from ap2.cron import save_state
-    save_state(cfg.cron_state_file, {"ideation": time.time() - 10})
-
-    sdk = FakeSDK()
-    asyncio.run(_tick(cfg, sdk, mcp_server=None))
-
-    kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
-    assert "ideation_empty_board" not in kinds
-
-
 def test_tick_auto_promote_skips_blocked_backlog_task(e2e_project):
     """Top-of-Backlog has unmet `blocked on:` → daemon picks next eligible."""
     cfg = e2e_project()
