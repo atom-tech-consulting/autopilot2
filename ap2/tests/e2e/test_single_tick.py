@@ -131,16 +131,9 @@ _TEST_IDEATION_PROMPT = "Propose new tasks."
 
 
 def test_tick_runs_ideation_when_board_is_empty(e2e_project, monkeypatch):
-    """Empty board + cooldown elapsed → step-4 fires ap2.ideation._maybe_ideate.
-
-    Post-refactor: ideation runs on its own event vocabulary, not the
-    `cron_*` channel. `ideation_empty_board` fires at entry; success-end
-    is the agent's `ideation_complete` log_event (or any
-    `ideation_*`-class event from inside the run); failure modes are
-    `ideation_error` / `ideation_timeout`.
-    """
+    """Empty board + cooldown elapsed → step-4 fires ap2.ideation._maybe_ideate."""
     import time
-    from ap2.cron import save_state
+    from ap2.cron import load_state, save_state
 
     monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
     monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
@@ -150,17 +143,14 @@ def test_tick_runs_ideation_when_board_is_empty(e2e_project, monkeypatch):
     sdk = FakeSDK()
     sdk.on("Propose new tasks.", text_respond("proposed 3 tasks"))
 
+    t0 = time.time()
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
-    evts = events.tail(cfg.events_file, 20)
-    kinds = [e["type"] for e in evts]
+    kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
     assert "ideation_empty_board" in kinds
-    # Ideation no longer emits cron_* events.
     assert "cron_start" not in kinds
     assert "cron_complete" not in kinds
-    # Cooldown was advanced via mark_run("ideation").
-    from ap2.cron import load_state
-    assert load_state(cfg.cron_state_file).get("ideation", 0) >= time.time() - 5
+    assert load_state(cfg.cron_state_file).get("ideation", 0) >= t0
 
 
 def test_tick_skips_ideation_if_ready_has_work(e2e_project):
@@ -240,6 +230,7 @@ def test_tick_first_run_fires_ideation_with_default_prompt(e2e_project, monkeypa
     `skipped_when_no_ideation_cron_configured` test: under the new design
     ideation is always available."""
     import time
+    from ap2.cron import load_state
     monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
     monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
     cfg = e2e_project()
@@ -247,10 +238,8 @@ def test_tick_first_run_fires_ideation_with_default_prompt(e2e_project, monkeypa
     # The default prompt contains "ideation_state_write" prominently — match
     # on that so we don't tie the test to a less-stable substring.
     sdk.on("ideation_state_write", text_respond("proposed"))
+    t0 = time.time()
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
     kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
     assert "ideation_empty_board" in kinds
-    # Ideation no longer rides on cron_complete; cooldown advance is the
-    # observable signal that the run finished.
-    from ap2.cron import load_state
-    assert load_state(cfg.cron_state_file).get("ideation", 0) >= time.time() - 5
+    assert load_state(cfg.cron_state_file).get("ideation", 0) >= t0

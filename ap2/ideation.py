@@ -116,7 +116,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     # from `prompts._CONTROL_HEADER`.
     full_prompt = prompts.build_cron_prompt(cfg, IDEATION_NAME, load_prompt(cfg))
     max_turns = int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT))
-    err, stderr_tail, prompt_dump = await _daemon._run_control_agent(
+    timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
         cfg,
         sdk,
         mcp_server,
@@ -125,7 +125,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
         allowed_tools=CONTROL_AGENT_TOOLS,
         max_turns=max_turns,
     )
-    if err == "timeout":
+    if timed_out:
         events.append(
             cfg.events_file,
             "ideation_timeout",
@@ -133,13 +133,15 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
             stderr_tail=stderr_tail,
             prompt_dump=str(prompt_dump),
         )
-    elif err is not None:
+    elif error is not None:
         events.append(
             cfg.events_file,
             "ideation_error",
-            error=err,
+            error=error,
             stderr_tail=stderr_tail,
             prompt_dump=str(prompt_dump),
         )
+    # Always advance the cooldown — even on failure — so a broken
+    # ideation agent doesn't get hammered every tick.
     mark_run(cfg.cron_state_file, IDEATION_NAME)
     _daemon._commit_state_files(cfg, "state: ideation")

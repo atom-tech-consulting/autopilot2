@@ -76,14 +76,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     prompt_dump, stream_dump, messages_dump = _prep_debug_dumps(cfg, task.id)
     prompt_dump.write_text(prompt)
 
-    # Ring buffer for SDK subprocess stderr — without this the SDK raises
-    # ProcessError with a useless "Check stderr output for details" message.
-    stderr_lines: list[str] = []
-
-    def _stderr_sink(line: str) -> None:
-        stderr_lines.append(line)
-        if len(stderr_lines) > 200:
-            del stderr_lines[: len(stderr_lines) - 200]
+    stderr_lines, _stderr_sink = _make_stderr_sink()
 
     # Ring buffer of stream-message summaries so we can attach the last few
     # messages to the error event; dumps to disk for full history.
@@ -398,6 +391,25 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
         )
 
 
+def _make_stderr_sink() -> tuple[list[str], "callable"]:
+    """200-line ring buffer for SDK subprocess stderr, plus an `stderr=`
+    callback the SDK will invoke per line. The caller pulls
+    ``"\\n".join(buf[-30:])`` for failure-event payloads.
+
+    Without this, the SDK raises ProcessError with the useless "Check
+    stderr output for details" sentinel and no way to see the actual
+    crash. Used by both `run_task` and `_run_control_agent`.
+    """
+    buf: list[str] = []
+
+    def sink(line: str) -> None:
+        buf.append(line)
+        if len(buf) > 200:
+            del buf[: len(buf) - 200]
+
+    return buf, sink
+
+
 async def _run_control_agent(
     cfg: Config,
     sdk,
@@ -407,35 +419,18 @@ async def _run_control_agent(
     prompt: str,
     allowed_tools,
     max_turns: int,
-) -> tuple[str | None, str, Path]:
-    """Run a control-agent SDK query with prompt-dump + stderr capture.
+) -> tuple[bool, str | None, str, Path]:
+    """SDK plumbing for control-agent runs (cron jobs, ideation).
 
-    Shared plumbing for `run_cron` (scheduled jobs like status-report) and
-    `ideation._maybe_ideate` (empty-board ideation runs). The caller owns
-    the surrounding event vocabulary, cooldown bookkeeping, and state
-    commit so each call site can name its lifecycle events appropriately
-    (`cron_*` vs `ideation_*`) without the helper deciding for it.
-
-    Returns ``(error, stderr_tail, prompt_dump_path)``:
-      - ``error`` is None on success, ``"timeout"`` on TimeoutError, or
-        ``"<ExceptionType>: <msg>"`` for any other exception.
-      - ``stderr_tail`` is the last 30 lines of the SDK subprocess stderr
-        (empty string on success in the common path).
-      - ``prompt_dump_path`` is the file under
-        ``.cc-autopilot/debug/`` the caller can include in a failure
-        event so the prompt is recoverable for offline diagnosis.
+    Returns ``(timed_out, error, stderr_tail, prompt_dump_path)``. On
+    success: ``(False, None, "", path)``. On timeout: ``(True, None,
+    tail, path)``. On any other exception: ``(False, "<Type>: <msg>",
+    tail, path)``. The caller owns the surrounding event vocabulary,
+    cooldown bookkeeping, and state commit.
     """
-    # Mirror run_task's debug capture so an opaque SDK subprocess crash
-    # (exit 1 with no propagated stderr) leaves us the prompt + stderr tail.
     prompt_dump, _, _ = _prep_debug_dumps(cfg, label)
     prompt_dump.write_text(prompt)
-
-    stderr_lines: list[str] = []
-
-    def _stderr_sink(line: str) -> None:
-        stderr_lines.append(line)
-        if len(stderr_lines) > 200:
-            del stderr_lines[: len(stderr_lines) - 200]
+    stderr_lines, stderr_sink = _make_stderr_sink()
 
     async def _consume() -> None:
         async for _ in sdk.query(
@@ -447,7 +442,7 @@ async def _run_control_agent(
                 permission_mode="bypassPermissions",
                 max_turns=max_turns,
                 setting_sources=["project"],
-                stderr=_stderr_sink,
+                stderr=stderr_sink,
             ),
         ):
             pass
@@ -455,16 +450,16 @@ async def _run_control_agent(
     try:
         await asyncio.wait_for(_consume(), timeout=cfg.control_timeout_s)
     except asyncio.TimeoutError:
-        return "timeout", "\n".join(stderr_lines[-30:]), prompt_dump
+        return True, None, "\n".join(stderr_lines[-30:]), prompt_dump
     except Exception as e:  # noqa: BLE001
-        return f"{type(e).__name__}: {e}", "\n".join(stderr_lines[-30:]), prompt_dump
-    return None, "", prompt_dump
+        return False, f"{type(e).__name__}: {e}", "\n".join(stderr_lines[-30:]), prompt_dump
+    return False, None, "", prompt_dump
 
 
 async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     prompt = prompts.build_cron_prompt(cfg, job.name, job.prompt)
     events.append(cfg.events_file, "cron_start", job=job.name)
-    err, stderr_tail, prompt_dump = await _run_control_agent(
+    timed_out, error, stderr_tail, prompt_dump = await _run_control_agent(
         cfg,
         sdk,
         mcp_server,
@@ -473,7 +468,7 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
         allowed_tools=job.allowed_tools or CONTROL_AGENT_TOOLS,
         max_turns=job.max_turns,
     )
-    if err == "timeout":
+    if timed_out:
         events.append(
             cfg.events_file,
             "cron_timeout",
@@ -482,12 +477,12 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
             stderr_tail=stderr_tail,
             prompt_dump=str(prompt_dump),
         )
-    elif err is not None:
+    elif error is not None:
         events.append(
             cfg.events_file,
             "cron_error",
             job=job.name,
-            error=err,
+            error=error,
             stderr_tail=stderr_tail,
             prompt_dump=str(prompt_dump),
         )
