@@ -258,7 +258,6 @@ def do_cron_edit(cfg: Config, args: dict) -> dict:
             cfg.cron_file,
             action,
             name=name,
-            trigger=args.get("trigger"),
             interval=args.get("interval"),
             prompt=args.get("prompt"),
             active_when=args.get("active_when"),
@@ -445,15 +444,10 @@ def build_mcp_server(cfg: Config):
 
     @tool(
         "cron_edit",
-        "Add, remove, or update a scheduled cron job. `trigger` selects the "
-        "scheduling mode: 'interval' (default — fires every `interval` when "
-        "`active_when` passes) or 'empty_board' (fires when Active+Ready+"
-        "Backlog are all empty, throttled by AP2_EMPTY_BOARD_COOLDOWN_S; "
-        "ignores `interval` and `active_when`).",
+        "Add, remove, or update a scheduled cron job.",
         {
             "action": str,
             "name": str,
-            "trigger": str,
             "interval": str,
             "prompt": str,
             "active_when": str,

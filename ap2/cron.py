@@ -35,15 +35,11 @@ def parse_interval(s: str | int) -> int:
     return n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
 
 
-VALID_TRIGGERS = ("interval", "empty_board")
-
-
 @dataclass
 class CronJob:
     name: str
     interval_s: int
     prompt: str
-    trigger: str = "interval"
     active_when: str | None = None
     max_turns: int = 15
     created_by: str | None = None
@@ -52,17 +48,10 @@ class CronJob:
 
     @classmethod
     def from_dict(cls, d: dict) -> "CronJob":
-        trigger = d.get("trigger", "interval")
-        if trigger not in VALID_TRIGGERS:
-            raise ValueError(f"unknown trigger {trigger!r}; expected one of {VALID_TRIGGERS}")
-        # interval is irrelevant for non-interval triggers but we keep a value
-        # on the dataclass for serialization symmetry; default it to the
-        # cooldown ceiling so any accidental due_jobs path remains harmless.
         return cls(
             name=d["name"],
             interval_s=parse_interval(d.get("interval", "1h")),
             prompt=d.get("prompt", "").strip(),
-            trigger=trigger,
             active_when=d.get("active_when"),
             max_turns=int(d.get("max_turns", 15)),
             created_by=d.get("created_by"),
@@ -73,15 +62,12 @@ class CronJob:
     def to_dict(self) -> dict:
         d: dict[str, Any] = {
             "name": self.name,
+            "interval": _interval_str(self.interval_s),
             "prompt": self.prompt,
             "max_turns": self.max_turns,
         }
-        if self.trigger == "interval":
-            d["interval"] = _interval_str(self.interval_s)
-            if self.active_when:
-                d["active_when"] = self.active_when
-        else:
-            d["trigger"] = self.trigger
+        if self.active_when:
+            d["active_when"] = self.active_when
         if self.created_by:
             d["created_by"] = self.created_by
         if self.created_at:
@@ -159,18 +145,10 @@ def update_job(cron_file: Path, action: str, **kw: Any) -> tuple[str, list[CronJ
             if any(j.name == name for j in jobs):
                 raise ValueError(f"job {name!r} already exists")
             mt = kw.get("max_turns")
-            trigger = kw.get("trigger") or "interval"
-            if trigger not in VALID_TRIGGERS:
-                raise ValueError(f"unknown trigger {trigger!r}; expected one of {VALID_TRIGGERS}")
-            interval_raw = kw.get("interval")
-            if trigger == "interval" and interval_raw is None:
-                raise ValueError("interval is required for trigger='interval'")
-            interval_s = parse_interval(interval_raw) if interval_raw is not None else 3600
             jobs.append(CronJob(
                 name=name,
-                interval_s=interval_s,
+                interval_s=parse_interval(kw["interval"]),
                 prompt=kw["prompt"].strip(),
-                trigger=trigger,
                 active_when=kw.get("active_when"),
                 max_turns=int(mt) if mt else 15,
                 created_by=kw.get("created_by"),
@@ -190,10 +168,6 @@ def update_job(cron_file: Path, action: str, **kw: Any) -> tuple[str, list[CronJ
             target = next((j for j in jobs if j.name == name), None)
             if target is None:
                 raise KeyError(f"job {name!r} not found")
-            if "trigger" in kw and kw["trigger"] is not None:
-                if kw["trigger"] not in VALID_TRIGGERS:
-                    raise ValueError(f"unknown trigger {kw['trigger']!r}; expected one of {VALID_TRIGGERS}")
-                target.trigger = kw["trigger"]
             if "interval" in kw and kw["interval"] is not None:
                 target.interval_s = parse_interval(kw["interval"])
             if "prompt" in kw and kw["prompt"] is not None:
@@ -233,18 +207,14 @@ def due_jobs(
     *,
     now: float | None = None,
 ) -> list[CronJob]:
-    """Return interval-triggered jobs whose interval has elapsed.
+    """Return jobs whose interval has elapsed since the last run (or never ran).
 
     `active_when` conditions are evaluated here — if false, the job is skipped
-    (not marked as run), so it'll be rechecked next tick. Jobs whose `trigger`
-    is not "interval" (e.g. `empty_board`) are skipped entirely; the daemon
-    fires those via a separate path.
+    (not marked as run), so it'll be rechecked next tick.
     """
     t = now if now is not None else time.time()
     out = []
     for j in jobs:
-        if j.trigger != "interval":
-            continue
         last = state.get(j.name, 0.0)
         if t - last < j.interval_s:
             continue

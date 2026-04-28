@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import diagnose, events, prompts, retry, tools, verify
+from . import diagnose, events, ideation, prompts, retry, tools, verify
 from .board import Board
 from .config import Config
 from .cron import (
@@ -1016,15 +1016,11 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "task_error", error=f"{type(e).__name__}: {e}")
 
-    # 4. Run any cron jobs marked `trigger: empty_board` when the working
-    # board (Active+Ready+Backlog) is fully empty. Throttled per-job by
-    # AP2_EMPTY_BOARD_COOLDOWN_S (default 3600) to avoid firing on every 30s
-    # tick. Shares cron_state.json so a normal scheduled run satisfies the
-    # cooldown and vice versa. Historically this only fired the `ideation`
-    # job (hence the ideation_empty_board event name); the trigger field
-    # generalizes the mechanism to any job that wants the same semantics.
+    # 4. Ideation: fire when the working board is fully empty, throttled by
+    # AP2_IDEATION_COOLDOWN_S (default 3600). Owned by `ap2.ideation`, not
+    # cron.yaml — see that module for the prompt + override mechanism.
     try:
-        await _maybe_run_empty_board_jobs(cfg, sdk, mcp_server)
+        await ideation._maybe_ideate(cfg, sdk, mcp_server)
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "ideation_error", error=f"{type(e).__name__}: {e}")
 
@@ -1040,49 +1036,6 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
                       error=f"{type(e).__name__}: {e}")
 
 
-async def _maybe_run_empty_board_jobs(cfg: Config, sdk, mcp_server) -> None:
-    """Fire any cron job with `trigger: empty_board` when the working board
-    (Active+Ready+Backlog) is fully empty. Throttled per-job by
-    `AP2_EMPTY_BOARD_COOLDOWN_S` (default 3600), with the legacy
-    `AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S` env var honored as a fallback for
-    back-compat. Reuses cron_state.json so per-job cooldown counts elapse from
-    any prior fire (including legacy interval-triggered runs).
-    """
-    board = Board.load(cfg.tasks_file)
-    has_work = any(
-        next(board.iter_tasks(section=s), None) is not None
-        for s in ("Active", "Ready", "Backlog")
-    )
-    if has_work:
-        return
-    jobs = load_jobs(cfg.cron_file)
-    empty_board_jobs = [j for j in jobs if j.trigger == "empty_board"]
-    if not empty_board_jobs:
-        return
-    cooldown_s = int(
-        os.environ.get(
-            "AP2_EMPTY_BOARD_COOLDOWN_S",
-            os.environ.get("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", 3600),
-        )
-    )
-    state = load_state(cfg.cron_state_file)
-    now = time.time()
-    for job in empty_board_jobs:
-        last = state.get(job.name, 0.0)
-        if now - last < cooldown_s:
-            continue
-        # Event name kept (`ideation_empty_board`) so the audit / status-report
-        # consumers built around the original ideation-only mechanism keep
-        # parsing it. `job` field added for cases where a project marks more
-        # than one job with `trigger: empty_board`.
-        events.append(
-            cfg.events_file,
-            "ideation_empty_board",
-            job=job.name,
-            cooldown_s=cooldown_s,
-            seconds_since_last=int(now - last) if last else None,
-        )
-        await run_cron(cfg, sdk, mcp_server, job)
 
 
 def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:

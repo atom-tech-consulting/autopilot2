@@ -127,24 +127,21 @@ def test_single_tick_auto_promotes_backlog_when_ready_empty(e2e_project):
 
 # TB-46: empty-board auto-ideation
 
-_IDEATION_CRON = {
-    "name": "ideation",
-    "trigger": "empty_board",
-    "prompt": "Propose new tasks.",
-    "max_turns": 5,
-}
+_TEST_IDEATION_PROMPT = "Propose new tasks."
 
 
-def test_tick_runs_ideation_when_board_is_empty(e2e_project):
-    """Empty board + cooldown elapsed → step-4 fires ideation via run_cron."""
+def test_tick_runs_ideation_when_board_is_empty(e2e_project, monkeypatch):
+    """Empty board + cooldown elapsed → step-4 fires ap2.ideation._maybe_ideate."""
     import time
     from ap2.cron import save_state
 
-    cfg = e2e_project(cron_jobs=[_IDEATION_CRON])
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    cfg = e2e_project(ideation_prompt=_TEST_IDEATION_PROMPT)
     save_state(cfg.cron_state_file, {"ideation": time.time() - 7200})
 
     sdk = FakeSDK()
-    sdk.on("cron", text_respond("proposed 3 tasks"))
+    sdk.on("Propose new tasks.", text_respond("proposed 3 tasks"))
 
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
@@ -157,10 +154,10 @@ def test_tick_runs_ideation_when_board_is_empty(e2e_project):
 
 
 def test_tick_skips_ideation_if_ready_has_work(e2e_project):
-    """Ready has a task → board not empty → step-4 does NOT fire ideation."""
+    """Ready has a task → board not empty → ideation does NOT fire."""
     cfg = e2e_project(
         ready_task=("TB-5", "Run the thing"),
-        cron_jobs=[_IDEATION_CRON],
+        ideation_prompt=_TEST_IDEATION_PROMPT,
     )
 
     sdk = FakeSDK()
@@ -173,17 +170,16 @@ def test_tick_skips_ideation_if_ready_has_work(e2e_project):
 
     evts = events.tail(cfg.events_file, 20)
     kinds = [e["type"] for e in evts]
-    # No empty-board fire because the task slot was occupied. With the
-    # `trigger: empty_board` design, no separate interval cron fires either.
     assert "ideation_empty_board" not in kinds
     assert "cron_start" not in kinds
 
 
 def test_tick_ideation_honors_cooldown(e2e_project, monkeypatch):
-    """A recent ideation run in cron_state.json suppresses the empty-board trigger."""
+    """A recent ideation run in cron_state.json suppresses the trigger."""
     import time
-    monkeypatch.setenv("AP2_EMPTY_BOARD_COOLDOWN_S", "3600")
-    cfg = e2e_project(cron_jobs=[_IDEATION_CRON])
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    cfg = e2e_project(ideation_prompt=_TEST_IDEATION_PROMPT)
 
     from ap2.cron import save_state
     save_state(cfg.cron_state_file, {"ideation": time.time() - 10})
@@ -200,9 +196,11 @@ def test_tick_ideation_honors_cooldown(e2e_project, monkeypatch):
 def test_tick_ideation_legacy_cooldown_env_var(e2e_project, monkeypatch):
     """Legacy AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S still honored as fallback."""
     import time
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_IDEATION_COOLDOWN_S", raising=False)
     monkeypatch.delenv("AP2_EMPTY_BOARD_COOLDOWN_S", raising=False)
     monkeypatch.setenv("AP2_EMPTY_BOARD_IDEATION_COOLDOWN_S", "3600")
-    cfg = e2e_project(cron_jobs=[_IDEATION_CRON])
+    cfg = e2e_project(ideation_prompt=_TEST_IDEATION_PROMPT)
 
     from ap2.cron import save_state
     save_state(cfg.cron_state_file, {"ideation": time.time() - 10})
@@ -212,30 +210,6 @@ def test_tick_ideation_legacy_cooldown_env_var(e2e_project, monkeypatch):
 
     kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
     assert "ideation_empty_board" not in kinds
-
-
-def test_tick_interval_trigger_does_not_fire_via_empty_board(e2e_project):
-    """Job with `trigger: interval` (default) is NOT picked up by empty-board path."""
-    import time
-    from ap2.cron import save_state
-
-    cron = {
-        "name": "ideation",
-        "interval": "6h",
-        "prompt": "Propose new tasks.",
-        "max_turns": 5,
-    }
-    cfg = e2e_project(cron_jobs=[cron])
-    # Make the interval not-yet-due so step-2 is a no-op; under the new
-    # design the empty-board path also skips because trigger != empty_board.
-    save_state(cfg.cron_state_file, {"ideation": time.time() - 60})
-
-    sdk = FakeSDK()
-    asyncio.run(_tick(cfg, sdk, mcp_server=None))
-
-    kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
-    assert "ideation_empty_board" not in kinds
-    assert "cron_start" not in kinds
 
 
 def test_tick_auto_promote_skips_blocked_backlog_task(e2e_project):
@@ -269,14 +243,19 @@ def test_tick_auto_promote_skips_blocked_backlog_task(e2e_project):
     assert promo["task"] == "TB-8"
 
 
-def test_tick_ideation_skipped_when_no_ideation_cron_configured(e2e_project):
-    """If the project's cron.yaml has no `ideation` job, step-4 is a no-op."""
+def test_tick_first_run_fires_ideation_with_default_prompt(e2e_project, monkeypatch):
+    """No project override + no prior cron_state + cooldown elapsed → ideation
+    fires using `ap2/ideation.default.md`. Replaces the old
+    `skipped_when_no_ideation_cron_configured` test: under the new design
+    ideation is always available."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
     cfg = e2e_project()
-
     sdk = FakeSDK()
+    # The default prompt contains "ideation_state_write" prominently — match
+    # on that so we don't tie the test to a less-stable substring.
+    sdk.on("ideation_state_write", text_respond("proposed"))
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
-
-    evts = events.tail(cfg.events_file, 20)
-    kinds = [e["type"] for e in evts]
-    assert "ideation_empty_board" not in kinds
-    assert not any(k.startswith("cron_") for k in kinds)
+    kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
+    assert "ideation_empty_board" in kinds
+    assert "cron_complete" in kinds

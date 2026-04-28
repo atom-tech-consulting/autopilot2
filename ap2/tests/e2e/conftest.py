@@ -19,6 +19,9 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
       ready_task:  (id, title) to seed in Ready.
       frozen_task: (id, title, blocked_on) to seed in Frozen.
       cron_jobs:   list of dicts passed straight to the cron.yaml `jobs:` list.
+      ideation_prompt: short prompt body to write at
+        `.cc-autopilot/ideation_prompt.md` (project override). Useful to
+        shrink the SDK prompt in tests that exercise empty-board ideation.
 
     Env is scrubbed so mattermost is opt-in per test. Returns the loaded
     `Config` with `ensure_dirs()` already called.
@@ -45,12 +48,18 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
     monkeypatch.setenv("AP2_TASK_TIMEOUT_S", "30")
     monkeypatch.setenv("AP2_CONTROL_TIMEOUT_S", "30")
     monkeypatch.setenv("AP2_MAX_RETRIES", "3")
+    # Suppress empty-board ideation by default. Tests exercising it call
+    # `monkeypatch.delenv("AP2_IDEATION_DISABLED")` and configure a
+    # short cooldown explicitly. Without this, every test with an empty
+    # board would inadvertently fire the ideation agent.
+    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
 
     def build(
         *,
         ready_task: tuple[str, str] | None = None,
         frozen_task: tuple[str, str, str] | None = None,
         cron_jobs: list[dict] | None = None,
+        ideation_prompt: str | None = None,
     ) -> Config:
         (tmp_path / "TASKS.md").write_text(
             "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n## Complete\n\n## Frozen\n"
@@ -83,6 +92,11 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
         if cron_jobs:
             jobs = [cron_mod.CronJob.from_dict(j) for j in cron_jobs]
             cron_mod.save_jobs(cfg.cron_file, jobs)
+
+        if ideation_prompt is not None:
+            override = cfg.project_root / ".cc-autopilot" / "ideation_prompt.md"
+            override.parent.mkdir(parents=True, exist_ok=True)
+            override.write_text(ideation_prompt)
 
         return cfg
 
