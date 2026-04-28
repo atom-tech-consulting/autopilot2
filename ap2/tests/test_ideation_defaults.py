@@ -78,6 +78,11 @@ def test_ideation_prompt_pins_step15_failure_review():
     assert "Frozen" in prompt
     assert "verification_failed" in prompt
     assert "retry_exhausted" in prompt
+    # TB-93+: partial verifications are also a follow-up source. Pinning the
+    # event name + the load-bearing instruction (rewrite prose-bullet criteria
+    # as concrete shell checks when the SDK judge can't evaluate them).
+    assert "verification_partial" in prompt
+    assert "concrete shell check" in prompt
     assert "#fix-briefing" in prompt
     assert "Recommend abandoning" in prompt
     assert "Do NOT auto-unfreeze" in prompt or "do not auto-unfreeze" in lower

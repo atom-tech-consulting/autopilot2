@@ -121,20 +121,32 @@ Collect follow-up candidates from this scan first. Only fall back to
 greenfield ideas if you're short of 3 candidates afterwards.
 
 ## Step 1.5: failure review (TB-88 — do this between Complete-scan and ranking)
-Scan up to 5 most-recent failed tasks. Sources:
+Scan up to 5 most-recent failed-or-flagged tasks. Sources:
   - All TB-Ns currently in TASKS.md `## Frozen` (retry-exhausted).
-  - Tasks with recent `verification_failed` or `retry_exhausted` events
-    in the prompt's events block (those are still in retry budget;
-    they may be back in Backlog now).
+  - Tasks with recent `verification_failed`, `retry_exhausted`, or
+    `verification_partial` events in the prompt's events block (those
+    are still in retry budget or already in Complete; treat all three
+    classes as candidates for follow-up).
 
 For each failed task, READ:
   - Its briefing file (path in the `[→ brief](...)` link).
-  - The matching `verification_failed` event(s) — note which criterion
-    failed and the `notes` field (often shows `exit=127`, `No such file
-    or directory`, etc.).
+  - The matching `verification_failed` / `verification_partial` event(s)
+    — note which criterion failed or stayed `unverified` and the `notes`
+    field (often shows `exit=127`, `No such file or directory`, or for
+    partial: SDK-judge timeout / malformed-JSON / "couldn't reach a
+    confident verdict on a prose bullet").
   - Any prior commits via `git log --grep="<TASK_ID>" --oneline` —
     the agent may have committed partial work even if verification
     failed, so the implementation may already be on disk.
+
+`verification_partial` specifics: a `partial` verdict means at least one
+bullet was `unverified` (typically a prose bullet whose SDK judge
+couldn't confidently classify) but no bullets explicitly failed. The
+task lands in Complete anyway. If the same prose bullet keeps coming
+back `unverified` across tasks, classify as **edit-briefing** and
+propose rewriting it as a concrete shell check (`test -f`, `pytest`,
+`grep`, etc.) — prose criteria that the judge can't evaluate are useless
+as a verification gate.
 
 CLASSIFY each into ONE of:
 
