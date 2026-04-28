@@ -68,13 +68,18 @@ exactly as the briefing's `## Pipeline launch` section spells out — name,
 command, validation_title, validation_briefing. Do NOT make follow-up
 `board_edit` calls afterward; the tool creates the validation task itself.
 
-## What the daemon handles (do NOT touch)
-The daemon manages state files for you — do not edit them:
+## What the daemon and operator handle (do NOT touch)
+These files are either daemon-managed state or operator-curated. The SDK
+will reject `Edit`/`Write` on them — they're listed in `disallowed_tools`.
 - `TASKS.md` — the daemon moves this task Active → Complete (or Backlog on failure) using the fields from your RESULT block.
+- `CLAUDE.md` — the daemon bumps the `Next task ID` line when allocating new TB-Ns.
+- `goal.md` — operator-curated project mission. If you think it needs updating, raise the recommendation in your RESULT summary; do NOT rewrite.
 - `.cc-autopilot/progress.md` — the daemon appends a section for your task on completion using RESULT fields.
 - `.cc-autopilot/events.jsonl` — append-only daemon log.
+- `.cc-autopilot/ideation_state.md` — ideation's per-cycle assessment, written only by the ideation agent.
+- `.cc-autopilot/cron.yaml` — control agents edit via the `cron_edit` MCP tool.
 
-Do not `Edit` or `Write` to any of the above. Just commit your code changes and emit the RESULT block; the daemon records everything from there.
+Do not `Edit` or `Write` to any of the above. Bash workarounds (`echo > path`, `sed -i`, etc.) bypass the SDK guard but break the daemon's invariants — also forbidden. Commit your code changes and emit the RESULT block; the daemon records everything from there.
 """
 
 _TASK_FOOTER = """\

@@ -34,11 +34,29 @@ from .mattermost import check_new_messages
 from .result import TaskResult, parse as parse_result
 from .tools import (
     CONTROL_AGENT_TOOLS,
+    TASK_AGENT_FENCED_PATHS,
     TASK_AGENT_TOOLS,
     build_mcp_server,
     do_board_edit,
     do_cron_edit,
 )
+
+
+def _task_disallowed_tools() -> list[str]:
+    """Edit/Write blocks for fenced paths plus the always-on Bash blocks.
+
+    Built once at module load via this helper for testability — a unit test
+    can assert each fenced path produces both an `Edit(<path>)` and a
+    `Write(<path>)` entry without spinning up the SDK.
+    """
+    fenced = []
+    for path in TASK_AGENT_FENCED_PATHS:
+        fenced.append(f"Edit({path})")
+        fenced.append(f"Write({path})")
+    return ["Bash(git push*)", "Bash(rm -rf *)", *fenced]
+
+
+_TASK_DISALLOWED_TOOLS = _task_disallowed_tools()
 
 
 RUNNING = True
@@ -105,7 +123,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 cwd=str(cfg.project_root),
                 mcp_servers={"autopilot": mcp_server},
                 allowed_tools=TASK_AGENT_TOOLS,
-                disallowed_tools=["Bash(git push*)", "Bash(rm -rf *)"],
+                disallowed_tools=_TASK_DISALLOWED_TOOLS,
                 permission_mode="bypassPermissions",
                 max_turns=int(os.environ.get("AP2_TASK_MAX_TURNS", 50)),
                 setting_sources=["project"],

@@ -558,3 +558,34 @@ TASK_AGENT_TOOLS = [
     "Bash",
     "mcp__autopilot__pipeline_task_start",
 ]
+
+
+# Files the task agent must NOT edit. Two enforcement layers wrap each
+# entry: (1) `prompts._TASK_HEADER` lists each file with a one-line
+# explanation so a well-behaved agent skips them, (2) `daemon.run_task`
+# adds `Edit(<path>)` + `Write(<path>)` to `disallowed_tools` so the SDK
+# rejects direct calls if the agent tries anyway.
+#
+# Defense-in-depth, not airtight: a determined agent could still write
+# via `Bash` (`echo > path`, `sed -i`, `python -c "open(...).write(...)"`).
+# Those rely on prompt compliance — globbing every shell shape that
+# touches a fenced file is a losing arms race.
+#
+# Categories:
+#   - Daemon-owned state: TASKS.md, progress.md, events.jsonl,
+#     ideation_state.md, CLAUDE.md (the daemon bumps Next task ID).
+#   - Daemon-owned config: cron.yaml (control agents edit via cron_edit).
+#   - Operator-curated: goal.md — the project mission. Ideation reads it
+#     for grounding; if a task could rewrite it, ideation would
+#     effectively rewrite its own constraints. Tasks that *want* to update
+#     goal.md should surface the recommendation in their RESULT summary
+#     instead, leaving the operator to apply.
+TASK_AGENT_FENCED_PATHS = (
+    "TASKS.md",
+    "CLAUDE.md",
+    "goal.md",
+    ".cc-autopilot/progress.md",
+    ".cc-autopilot/events.jsonl",
+    ".cc-autopilot/ideation_state.md",
+    ".cc-autopilot/cron.yaml",
+)

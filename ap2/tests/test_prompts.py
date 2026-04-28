@@ -69,13 +69,47 @@ def test_prompt_pins_pipeline_task_start_guidance(tmp_path):
 
 
 def test_prompt_pins_state_file_fence(tmp_path):
-    """Daemon (not agent) owns TASKS.md / progress.md / events.jsonl."""
+    """Daemon (not agent) owns TASKS.md / progress.md / events.jsonl /
+    CLAUDE.md / ideation_state.md / cron.yaml; operator owns goal.md.
+
+    Every fenced path must appear in the prompt header. Permission-level
+    enforcement (run_task's disallowed_tools) is the second line of defense;
+    the prompt fence is the first, and a missing entry would silently let
+    the agent edit a fenced file that the SDK guard *does* still block.
+    """
+    from ap2.tools import TASK_AGENT_FENCED_PATHS
+
     cfg = _cfg(tmp_path)
     t = Task(id="TB-99", title="x", section="Active")
     p = build_task_prompt(cfg, t)
-    assert "What the daemon handles (do NOT touch)" in p
-    for f in ("TASKS.md", "progress.md", "events.jsonl"):
-        assert f in p
+    assert "do NOT touch" in p
+    for f in TASK_AGENT_FENCED_PATHS:
+        assert f in p, f"fenced path {f!r} missing from task prompt header"
+
+
+def test_task_disallowed_tools_covers_every_fenced_path():
+    """Every TASK_AGENT_FENCED_PATHS entry must produce both an `Edit(<path>)`
+    and a `Write(<path>)` block in the disallowed_tools list — that's the
+    SDK-level enforcement layer behind the prompt fence."""
+    from ap2.daemon import _task_disallowed_tools
+    from ap2.tools import TASK_AGENT_FENCED_PATHS
+
+    blocks = _task_disallowed_tools()
+    # Always-on Bash blocks survive
+    assert "Bash(git push*)" in blocks
+    assert "Bash(rm -rf *)" in blocks
+    # Every fenced path appears as both Edit and Write
+    for path in TASK_AGENT_FENCED_PATHS:
+        assert f"Edit({path})" in blocks, f"Edit({path}) missing from disallowed_tools"
+        assert f"Write({path})" in blocks, f"Write({path}) missing from disallowed_tools"
+
+
+def test_task_fenced_paths_includes_goal_md():
+    """goal.md is operator-curated; if a task can rewrite it, ideation
+    rewrites its own constraints (the TB-144 feedback-loop case in stoch)."""
+    from ap2.tools import TASK_AGENT_FENCED_PATHS
+
+    assert "goal.md" in TASK_AGENT_FENCED_PATHS
 
 
 def test_mattermost_prompt_pins_explicit_thread_id(tmp_path):
