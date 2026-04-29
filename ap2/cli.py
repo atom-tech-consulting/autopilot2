@@ -13,8 +13,8 @@ import sys
 import time
 from pathlib import Path
 
-from . import doctor, events, retry, sandbox
-from .board import Board, locked_board
+from . import doctor, events, retry, rollback, sandbox
+from .board import Board, board_file_lock, locked_board
 from .config import Config
 from .cron import load_jobs, load_state
 from .init import init_project
@@ -323,6 +323,135 @@ def cmd_delete(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rollback(cfg: Config, args: argparse.Namespace) -> int:
+    """Linear rollback (TB-111).
+
+    Walk back along first-parent history to a boundary commit and
+    `git reset --hard` to it. Atomic via `locked_board()`. Mid-history
+    rollback (revert TB-X while keeping TB-Y after) is explicitly out of
+    scope — operators do that by hand with `git revert`.
+    """
+    if not (cfg.project_root / ".git").exists():
+        print("ap2 rollback: project is not a git repo — nothing to roll back",
+              file=sys.stderr)
+        return 1
+
+    # Pre-flight: refuse a dirty working tree. Rollback isn't a stash.
+    porcelain = subprocess.run(
+        ["git", "-C", str(cfg.project_root), "status", "--porcelain"],
+        capture_output=True, text=True,
+    )
+    if porcelain.returncode != 0:
+        print(f"ap2 rollback: `git status --porcelain` failed: "
+              f"{porcelain.stderr.strip()}", file=sys.stderr)
+        return 1
+    if porcelain.stdout.strip() and not args.force:
+        print(
+            "ap2 rollback: working tree is dirty — refusing.\n"
+            "  Commit, stash, or `git checkout -- .` your changes first,\n"
+            "  or pass --force to bypass (the dirt will be discarded).",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Resolve boundary from -n / --task / --to (mutually exclusive; default -n 1).
+    boundary: str | None = None
+    if args.to:
+        # Explicit ancestor sha. Refuse if not an ancestor (no rebases mid-rollback).
+        if not rollback.is_ancestor(cfg, args.to):
+            print(f"ap2 rollback: {args.to} is not an ancestor of HEAD — refusing",
+                  file=sys.stderr)
+            return 1
+        # Resolve to a full SHA so the print is unambiguous.
+        rp = subprocess.run(
+            ["git", "-C", str(cfg.project_root), "rev-parse", args.to],
+            capture_output=True, text=True,
+        )
+        boundary = rp.stdout.strip() if rp.returncode == 0 else args.to
+    elif args.task:
+        boundary = rollback.resolve_boundary_by_task(cfg, args.task)
+        if boundary is None:
+            print(
+                f"ap2 rollback: {args.task} not found in HEAD's first-parent "
+                f"history.\n  Try `git log --grep={args.task} --oneline` — "
+                f"the task may be too far back, or it shipped on a side branch.",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        n = args.n if args.n is not None else 1
+        if n <= 0:
+            print("ap2 rollback: -n must be ≥ 1", file=sys.stderr)
+            return 2
+        boundary = rollback.resolve_boundary_by_n(cfg, n)
+        if boundary is None:
+            print(f"ap2 rollback: history doesn't have {n} task-completions "
+                  f"to roll back", file=sys.stderr)
+            return 1
+
+    affected = rollback.list_affected_commits(cfg, boundary)
+    if not affected:
+        print(f"ap2 rollback: nothing to roll back "
+              f"(boundary {boundary[:8]} == HEAD)")
+        return 0
+    affected_tasks = rollback.affected_task_ids(affected)
+    pipeline_warnings = rollback.list_alive_pipelines_in_range(cfg, boundary)
+
+    # Print plan.
+    print("Rollback plan:")
+    print(f"  Boundary: {boundary[:8]}")
+    print(f"  Affected commits ({len(affected)}):")
+    for sha, subject in affected:
+        print(f"    - {sha[:8]} {subject}")
+    if affected_tasks:
+        print(f"  Affected tasks: {', '.join(affected_tasks)}")
+    if pipeline_warnings:
+        print("  Pipelines still running (NOT auto-killed):")
+        for w in pipeline_warnings:
+            print(f"    pid {w['pid']} ({w['name'] or '?'}) "
+                  f"— log: {w['log']}")
+    if not args.yes:
+        try:
+            reply = input("Proceed? [y/N] ").strip().lower()
+        except EOFError:
+            reply = ""
+        if reply not in ("y", "yes"):
+            print("ap2 rollback: aborted (no changes made)")
+            return 0
+
+    # Execute under board lock for atomicity vs. the daemon. We use the
+    # save-less variant because `git reset --hard` already wrote the
+    # post-reset TASKS.md; locked_board's save-on-exit would clobber it.
+    with board_file_lock(cfg.tasks_file):
+        try:
+            rollback.linear_rollback_to(cfg, boundary)
+        except Exception as exc:  # noqa: BLE001
+            events.append(
+                cfg.events_file, "rollback_error",
+                boundary=boundary, error=f"{type(exc).__name__}: {exc}",
+            )
+            print(f"ap2 rollback: failed: {exc}", file=sys.stderr)
+            return 1
+
+    events.append(
+        cfg.events_file,
+        "task_rollback",
+        boundary_sha=boundary,
+        reverted_commits=[
+            {"sha": sha, "subject": subject} for sha, subject in affected
+        ],
+        affected_tasks=affected_tasks,
+        pipeline_warnings=pipeline_warnings,
+    )
+    print(f"ap2 rollback: reset to {boundary[:8]} "
+          f"({len(affected)} commit(s) reverted, "
+          f"{len(affected_tasks)} task(s) affected)")
+    if pipeline_warnings:
+        print(f"  warning: {len(pipeline_warnings)} pipeline subprocess(es) "
+              f"still running — terminate manually if rerunning")
+    return 0
+
+
 def cmd_pause(cfg: Config, args: argparse.Namespace) -> int:
     cfg.pause_flag.parent.mkdir(parents=True, exist_ok=True)
     cfg.pause_flag.write_text((args.reason or "") + "\n")
@@ -497,6 +626,27 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-f", "--force", action="store_true",
                    help="allow deletion from Active or Ready (use with care)")
     s.set_defaults(func=cmd_delete)
+
+    s = sub.add_parser(
+        "rollback",
+        help="linear rollback (TB-111): walk back from HEAD by N tasks "
+             "(or to a specific TB-N / sha) and `git reset --hard`. "
+             "Restores TASKS.md + every committed state file coherently. "
+             "Refuses dirty working tree by default.",
+    )
+    grp = s.add_mutually_exclusive_group()
+    grp.add_argument("-n", type=int, default=None,
+                     help="roll back the last N task-completions (default: 1)")
+    grp.add_argument("--task", metavar="TB-N",
+                     help="roll back to before TB-N (linear: undoes everything "
+                          "between HEAD and TB-N too)")
+    grp.add_argument("--to", metavar="SHA",
+                     help="reset to an explicit ancestor sha")
+    s.add_argument("-y", "--yes", action="store_true",
+                   help="skip the interactive confirm prompt")
+    s.add_argument("--force", action="store_true",
+                   help="proceed even with a dirty working tree (will discard)")
+    s.set_defaults(func=cmd_rollback)
 
     s = sub.add_parser("pause", help="pause the daemon (sets a flag)")
     s.add_argument("--reason", default="")

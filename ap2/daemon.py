@@ -19,8 +19,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import diagnose, events, ideation, prompts, retry, tools, verify
-from .board import Board
+from . import diagnose, events, ideation, prompts, retry, rollback, tools, verify
+from .board import Board, board_file_lock
 from .config import Config
 from .cron import (
     CronJob,
@@ -79,7 +79,18 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     """Execute a single Ready task in an isolated SDK query()."""
     prompt = prompts.build_task_prompt(cfg, task)
     events.append(cfg.events_file, "task_start", task=task.id, title=task.title)
+    # TB-110 rollback boundary: capture HEAD BEFORE the daemon writes
+    # `move_to_active` to TASKS.md. If the agent later violates the
+    # state-file fence, `git reset --hard <pre_run_head>` restores the
+    # entire system (TASKS.md + everything else in `_STATE_FILE_NAMES`)
+    # to its pre-task-dispatch shape.
+    pre_run_head = rollback.git_head(cfg)
     do_board_edit(cfg, {"action": "move_to_active", "task_id": task.id})
+    # Snapshot fenced files AFTER move_to_active so the daemon's own
+    # legitimate write doesn't show up as a violation. Anything the
+    # agent then mutates (committed or working-tree only) shows up as
+    # a hash mismatch on the post-run snapshot.
+    pre_run_fenced = rollback.snapshot_fenced_files(cfg)
 
     # Pre-flight debug dump: if the SDK subprocess crashes with an empty
     # stderr (observed on stoch's TB-58/TB-59), these files are the only way
@@ -159,6 +170,14 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 text = t
         return text
 
+    # If consume hits a timeout / opaque SDK crash without HEAD salvage we
+    # defer the corresponding `_handle_failure` until AFTER the TB-110
+    # violation check below — so a fenced-file mutation made before the
+    # crash still gets the rollback + state_violation routing instead of
+    # whatever generic failure status the consume branch would otherwise
+    # have stamped.
+    early_failure_status: str | None = None
+    result_text = ""
     try:
         result_text = await asyncio.wait_for(_consume(), timeout=cfg.task_timeout_s)
     except asyncio.TimeoutError:
@@ -172,7 +191,6 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 task=task.id, commit=inferred.commit,
                 subject=inferred.summary, reason="timeout_recovered",
             )
-            result_text = ""  # bypass parse_result; the fallback below uses inferred
             parsed_override = inferred  # type: ignore[assignment]
         else:
             events.append(
@@ -186,8 +204,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 stream_dump=str(stream_dump),
                 messages_dump=str(messages_dump),
             )
-            _handle_failure(cfg, task, status="timeout")
-            return
+            early_failure_status = "timeout"
     except Exception as e:  # noqa: BLE001
         # Same logic for an opaque SDK subprocess crash (the "exit code 1 /
         # empty stderr_tail" pattern observed on stoch's TB-58/59). If the
@@ -200,7 +217,6 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 task=task.id, commit=inferred.commit,
                 subject=inferred.summary, reason="error_recovered",
             )
-            result_text = ""
             parsed_override = inferred  # type: ignore[assignment]
         else:
             events.append(
@@ -214,8 +230,60 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 stream_dump=str(stream_dump),
                 messages_dump=str(messages_dump),
             )
-            _handle_failure(cfg, task, status="error")
-            return
+            early_failure_status = "error"
+
+    # TB-110: post-hoc state-file violation check. Hash-compare fenced
+    # files against the pre_run_fenced snapshot taken right after
+    # move_to_active. Any difference (committed by the agent or just
+    # dirtied in the working tree) is a violation. We preempt any other
+    # status decision: the rollback wipes the run wholesale via
+    # `git reset --hard <pre_run_head>`, restoring every fenced file +
+    # the rest of `_STATE_FILE_NAMES` (TB-112) coherently. Routes through
+    # `_handle_failure(status="state_violation")` so retries count and
+    # repeated violations exhaust to Frozen.
+    violations = rollback.detect_fenced_violations(cfg, pre_run_fenced)
+    if violations:
+        events.append(
+            cfg.events_file,
+            "task_state_violation",
+            task=task.id,
+            fenced_files=violations,
+            pre_run_head=pre_run_head,
+        )
+        if pre_run_head:
+            with board_file_lock(cfg.tasks_file):
+                try:
+                    rollback.linear_rollback_to(cfg, pre_run_head)
+                except Exception as exc:  # noqa: BLE001
+                    events.append(
+                        cfg.events_file,
+                        "rollback_error",
+                        task=task.id,
+                        boundary=pre_run_head,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+        _handle_failure(cfg, task, status="state_violation")
+        events.append(
+            cfg.events_file,
+            "task_complete",
+            task=task.id,
+            status="state_violation",
+            commit="",
+            summary="(state-file violation; agent run reverted)",
+        )
+        board_after = Board.load(cfg.tasks_file)
+        loc = board_after.find(task.id)
+        dest = loc[0] if loc else "?"
+        _commit_state_files(cfg, f"state: {task.id} → {dest}")
+        return
+
+    # No violation. If consume failed without HEAD salvage we now do the
+    # deferred failure handling and return — preserving the original
+    # behavior of the timeout / error path (no `task_complete` event,
+    # no state-file commit).
+    if early_failure_status is not None:
+        _handle_failure(cfg, task, status=early_failure_status)
+        return
 
     # Result-payload precedence (TB-101 / TB-104):
     #   1. HEAD-recovery override (crash / timeout salvage path).

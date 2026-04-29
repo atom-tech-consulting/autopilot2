@@ -39,6 +39,7 @@ MEANINGFUL_EVENT_TYPES = frozenset({
     "task_start",
     "task_complete",
     "task_implicit_commit",
+    "task_rollback",  # TB-111
     "cron_complete",
     "cron_start",
     "mattermost",
@@ -58,7 +59,9 @@ MEANINGFUL_EVENT_TYPES = frozenset({
 FAILURE_EVENT_TYPES = frozenset({
     "task_error",
     "task_timeout",
+    "task_state_violation",  # TB-110
     "retry_exhausted",
+    "rollback_error",
     "state_commit_error",
     "verification_failed",  # TB-66 + TB-69
     "board_malformed_line",  # TB-68

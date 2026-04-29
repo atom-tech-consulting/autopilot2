@@ -328,3 +328,15 @@ def locked_board(tasks_file: Path) -> Iterator[Board]:
         board = Board.load(tasks_file)
         yield board
         board.save()
+
+
+@contextlib.contextmanager
+def board_file_lock(tasks_file: Path) -> Iterator[None]:
+    """Hold the board's fcntl lock without loading or saving any Board.
+
+    Used by callers (TB-110 violation path, TB-111 rollback) that mutate
+    TASKS.md *out-of-band* via `git reset --hard` and don't want
+    `locked_board`'s save-on-exit to clobber the post-reset on-disk content.
+    """
+    with _locked(lock_path(tasks_file)):
+        yield
