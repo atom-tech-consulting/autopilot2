@@ -247,7 +247,10 @@ def _union_gitignore(path: Path, blocks: list[tuple[str, list[str]]]) -> list[st
     return added
 
 
-_AUTOPILOT_HEADER_RE = re.compile(r"^##\s+Autopilot\s*$", re.M)
+# Word-boundary + any-trailing-content match (TB-102): tolerates
+# `## Autopilot (per-project)` etc. while still rejecting look-alikes
+# like `## AutopilotPlus`.
+_AUTOPILOT_HEADER_RE = re.compile(r"^##\s+Autopilot\b[^\n]*$", re.M)
 
 
 def _ensure_file(path: Path, content: str) -> bool:

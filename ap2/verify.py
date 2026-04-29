@@ -35,39 +35,24 @@ without verification sections keep working unchanged.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import mistune
 
-# `^##\s+Verification\b[^\n]*$` matches any heading that STARTS with
-# `## Verification` — bare (`## Verification`) or with any trailing
-# disambiguator (`## Verification (launch-task)`, `## Verification: launch`,
-# `## Verification — output artifacts`, etc.). The `\b` keeps `## Verifications`
-# (plural) and `## VerificationTable` from matching. TB-91 fix relied on the
-# launch task's heading being exactly `## Verification`; ideation agents have
-# been adding parentheticals like `(launch-task — ...)` for clarity, which
-# silently fell through to the validation_briefing's inner heading and ran
-# pipeline-output checks at launch time (TB-146 retry-exhausted into Frozen
-# this way 2026-04-28).
-_VERIFICATION_HEADER_RE = re.compile(
-    r"^##\s+Verification\b[^\n]*$(.*?)(?=^##\s|\Z)", re.M | re.S
-)
-# Bullet starts with `- ` then optional backtick command at the start.
-_BULLET_RE = re.compile(r"^\s*-\s+(.*?)(?=\n\s*-\s+|\n\s*\n|\Z)", re.S | re.M)
-# Single-backtick form (standard markdown shell): `cmd`
-# Double-backtick form (markdown's "code-with-backticks" wrapper, which
-# ideation agents sometimes use when they want the rendered output to
-# show the backticks visibly): `` `cmd` ``  →  the inner `cmd` is the
-# command we want to run. TB-146 hit this — every shell bullet got
-# classified as prose because _SHELL_LEAD_RE only matched the single
-# form, the SDK judge then evaluated each "is `test -f X` true" prose
-# claim against the unfreeze diff (only TASKS.md / progress.md) and
-# said "no". Try double-backtick first (more specific), then single.
-_SHELL_DOUBLE_RE = re.compile(r"^\s*``\s*`([^`]+)`\s*``")
-_SHELL_LEAD_RE = re.compile(r"^\s*`([^`]+)`")
+
+# Mistune AST parser — used for `## Verification` section detection and bullet
+# classification (TB-102). Replaces the regex tower (`_VERIFICATION_HEADER_RE`,
+# `_BULLET_RE`, `_SHELL_LEAD_RE`, `_SHELL_DOUBLE_RE`) that successively bit us:
+#   - TB-91: `\s*$` rejected `## Verification (launch-task — ...)` headings
+#   - TB-146 round 1: same regex variant
+#   - TB-146 round 2: shell-extraction regex didn't handle double-backtick
+#     code spans (`` ` `cmd` ` ``)
+# Markdown is rich enough that ad-hoc regex against it is a losing
+# arms race. mistune's AST handles all of these natively.
+_MD = mistune.create_markdown(renderer="ast")
 
 
 @dataclass
@@ -92,6 +77,85 @@ class VerifyVerdict:
     duration_s: float = 0.0
 
 
+def _heading_text(node: dict) -> str:
+    """Concat all text/codespan content under a heading node into a string."""
+    parts: list[str] = []
+    for ch in node.get("children", []) or []:
+        if ch.get("type") == "text":
+            parts.append(ch.get("raw", ""))
+        elif ch.get("type") == "codespan":
+            parts.append(ch.get("raw", ""))
+        elif ch.get("children"):
+            parts.append(_heading_text(ch))
+    return "".join(parts).strip()
+
+
+def _is_verification_heading(node: dict) -> bool:
+    """True iff `node` is a level-2 heading whose text starts with the word
+    "Verification" (with a word-boundary follow). Tolerates parentheticals
+    and trailing disambiguators: `## Verification`,
+    `## Verification (launch-task)`, `## Verification — output`, etc.
+    Rejects look-alikes like `## Verifications` (plural) or
+    `## VerificationTable`.
+    """
+    if node.get("type") != "heading":
+        return False
+    if (node.get("attrs") or {}).get("level") != 2:
+        return False
+    text = _heading_text(node)
+    if not text.startswith("Verification"):
+        return False
+    after = text[len("Verification"):]
+    # Word boundary: next char must NOT be alphanumeric/underscore.
+    if after and (after[0].isalnum() or after[0] == "_"):
+        return False
+    return True
+
+
+def _list_item_text(item: dict) -> str:
+    """Reconstruct a list_item's full text content (codespans rendered with
+    their backticks, regular text rendered as-is). Used for the bullet's
+    free-form `text` field on `VerifyBullet`."""
+    parts: list[str] = []
+    for ch in item.get("children", []) or []:
+        if ch.get("type") in ("block_text", "paragraph"):
+            for inner in ch.get("children", []) or []:
+                if inner.get("type") == "codespan":
+                    parts.append(f"`{inner.get('raw', '')}`")
+                else:
+                    parts.append(inner.get("raw", ""))
+        elif ch.get("type") == "codespan":
+            parts.append(f"`{ch.get('raw', '')}`")
+        elif ch.get("type") == "text":
+            parts.append(ch.get("raw", ""))
+    return "".join(parts).strip()
+
+
+def _list_item_leading_codespan(item: dict) -> str | None:
+    """If the list_item's first inline child is a codespan, return its raw
+    content with surrounding backticks stripped (handles both
+    `` `cmd` `` → "cmd" and `` ` `cmd` ` `` → "`cmd`" → "cmd"). Else None.
+    """
+    inlines: list[dict] = []
+    for ch in item.get("children", []) or []:
+        if ch.get("type") in ("block_text", "paragraph"):
+            inlines = ch.get("children", []) or []
+            break
+    if not inlines:
+        return None
+    first = inlines[0]
+    if first.get("type") != "codespan":
+        return None
+    raw = first.get("raw", "").strip()
+    # Mistune's `raw` for a single-backtick `` `cmd` `` codespan is just
+    # "cmd" (no backticks). For the double-backtick form `` ` `cmd` ` ``,
+    # mistune nests the inner backticks INTO the raw content as
+    # "`cmd`" — strip those.
+    if raw.startswith("`") and raw.endswith("`") and len(raw) >= 2:
+        raw = raw[1:-1].strip()
+    return raw or None
+
+
 def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
     """Return parsed bullets, or None if there's no `## Verification` section.
 
@@ -107,25 +171,38 @@ def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
     `## Verification` always comes after it. Picking the last match correctly
     targets the launch task's verification. For single-Verification briefings
     (the common case) last == first, so behavior is unchanged.
+
+    TB-102: parses via `mistune` AST instead of ad-hoc regex. The AST walks
+    handle parenthetical headings, double-backtick code spans, indented
+    bullets, and any other markdown rendering quirk natively — eliminating
+    the regex-brittleness class that produced TB-91 and TB-146.
     """
-    matches = list(_VERIFICATION_HEADER_RE.finditer(briefing_text))
-    if not matches:
+    nodes = _MD(briefing_text) or []
+    # Find the LAST verification heading; capture all sibling list nodes
+    # following it until the next heading (or EOF).
+    last_idx: int | None = None
+    for i, node in enumerate(nodes):
+        if _is_verification_heading(node):
+            last_idx = i
+    if last_idx is None:
         return None
-    body = matches[-1].group(1)
     bullets: list[VerifyBullet] = []
-    for bm in _BULLET_RE.finditer(body):
-        raw = bm.group(1).strip()
-        if not raw:
+    for node in nodes[last_idx + 1:]:
+        if node.get("type") == "heading":
+            break
+        if node.get("type") != "list":
             continue
-        sm = _SHELL_DOUBLE_RE.match(raw) or _SHELL_LEAD_RE.match(raw)
-        if sm:
-            bullets.append(VerifyBullet(
-                kind="shell",
-                text=raw,
-                command=sm.group(1).strip(),
-            ))
-        else:
-            bullets.append(VerifyBullet(kind="prose", text=raw))
+        for item in node.get("children", []) or []:
+            if item.get("type") != "list_item":
+                continue
+            text = _list_item_text(item)
+            if not text:
+                continue
+            cmd = _list_item_leading_codespan(item)
+            if cmd:
+                bullets.append(VerifyBullet(kind="shell", text=text, command=cmd))
+            else:
+                bullets.append(VerifyBullet(kind="prose", text=text))
     return bullets
 
 

@@ -164,7 +164,10 @@ def _read_autopilot_section(claude_md: Path) -> dict:
     if not claude_md.exists():
         return {}
     text = claude_md.read_text()
-    m = re.search(r"^##\s+Autopilot\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+    # `\b[^\n]*$` matches `## Autopilot` with or without trailing
+    # disambiguators (e.g. `## Autopilot (per-project)`). Same brittleness
+    # pattern as TB-91's verifier regex; eliminating proactively (TB-102).
+    m = re.search(r"^##\s+Autopilot\b[^\n]*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
     if not m:
         return {}
     body = m.group(1)

@@ -52,3 +52,38 @@ def test_load_project_env_handles_quotes_comments_blanks(tmp_path, monkeypatch):
 
 def test_load_project_env_missing_file_returns_empty(tmp_path):
     assert load_project_env(tmp_path) == {}
+
+
+# TB-102: the `## Autopilot` section regex must tolerate trailing content on
+# the heading (parenthetical, em-dash, etc.) — same brittleness pattern that
+# bit `## Verification (launch-task — ...)` in TB-91/TB-146.
+
+
+def test_read_autopilot_section_tolerates_parenthetical_heading(tmp_path):
+    """A trailing `(per-project)` or similar disambiguator must not stop the
+    Autopilot block from parsing. Pre-TB-102, `\\s*$` rejected anything but
+    bare whitespace after `## Autopilot`."""
+    from ap2.config import Config
+
+    (tmp_path / "TASKS.md").write_text("# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n## Complete\n\n## Frozen\n")
+    (tmp_path / "CLAUDE.md").write_text(
+        "# Project\n\n"
+        "## Autopilot (per-project)\n\n"
+        "- Task list: `TASKS.md`\n"
+        "- Next task ID: TB-77\n\n"
+        "## Other section\n\nbody\n"
+    )
+    cfg = Config.load(tmp_path)
+    assert cfg.next_task_id == 77
+
+
+def test_autopilot_header_re_rejects_lookalikes(tmp_path):
+    """`## AutopilotPlus` must NOT match — `\\b` word-boundary keeps lookalikes
+    out so a future doc heading doesn't collide with the anchor."""
+    from ap2.init import _AUTOPILOT_HEADER_RE
+
+    assert _AUTOPILOT_HEADER_RE.search("## Autopilot\n") is not None
+    assert _AUTOPILOT_HEADER_RE.search("## Autopilot — config\n") is not None
+    assert _AUTOPILOT_HEADER_RE.search("## Autopilot (per-project)\n") is not None
+    assert _AUTOPILOT_HEADER_RE.search("## AutopilotPlus\n") is None
+    assert _AUTOPILOT_HEADER_RE.search("## Autopilots\n") is None
