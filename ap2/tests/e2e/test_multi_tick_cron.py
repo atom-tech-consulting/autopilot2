@@ -21,7 +21,7 @@ from ap2.board import Board
 from ap2.daemon import _tick
 from ap2.tools import do_board_edit
 
-from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg, text_respond
+from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg, text_respond, tool_call_respond
 
 
 def _cron_unfreeze_when_pipeline_done(cfg, pipeline_id: str, follow_up_id: str):
@@ -62,16 +62,22 @@ def test_multi_tick_cron_unfreezes_follow_up(e2e_project, clock):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-5",
-        text_respond(
-            "RESULT:\nstatus: complete\ncommit: pipe0001\n"
-            "summary: pipeline done\ntests_passed: true\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete", "commit": "pipe0001",
+                "summary": "pipeline done", "tests_passed": "true",
+            },
         ),
     )
     sdk.on(
         "## Task\nTB-6",
-        text_respond(
-            "RESULT:\nstatus: complete\ncommit: foll0002\n"
-            "summary: follow-up done\ntests_passed: true\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete", "commit": "foll0002",
+                "summary": "follow-up done", "tests_passed": "true",
+            },
         ),
     )
     sdk.on(
@@ -141,7 +147,10 @@ def test_cron_noop_when_pipeline_still_running(e2e_project, clock):
     # Pipeline never responds with complete — simulate incomplete.
     sdk.on(
         "## Task\nTB-5",
-        text_respond("RESULT:\nstatus: incomplete\nsummary: still working\n"),
+        tool_call_respond(
+            "report_result",
+            {"status": "incomplete", "summary": "still working"},
+        ),
     )
     sdk.on(
         "## Control job: status-report",

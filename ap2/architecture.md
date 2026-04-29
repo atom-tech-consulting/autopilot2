@@ -75,7 +75,7 @@ Backlog → Ready → Active → Complete  (happy path; auto-promotion at the
 1. `move_to_active` (board lock).
 2. Build the prompt: header + briefing + recent events + RESULT format spec.
 3. `sdk.query()` consumed turn-by-turn; messages dumped to `.stream.jsonl` + `.messages.jsonl` for diagnosis (TB-85).
-4. Parse the agent's final `RESULT:` block — `status` + `commit` + `summary` + `files_changed` + `tests_passed` + optional `cron:` directives.
+4. Capture the agent's `report_result(...)` MCP tool call — `status` + `commit` + `summary` + `files_changed` + `tests_passed` + optional `cron` list. If the agent didn't call it, daemon sets `status="unknown"` and routes through HEAD-recovery (step 7).
 5. Two-tier verify:
    - Per-task verification (`verify.verify_task`) runs the briefing's `## Verification` bullets — shell bullets via subprocess, prose bullets via SDK judge.
    - Project-wide gate (`AP2_VERIFY_CMD`, e.g. `uv run pytest -q`) runs after the per-task verify. `#no-verify` tag opts out.

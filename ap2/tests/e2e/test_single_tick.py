@@ -21,13 +21,15 @@ def test_single_tick_completes_ready_task(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-5",
-        text_respond(
-            "RESULT:\n"
-            "status: complete\n"
-            "commit: abc12345\n"
-            "summary: did it\n"
-            "files_changed: a.py\n"
-            "tests_passed: true\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete",
+                "commit": "abc12345",
+                "summary": "did it",
+                "files_changed": "a.py",
+                "tests_passed": "true",
+            },
         ),
     )
 
@@ -80,57 +82,22 @@ def test_single_tick_completes_via_task_complete_tool(e2e_project):
     assert end["commit"] == "deadbeef"
 
 
-def test_single_tick_tool_call_wins_over_legacy_result_block(e2e_project):
-    """When BOTH a `task_complete` tool call AND a RESULT text block land in
-    the same turn, the tool call is canonical. Pin so the precedence in
-    `run_task` (TB-101) doesn't silently drift back to text-parsing.
-    """
+def test_single_tick_no_tool_call_routes_through_head_recovery(e2e_project):
+    """TB-104: legacy RESULT text-block parsing was removed. An agent that
+    ends without calling `report_result` now produces `status="unknown"`
+    which triggers `_infer_result_from_head` (HEAD-salvage). No git history
+    in this test → task shelves to Backlog with retry."""
     cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
 
     sdk = FakeSDK()
-    sdk.on(
-        "## Task\nTB-5",
-        tool_call_respond(
-            "report_result",
-            {"status": "blocked", "summary": "tool says blocked"},
-            prefix_text=(
-                "RESULT:\nstatus: complete\ncommit: aaaaaaaa\n"
-                "summary: text says complete\n"
-            ),
-        ),
-    )
+    # Plain text reply, no tool call. The text body is ignored.
+    sdk.on("## Task\nTB-5", text_respond("I think I'm done with the task."))
 
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
-    # Tool call (status=blocked) wins → task moves to Backlog, not Complete.
     board = Board.load(cfg.tasks_file)
+    # No HEAD recovery possible (no commit) → routes through _handle_failure.
     assert board.find("TB-5")[0] == "Backlog"
-    end = next(e for e in reversed(events.tail(cfg.events_file, 20))
-               if e["type"] == "task_complete")
-    assert end["status"] == "blocked"
-
-
-def test_single_tick_falls_back_to_result_block_when_no_tool_call(e2e_project):
-    """Backwards-compat path: agents on the old prompt or briefings cached
-    pre-task_complete still work via the RESULT text-block parser."""
-    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
-
-    sdk = FakeSDK()
-    sdk.on(
-        "## Task\nTB-5",
-        text_respond(
-            "RESULT:\nstatus: complete\ncommit: 1234abcd\n"
-            "summary: legacy path\n"
-        ),
-    )
-
-    asyncio.run(_tick(cfg, sdk, mcp_server=None))
-
-    board = Board.load(cfg.tasks_file)
-    assert board.find("TB-5")[0] == "Complete"
-    end = next(e for e in reversed(events.tail(cfg.events_file, 20))
-               if e["type"] == "task_complete")
-    assert end["commit"] == "1234abcd"
 
 
 def test_single_tick_no_mm_no_cron(e2e_project):
@@ -138,7 +105,10 @@ def test_single_tick_no_mm_no_cron(e2e_project):
     cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
 
     sdk = FakeSDK()
-    sdk.on("## Task\nTB-5", text_respond("RESULT:\nstatus: complete\nsummary: ok\n"))
+    sdk.on(
+        "## Task\nTB-5",
+        tool_call_respond("report_result", {"status": "complete", "summary": "ok"}),
+    )
 
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
@@ -169,8 +139,9 @@ def test_single_tick_blocked_status_goes_to_backlog(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-5",
-        text_respond(
-            "RESULT:\nstatus: blocked\nsummary: needs human input\n"
+        tool_call_respond(
+            "report_result",
+            {"status": "blocked", "summary": "needs human input"},
         ),
     )
 
@@ -191,8 +162,9 @@ def test_single_tick_auto_promotes_backlog_when_ready_empty(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-7",
-        text_respond(
-            "RESULT:\nstatus: complete\ncommit: abc12345\nsummary: did it\n"
+        tool_call_respond(
+            "report_result",
+            {"status": "complete", "commit": "abc12345", "summary": "did it"},
         ),
     )
 
@@ -248,7 +220,10 @@ def test_tick_skips_ideation_if_ready_has_work(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-5",
-        text_respond("RESULT:\nstatus: blocked\nsummary: needs human\n"),
+        tool_call_respond(
+            "report_result",
+            {"status": "blocked", "summary": "needs human"},
+        ),
     )
 
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
@@ -294,7 +269,10 @@ def test_tick_auto_promote_skips_blocked_backlog_task(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-8",
-        text_respond("RESULT:\nstatus: complete\ncommit: def0\nsummary: ok\n"),
+        tool_call_respond(
+            "report_result",
+            {"status": "complete", "commit": "def0", "summary": "ok"},
+        ),
     )
 
     asyncio.run(_tick(cfg, sdk, mcp_server=None))

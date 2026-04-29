@@ -14,7 +14,7 @@ from ap2 import events
 from ap2.board import Board
 from ap2.daemon import _tick
 
-from ap2.tests.e2e._fakes import FakeSDK, text_respond
+from ap2.tests.e2e._fakes import FakeSDK, text_respond, tool_call_respond
 
 
 def _seed_briefing(cfg, task_id: str, title: str, verification_section: str) -> str:
@@ -41,9 +41,12 @@ def _seed_ready_with_briefing(cfg, task_id: str, briefing_section: str) -> None:
 def _complete_responder(sdk: FakeSDK, task_id: str) -> None:
     sdk.on(
         f"## Task\n{task_id}",
-        text_respond(
-            f"RESULT:\nstatus: complete\ncommit: abc12345\n"
-            f"summary: did {task_id}\nfiles_changed: a.py\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete", "commit": "abc12345",
+                "summary": f"did {task_id}", "files_changed": "a.py",
+            },
         ),
     )
 

@@ -4,7 +4,7 @@ External Python daemon that drives a Claude Code project through a list of tasks
 
 ## What it does
 
-- **Picks the next Ready task** off `TASKS.md` and runs it as a task agent. The agent edits files, commits, and emits a `RESULT:` block. The daemon parses it, moves the task to Complete (or Backlog/Frozen on failure).
+- **Picks the next Ready task** off `TASKS.md` and runs it as a task agent. The agent edits files, commits, and calls the `report_result` MCP tool. The daemon receives the structured payload and moves the task to Complete (or Backlog/Frozen on failure).
 - **Auto-promotes Backlog → Ready** when Ready is empty, skipping any task with unmet `(blocked on: TB-X)` dependencies.
 - **Fires ideation** when the working board (Active+Ready+Backlog) is fully empty. The ideation agent reads `goal.md` + `progress.md` + recent failures + the insights index, writes a per-cycle assessment, and proposes new Backlog tasks.
 - **Runs cron jobs** from `.cc-autopilot/cron.yaml` (currently just `status-report` by default).

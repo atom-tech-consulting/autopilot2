@@ -31,7 +31,7 @@ from .cron import (
     mark_run,
 )
 from .mattermost import check_new_messages
-from .result import TaskResult, parse as parse_result
+from .result import TaskResult
 from .tools import (
     CONTROL_AGENT_TOOLS,
     TASK_AGENT_FENCED_PATHS,
@@ -96,11 +96,14 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
 
     stderr_lines, _stderr_sink = _make_stderr_sink()
 
-    # Captures the structured payload from a `task_complete` MCP tool call
-    # (TB-101). When present, this REPLACES the regex-parsed RESULT block —
-    # the agent's structured `task_complete(...)` invocation is the
-    # canonical signal. Falls back to `parse_result(text)` when no tool
-    # call lands (legacy RESULT-block agents, recovery from crash, etc.).
+    # Captures the structured payload from a `report_result` MCP tool call
+    # (TB-101 / TB-104). This is the only completion signal task agents
+    # emit; legacy `RESULT:` text-block parsing was removed in TB-104.
+    # When no tool call lands, the daemon treats `parsed.status` as
+    # "unknown" and routes through HEAD-recovery (`_infer_result_from_head`)
+    # — if the agent committed with the mandated `<TB-N>: ...` subject
+    # prefix the work is salvaged; otherwise the task shelves to Backlog
+    # for retry.
     task_complete_args: dict = {}
 
     # Ring buffer of stream-message summaries so we can attach the last few
@@ -214,17 +217,19 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             _handle_failure(cfg, task, status="error")
             return
 
-    # Result-payload precedence (TB-101):
+    # Result-payload precedence (TB-101 / TB-104):
     #   1. HEAD-recovery override (crash / timeout salvage path).
-    #   2. `task_complete` MCP tool call — structured, no regex parsing.
-    #   3. Legacy `RESULT:` block in the final assistant message — fallback
-    #      for agents on the old prompt or briefings cached pre-tool.
+    #   2. `report_result` MCP tool call — structured, no regex parsing.
+    #   3. Neither fired → status="unknown", routes through HEAD-recovery
+    #      below (`_infer_result_from_head`). If the agent committed with
+    #      the mandated `<TB-N>: ...` subject prefix the work is salvaged;
+    #      otherwise the task shelves to Backlog for retry.
     if 'parsed_override' in locals():
         parsed = parsed_override
     elif task_complete_args:
         parsed = _task_result_from_tool_args(task_complete_args)
     else:
-        parsed = parse_result(result_text)
+        parsed = TaskResult(status="unknown", raw=(result_text or "")[-500:])
     if parsed.status not in _VALID_RESULT_STATUSES:
         inferred = _infer_result_from_head(cfg, task)
         if inferred is not None:

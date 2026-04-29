@@ -51,6 +51,16 @@ class _FakeMsg:
         self.content = [SimpleNamespace(text=text)]
 
 
+class _FakeToolMsg:
+    """Message with one tool_use block — what real SDK ToolUseBlock looks
+    like to `daemon._log_message`'s walk."""
+
+    def __init__(self, name: str, args: dict) -> None:
+        self.content = [
+            SimpleNamespace(name=name, input=args, id="tu-1"),
+        ]
+
+
 def _make_sdk(behavior):
     """Build a stub with the minimum surface run_task uses.
 
@@ -69,6 +79,16 @@ def _make_sdk(behavior):
 def _sdk_yielding(text: str):
     async def gen():
         yield _FakeMsg(text)
+
+    return _make_sdk(gen)
+
+
+def _sdk_yielding_report(args: dict):
+    """Stub that yields a `report_result` tool_use block with `args`. The
+    post-TB-104 replacement for `_sdk_yielding("RESULT:\\n...")`.
+    """
+    async def gen():
+        yield _FakeToolMsg("report_result", args)
 
     return _make_sdk(gen)
 
@@ -171,8 +191,8 @@ def test_successful_run_resets_attempt_counter(cfg):
     retry.bump_attempt(cfg.retry_state_file, "TB-5")
     assert retry.attempt_count(cfg.retry_state_file, "TB-5") == 1
 
-    sdk = _sdk_yielding(
-        "RESULT:\nstatus: complete\ncommit: abc12345\nsummary: did it\n"
+    sdk = _sdk_yielding_report(
+        {"status": "complete", "commit": "abc12345", "summary": "did it"}
     )
     asyncio.run(run_task(cfg, sdk, None, task))
 
@@ -187,8 +207,8 @@ def test_successful_run_resets_attempt_counter(cfg):
 def test_run_task_emits_start_and_complete_events(cfg):
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding(
-        "RESULT:\nstatus: complete\ncommit: deadbeef\nsummary: done\n"
+    sdk = _sdk_yielding_report(
+        {"status": "complete", "commit": "deadbeef", "summary": "done"}
     )
     asyncio.run(run_task(cfg, sdk, None, task))
     evts = events.tail(cfg.events_file, 20)
@@ -208,7 +228,7 @@ def test_run_task_does_not_bump_next_task_id(cfg, tmp_path):
     before = (tmp_path / "CLAUDE.md").read_text()
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding("RESULT:\nstatus: complete\nsummary: ok\n")
+    sdk = _sdk_yielding_report({"status": "complete", "summary": "ok"})
     asyncio.run(run_task(cfg, sdk, None, task))
     after = (tmp_path / "CLAUDE.md").read_text()
     assert "TB-10" in after
@@ -218,14 +238,13 @@ def test_run_task_does_not_bump_next_task_id(cfg, tmp_path):
 def test_run_task_appends_progress_section_on_complete(cfg):
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding(
-        "RESULT:\n"
-        "status: complete\n"
-        "commit: deadbeef1234\n"
-        "summary: Added X to Y\n"
-        "files_changed: a.py, b.py\n"
-        "tests_passed: true\n"
-    )
+    sdk = _sdk_yielding_report({
+        "status": "complete",
+        "commit": "deadbeef1234",
+        "summary": "Added X to Y",
+        "files_changed": "a.py, b.py",
+        "tests_passed": "true",
+    })
     asyncio.run(run_task(cfg, sdk, None, task))
 
     text = cfg.progress_file.read_text()
@@ -245,7 +264,7 @@ def test_run_task_progress_skips_empty_fields(cfg):
     """Only include fields that the RESULT actually populated."""
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding("RESULT:\nstatus: complete\nsummary: short\n")
+    sdk = _sdk_yielding_report({"status": "complete", "summary": "short"})
     asyncio.run(run_task(cfg, sdk, None, task))
     text = cfg.progress_file.read_text()
     assert "TB-5: Victim" in text
@@ -261,13 +280,12 @@ def test_run_task_applies_cron_add_on_complete(cfg):
 
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding(
-        "RESULT:\n"
-        "status: complete\n"
-        "commit: beefcafe\n"
-        "summary: wired it up\n"
-        "cron: add name=newjob interval=2h prompt=\"do thing\"\n"
-    )
+    sdk = _sdk_yielding_report({
+        "status": "complete",
+        "commit": "beefcafe",
+        "summary": "wired it up",
+        "cron": '[{"action": "add", "name": "newjob", "interval": "2h", "prompt": "do thing"}]',
+    })
     asyncio.run(run_task(cfg, sdk, None, task))
 
     jobs = {j.name: j for j in load_jobs(cfg.cron_file)}
@@ -285,12 +303,11 @@ def test_run_task_skips_cron_on_incomplete(cfg):
 
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding(
-        "RESULT:\n"
-        "status: blocked\n"
-        "summary: stuck\n"
-        "cron: add name=shouldnotappear interval=1h prompt=\"noop\"\n"
-    )
+    sdk = _sdk_yielding_report({
+        "status": "blocked",
+        "summary": "stuck",
+        "cron": '[{"action": "add", "name": "shouldnotappear", "interval": "1h", "prompt": "noop"}]',
+    })
     asyncio.run(run_task(cfg, sdk, None, task))
 
     jobs = load_jobs(cfg.cron_file)
@@ -300,16 +317,19 @@ def test_run_task_skips_cron_on_incomplete(cfg):
 def test_run_task_logs_rejected_cron_directive(cfg):
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding(
-        "RESULT:\n"
-        "status: complete\n"
-        "summary: tried a bad directive\n"
-        "cron: bogus-action name=x\n"
-    )
+    sdk = _sdk_yielding_report({
+        "status": "complete",
+        "summary": "tried a bad directive",
+        "cron": '[{"action": "bogus-action", "name": "x"}]',
+    })
     asyncio.run(run_task(cfg, sdk, None, task))
     evts = events.tail(cfg.events_file, 20)
+    # Post-TB-104 the cron list arrives as structured dicts (no `_error`
+    # markers from the regex parser); a bogus action goes through
+    # do_cron_edit and surfaces as `cron_proposal_error` instead.
     assert any(
-        e["type"] == "cron_proposal_rejected" and "bogus-action" in e.get("reason", "")
+        e["type"] == "cron_proposal_error"
+        and e.get("action") == "bogus-action"
         for e in evts
     )
 
@@ -325,8 +345,8 @@ def test_run_task_blocked_moves_to_backlog_and_writes_attempts(cfg, tmp_path):
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
 
-    sdk = _sdk_yielding(
-        "RESULT:\nstatus: blocked\nsummary: needs human input\n"
+    sdk = _sdk_yielding_report(
+        {"status": "blocked", "summary": "needs human input"}
     )
     asyncio.run(run_task(cfg, sdk, None, task))
 

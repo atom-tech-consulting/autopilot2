@@ -18,7 +18,7 @@ from ap2 import events, retry
 from ap2.board import Board
 from ap2.daemon import _tick
 
-from ap2.tests.e2e._fakes import FakeSDK, text_respond
+from ap2.tests.e2e._fakes import FakeSDK, text_respond, tool_call_respond
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -38,9 +38,12 @@ def _git_init(cwd: Path) -> None:
 def _ready_with_complete_result(sdk: FakeSDK, task_id: str) -> None:
     sdk.on(
         f"## Task\n{task_id}",
-        text_respond(
-            f"RESULT:\nstatus: complete\ncommit: abc12345\n"
-            f"summary: implemented {task_id}\nfiles_changed: a.py\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete", "commit": "abc12345",
+                "summary": f"implemented {task_id}", "files_changed": "a.py",
+            },
         ),
     )
 

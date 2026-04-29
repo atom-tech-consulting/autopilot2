@@ -118,22 +118,13 @@ encoded list of `{action, name, interval, prompt}` dicts:
 `add` requires `action`, `name`, `interval`, `prompt`. Directives are applied
 only when `status: complete`. Malformed entries are logged and skipped.
 
-### Legacy RESULT block (deprecated, still accepted as fallback)
-If your environment can't make MCP tool calls for some reason, you can fall
-back to the old text contract — end your final message with a fenced RESULT
-block:
-
-```
-RESULT:
-status: complete
-commit: a1b2c3d
-summary: ...
-files_changed: foo.py, bar.py
-tests_passed: true
-```
-
-The daemon parses this only when no `report_result` tool call landed. Prefer
-the tool call.
+### What if you forget?
+If you end your turn without calling `report_result`, the daemon synthesizes
+a result from `git log`: a HEAD commit whose subject starts with `<TASK_ID>:`
+(per the convention pinned earlier in this prompt) is treated as a
+successful completion. If no such commit exists, the task is shelved to
+Backlog and retried. So always commit with the right subject prefix; the
+tool call is the cheap, explicit signal.
 """
 
 

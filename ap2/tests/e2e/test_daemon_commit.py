@@ -16,7 +16,7 @@ from ap2 import events
 from ap2.board import Board
 from ap2.daemon import _commit_state_files, _tick
 
-from ap2.tests.e2e._fakes import FakeSDK, crash_respond, text_respond
+from ap2.tests.e2e._fakes import FakeSDK, crash_respond, text_respond, tool_call_respond
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -175,9 +175,12 @@ def test_tick_creates_state_commit_on_task_complete(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-5",
-        text_respond(
-            "RESULT:\nstatus: complete\ncommit: abc12345\n"
-            "summary: did it\nfiles_changed: a.py\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete", "commit": "abc12345",
+                "summary": "did it", "files_changed": "a.py",
+            },
         ),
     )
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
@@ -198,7 +201,10 @@ def test_tick_state_commit_reflects_backlog_on_blocked_task(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-5",
-        text_respond("RESULT:\nstatus: blocked\nsummary: needs human\n"),
+        tool_call_respond(
+            "report_result",
+            {"status": "blocked", "summary": "needs human"},
+        ),
     )
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
@@ -214,7 +220,10 @@ def test_successful_task_cleans_up_debug_dumps(e2e_project):
 
     sdk = FakeSDK()
     sdk.on("## Task\nTB-5",
-           text_respond("RESULT:\nstatus: complete\nsummary: ok\n"))
+           tool_call_respond(
+               "report_result",
+               {"status": "complete", "summary": "ok"},
+           ))
 
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
@@ -235,7 +244,8 @@ def test_implicit_commit_recovery_on_unknown_status(e2e_project):
     _git(["commit", "-m", "TB-5: implement the thing"], cfg.project_root)
 
     sdk = FakeSDK()
-    # Agent talks but doesn't emit a RESULT block — parse_result → status=unknown.
+    # Agent talks but doesn't call report_result — daemon sets status=unknown,
+    # then `_infer_result_from_head` salvages from the TB-5-prefixed commit.
     sdk.on(
         "## Task\nTB-5",
         text_respond("All done — committed and tests pass.\n"),
@@ -359,7 +369,10 @@ def test_blocked_task_keeps_debug_dumps(e2e_project):
     sdk = FakeSDK()
     sdk.on(
         "## Task\nTB-5",
-        text_respond("RESULT:\nstatus: blocked\nsummary: stuck\n"),
+        tool_call_respond(
+            "report_result",
+            {"status": "blocked", "summary": "stuck"},
+        ),
     )
 
     asyncio.run(_tick(cfg, sdk, mcp_server=None))

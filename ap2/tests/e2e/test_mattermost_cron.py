@@ -14,7 +14,7 @@ from ap2.board import Board
 from ap2.daemon import _tick
 from ap2.tools import do_board_edit
 
-from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg, text_respond
+from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg, text_respond, tool_call_respond
 
 
 # ---------- responder factories ----------
@@ -137,16 +137,22 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
            _cron_unfreeze_pipeline_follow_up(cfg, "TB-6"))
     sdk.on(
         "**Pipeline**",  # unique to the pipeline task prompt title
-        text_respond(
-            "RESULT:\nstatus: complete\ncommit: pipedead\n"
-            "summary: pipeline done\ntests_passed: true\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete", "commit": "pipedead",
+                "summary": "pipeline done", "tests_passed": "true",
+            },
         ),
     )
     sdk.on(
         "## Task\nTB-6",
-        text_respond(
-            "RESULT:\nstatus: complete\ncommit: follbeef\n"
-            "summary: follow-up done\ntests_passed: true\n"
+        tool_call_respond(
+            "report_result",
+            {
+                "status": "complete", "commit": "follbeef",
+                "summary": "follow-up done", "tests_passed": "true",
+            },
         ),
     )
 
