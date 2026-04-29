@@ -1,21 +1,26 @@
-"""Real-SDK round-trip for the `pipeline_task_start` MCP tool (TB-81).
+"""Real-SDK round-trip for the `pipeline_task_start` MCP tool (TB-115).
 
-Validates the full chain that `pipeline_start` events in stoch's
-events.jsonl prove implicitly:
+Validates the full chain end-to-end with the real Claude SDK + MCP
+server (without `daemon.run_task`'s capture / Pipeline Pending parking
+— those are covered by the FakeSDK e2e in test_pipeline_pending.py):
 
   1. The tool is advertised by the autopilot MCP server (covered by
      `test_mcp_inventory.py` without a real SDK; this pins it via the
      real-SDK round-trip too).
   2. A real Claude agent, given a briefing that asks for a pipeline
-     launch, calls the tool with the structured args.
-  3. The tool spawns a real OS subprocess, captures its pid, creates a
-     Backlog validation task with `(blocked on: pid:N@TS)`, and emits a
-     `pipeline_start` event.
+     launch, calls `pipeline_task_start(name, command)` with the
+     structured args.
+  3. The tool spawns a real OS subprocess, captures its pid, and emits
+     a `pipeline_start` event with `name` + `pid` + `started_at` + `log`.
 
-The pipeline command is intentionally trivial (`sleep 0.5`) so the test
-finishes in seconds. We assert on the side effects (events.jsonl entry,
-Backlog task) — that's the canonical contract `Board.next_dispatchable`
-+ the validation task auto-promote rely on.
+Pre-TB-115 the tool also created a Backlog validation task gated on
+`pid:N@TS`; that pattern was retired (TB-115 + TB-117) — the launching
+task itself carries verification, parked in `Pipeline Pending` by the
+daemon. This smoke only exercises the MCP tool surface, so it doesn't
+involve the Pipeline Pending move.
+
+The pipeline command is intentionally trivial (`sleep 0.5`) so the
+test finishes in seconds.
 
 OPT-IN via `AP2_REAL_SDK=1`.
 """
@@ -43,7 +48,7 @@ def _bootstrap_project(root: Path):
 
     (root / "TASKS.md").write_text(
         "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n"
-        "## Complete\n\n## Frozen\n"
+        "## Pipeline Pending\n\n## Complete\n\n## Frozen\n"
     )
     (root / "CLAUDE.md").write_text(
         "# Smoke project\n\n## Autopilot\n\n- Next task ID: TB-2\n"
@@ -67,12 +72,6 @@ def _fake_pipeline_task():
             "summary='launched smoke pipeline')` and end your turn:\n"
             "  name: smoke-sleep\n"
             "  command: sleep 0.5\n"
-            "  validation_title: Validate smoke pipeline output\n"
-            "  validation_briefing: |\n"
-            "    ## Goal\n"
-            "    Confirm the smoke pipeline ran.\n\n"
-            "    ## Verification\n\n"
-            "    - `true` — placeholder\n"
             "Do NOT do any real work. Do NOT read or edit other files. "
             "Just call the two MCP tools and return."
         ),
@@ -117,10 +116,9 @@ def test_pipeline_task_start_round_trip_via_real_sdk():
             evts = ev_mod.tail(cfg.events_file, n=20)
             pipe_starts = [e for e in evts if e.get("type") == "pipeline_start"]
             board = Board.load(cfg.tasks_file)
-            backlog_tasks = list(board.iter_tasks(section="Backlog"))
-            return tool_calls, pipe_starts, backlog_tasks, root
+            return tool_calls, pipe_starts, board, root
 
-    tool_calls, pipe_starts, backlog_tasks, root = asyncio.run(go())
+    tool_calls, pipe_starts, board, root = asyncio.run(go())
 
     print(f"\n[smoke] {len(tool_calls)} tool calls observed:")
     for tc in tool_calls:
@@ -144,27 +142,19 @@ def test_pipeline_task_start_round_trip_via_real_sdk():
     started = pipe_starts[0]
     assert started.get("name") == "smoke-sleep", started
     assert isinstance(started.get("pid"), int), started
-    print(f"[smoke] pipeline_start: pid={started['pid']} "
-          f"validation={started.get('validation')}")
-
-    # The handler created exactly one Backlog validation task gated on
-    # the pid.
-    pid_blockers = [
-        t for t in backlog_tasks
-        if any(b.startswith("pid:") for b in t.blocked_on)
-    ]
-    assert len(pid_blockers) == 1, (
-        f"expected 1 Backlog task with pid:N@TS blocker, got "
-        f"{len(pid_blockers)} (all backlog: "
-        f"{[(t.id, t.title) for t in backlog_tasks]})"
+    assert isinstance(started.get("started_at"), int), started
+    assert started.get("log", "").endswith(f"smoke-sleep-{started['pid']}.log"), started
+    # TB-115 contract: no `validation` field; no Backlog validation task.
+    assert "validation" not in started, (
+        f"pipeline_start event leaked retired `validation` field: {started}"
     )
-    val_task = pid_blockers[0]
-    assert val_task.id == started["validation"], (
-        f"validation task id mismatch: event says {started['validation']}, "
-        f"board has {val_task.id}"
+    backlog_tasks = list(board.iter_tasks(section="Backlog"))
+    assert backlog_tasks == [], (
+        f"unexpected Backlog tasks created (pre-TB-115 contract): "
+        f"{[(t.id, t.title) for t in backlog_tasks]}"
     )
-    print(f"[smoke] PASS — validation task {val_task.id} "
-          f"blocked_on={val_task.blocked_on}")
+    print(f"[smoke] PASS — pipeline_start fired for pid={started['pid']}; "
+          f"no Backlog side-effect (TB-115 contract)")
 
     # Wait briefly for the sleep 0.5 subprocess to exit so we don't leave
     # zombies in the test runner's process tree.
