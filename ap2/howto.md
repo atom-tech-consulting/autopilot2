@@ -102,29 +102,33 @@ the task shelves to Backlog and retries up to `AP2_MAX_RETRIES` (default
 
 ### Long-running work — use `pipeline_task_start`
 
-If your work would take >10 minutes (grid sweeps, full-history
-backtests, anything with progress bars), don't run it inline. Call:
+If your work would take >~5 minutes wall-clock (grid sweeps,
+full-history backtests, Polygon-class data fetches, ML training,
+anything with rate-limited APIs), don't run it inline. Call:
 
 ```python
 pipeline_task_start(
     name="my-sweep",
     command="uv run python scripts/run_my_sweep.py",
-    validation_title="Validate my-sweep output",
-    validation_briefing="...full markdown briefing...",
 )
 ```
 
 The tool spawns the command detached, captures the pid +
-`create_time()`, creates a Backlog validation task with
-`(blocked on: pid:<N>@<TS>)`. The validation task auto-promotes when
-the process exits and runs the briefing's output-artifact checks then.
+`create_time()`, and emits a `pipeline_start` event. After your
+`report_result(status="complete", ...)` the daemon moves THIS task
+to a `Pipeline Pending` board section (TB-115). On every subsequent
+tick, the daemon checks whether all of your spawned pids are dead.
+Once they are, it re-runs your briefing's `## Verification`
+against the post-pipeline working tree — pass → Complete, fail →
+Backlog (with retry-counter bump) → Frozen on retry exhaustion.
+You can call `pipeline_task_start` multiple times in one turn for
+parallel pipelines (use distinct `name` values); the daemon waits
+for ALL of them.
 
-**Two-tier verification** (TB-86): the launch task's own
-`## Verification` runs at launch-completion time and must check
-launch-time things only (file exists, --help exits 0, pytest passes,
-import works). Output-artifact checks (`test -f reports/...`) belong
-in the `validation_briefing` argument, not in the launch task's
-verification section.
+The briefing's `## Verification` IS the post-pipeline verification —
+write it to check output artifacts (`test -f reports/foo.csv`,
+JSON schema validation, etc.). Pre-TB-115's two-tier
+launch-task-and-validation-task split is retired.
 
 ## What the daemon does each tick (~30s)
 
@@ -158,10 +162,12 @@ Verdicts: `pass` → Complete. `partial` (some unverified, no fails)
 → Complete + `verification_partial` event. `fail` (any) → Backlog →
 retry → Frozen at retry exhaustion.
 
-The verifier picks the **last** `## Verification` heading. This matters
-for two-tier pipeline-launch briefings — the launch task's own bullets
-must come last; the inline `validation_briefing` sub-document's
-`## Verification` (the post-pipeline checks) comes earlier.
+The verifier picks the **last** `## Verification` heading. (Pre-TB-115
+two-tier pipeline briefings used this property to keep the launch task's
+own checks last while a sub-`validation_briefing` carried output-artifact
+bullets earlier; the two-tier split is retired post-TB-115 — now the
+single `## Verification` runs both at synchronous-completion time AND
+post-pipeline as `_sweep_pipeline_pending` re-runs it.)
 
 **Project-wide gate** (`AP2_VERIFY_CMD`, optional). Runs after the
 per-task gate. Typical: `uv run pytest -q`. `--no-verify` tag opts
@@ -185,10 +191,8 @@ specific tasks out (e.g. docs-only changes).
   recent failures, cron staleness, board health) and posts to
   `AP2_MM_CHANNELS[0]`.
 - **Stuck blocker.** `Board.next_dispatchable` skips Backlog tasks
-  whose `(blocked on: TB-X)` blockers are unsatisfied. `pid:N@TS`
-  blockers from `pipeline_task_start` consult `pipelines.is_blocking`
-  (alive + matching `create_time`). Diagnose surfaces unsatisfiable
-  cases (Backlog blocked on Frozen).
+  whose `(blocked on: TB-X)` blockers are unsatisfied. Diagnose
+  surfaces unsatisfiable cases (Backlog blocked on Frozen).
 - **Malformed task line.** `Board._parse` flags any line not matching
   `TASK_LINE_RE`; daemon emits dedup'd `board_malformed_line` event.
 
@@ -199,7 +203,7 @@ by allowlist:
 
 **Task agents** (`TASK_AGENT_TOOLS`):
 - `report_result(status, commit, summary, files_changed, tests_passed, cron)`
-- `pipeline_task_start(name, command, validation_title, validation_briefing)`
+- `pipeline_task_start(name, command)` (TB-115)
 - Plus regular `Read`/`Glob`/`Grep`/`Bash`/`Edit`/`Write` (with the
   fenced paths blocked).
 
@@ -309,8 +313,8 @@ Per-project Mattermost channel routing lives in
 The daemon is intentionally not transactional across ticks. Every tick
 is idempotent and corrective:
 - Mid-task crash → `_recover_orphans` on next start, task retries.
-- Pipeline died while daemon was off → validation task auto-promotes
-  next tick (`is_blocking` returns False).
+- Pipeline died while daemon was off → next tick's
+  `_sweep_pipeline_pending` notices and runs verification.
 - Cron run crashed mid-run → next tick re-fires when due.
 - Ideation crashed before writing state → cooldown still advances so
   the broken agent doesn't get hammered every tick.

@@ -238,66 +238,42 @@ concrete acceptance bullets that the per-task verifier can evaluate:
 A briefing with no `## Verification` section will be skipped by the
 verifier (legacy compat). New work should not opt into that path.
 
-## Long-running work — propose as a pipeline launch (TB-81)
-If the proposed work plausibly takes more than ~10 minutes as a single
-agent dispatch (parameter sweeps, multi-day backtests, large data
-preprocessing), DO NOT propose it as one mega-task. The daemon dispatches
-tasks one at a time inside `await sdk.query(...)` — a 30-min task holds
-the only task slot for 30 min.
+## Long-running work — write briefings the agent can pivot to a pipeline (TB-115)
+If the proposed work plausibly takes more than ~5 minutes wall-clock
+(parameter sweeps, multi-day backtests, full-history data fetches
+against rate-limited APIs, ML training), the briefing should be the
+SAME shape as any synchronous briefing — concrete scope and a `##
+Verification` section that checks output artifacts. The task agent
+itself decides whether to dispatch via `pipeline_task_start(name,
+command)` or run inline based on its self-classification (the task
+prompt teaches the rule).
 
-Instead, propose a fast (<2 min) launch task whose briefing instructs
-the agent to call ONE MCP tool, `pipeline_task_start`:
+When the agent does dispatch via pipeline, the daemon parks the
+launching task in `Pipeline Pending` (the 4th board section). On every
+subsequent tick, the daemon's `_sweep_pipeline_pending` checks whether
+all of the dispatched pids have died. Once they have, the daemon
+re-runs the briefing's `## Verification` against the post-pipeline
+working tree — pass moves the task to Complete, fail routes through
+Backlog → Frozen on retry exhaust. So the SAME `## Verification`
+section serves both synchronous and pipeline-dispatched runs;
+ideation does not need to pre-classify.
 
-    pipeline_task_start(
-        name="<pipeline-name>",
-        command="<shell command, e.g. uv run python -m foo sweep ...>",
-        validation_title="Validate <pipeline-name> output",
-        validation_briefing="<full markdown briefing for the post-run review>",
-    )
+What the briefing should include: concrete output-artifact checks
+where the work produces files (e.g. `test -f reports/<name>/grid.csv`,
+`test -f reports/<name>/best.json`, JSON schema validation), plus a
+test command (`uv run pytest -q tests/test_<feature>.py` if there's
+test scaffolding).
 
-The tool spawns the command as a detached OS process, creates the
-validation task in Backlog with `(blocked on: pid:<N>@<TS>)`, and
-returns. The validation task auto-promotes when the OS process dies
-(the next dispatch tick consults `pipelines.is_blocking` for the
-`pid:` blocker — no monitor cron, no Frozen stub, no PID file).
+What ideation should NOT do: include a `validation_briefing`
+sub-document (retired in TB-115), pre-classify the task as a "launch"
+task, or split into a fast-launch + slow-validation pair. The task
+agent owns the inline-vs-pipeline call.
 
-Launch-task RESULT block needs only `status=complete` plus the usual
-`commit:` line — no `cron:` directives, no follow-up `board_edit`
-calls. The validation briefing must include its own `## Verification`
-section so the per-task verifier (TB-69) can score the pipeline's
-output once it auto-promotes.
-
-### Two-tier verification: where output checks belong (TB-86)
-The launch task and the validation task each get their own
-`## Verification` section, and they verify DIFFERENT things. Splitting
-them wrong is what made stoch's TB-83 / TB-92 retry-exhaust into Frozen.
-
-Launch task's top-level `## Verification` — checks that pass at
-LAUNCH-COMPLETION time, BEFORE the detached pipeline has produced
-anything. Examples:
-  - `uv run pytest tests/test_<feature>.py -q` — new unit tests pass.
-  - `uv run python scripts/<name>.py --help` — CLI parses cleanly.
-  - `test -f stoch/sweep/<feature>.py` — implementation file present.
-  - `uv run python -c "from stoch.sweep.<feature> import enumerate_grid; assert len(enumerate_grid())==18"` — grid enumeration imports + has expected size.
-
-`validation_briefing`'s `## Verification` (the briefing you pass to
-`pipeline_task_start`) — checks that run AFTER the pipeline dies and
-the validation task auto-promotes. Examples:
-  - `test -f reports/<name>/grid.csv` — pipeline OUTPUT exists.
-  - `test -f reports/<name>/best.json` — output artifact exists.
-  - `uv run python -c "import json; d=json.load(open('reports/<name>/best.json')); assert 'sharpe' in d"` — output schema check.
-
-DO NOT put output-artifact checks in the launch task's
-`## Verification` — when the per-task verifier runs them, the pipeline
-is still running detached and the files don't exist yet. Every such
-bullet exits 1 / "No such file or directory", and the launch task
-retry-exhausts into Frozen even though the pipeline is fine. Output
-checks ALWAYS go in `validation_briefing`.
-
-Heuristic for "more than 10 min": grid sweeps with >5 parameter
+Heuristic for "more than 5 min": grid sweeps with >5 parameter
 combinations on minute-bar data; full-history backtests on >10
 tickers; anything that fans out across many subprocesses; anything
-whose existing CLI (e.g. `python -m stoch sweep`) has progress bars.
+whose existing CLI (e.g. `python -m stoch sweep`) has progress bars;
+data fetches against Polygon-class rate-limited APIs.
 
 ## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)
 The verifier runs each shell bullet via `/bin/sh -c <bullet>` in the

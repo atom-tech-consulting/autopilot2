@@ -379,29 +379,22 @@ def test_is_blocker_satisfied_tb_in_completed(tmp_path):
     assert b._is_blocker_satisfied("TB-99", {"TB-9"}) is False
 
 
-def test_is_blocker_satisfied_pid_delegates_to_pipelines(tmp_path, monkeypatch):
-    path = _write_board(tmp_path, SAMPLE)
-    b = Board.load(path)
-
-    from ap2 import pipelines
-
-    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: True)
-    assert b._is_blocker_satisfied("pid:1@2", set()) is False  # still blocking
-
-    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: False)
-    assert b._is_blocker_satisfied("pid:1@2", set()) is True  # unblocked
-
-
 def test_is_blocker_satisfied_unknown_scheme_fails_safe(tmp_path):
     path = _write_board(tmp_path, SAMPLE)
     b = Board.load(path)
     # Typo / unknown prefix → treat as unsatisfied so the task stays put
-    # rather than silently dispatching.
+    # rather than silently dispatching. Includes the TB-117-retired
+    # `pid:N@TS` scheme — any straggler from a pre-TB-115 board
+    # remains stuck Backlog until the operator removes the clause.
     assert b._is_blocker_satisfied("pidd:1@2", set()) is False
     assert b._is_blocker_satisfied("file:/tmp/foo", set()) is False
+    assert b._is_blocker_satisfied("pid:1@2", set()) is False
 
 
-def test_next_dispatchable_with_pid_blocker(tmp_path, monkeypatch):
+def test_next_dispatchable_pid_blocker_strands_task(tmp_path):
+    """TB-117: the retired `pid:N@TS` scheme always evaluates to "not
+    satisfied" — any pre-TB-115 task whose Backlog line still carries
+    such a blocker stays put until an operator removes the clause."""
     text = textwrap.dedent(
         """\
         # Tasks
@@ -414,6 +407,8 @@ def test_next_dispatchable_with_pid_blocker(tmp_path, monkeypatch):
 
         - [ ] **TB-5** **validate** — runs after the pipeline (blocked on: pid:12345@1700000000)
 
+        ## Pipeline Pending
+
         ## Complete
 
         ## Frozen
@@ -421,14 +416,4 @@ def test_next_dispatchable_with_pid_blocker(tmp_path, monkeypatch):
     )
     path = _write_board(tmp_path, text)
     b = Board.load(path)
-
-    from ap2 import pipelines
-
-    # Pipeline still running → task still blocked.
-    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: True)
     assert b.next_dispatchable("Backlog") is None
-
-    # Pipeline ended → task auto-unblocks on the very next dispatch tick.
-    monkeypatch.setattr(pipelines, "is_blocking", lambda blocker: False)
-    t = b.next_dispatchable("Backlog")
-    assert t is not None and t.id == "TB-5"

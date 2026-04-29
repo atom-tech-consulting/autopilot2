@@ -126,7 +126,7 @@ ap2/
 ├── tools.py          # MCP server: do_board_edit, do_cron_edit, do_mattermost_reply,
 │                     # do_log_event, do_daemon_control, do_ideation_state_write,
 │                     # do_pipeline_task_start
-├── pipelines.py      # is_blocking (pid:N@TS dependency check)
+├── rollback.py       # linear_rollback_to + helpers (TB-110 + TB-111 + TB-115)
 ├── prompts.py        # build_task_prompt, build_control_prompt, build_mattermost_prompt
 ├── web.py            # local read-only web UI (TB-99 + TB-93 thaw):
 │                     # /, /events, /tasks, /task/<TB-N>, /pipelines,
@@ -180,7 +180,7 @@ A task is verified twice before landing in Complete:
 
 **Per-task verification** (`ap2/verify.py`). The briefing's `## Verification` section is parsed for shell bullets (`[shell] cmd` or backtick-quoted `\`cmd\``) and prose bullets (free text). Shell bullets run via `subprocess` in the project root; prose bullets go to a small SDK judge that returns `{status, rationale}`. Verdicts: `pass`, `partial` (some unverified, none failed — proceeds to Complete with a `verification_partial` event), `fail` (routes through retry).
 
-The verifier picks the **last** `## Verification` section in the briefing. This matters for two-tier pipeline-launch briefings (TB-86), which embed a `validation_briefing` sub-document with its own `## Verification`. The launch task's own bullets must come last; the inline validation's output-artifact checks (which run after the pipeline dies) come earlier.
+The verifier picks the **last** `## Verification` section in the briefing. (Pre-TB-115 two-tier pipeline-launch briefings used this property — they embedded a `validation_briefing` sub-document with its own `## Verification` earlier in the markdown so the launch task's own bullets came last. Post-TB-115 there's only one `## Verification` per briefing — `_sweep_pipeline_pending` re-runs it post-pipeline against the populated work tree.)
 
 **Project-wide regression gate** (`AP2_VERIFY_CMD`). Runs after a successful per-task verify. Default unset = skip. Typical values: `uv run pytest -q`, `cargo test`, `npm test`. Failure routes the task through `_handle_failure` like any other crash. `--no-verify` on the original `ap2 add` opts the task out (tag `#no-verify`).
 
@@ -188,16 +188,17 @@ This split lets the per-task gate stay narrow ("did the agent do THIS task's wor
 
 ## Pipelines (`pipeline_task_start`)
 
-Long-running work (>10 min — sweeps, full-history backtests, anything with progress bars) goes through `pipeline_task_start` instead of being run inline. The tool:
+Long-running work (>~5 min wall-clock — sweeps, full-history backtests, Polygon-class data fetches, ML training, anything with rate-limited APIs) goes through `pipeline_task_start(name, command)` instead of being run inline. The tool:
 
 1. Spawns the command via `Popen(shell=True, start_new_session=True)`.
 2. Captures `psutil.Process(pid).create_time()` for PID-recycling defense.
 3. Writes a `pipeline_start` event with the pid + log path.
-4. Inside `locked_board`, creates one Backlog **validation task** with `(blocked on: pid:<N>@<TS>)`.
 
-`Board.next_dispatchable("Backlog")` skips any task whose blockers aren't satisfied. `pipelines.is_blocking(pid, ts)` returns `True` while the process is alive AND its `create_time` matches — both checks survive a crashed daemon and a long-lived daemon over weeks. When the pipeline exits and the validation task auto-promotes, that task runs the *output-artifact* checks (`test -f reports/foo.csv`, JSON schema validation), which the launch task can't run because the pipeline hadn't produced output yet.
+The daemon walks the agent's SDK message stream during `_consume`, pairs `pipeline_task_start` tool_use blocks with their tool_result blocks (by `tool_use_id`) to capture pid + started_at, and on `report_result(status="complete")` moves the launching task to a `Pipeline Pending` board section (TB-115 — 4th of 6 sections) instead of Complete, emitting `task_pipeline_pending` with the captured pids.
 
-The TB-86 prompt guidance + TB-91 verifier last-match fix together ensure ideation authors briefings of this shape correctly and the verifier picks the right `## Verification` section at each tier.
+`_sweep_pipeline_pending` runs each tick (between cron and Ready dispatch). For each Pipeline Pending task, it looks up the most recent `task_pipeline_pending` event for that task and checks every pid via `os.kill(pid, 0)` + psutil `create_time` (pid-recycling defense). When all dead, it re-runs the briefing's project-wide and per-task verifiers against the post-pipeline working tree — pass moves to Complete (with `_append_progress`), fail routes through `_handle_failure(status="verification_failed")` → Backlog → Frozen at retry exhaustion. An agent can call `pipeline_task_start` multiple times in one turn for parallel pipelines; the sweep waits for ALL of them.
+
+Pre-TB-115's two-task split (launch + auto-created Backlog validation with `(blocked on: pid:N@TS)`) was retired; `pipelines.is_blocking` was retired with it (TB-117) once stoch's last pre-TB-115 validation tasks drained off the live board.
 
 ## Failure modes and recovery
 
@@ -211,7 +212,7 @@ The TB-86 prompt guidance + TB-91 verifier last-match fix together ensure ideati
 
 **Daemon goes silent for >3h** — the watchdog (`_maybe_auto_diagnose`) builds a `DiagnoseReport` (board summary + recent failures + cron staleness + board health), renders it as Mattermost-friendly markdown, and posts to `AP2_MM_CHANNELS[0]`. Cooldown 6h. Skips when no MM destination is configured (sticky one-shot warning so it doesn't spam).
 
-**Stuck-blocker** — `Board._is_blocker_satisfied` checks each `(blocked on: ...)` token. `TB-N` blockers are satisfied when the named task is in Complete; `pid:N@TS` blockers go through `pipelines.is_blocking`; unknown schemes fail-safe. `diagnose.board_health["unsatisfiable_blocks"]` surfaces the corner case where a Backlog task is blocked on a Frozen task (will never auto-promote).
+**Stuck-blocker** — `Board._is_blocker_satisfied` checks each `(blocked on: ...)` token. `TB-N` blockers are satisfied when the named task is in Complete; unknown schemes fail-safe (including the retired `pid:N@TS` scheme — any straggler from a pre-TB-115 / pre-TB-117 board sits in Backlog until the operator removes the clause). `diagnose.board_health["unsatisfiable_blocks"]` surfaces the corner case where a Backlog task is blocked on a Frozen task (will never auto-promote).
 
 **Malformed task line** — `Board._parse` flags any line that doesn't match `TASK_LINE_RE`; the daemon emits a deduped `board_malformed_line` event in step 3 of `_tick`. Without this, an out-of-band edit (e.g. a `(<sha>)` annotation between `**TB-N**` and `**Title**`) silently strands every task that depends on the affected one.
 
@@ -232,7 +233,7 @@ Per-project Mattermost channel routing lives in `<project>/.cc-autopilot/env` (`
 The daemon is intentionally not transactional across ticks. State files are point-in-time snapshots; recovery is "do the right thing on the next tick." Examples:
 
 - A daemon restart mid-task → orphan recovery on startup; the task gets retried.
-- A pipeline that died while the daemon was off → the validation task auto-promotes on the next tick (the `pid:N@TS` blocker resolves the moment `is_blocking` returns False).
+- A pipeline that died while the daemon was off → the next tick's `_sweep_pipeline_pending` notices the pid is gone and runs the launching task's verifier against the post-pipeline working tree.
 - A cron run that crashed mid-run → next tick checks `cron_state.json` and re-fires when due.
 - An ideation run that crashed before writing `ideation_state.md` → cooldown still advances (`mark_run` always fires) so the broken agent doesn't get hammered every tick. Operator can `ap2 logs` to see `ideation_error` and decide whether to manually retry.
 
@@ -250,7 +251,6 @@ Three tiers, increasing in fidelity and cost.
 - `tests/test_ideation_defaults.py` — pins on `ideation.default.md` content (Step 0 / Step 0.5 / Step 1.5 phrases — load-bearing for ideation behavior).
 - `tests/test_verify.py` / `test_briefing.py` — per-task verification + last-`## Verification`-section parsing.
 - `tests/test_diagnose.py` — watchdog report shape.
-- `tests/test_pipelines.py` — `pid:N@TS` blocker semantics.
 - `tests/test_mcp_inventory.py` — every advertised MCP tool ↔ allowlist match. Catches the "decorated but not in `tools=[...]`" bug class without a real SDK.
 - `tests/e2e/test_single_tick.py` / `test_multi_tick_cron.py` / `test_pipeline.py` / `test_mattermost_cron.py` — full `_tick` exercises with `FakeSDK`.
 
@@ -261,7 +261,7 @@ The e2e tests use `FakeSDK` (`tests/e2e/_fakes.py`) — a programmable mock that
 `AP2_REAL_SDK=1 uv run pytest ap2/tests/smoke/ -v -s` invokes the real Claude Agent SDK against tiny synthetic tasks. Validates what FakeSDK can't: tool advertisement reaches the agent, the agent actually calls the tool, and the daemon's stream-walking captures the structured payload. Default `pytest` skips them via a module-level `pytest.mark.skipif(not AP2_REAL_SDK)`.
 
 - `tests/smoke/test_report_result_real_sdk.py` — agent calls `report_result` MCP tool → daemon synthesizes valid `TaskResult`. Pins the TB-101 protocol.
-- `tests/smoke/test_pipeline_task_start_real_sdk.py` — agent calls `pipeline_task_start` → real OS subprocess spawns, `pipeline_start` event fires, Backlog validation task created with `pid:N@TS` blocker. Pins the TB-81 chain.
+- `tests/smoke/test_pipeline_task_start_real_sdk.py` — agent calls `pipeline_task_start` → real OS subprocess spawns, `pipeline_start` event fires. Pins the launch surface (post-TB-115 contract: just name + command, launching task parks in Pipeline Pending).
 - `tests/smoke/test_prose_judge_real_sdk.py` — `verify._judge_prose_bullet` against obvious-pass and obvious-fail diffs. Catches the `verification_partial`-from-judge-crash class (TB-146 round 2).
 
 When to run: after any change to MCP tool registration (`tools.py`), agent prompt (`prompts.py`, `ideation.default.md`), or the verifier judge (`verify._judge_prose_bullet`). Total ~30 seconds and a few cents.

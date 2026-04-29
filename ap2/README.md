@@ -165,7 +165,7 @@ The daemon registers an `autopilot` MCP server with two pools of tools, partitio
 
 **Control agents** (mattermost handler, cron jobs, ideation): `board_edit`, `cron_edit`, `mattermost_reply`, `log_event`, `daemon_control`, `ideation_state_write`. Broad reads, narrow writes — every mutation goes through a single-purpose MCP tool, no `Write`/`Edit` access.
 
-**Task agents**: `pipeline_task_start(name, command, validation_title, validation_briefing)`. Launches `command` as a detached process and creates a Backlog validation task with `(blocked on: pid:<N>@<TS>)`. The validation task auto-promotes when the pipeline exits.
+**Task agents**: `pipeline_task_start(name, command)` for long work (>~5 min wall-clock — data fetches, parameter sweeps, ML training). Launches `command` as a detached subprocess. The launching task moves to a `Pipeline Pending` board section (TB-115); the daemon's per-tick sweep re-runs the briefing's `## Verification` once every spawned pid dies and routes to Complete or Backlog/Frozen.
 
 Task agents otherwise have `Read`, `Glob`, `Grep`, `Bash`, `Edit`, `Write` (project-scoped) — they edit code, commit, and exit.
 

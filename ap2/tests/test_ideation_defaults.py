@@ -52,14 +52,18 @@ def test_ideation_prompt_mentions_followup_scan():
 
 
 def test_ideation_prompt_includes_pipeline_task_start_for_long_work():
-    """TB-81: long work routes through `pipeline_task_start`."""
+    """TB-115: ideation no longer pre-classifies into "launch task" +
+    "validation task". Long work goes into a regular briefing whose
+    `## Verification` checks output artifacts; the task agent decides
+    whether to dispatch via `pipeline_task_start` based on its self-
+    classification rule. Ideation's prompt still names the tool so a
+    proposer task can flag work it knows will exceed the threshold.
+    """
     prompt = _default_prompt()
     lower = prompt.lower()
     assert "pipeline_task_start" in prompt
-    assert "10 minutes" in lower or "10 min" in lower
-    assert "launch task" in lower
-    assert "validation" in lower
-    assert "pid:" in prompt
+    assert "5 minutes" in lower or "5 min" in lower
+    assert "Pipeline Pending" in prompt
     assert "progress bar" in lower or "fans out" in lower
 
 
@@ -164,15 +168,20 @@ def test_ideation_prompt_reads_operator_log_and_treats_as_authoritative():
     assert "re-propose" in flat.lower()
 
 
-def test_ideation_prompt_pins_two_tier_verification_split():
-    """TB-86: pipeline-launch output checks belong in validation_briefing."""
+def test_ideation_prompt_pins_post_pipeline_verification_shape():
+    """TB-115: the briefing's `## Verification` section serves both
+    synchronous completion AND post-pipeline verification — same bullets,
+    re-run by `_sweep_pipeline_pending` once spawned pids die. Ideation
+    should write output-artifact bullets (not split them into a separate
+    validation_briefing — that two-tier split was retired).
+    """
     prompt = _default_prompt()
     lower = prompt.lower()
-    assert "two-tier" in lower or "where output checks belong" in lower
-    assert "validation_briefing" in prompt
-    assert "DO NOT put output" in prompt or "do not put output" in lower
+    assert "Pipeline Pending" in prompt
     assert "test -f reports/" in prompt
-    assert "running detached" in lower or "still running" in lower
+    # The retired pattern should NOT be advertised.
+    assert "two-tier" not in lower
+    assert "validation_briefing" not in prompt or "retired" in lower
 
 
 def test_ideation_prompt_warns_off_bare_python_and_path_pitfalls():

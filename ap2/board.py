@@ -253,18 +253,16 @@ class Board:
     def _is_blocker_satisfied(self, blocker: str, completed: set[str]) -> bool:
         """Per-scheme dispatch.
 
-        - `TB-N` blockers are satisfied iff the id is in Complete (legacy).
-        - `pid:<N>[@<TS>]` blockers consult `pipelines.is_blocking` (TB-81).
+        - `TB-N` blockers are satisfied iff the id is in Complete.
         - Unknown schemes fail-safe to "not satisfied" — silently dispatching
           on a typo would be worse than stranding the task until an operator
-          fixes it.
+          fixes it. Includes the retired `pid:<N>@<TS>` scheme (TB-81 →
+          retired in TB-117 once stoch's last pre-TB-115 validation tasks
+          drained from the live board) — any straggler stays Backlog until
+          the operator removes the clause manually.
         """
         if blocker.startswith("TB-"):
             return blocker in completed
-        if blocker.startswith("pid:"):
-            from . import pipelines
-
-            return not pipelines.is_blocking(blocker)
         return False
 
     def _is_dispatchable(self, t: Task, completed: set[str]) -> bool:
