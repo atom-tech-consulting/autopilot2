@@ -200,6 +200,21 @@ def cmd_init(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check(cfg: Config, args: argparse.Namespace) -> int:
+    """One-shot integrity check on TASKS.md, cron.yaml, JSON state files,
+    insights front matter, and briefing-link resolution (TB-108).
+
+    Sibling of `ap2 doctor` (which checks the environment — sandbox user,
+    OAuth token, project clone, CLI presence). `check` checks the data on
+    disk. Exit nonzero on any error; warnings don't fail.
+    """
+    from . import check
+
+    report = check.check_project(cfg)
+    print(check.render_json(report) if args.json else check.render_text(report))
+    return 0 if report.ok else 1
+
+
 def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     """One-shot environment-readiness check (project skeleton + sandbox + CLI)."""
     user = args.user or sandbox.DEFAULT_USER
@@ -445,6 +460,16 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("doctor", help="check ap2 readiness (project skeleton + sandbox)")
     s.add_argument("--user", default=None, help="sandbox user (default: claude-agent)")
     s.set_defaults(func=cmd_doctor)
+
+    s = sub.add_parser(
+        "check",
+        help="check on-disk state-file integrity: TASKS.md shape, "
+             "briefing-link resolution, cron.yaml schema, JSON state "
+             "parseability, insights front matter (TB-108). Exits 1 on "
+             "errors; warnings don't fail.",
+    )
+    s.add_argument("--json", action="store_true", help="machine-readable output")
+    s.set_defaults(func=cmd_check)
 
     s = sub.add_parser("logs", help="show recent events")
     s.add_argument("-n", type=int, default=40)

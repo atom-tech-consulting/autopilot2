@@ -67,7 +67,8 @@ TASKS.md                       # 5-section board, daemon-owned
 | Command | Purpose |
 |---|---|
 | `ap2 init` | Scaffold project skeleton (idempotent). |
-| `ap2 doctor` | One-shot environment-readiness check. |
+| `ap2 doctor` | One-shot environment-readiness check (sandbox user, OAuth token, project clone, CLI presence). |
+| `ap2 check` | One-shot data-integrity check — `TASKS.md` shape, briefing-link resolution, `cron.yaml` schema, JSON state parseability, insights front matter. `--json` for machine-readable. Exit 1 on errors, warnings don't fail. |
 | `ap2 start` | Start the daemon backgrounded. `--foreground` runs in-shell. |
 | `ap2 stop` | SIGTERM the daemon. `-f` for SIGKILL. |
 | `ap2 status` | Daemon liveness, board counts, cron jobs, next task. `--json`. |

@@ -258,6 +258,7 @@ where to look:
 | What's been published as "learned"? | `cat .cc-autopilot/insights/_index.md` |
 | What has the operator decided / acked? | `cat .cc-autopilot/operator_log.md` |
 | Recent commits? | `git log --oneline -20` |
+| Are state files well-formed? | `ap2 check` (errors: TASKS.md shape, JSON state, cron schema; warnings: stale brief links, insights front matter, missing goal.md) |
 
 `ap2 logs --json -n 30 \| jq` works too if the CLI is on PATH; defaults
 truncate to 120 chars per field, `--json` gives full payloads.
