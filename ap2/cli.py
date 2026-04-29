@@ -462,6 +462,14 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=sandbox.cmd_install_statusline)
 
     sc = sub_sbx.add_parser(
+        "install-howto",
+        help="copy ap2/howto.md to ~<user>/.claude/ap2-howto.md so a Claude "
+             "session running as the sandbox user can read it for context",
+    )
+    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
+    sc.set_defaults(func=sandbox.cmd_install_howto)
+
+    sc = sub_sbx.add_parser(
         "install-mm",
         help="install MATTERMOST_URL + MATTERMOST_TOKEN into ~<user>/.zshenv",
     )

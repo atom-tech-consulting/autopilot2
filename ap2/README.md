@@ -94,6 +94,7 @@ The daemon is designed to run as a separate OS user (`claude-agent` by default) 
 | `ap2 sandbox user-audit [user]` | Verify the user exists and has no creds. |
 | `ap2 sandbox install-token [user]` | Write `CLAUDE_CODE_OAUTH_TOKEN` to `~user/.zshenv`. |
 | `ap2 sandbox install-statusline [user]` | Copy the statusline script + wire it into `~user/.claude/settings.json`. |
+| `ap2 sandbox install-howto [user]` | Copy `ap2/howto.md` to `~user/.claude/ap2-howto.md` so a Claude session running as the sandbox user can read it for context. |
 | `ap2 sandbox install-mm [user]` | Write `MATTERMOST_URL` + `MATTERMOST_TOKEN` to `~user/.zshenv`. |
 | `ap2 sandbox install-channel <project> <channel>` | Resolve `#channel` → ID, write to `<project>/.cc-autopilot/env`. |
 | `ap2 sandbox project-setup <source>` | Clone the source repo into `~user/repos/`. `--mm-channel <name>` resolves+wires in one shot. |

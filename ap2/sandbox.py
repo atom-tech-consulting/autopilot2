@@ -346,6 +346,13 @@ def user_setup(
         print(f"\nSkipped statusline install (--skip-statusline). Run later with:")
         print(f"  ap2 sandbox install-statusline {user}")
 
+    # ap2 howto reference (TB-105) — copy the operator quick-reference into
+    # the sandbox user's ~/.claude/ so an in-project Claude session can read
+    # it for context without reaching into the human's source tree. Cheap;
+    # always installed (no skip flag — it's just a markdown file).
+    print()
+    install_howto(user)
+
     # Mattermost credentials — only install if both supplied; otherwise print
     # the follow-up command. No interactive prompt: the `MATTERMOST_URL`/
     # `_TOKEN` are usually already in the human's shell, so an explicit flag
@@ -490,6 +497,56 @@ def _statusline_source() -> Path:
     `hooks/statusline-command.sh` lives.
     """
     return Path(__file__).resolve().parent.parent / "hooks" / "statusline-command.sh"
+
+
+def _howto_source() -> Path:
+    """Path to `ap2/howto.md` — the operator-side quick-reference for
+    Claude sessions running as the sandbox user. Shipped with the
+    package so re-installing the editable tool keeps the deployed copy
+    fresh."""
+    return Path(__file__).resolve().parent / "howto.md"
+
+
+def install_howto(user: str) -> int:
+    """Copy `ap2/howto.md` to `~<user>/.claude/ap2-howto.md`.
+
+    Lets a Claude Code session running as the sandbox user load the
+    ap2 operator quick-reference (~300 lines: contracts, on-disk
+    layout, MCP tools, event schema, operator-question playbook) on
+    demand without reaching into the human user's source tree.
+
+    Idempotent — overwrites in place, owned by `user`. Re-run after
+    any `ap2/howto.md` edit to refresh.
+    """
+    if not _user_exists(user):
+        print(f"user {user!r} does not exist", file=sys.stderr)
+        return 1
+    home = _user_home(user)
+    if home is None:
+        print(f"cannot resolve home for {user!r}", file=sys.stderr)
+        return 1
+
+    src = _howto_source()
+    if not src.exists():
+        print(f"howto source missing: {src}", file=sys.stderr)
+        return 1
+    body = src.read_text()
+
+    claude_dir = home / ".claude"
+    target = claude_dir / "ap2-howto.md"
+    subprocess.run(
+        ["sudo", "-u", user, "mkdir", "-p", str(claude_dir)], check=False,
+    )
+    w = subprocess.run(
+        ["sudo", "-u", user, "tee", str(target)],
+        input=body, text=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    if w.returncode != 0:
+        print(f"failed to write {target}: {w.stderr}", file=sys.stderr)
+        return 1
+    print(f"installed ap2 howto: {target} ({len(body):,} chars)")
+    return 0
 
 
 def install_statusline(user: str) -> int:
@@ -795,6 +852,10 @@ def cmd_user_setup(cfg, args) -> int:        # noqa: ARG001
 
 def cmd_install_statusline(cfg, args) -> int:  # noqa: ARG001
     return install_statusline(args.user)
+
+
+def cmd_install_howto(cfg, args) -> int:  # noqa: ARG001
+    return install_howto(args.user)
 
 
 def cmd_project_setup(cfg, args) -> int:     # noqa: ARG001
