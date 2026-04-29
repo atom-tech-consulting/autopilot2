@@ -289,6 +289,54 @@ def do_task_complete(cfg: Config, args: dict) -> dict:
     return _ok(f"task_complete acknowledged (status={status})")
 
 
+def do_operator_log_append(cfg: Config, args: dict) -> dict:
+    """Append a timestamped operator-decision line to
+    `.cc-autopilot/operator_log.md` (TB-106).
+
+    Operator-owned channel for decisions ideation can't observe via the
+    filesystem (e.g. "decided to keep FRAGILE plists as references" or
+    "considered the universe-expansion question, deferred"). Ideation
+    reads the log in Step 0 and treats logged items as authoritative —
+    won't re-propose them in subsequent cycles.
+
+    Two write paths share this handler:
+      - operator-side: `ap2 ack [-t TB-N] "<note>"` (CLI)
+      - mattermost-handler-side: `operator_log_append` MCP tool when the
+        operator sends `@claude-bot done: ...` style messages.
+
+    Each call appends one bullet line. The file is created with a
+    short header on first append. `operator_ack` event emitted for
+    auditability.
+    """
+    note = str(args.get("note") or "").strip()
+    if not note:
+        return _err("note is required")
+    task_id = str(args.get("task_id") or "").strip()
+
+    log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not log_path.exists():
+        log_path.write_text(
+            "# Operator log\n\n"
+            "_Operator decisions and action acknowledgements. Append-only.\n"
+            "Ideation reads this in Step 0; logged items are authoritative —\n"
+            "ideation won't re-propose decisions logged here._\n\n"
+        )
+
+    import datetime as _dt
+    ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tb_tag = f" [{task_id}]" if task_id else ""
+    line = f"- {ts}{tb_tag} — {note}\n"
+    with log_path.open("a") as f:
+        f.write(line)
+
+    payload: dict = {"note": note[:500]}
+    if task_id:
+        payload["task"] = task_id
+    events.append(cfg.events_file, "operator_ack", **payload)
+    return _ok(f"appended to {log_path.name}", line=line.strip())
+
+
 def do_ideation_state_write(cfg: Config, args: dict) -> dict:
     """Overwrite `.cc-autopilot/ideation_state.md` with a fresh assessment (TB-90).
 
@@ -519,6 +567,20 @@ def build_mcp_server(cfg: Config):
     # MCP server registered it. Renamed to `report_result` (no `task_`
     # prefix) so the namespace doesn't collide.
     @tool(
+        "operator_log_append",
+        "Append a timestamped operator-decision line to "
+        ".cc-autopilot/operator_log.md (TB-106). Use ONLY for "
+        "operator-mediated messages — e.g. when an operator says "
+        "`@claude-bot done: <action>` or `@claude-bot decided: <choice>`. "
+        "Args: note (required, one sentence), task_id (optional TB-N). "
+        "Ideation reads this log in Step 0 and treats entries as "
+        "authoritative; logged decisions are not re-proposed.",
+        {"note": str, "task_id": str},
+    )
+    async def operator_log_append(args):
+        return do_operator_log_append(cfg, args)
+
+    @tool(
         "report_result",
         "Report task completion to the autopilot daemon. Call this ONCE at "
         "the end of your run instead of emitting a `RESULT:` text block. "
@@ -576,6 +638,7 @@ def build_mcp_server(cfg: Config):
             log_event,
             daemon_control,
             ideation_state_write,
+            operator_log_append,
             report_result,
             pipeline_task_start,
         ],
@@ -593,6 +656,7 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__log_event",
     "mcp__autopilot__daemon_control",
     "mcp__autopilot__ideation_state_write",
+    "mcp__autopilot__operator_log_append",
 ]
 
 # `pipeline_task_start` is the first MCP tool task agents can call directly
@@ -641,4 +705,5 @@ TASK_AGENT_FENCED_PATHS = (
     ".cc-autopilot/events.jsonl",
     ".cc-autopilot/ideation_state.md",
     ".cc-autopilot/cron.yaml",
+    ".cc-autopilot/operator_log.md",
 )

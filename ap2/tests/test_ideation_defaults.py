@@ -140,8 +140,21 @@ def test_ideation_prompt_lists_ideation_state_first_in_read_order():
     prompt = _default_prompt()
     idx = prompt.find("Read these files in order:")
     assert idx >= 0
-    block = prompt[idx:idx + 600]
+    block = prompt[idx:idx + 800]
     assert "1. .cc-autopilot/ideation_state.md" in block
+
+
+def test_ideation_prompt_reads_operator_log_and_treats_as_authoritative():
+    """TB-106: operator_log.md is the operator-decision channel. Ideation
+    must read it and NOT re-propose actions logged there, even if its own
+    prior assessment surfaced them as 'Open questions for operator'."""
+    prompt = _default_prompt()
+    assert ".cc-autopilot/operator_log.md" in prompt
+    # Normalize whitespace — the prompt is markdown-wrapped so phrases
+    # like "do NOT re-propose" can straddle a line break.
+    flat = " ".join(prompt.split())
+    assert "authoritative" in flat.lower()
+    assert "re-propose" in flat.lower()
 
 
 def test_ideation_prompt_pins_two_tier_verification_split():

@@ -344,6 +344,83 @@ def test_task_complete_acknowledges(cfg):
     assert "complete" in body["message"]
 
 
+# TB-106: do_operator_log_append — operator-decision channel for ideation
+
+
+def test_operator_log_append_creates_file_on_first_call(cfg):
+    res = tools.do_operator_log_append(cfg, {"note": "abandoned TB-91"})
+    body = _unwrap(res)
+    assert "appended to operator_log.md" in body["message"]
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    assert log.exists()
+    text = log.read_text()
+    assert "# Operator log" in text
+    assert "abandoned TB-91" in text
+    # Timestamped bullet line.
+    assert text.rstrip().endswith("— abandoned TB-91")
+
+
+def test_operator_log_append_includes_task_id_when_given(cfg):
+    res = tools.do_operator_log_append(
+        cfg, {"note": "LaunchAgent loaded", "task_id": "TB-139"}
+    )
+    body = _unwrap(res)
+    assert "[TB-139]" in body["line"]
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    assert "[TB-139]" in log.read_text()
+
+
+def test_operator_log_append_omits_tag_when_no_task_id(cfg):
+    tools.do_operator_log_append(cfg, {"note": "no task ref"})
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    text = log.read_text()
+    # No "[TB-...]" tag in the bullet line.
+    assert "[TB-" not in text
+
+
+def test_operator_log_append_appends_subsequent_calls(cfg):
+    tools.do_operator_log_append(cfg, {"note": "first decision"})
+    tools.do_operator_log_append(cfg, {"note": "second decision"})
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    text = log.read_text()
+    assert "first decision" in text
+    assert "second decision" in text
+    # Header written exactly once on first call.
+    assert text.count("# Operator log") == 1
+
+
+def test_operator_log_append_requires_note(cfg):
+    res = tools.do_operator_log_append(cfg, {"note": "  "})
+    assert res.get("isError"), res
+    assert "note is required" in res["content"][0]["text"]
+
+
+def test_operator_log_append_emits_operator_ack_event(cfg):
+    from ap2 import events
+    tools.do_operator_log_append(
+        cfg, {"note": "ate the frog", "task_id": "TB-9"}
+    )
+    evts = events.tail(cfg.events_file, 5)
+    ack = next(e for e in evts if e["type"] == "operator_ack")
+    assert ack["note"] == "ate the frog"
+    assert ack["task"] == "TB-9"
+
+
+def test_operator_log_append_in_control_agent_tools():
+    """Pin: tool is in CONTROL_AGENT_TOOLS so the mattermost handler /
+    cron / ideation agents can call it. NOT in TASK_AGENT_TOOLS — task
+    agents go through their report_result; operator-decision channel is
+    the operator's, not the task agent's."""
+    assert "mcp__autopilot__operator_log_append" in tools.CONTROL_AGENT_TOOLS
+    assert "mcp__autopilot__operator_log_append" not in tools.TASK_AGENT_TOOLS
+
+
+def test_operator_log_path_in_task_agent_fenced_paths():
+    """Pin: task agents can't write to operator_log.md — it's
+    operator-owned + control-agent-mediated."""
+    assert ".cc-autopilot/operator_log.md" in tools.TASK_AGENT_FENCED_PATHS
+
+
 def test_task_complete_in_task_agent_tools_list():
     """Pin: the tool is in TASK_AGENT_TOOLS, not CONTROL_AGENT_TOOLS — task
     agents call it; control/cron/ideation agents don't have a use for it.

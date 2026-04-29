@@ -254,6 +254,7 @@ where to look:
 | What did ideation propose? | Last `ideation_complete` event's `summary` field |
 | What's the latest assessment? | `cat .cc-autopilot/ideation_state.md` |
 | What's been published as "learned"? | `cat .cc-autopilot/insights/_index.md` |
+| What has the operator decided / acked? | `cat .cc-autopilot/operator_log.md` |
 | Recent commits? | `git log --oneline -20` |
 
 `ap2 logs --json -n 30 \| jq` works too if the CLI is on PATH; defaults

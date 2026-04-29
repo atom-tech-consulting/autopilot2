@@ -78,6 +78,7 @@ will reject `Edit`/`Write` on them — they're listed in `disallowed_tools`.
 - `.cc-autopilot/events.jsonl` — append-only daemon log.
 - `.cc-autopilot/ideation_state.md` — ideation's per-cycle assessment, written only by the ideation agent.
 - `.cc-autopilot/cron.yaml` — control agents edit via the `cron_edit` MCP tool.
+- `.cc-autopilot/operator_log.md` — operator decision log; the operator owns it (`ap2 ack`) and the mattermost handler appends to it via the `operator_log_append` MCP tool.
 
 Do not `Edit` or `Write` to any of the above. Bash workarounds (`echo > path`, `sed -i`, etc.) bypass the SDK guard but break the daemon's invariants — also forbidden. Commit your code changes and emit the RESULT block; the daemon records everything from there.
 """

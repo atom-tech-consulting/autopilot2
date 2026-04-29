@@ -5,12 +5,18 @@ Read these files in order:
    (if it exists). This is YOUR cross-cycle memory — what was
    considered, what was deferred, where prior cycles thought the
    current focus stood.
-2. goal.md — project mission, current focus, non-goals, constraints.
+2. .cc-autopilot/operator_log.md — operator decisions and action
+   acknowledgements (if it exists). Each line is authoritative: do
+   NOT re-propose actions or decisions logged here, even if your
+   prior assessment surfaced them as "Open questions for operator".
+   Treat this file as the operator-owned ground truth on what's been
+   done, abandoned, or decided.
+3. goal.md — project mission, current focus, non-goals, constraints.
    If absent OR all sections are still placeholders, infer goals from
    CLAUDE.md + progress.md instead.
-3. TASKS.md — current board state (do not duplicate existing tasks).
-4. progress.md — recent completed work, for follow-up discovery.
-5. CLAUDE.md — project conventions and any Autopilot config.
+4. TASKS.md — current board state (do not duplicate existing tasks).
+5. progress.md — recent completed work, for follow-up discovery.
+6. CLAUDE.md — project conventions and any Autopilot config.
 
 Propose new tasks ONLY if Backlog has fewer than 3 workable items.
 

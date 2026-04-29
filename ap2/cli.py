@@ -18,6 +18,7 @@ from .board import Board, locked_board
 from .config import Config
 from .cron import load_jobs, load_state
 from .init import init_project
+from . import tools
 from .tools import do_board_edit
 
 
@@ -291,6 +292,24 @@ def cmd_cron_list(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ack(cfg: Config, args: argparse.Namespace) -> int:
+    """Append an operator-decision line to .cc-autopilot/operator_log.md
+    (TB-106). Used to communicate "I did X" / "I decided Y" back to ap2
+    so ideation stops re-proposing actions whose effects aren't visible
+    on the filesystem (e.g. "considered FRAGILE plist retention,
+    decided to keep them"). Optional `-t TB-N` ties the ack to a task.
+    """
+    res = tools.do_operator_log_append(
+        cfg,
+        {"note": args.note, "task_id": args.task or ""},
+    )
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print(json.loads(res["content"][0]["text"])["line"])
+    return 0
+
+
 def cmd_web(cfg: Config, args: argparse.Namespace) -> int:
     """Start the local read-only web UI for daemon state and event log.
 
@@ -408,6 +427,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("resume", help="clear the pause flag")
     s.set_defaults(func=cmd_resume)
+
+    s = sub.add_parser(
+        "ack",
+        help="record an operator-decision in .cc-autopilot/operator_log.md "
+             "(TB-106) so ideation stops re-proposing actions whose effects "
+             "aren't filesystem-visible",
+    )
+    s.add_argument("note", help="the decision or action to record (one sentence)")
+    s.add_argument("-t", "--task", default=None,
+                   help="optional TB-N this ack relates to")
+    s.set_defaults(func=cmd_ack)
 
     s = sub.add_parser(
         "web",
