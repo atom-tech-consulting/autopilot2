@@ -357,3 +357,138 @@ def test_run_task_blocked_moves_to_backlog_and_writes_attempts(cfg, tmp_path):
     assert "## Attempts" in text
     assert "blocked" in text
     assert "needs human input" in text
+    # TB-114: every Attempts entry carries the per-run debug-dump paths
+    # so the next attempt's agent can `Read` them when the truncated
+    # summary isn't enough.
+    assert "Debug dumps" in text
+    assert "prompt:" in text
+    assert "stream:" in text
+    assert "messages:" in text
+
+
+# ---------------------------------------------------------------------------
+# TB-114: every failure mode appends an `## Attempts` entry. Pre-TB-114
+# `_append_attempts` only fired when `parsed is not None`, so timeout /
+# error / state_violation / verification_failed left no narrative trail
+# in the briefing — agents retrying a Frozen task had nothing to read.
+
+def _swap_briefing(cfg, tmp_path):
+    """Replace the cfg fixture's `brief.md` placeholder with a real file
+    on disk so `_append_attempts` can write to it. Returns the path."""
+    brief = tmp_path / "brief.md"
+    brief.write_text("# Existing\n")
+    tasks_text = cfg.tasks_file.read_text().replace(
+        "[→ brief](brief.md)", f"[→ brief]({brief.name})"
+    )
+    cfg.tasks_file.write_text(tasks_text)
+    return brief
+
+
+def test_timeout_appends_attempts_with_debug_paths(cfg, tmp_path, monkeypatch):
+    monkeypatch.setenv("AP2_TASK_TIMEOUT_S", "1")
+    brief = _swap_briefing(cfg, tmp_path)
+    cfg2 = Config.load(cfg.project_root)
+    task = Board.load(cfg2.tasks_file).get("TB-5")
+
+    sdk = _sdk_hanging(sleep_s=5.0)
+    asyncio.run(run_task(cfg2, sdk, None, task))
+
+    text = brief.read_text()
+    assert "## Attempts" in text
+    assert "timeout" in text
+    assert "timeout_s" in text  # kw extra rendered as `- **timeout_s:** 1`
+    assert "Debug dumps" in text
+    assert "prompt:" in text
+
+
+def test_sdk_error_appends_attempts_with_debug_paths(cfg, tmp_path):
+    brief = _swap_briefing(cfg, tmp_path)
+    cfg2 = Config.load(cfg.project_root)
+    task = Board.load(cfg2.tasks_file).get("TB-5")
+
+    sdk = _sdk_raising(RuntimeError("Command failed with exit code 1"))
+    asyncio.run(run_task(cfg2, sdk, None, task))
+
+    text = brief.read_text()
+    assert "## Attempts" in text
+    assert "error" in text
+    assert "RuntimeError" in text
+    assert "Debug dumps" in text
+
+
+def test_state_violation_appends_attempts_with_fenced_files(cfg, tmp_path):
+    """An agent that touches CLAUDE.md (fenced) → TB-110 violation →
+    Attempts entry includes the fenced-file list + debug paths.
+    """
+    brief = _swap_briefing(cfg, tmp_path)
+    cfg2 = Config.load(cfg.project_root)
+    task = Board.load(cfg2.tasks_file).get("TB-5")
+
+    # FakeSDK that mutates CLAUDE.md before yielding report_result.
+    project_root = cfg2.project_root
+
+    class _MutatingSDK:
+        class ClaudeAgentOptions:
+            def __init__(self, **kw):
+                self.kw = kw
+
+        def query(self, *, prompt, options):  # noqa: ARG002
+            async def _gen():
+                # Dirty a fenced file mid-run.
+                (project_root / "CLAUDE.md").write_text("rewritten by agent\n")
+                yield _FakeToolMsg(
+                    "report_result", {"status": "complete", "summary": "ok"},
+                )
+            return _gen()
+
+    asyncio.run(run_task(cfg2, _MutatingSDK(), None, task))
+
+    text = brief.read_text()
+    assert "## Attempts" in text
+    assert "state_violation" in text
+    assert "fenced_files" in text
+    assert "CLAUDE.md" in text
+    assert "Debug dumps" in text
+
+
+def test_verification_failed_project_wide_appends_attempts(
+    cfg, tmp_path, monkeypatch,
+):
+    """Project-wide verifier (`AP2_VERIFY_CMD`) failure → Attempts entry
+    captures kind + verify_command + exit_code + stderr_tail.
+    """
+    monkeypatch.setenv("AP2_VERIFY_CMD", "false")
+    brief = _swap_briefing(cfg, tmp_path)
+    cfg2 = Config.load(cfg.project_root)
+    task = Board.load(cfg2.tasks_file).get("TB-5")
+
+    sdk = _sdk_yielding_report({"status": "complete", "summary": "did it"})
+    asyncio.run(run_task(cfg2, sdk, None, task))
+
+    text = brief.read_text()
+    assert "## Attempts" in text
+    assert "verification_failed" in text
+    assert "kind" in text and "project_wide" in text
+    assert "verify_command" in text
+    assert "exit_code" in text
+    assert "Debug dumps" in text
+
+
+def test_incomplete_status_appends_attempts(cfg, tmp_path):
+    """The pre-TB-114 path (parsed is not None) still works — `incomplete`
+    status appends just like `blocked`/`failed`. Pin so the existing
+    coverage doesn't regress alongside the new failure modes."""
+    brief = _swap_briefing(cfg, tmp_path)
+    cfg2 = Config.load(cfg.project_root)
+    task = Board.load(cfg2.tasks_file).get("TB-5")
+
+    sdk = _sdk_yielding_report(
+        {"status": "incomplete", "summary": "did half the scope"},
+    )
+    asyncio.run(run_task(cfg2, sdk, None, task))
+
+    text = brief.read_text()
+    assert "## Attempts" in text
+    assert "incomplete" in text
+    assert "did half the scope" in text
+    assert "Debug dumps" in text

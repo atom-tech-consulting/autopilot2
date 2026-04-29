@@ -210,6 +210,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     # whatever generic failure status the consume branch would otherwise
     # have stamped.
     early_failure_status: str | None = None
+    early_failure_extras: dict[str, str] = {}
     result_text = ""
     try:
         result_text = await asyncio.wait_for(_consume(), timeout=cfg.task_timeout_s)
@@ -238,6 +239,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 messages_dump=str(messages_dump),
             )
             early_failure_status = "timeout"
+            early_failure_extras = {
+                "timeout_s": str(cfg.task_timeout_s),
+                "stderr_tail": "\n".join(stderr_lines[-30:]),
+            }
     except Exception as e:  # noqa: BLE001
         # Same logic for an opaque SDK subprocess crash (the "exit code 1 /
         # empty stderr_tail" pattern observed on stoch's TB-58/59). If the
@@ -264,6 +269,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 messages_dump=str(messages_dump),
             )
             early_failure_status = "error"
+            early_failure_extras = {
+                "error": f"{type(e).__name__}: {e}",
+                "stderr_tail": "\n".join(stderr_lines[-30:]),
+            }
 
     # TB-110: post-hoc state-file violation check. Hash-compare fenced
     # files against the pre_run_fenced snapshot taken right after
@@ -295,7 +304,19 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                         boundary=pre_run_head,
                         error=f"{type(exc).__name__}: {exc}",
                     )
-        _handle_failure(cfg, task, status="state_violation")
+        _handle_failure(
+            cfg, task,
+            status="state_violation",
+            debug_paths={
+                "prompt": str(prompt_dump),
+                "stream": str(stream_dump),
+                "messages": str(messages_dump),
+            },
+            extras={
+                "fenced_files": ", ".join(violations),
+                "pre_run_head": (pre_run_head or "")[:8] or "(no git repo)",
+            },
+        )
         events.append(
             cfg.events_file,
             "task_complete",
@@ -315,7 +336,16 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     # behavior of the timeout / error path (no `task_complete` event,
     # no state-file commit).
     if early_failure_status is not None:
-        _handle_failure(cfg, task, status=early_failure_status)
+        _handle_failure(
+            cfg, task,
+            status=early_failure_status,
+            debug_paths={
+                "prompt": str(prompt_dump),
+                "stream": str(stream_dump),
+                "messages": str(messages_dump),
+            },
+            extras=early_failure_extras,
+        )
         return
 
     # Result-payload precedence (TB-101 / TB-104):
@@ -410,7 +440,21 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 stderr_tail=verify_res.stderr_tail,
                 duration_s=round(verify_res.duration_s, 2),
             )
-            _handle_failure(cfg, task, status="verification_failed")
+            _handle_failure(
+                cfg, task,
+                status="verification_failed",
+                debug_paths={
+                    "prompt": str(prompt_dump),
+                    "stream": str(stream_dump),
+                    "messages": str(messages_dump),
+                },
+                extras={
+                    "kind": "project_wide",
+                    "verify_command": verify_res.command,
+                    "exit_code": str(verify_res.exit_code),
+                    "stderr_tail": verify_res.stderr_tail[:300],
+                },
+            )
             final_status = "verification_failed"
         else:
             # Per-task verification (TB-69): run the briefing's `## Verification`
@@ -431,7 +475,23 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                     ],
                     duration_s=round(per_verdict.duration_s, 2),
                 )
-                _handle_failure(cfg, task, status="verification_failed")
+                _handle_failure(
+                    cfg, task,
+                    status="verification_failed",
+                    debug_paths={
+                        "prompt": str(prompt_dump),
+                        "stream": str(stream_dump),
+                        "messages": str(messages_dump),
+                    },
+                    extras={
+                        "kind": "per_task",
+                        "failed_criteria": "; ".join(
+                            f"[{c.status}] {c.bullet[:120]}"
+                            for c in per_verdict.criteria
+                            if c.status == "fail"
+                        )[:400] or "(no criteria captured)",
+                    },
+                )
                 final_status = "verification_failed"
             else:
                 if per_verdict is not None and per_verdict.overall == "partial":
@@ -457,7 +517,19 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                     except FileNotFoundError:
                         pass
     else:
-        _handle_failure(cfg, task, status=parsed.status, parsed=parsed)
+        _handle_failure(
+            cfg, task,
+            status=parsed.status,
+            parsed=parsed,
+            debug_paths={
+                "prompt": str(prompt_dump),
+                "stream": str(stream_dump),
+                "messages": str(messages_dump),
+            },
+            extras={
+                "commit": (parsed.commit or "")[:8] or "(no commit)",
+            } if parsed.commit else None,
+        )
     events.append(
         cfg.events_file,
         "task_complete",
@@ -481,8 +553,17 @@ def _handle_failure(
     *,
     status: str,
     parsed: TaskResult | None = None,
+    debug_paths: dict[str, str] | None = None,
+    extras: dict[str, str] | None = None,
 ) -> None:
-    """Move a failed task to Backlog, or Frozen if it has exhausted retries."""
+    """Move a failed task to Backlog, or Frozen if it has exhausted retries.
+
+    TB-114: ALWAYS appends a `## Attempts` entry to the briefing — for
+    every failure mode (timeout, error, state_violation, verification_failed,
+    incomplete/blocked/failed). The next attempt's agent can `Read` the
+    briefing and see the full failure narrative + debug-dump paths to
+    pick up where the prior attempt left off.
+    """
     attempts = retry.bump_attempt(cfg.retry_state_file, task.id)
     if attempts >= cfg.max_retries:
         do_board_edit(cfg, {"action": "move_to_frozen", "task_id": task.id})
@@ -495,8 +576,14 @@ def _handle_failure(
         )
     else:
         do_board_edit(cfg, {"action": "move_to_backlog", "task_id": task.id})
-    if parsed is not None:
-        _append_attempts(cfg, task, parsed)
+    summary = (parsed.summary if parsed is not None else "") or ""
+    _append_attempts(
+        cfg, task,
+        status=status,
+        summary=summary,
+        debug_paths=debug_paths,
+        extras=extras,
+    )
 
 
 def _dispatch_cron_directives(cfg: Config, task_id: str, directives: list[dict]) -> None:
@@ -903,19 +990,62 @@ def _append_progress(cfg: Config, task, r: TaskResult) -> None:
         f.write("\n".join(lines) + "\n")
 
 
-def _append_attempts(cfg: Config, task, r: TaskResult) -> None:
+def _append_attempts(
+    cfg: Config,
+    task,
+    *,
+    status: str,
+    summary: str = "",
+    debug_paths: dict[str, str] | None = None,
+    extras: dict[str, str] | None = None,
+) -> None:
+    """Append a `## Attempts` entry to the task's briefing (TB-114).
+
+    Fires for EVERY failure mode — timeout, error, state_violation,
+    verification_failed (project / per-task / pipeline_pending), and
+    the agent's own incomplete/blocked/failed statuses. Without this
+    trail, a task that hits Frozen via repeated timeouts has no
+    narrative the next agent can read.
+
+    `debug_paths` is `{"prompt": <path>, "stream": <path>, "messages":
+    <path>}` for failure modes that have a per-run dump. Paths render
+    as project-relative bullets so the next agent can `Read` them.
+
+    `extras` is arbitrary key/value lines (e.g. `timeout_s`, `exit_code`,
+    `stderr_tail`, `fenced_files`) — bullets under the entry.
+    """
     if not task.briefing:
         return
     p = Path(task.briefing)
     full = p if p.is_absolute() else cfg.project_root / p
     if not full.exists():
         return
+
+    lines = [f"\n### {_today()} — {status}"]
+    lines.append(summary or "(no summary)")
+    if extras:
+        for k, v in extras.items():
+            v_str = str(v)
+            if len(v_str) > 400:
+                v_str = v_str[:397] + "…"
+            lines.append(f"- **{k}:** {v_str}")
+    if debug_paths:
+        bullets = []
+        for k, dpath in debug_paths.items():
+            if not dpath:
+                continue
+            try:
+                rp = Path(dpath).resolve().relative_to(cfg.project_root.resolve())
+                shown = str(rp)
+            except (ValueError, OSError):
+                shown = str(dpath)
+            bullets.append(f"`{k}: {shown}`")
+        if bullets:
+            lines.append("- **Debug dumps:** " + ", ".join(bullets))
+    entry = "\n".join(lines) + "\n"
+
     text = full.read_text()
     header = "\n## Attempts\n"
-    entry = (
-        f"\n### {_today()} — {r.status}\n"
-        f"{r.summary or '(no summary)'}\n"
-    )
     if header in text:
         full.write_text(text.rstrip() + entry)
     else:
@@ -1274,7 +1404,17 @@ async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
                 stderr_tail=verify_res.stderr_tail,
                 duration_s=round(verify_res.duration_s, 2),
             )
-            _handle_failure(cfg, task, status="verification_failed")
+            _handle_failure(
+                cfg, task,
+                status="verification_failed",
+                extras={
+                    "kind": "project_wide",
+                    "source": "pipeline_pending",
+                    "verify_command": verify_res.command,
+                    "exit_code": str(verify_res.exit_code),
+                    "stderr_tail": verify_res.stderr_tail[:300],
+                },
+            )
             final_status = "verification_failed"
         else:
             per_verdict = await _maybe_per_task_verify(cfg, sdk, task)
@@ -1293,7 +1433,19 @@ async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
                     ],
                     duration_s=round(per_verdict.duration_s, 2),
                 )
-                _handle_failure(cfg, task, status="verification_failed")
+                _handle_failure(
+                    cfg, task,
+                    status="verification_failed",
+                    extras={
+                        "kind": "per_task",
+                        "source": "pipeline_pending",
+                        "failed_criteria": "; ".join(
+                            f"[{c.status}] {c.bullet[:120]}"
+                            for c in per_verdict.criteria
+                            if c.status == "fail"
+                        )[:400] or "(no criteria captured)",
+                    },
+                )
                 final_status = "verification_failed"
             else:
                 if per_verdict is not None and per_verdict.overall == "partial":
