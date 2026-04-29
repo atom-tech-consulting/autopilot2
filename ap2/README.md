@@ -75,6 +75,7 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 add "<title>"` | Append a task. `-s Ready\|Backlog\|Frozen`, `-t #tag`, `-d <desc>`, `--briefing-file <path>`, `--no-verify`. |
 | `ap2 backlog <TB-N>` | Move any task to Backlog. |
 | `ap2 unfreeze <TB-N>` | Un-freeze + reset retry counter. Refuses if not in Frozen. |
+| `ap2 delete <TB-N>` | Permanently remove a task. Refuses Active/Ready without `--force`. Emits `task_deleted`. |
 | `ap2 pause --reason "..."` | Set the pause flag (daemon stops dispatching, stays running). |
 | `ap2 resume` | Clear the pause flag. |
 | `ap2 cron list` | List cron jobs + last-fired timestamps. |

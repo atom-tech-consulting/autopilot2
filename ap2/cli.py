@@ -266,6 +266,48 @@ def cmd_unfreeze(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_delete(cfg: Config, args: argparse.Namespace) -> int:
+    """Permanently remove a task from the board.
+
+    Refuses to delete from Active (in-flight) or Ready (about to dispatch)
+    by default — the daemon's orphan-recovery and dispatch invariants
+    assume those sections aren't out from under it. Use `ap2 backlog
+    <TB-N>` first to move the task somewhere safe, OR pass `--force` if
+    you really mean it.
+
+    Emits a `task_deleted` event with the task id + source section +
+    title for the audit trail. Briefing file under `.cc-autopilot/tasks/`
+    is NOT removed — git history preserves it if it was committed, and
+    the ghost file is harmless (board parses TASKS.md, not the dir).
+    """
+    with locked_board(cfg.tasks_file) as board:
+        loc = board.find(args.task_id)
+        if loc is None:
+            print(f"{args.task_id} not on board", file=sys.stderr)
+            return 1
+        section, _ = loc
+        if section in ("Active", "Ready") and not args.force:
+            print(
+                f"{args.task_id} is in {section} — refusing without --force.\n"
+                f"  Active tasks may be in-flight; Ready is next-to-dispatch.\n"
+                f"  `ap2 backlog {args.task_id}` first, or pass --force.",
+                file=sys.stderr,
+            )
+            return 1
+        task = board.get(args.task_id)
+        title = task.title if task else ""
+        board.remove(args.task_id)
+    events.append(
+        cfg.events_file,
+        "task_deleted",
+        task=args.task_id,
+        section=section,
+        title=title,
+    )
+    print(f"deleted {args.task_id} from {section}")
+    return 0
+
+
 def cmd_pause(cfg: Config, args: argparse.Namespace) -> int:
     cfg.pause_flag.parent.mkdir(parents=True, exist_ok=True)
     cfg.pause_flag.write_text((args.reason or "") + "\n")
@@ -420,6 +462,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("task_id")
     s.set_defaults(func=cmd_unfreeze)
+
+    s = sub.add_parser(
+        "delete",
+        help="permanently remove a task from the board (refuses Active/"
+             "Ready without --force; emits task_deleted event for audit)",
+    )
+    s.add_argument("task_id")
+    s.add_argument("-f", "--force", action="store_true",
+                   help="allow deletion from Active or Ready (use with care)")
+    s.set_defaults(func=cmd_delete)
 
     s = sub.add_parser("pause", help="pause the daemon (sets a flag)")
     s.add_argument("--reason", default="")

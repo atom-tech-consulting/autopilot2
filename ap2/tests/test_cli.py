@@ -12,7 +12,7 @@ import pytest
 
 from ap2 import events, retry
 from ap2.board import Board
-from ap2.cli import _require_oauth_token, cmd_backlog, cmd_start, cmd_unfreeze
+from ap2.cli import _require_oauth_token, cmd_backlog, cmd_delete, cmd_start, cmd_unfreeze
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -172,3 +172,101 @@ def test_cmd_start_refuses_without_token(tmp_path: Path, monkeypatch, capsys):
     rc = cmd_start(cfg, Namespace(foreground=False))
     assert rc == 1
     assert "CLAUDE_CODE_OAUTH_TOKEN" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# cmd_delete (TB-107)
+
+
+def test_delete_removes_from_frozen(tmp_path: Path):
+    """Primary use case: abandon a Frozen task that's been superseded.
+    Ideation surfaces these in the open-questions list."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Frozen", task_id="TB-91", title="superseded")
+    board.save()
+
+    rc = cmd_delete(cfg, Namespace(task_id="TB-91", force=False))
+    assert rc == 0
+    # Task is gone from the board entirely.
+    assert Board.load(cfg.tasks_file).find("TB-91") is None
+
+
+def test_delete_removes_from_backlog(tmp_path: Path):
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Backlog", task_id="TB-80", title="never mind")
+    board.save()
+
+    rc = cmd_delete(cfg, Namespace(task_id="TB-80", force=False))
+    assert rc == 0
+    assert Board.load(cfg.tasks_file).find("TB-80") is None
+
+
+def test_delete_refuses_active_without_force(tmp_path: Path, capsys):
+    """Active means in-flight; deleting could orphan the SDK subprocess
+    or break orphan recovery. Default refusal."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-50", title="running now")
+    board.save()
+
+    rc = cmd_delete(cfg, Namespace(task_id="TB-50", force=False))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Active" in err
+    assert "--force" in err
+    # Task untouched.
+    assert Board.load(cfg.tasks_file).find("TB-50")[0] == "Active"
+
+
+def test_delete_refuses_ready_without_force(tmp_path: Path, capsys):
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Ready", task_id="TB-51", title="next-up")
+    board.save()
+
+    rc = cmd_delete(cfg, Namespace(task_id="TB-51", force=False))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Ready" in err
+    assert "ap2 backlog" in err  # nudge to the right alternative
+    assert Board.load(cfg.tasks_file).find("TB-51")[0] == "Ready"
+
+
+def test_delete_force_allows_active(tmp_path: Path):
+    """--force overrides the Active/Ready safety. Use case: stale Active
+    line left by a daemon crash, where the operator knows the task isn't
+    really running."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-52", title="actually dead")
+    board.save()
+
+    rc = cmd_delete(cfg, Namespace(task_id="TB-52", force=True))
+    assert rc == 0
+    assert Board.load(cfg.tasks_file).find("TB-52") is None
+
+
+def test_delete_emits_audit_event(tmp_path: Path):
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Frozen", task_id="TB-92", title="auditable delete")
+    board.save()
+
+    cmd_delete(cfg, Namespace(task_id="TB-92", force=False))
+
+    evts = events.tail(cfg.events_file, 5)
+    deleted = [e for e in evts if e["type"] == "task_deleted"]
+    assert len(deleted) == 1
+    assert deleted[0]["task"] == "TB-92"
+    assert deleted[0]["section"] == "Frozen"
+    assert deleted[0]["title"] == "auditable delete"
+
+
+def test_delete_unknown_task_returns_error(tmp_path: Path, capsys):
+    cfg = _project(tmp_path)
+    rc = cmd_delete(cfg, Namespace(task_id="TB-999", force=False))
+    assert rc == 1
+    assert "not on board" in capsys.readouterr().err
+

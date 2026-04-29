@@ -178,7 +178,9 @@ specific tasks out (e.g. docs-only changes).
 - **Active task on daemon restart.** `_recover_orphans` moves it back
   to Ready with retry counter incremented.
 - **Failing task that retry-exhausts.** Goes to Frozen. Operator
-  unfreezes with `ap2 unfreeze TB-N` (resets retry counter atomically).
+  unfreezes with `ap2 unfreeze TB-N` (resets retry counter atomically),
+  or permanently removes it with `ap2 delete TB-N` (atomic; emits
+  `task_deleted` event; refuses Active/Ready without `--force`).
 - **Daemon idle >3h.** Watchdog builds a `DiagnoseReport` (board,
   recent failures, cron staleness, board health) and posts to
   `AP2_MM_CHANNELS[0]`.
