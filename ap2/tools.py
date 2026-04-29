@@ -270,6 +270,25 @@ def do_cron_edit(cfg: Config, args: dict) -> dict:
         return _err(f"{type(e).__name__}: {e}")
 
 
+def do_task_complete(cfg: Config, args: dict) -> dict:
+    """Acknowledge a `task_complete` tool call from a task agent (TB-101).
+
+    The structured payload (status / commit / summary / files_changed /
+    tests_passed / cron) is captured by `daemon.run_task` walking the
+    SDK message stream — this handler exists only to give the SDK a
+    valid response so the agent doesn't loop or treat the call as
+    failed. No state mutation here; the daemon owns the routing
+    decision after the query returns.
+
+    Replaces the `RESULT:\\n status: ...` free-text contract that
+    `result.py` parsed via regex.
+    """
+    status = args.get("status", "")
+    if not isinstance(status, str) or not status.strip():
+        return _err("status is required")
+    return _ok(f"task_complete acknowledged (status={status})")
+
+
 def do_ideation_state_write(cfg: Config, args: dict) -> dict:
     """Overwrite `.cc-autopilot/ideation_state.md` with a fresh assessment (TB-90).
 
@@ -493,6 +512,27 @@ def build_mcp_server(cfg: Config):
         return do_ideation_state_write(cfg, args)
 
     @tool(
+        "task_complete",
+        "Report task completion to the daemon. Call this once at the end of "
+        "your run with the final status. Replaces the legacy `RESULT:` "
+        "free-text block. Pass: status (complete/incomplete/blocked/failed); "
+        "commit (the 7-40 char SHA you committed, or empty for none); "
+        "summary (one sentence); files_changed (list of paths); "
+        "tests_passed (true/false/null); cron (optional list of "
+        "{action, name, interval, prompt} dicts to update cron.yaml).",
+        {
+            "status": str,
+            "commit": str,
+            "summary": str,
+            "files_changed": list,
+            "tests_passed": bool,
+            "cron": list,
+        },
+    )
+    async def task_complete(args):
+        return do_task_complete(cfg, args)
+
+    @tool(
         "pipeline_task_start",
         "Atomically launch a long-running pipeline as a detached OS process "
         "and create a single Backlog validation task gated on the process's "
@@ -557,6 +597,7 @@ TASK_AGENT_TOOLS = [
     "Grep",
     "Bash",
     "mcp__autopilot__pipeline_task_start",
+    "mcp__autopilot__task_complete",
 ]
 
 

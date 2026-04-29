@@ -12,7 +12,7 @@ from ap2 import events
 from ap2.board import Board
 from ap2.daemon import _tick
 
-from ap2.tests.e2e._fakes import FakeSDK, text_respond
+from ap2.tests.e2e._fakes import FakeSDK, text_respond, tool_call_respond
 
 
 def test_single_tick_completes_ready_task(e2e_project):
@@ -46,6 +46,91 @@ def test_single_tick_completes_ready_task(e2e_project):
     assert end["task"] == "TB-5"
     assert end["status"] == "complete"
     assert end["commit"] == "abc12345"
+
+
+def test_single_tick_completes_via_task_complete_tool(e2e_project):
+    """TB-101: agent calls `task_complete(...)` MCP tool instead of emitting
+    a RESULT text block. Daemon picks up the structured payload and routes
+    the task to Complete with the same fields."""
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-5",
+        tool_call_respond(
+            "task_complete",
+            {
+                "status": "complete",
+                "commit": "deadbeef",
+                "summary": "did it via tool call",
+                "files_changed": ["x.py", "y.py"],
+                "tests_passed": True,
+            },
+        ),
+    )
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Complete"
+    end = next(e for e in reversed(events.tail(cfg.events_file, 20))
+               if e["type"] == "task_complete")
+    assert end["task"] == "TB-5"
+    assert end["status"] == "complete"
+    assert end["commit"] == "deadbeef"
+
+
+def test_single_tick_tool_call_wins_over_legacy_result_block(e2e_project):
+    """When BOTH a `task_complete` tool call AND a RESULT text block land in
+    the same turn, the tool call is canonical. Pin so the precedence in
+    `run_task` (TB-101) doesn't silently drift back to text-parsing.
+    """
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-5",
+        tool_call_respond(
+            "task_complete",
+            {"status": "blocked", "summary": "tool says blocked"},
+            prefix_text=(
+                "RESULT:\nstatus: complete\ncommit: aaaaaaaa\n"
+                "summary: text says complete\n"
+            ),
+        ),
+    )
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    # Tool call (status=blocked) wins → task moves to Backlog, not Complete.
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Backlog"
+    end = next(e for e in reversed(events.tail(cfg.events_file, 20))
+               if e["type"] == "task_complete")
+    assert end["status"] == "blocked"
+
+
+def test_single_tick_falls_back_to_result_block_when_no_tool_call(e2e_project):
+    """Backwards-compat path: agents on the old prompt or briefings cached
+    pre-task_complete still work via the RESULT text-block parser."""
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-5",
+        text_respond(
+            "RESULT:\nstatus: complete\ncommit: 1234abcd\n"
+            "summary: legacy path\n"
+        ),
+    )
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Complete"
+    end = next(e for e in reversed(events.tail(cfg.events_file, 20))
+               if e["type"] == "task_complete")
+    assert end["commit"] == "1234abcd"
 
 
 def test_single_tick_no_mm_no_cron(e2e_project):

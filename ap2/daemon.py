@@ -96,6 +96,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
 
     stderr_lines, _stderr_sink = _make_stderr_sink()
 
+    # Captures the structured payload from a `task_complete` MCP tool call
+    # (TB-101). When present, this REPLACES the regex-parsed RESULT block —
+    # the agent's structured `task_complete(...)` invocation is the
+    # canonical signal. Falls back to `parse_result(text)` when no tool
+    # call lands (legacy RESULT-block agents, recovery from crash, etc.).
+    task_complete_args: dict = {}
+
     # Ring buffer of stream-message summaries so we can attach the last few
     # messages to the error event; dumps to disk for full history.
     stream_log: list[dict] = []
@@ -114,6 +121,16 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         with messages_dump.open("a") as f:
             full = {"seq": idx, **_serialize_message_full(msg)}
             f.write(_json.dumps(full, default=str) + "\n")
+        # TB-101: capture the structured payload from `task_complete` tool
+        # calls. Walk the message's content blocks directly (the streamed
+        # summaries truncate `args_preview` to 200 chars; we want full args).
+        # Last-write-wins if the agent calls task_complete more than once.
+        for part in (getattr(msg, "content", None) or []):
+            if getattr(part, "name", None) == "task_complete":
+                inp = getattr(part, "input", None)
+                if isinstance(inp, dict):
+                    task_complete_args.clear()
+                    task_complete_args.update(inp)
 
     async def _consume() -> str:
         text = ""
@@ -194,10 +211,29 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             _handle_failure(cfg, task, status="error")
             return
 
-    # If we recovered from a crash/timeout via HEAD, parsed_override is set;
-    # otherwise parse the agent's RESULT block as usual and try the fallback
-    # for the status=unknown case.
-    parsed = parsed_override if 'parsed_override' in locals() else parse_result(result_text)
+    # Result-payload precedence (TB-101):
+    #   1. HEAD-recovery override (crash / timeout salvage path).
+    #   2. `task_complete` MCP tool call — structured, no regex parsing.
+    #   3. Legacy `RESULT:` block in the final assistant message — fallback
+    #      for agents on the old prompt or briefings cached pre-tool.
+    if 'parsed_override' in locals():
+        parsed = parsed_override
+    elif task_complete_args:
+        parsed = TaskResult(
+            status=str(task_complete_args.get("status", "unknown")).lower(),
+            commit=str(task_complete_args.get("commit", "") or ""),
+            summary=str(task_complete_args.get("summary", "") or ""),
+            files_changed=[
+                str(f).strip()
+                for f in (task_complete_args.get("files_changed") or [])
+                if str(f).strip()
+            ],
+            tests_passed=task_complete_args.get("tests_passed"),
+            cron=[c for c in (task_complete_args.get("cron") or []) if isinstance(c, dict)],
+            raw="(via mcp__autopilot__task_complete tool call)",
+        )
+    else:
+        parsed = parse_result(result_text)
     if parsed.status not in _VALID_RESULT_STATUSES:
         inferred = _infer_result_from_head(cfg, task)
         if inferred is not None:

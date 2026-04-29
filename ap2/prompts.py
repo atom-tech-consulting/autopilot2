@@ -84,36 +84,60 @@ Do not `Edit` or `Write` to any of the above. Bash workarounds (`echo > path`, `
 
 _TASK_FOOTER = """\
 
-## Output contract
-When you are finished (success OR failure), end your FINAL message with a single
-fenced RESULT block — the daemon parses this and updates the board. Example:
+## Output contract — call `task_complete(...)` when you finish
+
+When you are done (success OR failure), call the `mcp__autopilot__task_complete`
+MCP tool ONCE with your final result. Do not also emit a RESULT text block —
+the tool call is the canonical signal and the daemon prefers it. Example
+arguments:
+
+    task_complete(
+      status="complete",
+      commit="a1b2c3d4",                         # 7-40 char SHA, or "" if no commit
+      summary="Added X to Y, all tests pass.",   # one sentence
+      files_changed=["foo/bar.py", "foo/bar_test.py"],
+      tests_passed=true,
+    )
+
+Valid statuses:
+- `complete`   — task done, tests pass, committed.
+- `incomplete` — partial progress; document what remains in `summary`.
+- `blocked`    — hit a blocker you can't resolve; explain in `summary`.
+- `failed`     — tried and could not make progress.
+
+### Proposing recurring work (optional)
+If your work should become scheduled, pass a `cron` list of structured dicts:
+
+    task_complete(
+      status="complete",
+      ...,
+      cron=[
+        {"action": "add", "name": "<name>", "interval": "1h",
+         "prompt": "what to run"},
+        # or {"action": "remove", "name": "<name>"}
+        # or {"action": "update", "name": "<name>", "interval": "..."}
+      ],
+    )
+
+`add` requires `action`, `name`, `interval`, `prompt`. Directives are applied
+only when `status: complete`. Malformed entries are logged and skipped.
+
+### Legacy RESULT block (deprecated, still accepted as fallback)
+If your environment can't make MCP tool calls for some reason, you can fall
+back to the old text contract — end your final message with a fenced RESULT
+block:
 
 ```
 RESULT:
 status: complete
 commit: a1b2c3d
-summary: Added X to Y, all tests pass.
-files_changed: foo/bar.py, foo/bar_test.py
+summary: ...
+files_changed: foo.py, bar.py
 tests_passed: true
 ```
 
-Valid statuses:
-- `complete`  — task done, tests pass, committed.
-- `incomplete` — partial progress; document what remains in the summary.
-- `blocked`  — ran into a blocker you can't resolve; explain in summary.
-- `failed`   — tried and could not make progress.
-
-### Proposing recurring work (optional)
-If the work you did should become scheduled, include one or more `cron:` lines
-inside the RESULT block. Each is a single line, `key=value` pairs with shell
-quoting allowed:
-
-    cron: add name=<name> interval=<1h|2d|30m|...> prompt="what to run"
-    cron: remove name=<name>
-    cron: update name=<name> interval=<...>
-
-`add` requires `name`, `interval`, and `prompt`. Directives are applied only
-when `status: complete`. Malformed directives are logged and skipped.
+The daemon parses this only when no `task_complete` tool call landed. Prefer
+the tool call.
 """
 
 

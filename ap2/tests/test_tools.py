@@ -320,3 +320,32 @@ def test_pipeline_task_start_assigns_id_via_locked_board(cfg):
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
+
+
+# TB-101: do_task_complete is a thin acknowledgement handler — the daemon-side
+# capture in run_task is what actually consumes the structured payload. Pin
+# the validation + acknowledgement shape here.
+
+
+def test_task_complete_requires_status(cfg):
+    res = tools.do_task_complete(cfg, {"summary": "missing status"})
+    assert res.get("isError"), res
+    assert "status" in res["content"][0]["text"].lower()
+
+
+def test_task_complete_acknowledges(cfg):
+    res = tools.do_task_complete(cfg, {
+        "status": "complete",
+        "commit": "abc12345",
+        "summary": "ok",
+    })
+    body = _unwrap(res)
+    assert "task_complete acknowledged" in body["message"]
+    assert "complete" in body["message"]
+
+
+def test_task_complete_in_task_agent_tools_list():
+    """Pin: the tool is in TASK_AGENT_TOOLS, not CONTROL_AGENT_TOOLS — task
+    agents call it; control/cron/ideation agents don't have a use for it."""
+    assert "mcp__autopilot__task_complete" in tools.TASK_AGENT_TOOLS
+    assert "mcp__autopilot__task_complete" not in tools.CONTROL_AGENT_TOOLS

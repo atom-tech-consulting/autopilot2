@@ -68,6 +68,47 @@ def text_respond(text: str) -> Callable:
     return factory
 
 
+class _FakeToolUseBlock:
+    """Minimal tool_use block shape for `daemon._log_message` (TB-101).
+
+    `_log_message` walks message.content for `name` + `input` to capture
+    `task_complete` calls. We mimic the SDK's ToolUseBlock by exposing
+    those attributes (plus an `id`).
+    """
+
+    def __init__(self, name: str, input: dict, id: str = "tool-use-1") -> None:
+        self.name = name
+        self.input = input
+        self.id = id
+
+
+class _FakeMixedMsg:
+    """Message containing arbitrary content blocks (text + tool_use)."""
+
+    def __init__(self, blocks: list) -> None:
+        self.content = blocks
+
+
+def tool_call_respond(name: str, args: dict, *, prefix_text: str = "") -> Callable:
+    """Return an async-gen factory yielding one assistant-style message with
+    a tool_use block of `name`/`args`. Used to simulate `task_complete` calls.
+
+    `prefix_text` lets the caller seed a leading text-only message — useful
+    when a test wants to assert the daemon prefers the tool call over a
+    legacy RESULT block emitted earlier in the same turn.
+    """
+
+    async def _gen() -> AsyncIterator:
+        if prefix_text:
+            yield _FakeMsg(prefix_text)
+        yield _FakeMixedMsg([_FakeToolUseBlock(name=name, input=args)])
+
+    def factory(prompt, options):  # noqa: ARG001
+        return _gen()
+
+    return factory
+
+
 def crash_respond(exc: Exception) -> Callable:
     """Return an async-gen factory that raises `exc` mid-iteration — simulates
     the "SDK subprocess died with exit 1" pattern where the agent had already
