@@ -116,6 +116,31 @@ def test_parse_verification_picks_last_section_for_pipeline_launch_briefings():
     assert not any("reports/x/best.json" in c for c in commands), commands
 
 
+def test_parse_verification_extracts_shell_with_double_backtick_wrapping():
+    """TB-146 (round 2): ideation agents sometimes write shell bullets as
+    `` ` `cmd` ` `` (double-backtick wrapping around a single-backtick code
+    span — markdown's idiom for code that contains a backtick). The verifier
+    used to only match `` `cmd` `` (single-backtick form), so these bullets
+    silently fell through to prose, and the SDK judge evaluated them as
+    "is this claim true given the diff" — which always fails for a no-op
+    state-only diff like an unfreeze tick. Stoch's TB-146 retry-exhausted
+    again on 2026-04-29 this way after the parenthetical-heading fix.
+    """
+    text = (
+        "## Verification\n"
+        "- `` `test -f scripts/run_vwap_wfo.py` `` — script file present\n"
+        "- `` `uv run pytest tests/test_vwap_wfo.py -q` `` — all tests pass\n"
+        "- `uv run python scripts/run_vwap_wfo.py --help` — single-backtick form still works\n"
+    )
+    bullets = parse_verification_section(text)
+    assert bullets is not None and len(bullets) == 3
+    for b in bullets:
+        assert b.kind == "shell", f"{b.text!r} should be shell, got {b.kind}"
+    assert bullets[0].command == "test -f scripts/run_vwap_wfo.py"
+    assert bullets[1].command == "uv run pytest tests/test_vwap_wfo.py -q"
+    assert bullets[2].command == "uv run python scripts/run_vwap_wfo.py --help"
+
+
 def test_parse_verification_picks_last_section_with_parenthetical_heading():
     """TB-146 regression: ideation agents add parenthetical disambiguators
     to the launch task's heading like `## Verification (launch-task — ...)`.

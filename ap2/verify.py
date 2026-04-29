@@ -57,6 +57,16 @@ _VERIFICATION_HEADER_RE = re.compile(
 )
 # Bullet starts with `- ` then optional backtick command at the start.
 _BULLET_RE = re.compile(r"^\s*-\s+(.*?)(?=\n\s*-\s+|\n\s*\n|\Z)", re.S | re.M)
+# Single-backtick form (standard markdown shell): `cmd`
+# Double-backtick form (markdown's "code-with-backticks" wrapper, which
+# ideation agents sometimes use when they want the rendered output to
+# show the backticks visibly): `` `cmd` ``  →  the inner `cmd` is the
+# command we want to run. TB-146 hit this — every shell bullet got
+# classified as prose because _SHELL_LEAD_RE only matched the single
+# form, the SDK judge then evaluated each "is `test -f X` true" prose
+# claim against the unfreeze diff (only TASKS.md / progress.md) and
+# said "no". Try double-backtick first (more specific), then single.
+_SHELL_DOUBLE_RE = re.compile(r"^\s*``\s*`([^`]+)`\s*``")
 _SHELL_LEAD_RE = re.compile(r"^\s*`([^`]+)`")
 
 
@@ -107,7 +117,7 @@ def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
         raw = bm.group(1).strip()
         if not raw:
             continue
-        sm = _SHELL_LEAD_RE.match(raw)
+        sm = _SHELL_DOUBLE_RE.match(raw) or _SHELL_LEAD_RE.match(raw)
         if sm:
             bullets.append(VerifyBullet(
                 kind="shell",
