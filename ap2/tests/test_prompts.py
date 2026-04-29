@@ -44,28 +44,26 @@ def test_prompt_warns_against_naive_complete_from_commit_existence(tmp_path):
 
 
 def test_prompt_pins_pipeline_task_start_guidance(tmp_path):
-    """TB-84: task agent header must steer agents to `pipeline_task_start` when
-    a briefing has a `## Pipeline launch` section. Surfaced live: stoch's TB-78
-    had a perfectly-shaped pipeline briefing but the agent ignored it and ran
-    the 18-point sweep inline (24-min single dispatch). The header reminder is
-    seen by every task agent before they even read the briefing.
+    """TB-114: task agent header must steer agents to `pipeline_task_start`
+    for any work expected to take more than ~5 min wall-clock —
+    independent of whether the briefing has a `## Pipeline launch` section
+    (that two-shape pattern was retired). The agent self-classifies; on
+    pipeline pivot the daemon parks the task in `Pipeline Pending` and
+    re-runs verification once subprocesses die.
     """
     cfg = _cfg(tmp_path)
     t = Task(id="TB-99", title="x", section="Active")
     p = build_task_prompt(cfg, t)
     # Tool named explicitly — agents see the symbol they need to call.
     assert "pipeline_task_start" in p
-    # Trigger phrase that matches the briefing convention.
-    assert "## Pipeline launch" in p
-    # Strong negative instruction to prevent inlining.
-    assert "do NOT run it inline" in p
-    # The "MUST" phrasing is load-bearing; weaker words let agents rationalize
-    # past it (the TB-78 agent did).
-    assert "MUST call" in p
-    # Auto-creation of validation task is the second load-bearing fact —
-    # agents that skim might otherwise call `board_edit add_backlog` after
-    # `pipeline_task_start` and double-create the task.
-    assert "creates the validation task" in p
+    # Strong MUST phrasing — weaker words let agents rationalize past it.
+    assert "MUST" in p
+    # Self-classification trigger (cost-aware, not briefing-shape-aware).
+    assert "5 minutes" in p or "~5 minutes" in p
+    # The Pipeline Pending parking is the load-bearing post-dispatch fact.
+    assert "Pipeline Pending" in p
+    # Make sure the agent doesn't double-do the work inline + via pipeline.
+    assert "Do NOT ALSO" in p or "Do NOT also" in p
 
 
 def test_prompt_pins_state_file_fence(tmp_path):

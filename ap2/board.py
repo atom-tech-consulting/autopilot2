@@ -1,8 +1,17 @@
 """TASKS.md parser: read sections, move/add/remove tasks, assign TB-N IDs.
 
 Uses fcntl.flock for file locking so multiple agents can mutate the board safely.
-The board has exactly 5 sections in a fixed order (see skills/taskboard/SKILL.md):
-Active, Ready, Backlog, Complete, Frozen.
+The board has 6 sections in a fixed order (see skills/taskboard/SKILL.md):
+Active, Ready, Backlog, Pipeline Pending, Complete, Frozen.
+
+`Pipeline Pending` (TB-114-era refactor) is the holding area for a launch
+task that has dispatched one or more pipelines via `pipeline_task_start`.
+The launch agent's own SDK turn finished, but the work isn't truly done
+until each spawned subprocess dies and the original briefing's
+`## Verification` passes against the post-pipeline working tree. The
+daemon sweeps Pipeline Pending each tick: when all of a task's
+pipeline pids are dead, it runs verification and routes to Complete
+(pass) or Backlog/Frozen (fail).
 """
 from __future__ import annotations
 
@@ -14,8 +23,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-SECTIONS = ["Active", "Ready", "Backlog", "Complete", "Frozen"]
-SECTION_RE = re.compile(r"^## (Active|Ready|Backlog|Complete|Frozen)\s*$", re.M)
+SECTIONS = ["Active", "Ready", "Backlog", "Pipeline Pending", "Complete", "Frozen"]
+SECTION_RE = re.compile(
+    r"^## (Active|Ready|Backlog|Pipeline Pending|Complete|Frozen)\s*$", re.M,
+)
 TASK_LINE_RE = re.compile(
     r"^- \[(?P<check>[ x])\] \*\*(?P<id>TB-\d+)\*\* \*\*(?P<title>[^*]+)\*\*"
     r"(?P<tags>(?:\s+`#[^`]+`)*)"

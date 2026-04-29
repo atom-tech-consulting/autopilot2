@@ -225,7 +225,8 @@ def _render_home(cfg: Config) -> str:
     paused = cfg.pause_flag.exists()
     board = Board.load(cfg.tasks_file)
     counts = {s: sum(1 for _ in board.iter_tasks(section=s))
-              for s in ("Active", "Ready", "Backlog", "Complete", "Frozen")}
+              for s in ("Active", "Ready", "Backlog", "Pipeline Pending",
+                        "Complete", "Frozen")}
     evts = ev_mod.tail(cfg.events_file, n=30)
     evts.reverse()  # newest first
 
@@ -245,7 +246,8 @@ def _render_home(cfg: Config) -> str:
         + "".join(
             f'<div class="stat"><div class="stat-label">{s}</div>'
             f'<div class="stat-value">{counts[s]}</div></div>'
-            for s in ("Active", "Ready", "Backlog", "Complete", "Frozen")
+            for s in ("Active", "Ready", "Backlog", "Pipeline Pending",
+                      "Complete", "Frozen")
         )
         + "</div>"
         f'<h2>events <span class="meta">— last 30, newest first '
@@ -290,6 +292,7 @@ def _render_tasks(cfg: Config) -> str:
     board = Board.load(cfg.tasks_file)
     sections_html = []
     for s, limit in (("Active", None), ("Ready", None), ("Backlog", None),
+                     ("Pipeline Pending", None),
                      ("Complete", 30), ("Frozen", None)):
         label = f"{s} <span class=\"meta\">({sum(1 for _ in board.iter_tasks(section=s))} total)</span>"
         if limit is not None:

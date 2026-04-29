@@ -117,6 +117,14 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     # for retry.
     task_complete_args: dict = {}
 
+    # TB-114: capture every `pipeline_task_start` tool call the agent makes
+    # during its run — used after the agent returns to decide whether to
+    # park the task in Pipeline Pending (instead of Complete) and to record
+    # which pids are blocking it. We capture both the tool args (name,
+    # command) and the daemon's tool-result payload (pid, started_at, log).
+    pipeline_starts: list[dict] = []
+    pipeline_args_by_id: dict[str, dict] = {}
+
     # Ring buffer of stream-message summaries so we can attach the last few
     # messages to the error event; dumps to disk for full history.
     stream_log: list[dict] = []
@@ -141,13 +149,38 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         # uses the bare name (`report_result`). Match both. Last-write-wins
         # if the agent calls the tool more than once.
         for part in (getattr(msg, "content", None) or []):
-            if getattr(part, "name", None) in (
-                "report_result", "mcp__autopilot__report_result",
-            ):
+            pname = getattr(part, "name", None)
+            if pname in ("report_result", "mcp__autopilot__report_result"):
                 inp = getattr(part, "input", None)
                 if isinstance(inp, dict):
                     task_complete_args.clear()
                     task_complete_args.update(inp)
+            elif pname in (
+                "pipeline_task_start", "mcp__autopilot__pipeline_task_start",
+            ):
+                inp = getattr(part, "input", None)
+                if isinstance(inp, dict):
+                    use_id = getattr(part, "id", None) or ""
+                    pipeline_args_by_id[use_id] = dict(inp)
+            else:
+                # Tool result block: pair it with its tool_use_id so we can
+                # learn the daemon-side pid/started_at for each
+                # pipeline_task_start call.
+                tu_id = getattr(part, "tool_use_id", None)
+                if not tu_id or tu_id not in pipeline_args_by_id:
+                    continue
+                content = getattr(part, "content", None)
+                payload = _extract_tool_result_payload(content)
+                if not isinstance(payload, dict):
+                    continue
+                started_args = pipeline_args_by_id.pop(tu_id)
+                pipeline_starts.append({
+                    "name": str(started_args.get("name") or "").strip(),
+                    "command": str(started_args.get("command") or "").strip(),
+                    "pid": payload.get("pid"),
+                    "started_at": payload.get("started_at"),
+                    "log": payload.get("log") or "",
+                })
 
     async def _consume() -> str:
         text = ""
@@ -312,6 +345,50 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             parsed = inferred
     commit_hash = parsed.commit
     final_status = parsed.status
+    # TB-114: if the agent dispatched any pipelines via `pipeline_task_start`,
+    # the work isn't really done — pipeline subprocesses are still running.
+    # Park the task in `Pipeline Pending`, emit a `task_pipeline_pending`
+    # event with the captured pids, and skip both verifier paths (they'd
+    # check for output artifacts the pipelines haven't produced yet). The
+    # daemon's per-tick Pipeline Pending sweep re-runs verification once
+    # every pid for this task has died.
+    pipelines_for_task = [
+        p for p in pipeline_starts
+        if isinstance(p.get("pid"), int)
+    ]
+    if parsed.status == "complete" and pipelines_for_task:
+        do_board_edit(cfg, {
+            "action": "move_to_pipeline_pending", "task_id": task.id,
+        })
+        events.append(
+            cfg.events_file,
+            "task_pipeline_pending",
+            task=task.id,
+            commit=parsed.commit,
+            summary=parsed.summary[:300],
+            pipelines=[
+                {
+                    "name": p.get("name", ""),
+                    "pid": p["pid"],
+                    "started_at": p.get("started_at"),
+                    "log": p.get("log", ""),
+                }
+                for p in pipelines_for_task
+            ],
+        )
+        events.append(
+            cfg.events_file,
+            "task_complete",
+            task=task.id,
+            status="pipeline_pending",
+            commit=parsed.commit,
+            summary=parsed.summary[:300],
+        )
+        board_after = Board.load(cfg.tasks_file)
+        loc = board_after.find(task.id)
+        dest = loc[0] if loc else "?"
+        _commit_state_files(cfg, f"state: {task.id} → {dest}")
+        return
     if parsed.status == "complete":
         # Project-wide regression gate: when AP2_VERIFY_CMD is set, run it
         # against HEAD (post-agent-commit) before declaring Complete. Failure
@@ -634,6 +711,39 @@ def _extract_text(msg) -> str:
 
 def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n] + "…"
+
+
+def _extract_tool_result_payload(content) -> dict | None:
+    """Parse a ToolResultBlock's content into the dict the daemon's MCP
+    tools return via `_ok(...)` (the body of the inner `text` field is a
+    JSON object with `message` + structured fields).
+
+    Returns the dict on success, or None when the shape doesn't match (the
+    block was an error, the content is a non-JSON string, etc.).
+    """
+    import json as _json
+
+    text: str | None = None
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        for blk in content:
+            t = getattr(blk, "text", None)
+            if isinstance(t, str):
+                text = t
+                break
+            if isinstance(blk, dict):
+                t = blk.get("text")
+                if isinstance(t, str):
+                    text = t
+                    break
+    if not text:
+        return None
+    try:
+        payload = _json.loads(text)
+    except _json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _stringify_block_content(c) -> str:
@@ -1092,6 +1202,175 @@ _STATE_DIRS = (
 )
 
 
+async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
+    """Walk Pipeline Pending and verify any task whose pipelines all died.
+
+    For each task in `Pipeline Pending` we read events.jsonl backwards to
+    find the most recent `task_pipeline_pending` event for that task — its
+    `pipelines` field lists the (pid, started_at) tuples we need to check.
+    A pipeline is "dead" if `os.kill(pid, 0)` raises ProcessLookupError
+    (or if psutil reports the process create_time differs from the
+    recorded `started_at`, defending against pid recycling). When every
+    pipeline for the task is dead, re-run the verification harness:
+
+      1. Project-wide gate (`_run_verify`) — same as the synchronous path.
+      2. Per-task verification (`_maybe_per_task_verify`) — runs the
+         briefing's `## Verification` bullets against the post-pipeline
+         working tree.
+
+    Pass → move to Complete, append progress, dispatch any cron directives
+    captured at launch time. Fail → `_handle_failure(status="verification_failed")`
+    routes through Backlog (with retry-counter bump) → Frozen at
+    exhaustion. Tick continues; the next dispatch picks the (now-Backlog)
+    task back up.
+    """
+    if not cfg.tasks_file.exists():
+        return
+    board = Board.load(cfg.tasks_file)
+    pending = list(board.iter_tasks("Pipeline Pending"))
+    if not pending:
+        return
+
+    # Index task_pipeline_pending events by task id (newest wins).
+    task_pipelines: dict[str, list[dict]] = {}
+    summaries: dict[str, dict] = {}
+    for evt in events.tail(cfg.events_file, n=2000):
+        if evt.get("type") != "task_pipeline_pending":
+            continue
+        tid = evt.get("task")
+        if not isinstance(tid, str):
+            continue
+        pls = evt.get("pipelines") or []
+        if isinstance(pls, list):
+            task_pipelines[tid] = [p for p in pls if isinstance(p, dict)]
+            summaries[tid] = {
+                "commit": evt.get("commit", "") or "",
+                "summary": evt.get("summary", "") or "",
+            }
+
+    for task in pending:
+        pipelines = task_pipelines.get(task.id) or []
+        if not pipelines:
+            # Defensive: no record of which pids gate this task. Skip —
+            # don't auto-resolve without evidence the dispatcher knew
+            # about. Operator can manually move the task off Pipeline
+            # Pending if needed.
+            continue
+        alive = [p for p in pipelines if _pipeline_alive(p)]
+        if alive:
+            continue
+        # All pipelines dead — verify and resolve.
+        result_summary = summaries.get(task.id, {})
+        final_status = "complete"
+        verify_res = _run_verify(cfg, task)
+        if verify_res is not None and not verify_res.passed:
+            events.append(
+                cfg.events_file,
+                "verification_failed",
+                task=task.id,
+                source="pipeline_pending",
+                command=verify_res.command,
+                exit_code=verify_res.exit_code,
+                stderr_tail=verify_res.stderr_tail,
+                duration_s=round(verify_res.duration_s, 2),
+            )
+            _handle_failure(cfg, task, status="verification_failed")
+            final_status = "verification_failed"
+        else:
+            per_verdict = await _maybe_per_task_verify(cfg, sdk, task)
+            if per_verdict is not None and per_verdict.overall == "fail":
+                events.append(
+                    cfg.events_file,
+                    "verification_failed",
+                    task=task.id,
+                    kind="per_task",
+                    source="pipeline_pending",
+                    overall=per_verdict.overall,
+                    criteria=[
+                        {"kind": c.kind, "status": c.status,
+                         "bullet": c.bullet[:200], "notes": c.notes[:200]}
+                        for c in per_verdict.criteria
+                    ],
+                    duration_s=round(per_verdict.duration_s, 2),
+                )
+                _handle_failure(cfg, task, status="verification_failed")
+                final_status = "verification_failed"
+            else:
+                if per_verdict is not None and per_verdict.overall == "partial":
+                    events.append(
+                        cfg.events_file,
+                        "verification_partial",
+                        task=task.id,
+                        source="pipeline_pending",
+                        criteria=[
+                            {"kind": c.kind, "status": c.status,
+                             "bullet": c.bullet[:200], "notes": c.notes[:200]}
+                            for c in per_verdict.criteria
+                        ],
+                    )
+                do_board_edit(cfg, {
+                    "action": "move_to_complete", "task_id": task.id,
+                })
+                retry.reset_attempt(cfg.retry_state_file, task.id)
+                synth = TaskResult(
+                    status="complete",
+                    commit=result_summary.get("commit", ""),
+                    summary=result_summary.get("summary", "") or
+                            f"pipelines completed ({len(pipelines)}); verification passed",
+                    files_changed=[],
+                    tests_passed=None,
+                    cron=[],
+                    raw="(pipeline_pending → complete)",
+                )
+                _append_progress(cfg, task, synth)
+        events.append(
+            cfg.events_file,
+            "task_complete",
+            task=task.id,
+            status=final_status,
+            source="pipeline_pending",
+            commit=result_summary.get("commit", ""),
+            summary=(result_summary.get("summary") or "")[:300],
+        )
+        board_after = Board.load(cfg.tasks_file)
+        loc = board_after.find(task.id)
+        dest = loc[0] if loc else "?"
+        _commit_state_files(cfg, f"state: {task.id} → {dest}")
+
+
+def _pipeline_alive(pipeline: dict) -> bool:
+    """True if the pipeline subprocess identified by (pid, started_at) is
+    still running. Defends against pid recycling by comparing
+    `psutil.Process(pid).create_time()` to the recorded `started_at` when
+    psutil is available; falls back to a bare `os.kill(pid, 0)` check.
+    """
+    pid = pipeline.get("pid")
+    if not isinstance(pid, int):
+        return False
+    started_at = pipeline.get("started_at")
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # PID exists but isn't ours — treat as alive (we can't kill, so
+        # we don't reliably know it's dead either). Won't happen in
+        # practice since the daemon spawned it.
+        return True
+    if isinstance(started_at, (int, float)):
+        try:
+            import psutil
+
+            ct = int(psutil.Process(pid).create_time())
+            if abs(ct - int(started_at)) > 2:
+                # PID recycled — the pid we recorded is gone, replaced
+                # by an unrelated process.
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
 def _commit_state_files(cfg: Config, message: str) -> None:
     """Stage + commit the daemon-owned state files if any are modified.
 
@@ -1191,7 +1470,19 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "cron_error", error=f"{type(e).__name__}: {e}")
 
-    # 3. Next Ready task (auto-promote top-of-Backlog if Ready is empty)
+    # 3. Pipeline Pending sweep (TB-114). Each task in `Pipeline Pending`
+    # has one or more pids it dispatched via `pipeline_task_start`. When
+    # ALL of those pids are dead, re-run verification against the now-
+    # populated working tree and route to Complete or Backlog/Frozen.
+    try:
+        await _sweep_pipeline_pending(cfg, sdk)
+    except Exception as e:  # noqa: BLE001
+        events.append(
+            cfg.events_file, "pipeline_pending_sweep_error",
+            error=f"{type(e).__name__}: {e}",
+        )
+
+    # 4. Next Ready task (auto-promote top-of-Backlog if Ready is empty)
     try:
         board = Board.load(cfg.tasks_file)
         # Surface task-shaped lines that fail the parser. A common cause is a

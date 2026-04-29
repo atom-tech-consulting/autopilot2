@@ -1,83 +1,75 @@
-"""E2E for TB-81: launch a real subprocess via `pipeline_task_start`, confirm
-the validation task lands in Backlog with `(blocked on: pid:N@TS)`, then wait
-for the process to exit and confirm `next_dispatchable("Backlog")` auto-promotes
-the validation task. No SDK harness needed — this exercises the full board +
-pipelines.is_blocking dispatch path end-to-end.
+"""E2E for TB-114: launch a real subprocess via `pipeline_task_start`,
+confirm `pipeline_start` event fires with name/pid/started_at/log, no
+side-effect Backlog task is created (pre-TB-114 contract retired), and
+the log file captures stdout/stderr.
+
+Pipeline-Pending parking + sweep-driven verification on pid death is
+covered in test_state_violation/test_daemon_pipeline_pending — those
+involve the full daemon.run_task flow, not just the tool.
 """
 from __future__ import annotations
 
+import json
 import os
 import signal
 import time
 
-from ap2 import pipelines, tools
+from ap2 import tools
 from ap2.board import Board
 
 
-def test_pipeline_launch_then_auto_promote_when_process_dies(e2e_project):
+def test_pipeline_task_start_emits_event_no_validation_task(e2e_project):
     cfg = e2e_project()
 
-    # Use a short-lived sleep so the test doesn't have to wait long.
     res = tools.do_pipeline_task_start(
         cfg,
-        {
-            "name": "demo",
-            "command": "sleep 1",
-            "validation_title": "Validate demo output",
-            "validation_briefing": "# Validate demo\n\n## Verification\n- `true`\n",
-        },
+        {"name": "demo", "command": "sleep 1"},
     )
     assert not res.get("isError"), res
-    import json as _json
-    body = _json.loads(res["content"][0]["text"])
+    body = json.loads(res["content"][0]["text"])
     pid = body["pid"]
-    val_id = body["validation_id"]
+    started_at = body["started_at"]
 
-    # While the pipeline is alive, the validation task is NOT dispatchable.
+    # No new task in Backlog — TB-114 retired the auto-validation pattern.
     b = Board.load(cfg.tasks_file)
-    assert b.find(val_id)[0] == "Backlog"
-    assert b.next_dispatchable("Backlog") is None
+    assert sum(1 for _ in b.iter_tasks("Backlog")) == 0
+    assert sum(1 for _ in b.iter_tasks("Pipeline Pending")) == 0
 
-    # Wait for the sleep to exit. The Popen handle wasn't retained, so the
-    # child becomes a zombie when it exits — pipelines.is_blocking detects
-    # zombie status via psutil and reports unblocked.
-    blocker = f"pid:{pid}@{body['started_at']}"
+    # pipeline_start event recorded with the right fields.
+    from ap2.events import tail
+    evts = tail(cfg.events_file, 20)
+    starts = [e for e in evts if e["type"] == "pipeline_start"]
+    assert len(starts) == 1
+    assert starts[0]["name"] == "demo"
+    assert starts[0]["pid"] == pid
+    assert starts[0]["started_at"] == started_at
+    assert "validation" not in starts[0]
+
+    # Wait for the sleep to exit so we don't leak.
     deadline = time.time() + 5.0
     while time.time() < deadline:
-        if not pipelines.is_blocking(blocker):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
             break
         time.sleep(0.1)
-    else:  # pragma: no cover — defensive
+    else:  # pragma: no cover
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        raise AssertionError("pipeline subprocess did not exit within 5s")
-
-    # Pipeline is gone → validation task auto-promotes on the next call.
-    b2 = Board.load(cfg.tasks_file)
-    t = b2.next_dispatchable("Backlog")
-    assert t is not None and t.id == val_id
 
 
 def test_pipeline_log_file_captures_command_output(e2e_project, tmp_path):
     cfg = e2e_project()
     res = tools.do_pipeline_task_start(
         cfg,
-        {
-            "name": "echo-test",
-            "command": "echo hello-pipeline",
-            "validation_title": "Validate echo",
-            "validation_briefing": "# x\n\n## Verification\n- `true`\n",
-        },
+        {"name": "echo-test", "command": "echo hello-pipeline"},
     )
-    import json as _json
-    body = _json.loads(res["content"][0]["text"])
+    body = json.loads(res["content"][0]["text"])
     log_path = body["log"]
 
-    # Brief poll: wait for echo to finish + flush.
     from pathlib import Path
-
     log = Path(log_path)
     deadline = time.time() + 3.0
     while time.time() < deadline:

@@ -231,33 +231,31 @@ def test_ideation_state_write_atomic_no_partial_on_failure(cfg, monkeypatch):
 
 
 def test_pipeline_task_start_happy_path(cfg, tmp_path):
+    """TB-114: pipeline_task_start spawns a detached subprocess, writes a
+    `pipeline_start` event with name/pid/started_at/log, and returns the
+    pid + started_at + log path. It does NOT create a separate validation
+    task — the launching task itself goes to Pipeline Pending in
+    daemon.run_task and re-runs verification once the pid dies.
+    """
+    backlog_before = sum(1 for _ in Board.load(cfg.tasks_file).iter_tasks("Backlog"))
     res = tools.do_pipeline_task_start(
         cfg,
         {
             "name": "demo",
             "command": "sleep 30",
-            "validation_title": "Validate demo output",
-            "validation_briefing": "# Validate\n\n## Verification\n- `true`\n",
         },
     )
     body = _unwrap(res)
     pid = body["pid"]
     started_at = body["started_at"]
-    val_id = body["validation_id"]
     log = body["log"]
+    # No validation_id in the response — pre-TB-114 contract is gone.
+    assert "validation_id" not in body
 
     try:
-        # Validation task lands in Backlog with the right blocked_on token.
+        # No new task created in Backlog as a side effect — count unchanged.
         b = Board.load(cfg.tasks_file)
-        loc = b.find(val_id)
-        assert loc is not None and loc[0] == "Backlog"
-        t = b.get(val_id)
-        assert t.blocked_on == [f"pid:{pid}@{started_at}"]
-        # Briefing file written under .cc-autopilot/tasks/.
-        assert t.briefing
-        brief_path = cfg.project_root / t.briefing
-        assert brief_path.exists()
-        assert "Validate" in brief_path.read_text()
+        assert sum(1 for _ in b.iter_tasks("Backlog")) == backlog_before
         # Log file ended up in the conventional location.
         assert log.endswith(f"demo-{pid}.log")
         # pipeline_start event was appended.
@@ -268,8 +266,10 @@ def test_pipeline_task_start_happy_path(cfg, tmp_path):
         assert "pipeline_start" in kinds
         starting = [e for e in evts if e["type"] == "pipeline_start"][-1]
         assert starting["pid"] == pid
-        assert starting["validation"] == val_id
+        assert starting["started_at"] == started_at
         assert starting["name"] == "demo"
+        # Pre-TB-114 `validation` field is gone.
+        assert "validation" not in starting
     finally:
         # Clean up the spawned process so the test doesn't leak.
         import os, signal
@@ -282,37 +282,24 @@ def test_pipeline_task_start_happy_path(cfg, tmp_path):
 def test_pipeline_task_start_missing_args_errors(cfg):
     res = tools.do_pipeline_task_start(cfg, {"name": "x"})
     assert res.get("isError")
-    res = tools.do_pipeline_task_start(
-        cfg, {"name": "x", "command": "true", "validation_title": ""}
-    )
+    res = tools.do_pipeline_task_start(cfg, {"command": "true"})
     assert res.get("isError")
 
 
-def test_pipeline_task_start_assigns_id_via_locked_board(cfg):
-    """The validation task gets a fresh TB-N via _allocate_id, same as
-    add_backlog. Two back-to-back launches should produce different ids.
+def test_pipeline_task_start_distinct_pids(cfg):
+    """Two back-to-back launches each spawn their own subprocess — pids
+    differ. (Pre-TB-114 we asserted validation_id divergence; that field
+    is gone, so we now pin the pid uniqueness as the visible contract.)
     """
     r1 = tools.do_pipeline_task_start(
-        cfg,
-        {
-            "name": "p1",
-            "command": "sleep 30",
-            "validation_title": "validate p1",
-            "validation_briefing": "x",
-        },
+        cfg, {"name": "p1", "command": "sleep 30"},
     )
     r2 = tools.do_pipeline_task_start(
-        cfg,
-        {
-            "name": "p2",
-            "command": "sleep 30",
-            "validation_title": "validate p2",
-            "validation_briefing": "x",
-        },
+        cfg, {"name": "p2", "command": "sleep 30"},
     )
     body1 = _unwrap(r1)
     body2 = _unwrap(r2)
-    assert body1["validation_id"] != body2["validation_id"]
+    assert body1["pid"] != body2["pid"]
 
     import os, signal
     for pid in (body1["pid"], body2["pid"]):

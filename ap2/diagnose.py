@@ -39,6 +39,7 @@ MEANINGFUL_EVENT_TYPES = frozenset({
     "task_start",
     "task_complete",
     "task_implicit_commit",
+    "task_pipeline_pending",  # TB-114
     "task_rollback",  # TB-111
     "cron_complete",
     "cron_start",
@@ -62,6 +63,7 @@ FAILURE_EVENT_TYPES = frozenset({
     "task_state_violation",  # TB-110
     "retry_exhausted",
     "rollback_error",
+    "pipeline_pending_sweep_error",  # TB-114
     "state_commit_error",
     "verification_failed",  # TB-66 + TB-69
     "board_malformed_line",  # TB-68
@@ -230,10 +232,11 @@ def _iso(epoch_s: float) -> str:
 
 def _board_summary(board: Board | None) -> dict[str, Any]:
     if board is None:
-        return {"Active": 0, "Ready": 0, "Backlog": 0,
+        return {"Active": 0, "Ready": 0, "Backlog": 0, "Pipeline Pending": 0,
                 "Complete": 0, "Frozen": 0, "active_task": None}
     out: dict[str, Any] = {}
-    for s in ("Active", "Ready", "Backlog", "Complete", "Frozen"):
+    for s in ("Active", "Ready", "Backlog", "Pipeline Pending",
+              "Complete", "Frozen"):
         out[s] = sum(1 for _ in board.iter_tasks(s))
     active = next(board.iter_tasks("Active"), None)
     out["active_task"] = active.id if active else None

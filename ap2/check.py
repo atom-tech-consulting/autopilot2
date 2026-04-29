@@ -71,7 +71,7 @@ def check_project(cfg: Config) -> CheckReport:
 # `next_ready` / `next_dispatchable` walk Active → Ready → Backlog
 # expecting the canonical order. Out-of-order sections are not just
 # cosmetic — they can route tasks through the wrong precedence.
-_SECTION_ORDER_RE = re.compile(r"^##\s+(\w+)\s*$", re.M)
+_SECTION_ORDER_RE = re.compile(r"^##\s+([A-Za-z][A-Za-z ]*?)\s*$", re.M)
 
 
 def _check_tasks_md(cfg: Config) -> list[Issue]:

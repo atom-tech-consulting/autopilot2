@@ -23,6 +23,7 @@ TASKS_TEMPLATE = (
     "## Active\n\n"
     "## Ready\n\n"
     "## Backlog\n\n"
+    "## Pipeline Pending\n\n"
     "## Complete\n\n"
     "## Frozen\n"
 )

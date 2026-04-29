@@ -53,20 +53,52 @@ work actually satisfies the briefing — read the diff, run the tests, check
 the files exist and have the expected shape. The daemon's separate fallback
 trusts the commit subject naively; you, as the agent, must do better.
 
-## Pipeline launches (when your briefing has a `## Pipeline launch` section)
-Some briefings split work into a fast prep step + a long-running pipeline
-(parameter sweep, full-history backtest, multi-day data job). If your briefing
-has a `## Pipeline launch` section, you MUST call the `pipeline_task_start` MCP
-tool for the long step — do NOT run it inline via Bash even though Bash is
-available. The daemon dispatches one task at a time inside `await sdk.query(...)`,
-so a 30-min inline run holds the only task slot for 30 min and starves
-everything else.
+## Long-running work — use `pipeline_task_start`
+Before you start, estimate how long your work will take to run end-to-end.
+The daemon dispatches one task at a time inside `await sdk.query(...)` and
+will hard-cap the run at `AP2_TASK_TIMEOUT_S` (default 1h). If your work
+will exceed ~5 minutes of wall-clock time — Polygon-class data fetches,
+full-history backtests, parameter sweeps, ML training, anything against a
+rate-limited external API — you MUST dispatch it via the
+`pipeline_task_start(name, command)` MCP tool instead of running it inline
+via Bash.
 
-The tool spawns the command detached, creates the post-run validation task in
-Backlog with `(blocked on: pid:<N>@<TS>)`, and returns immediately. Call it
-exactly as the briefing's `## Pipeline launch` section spells out — name,
-command, validation_title, validation_briefing. Do NOT make follow-up
-`board_edit` calls afterward; the tool creates the validation task itself.
+How it works:
+- The tool spawns `command` as a detached subprocess (via shell), returns
+  immediately with the pid + log path. Your turn is NOT blocked on the
+  subprocess; you finish your turn right after dispatching.
+- After your `report_result(status="complete", ...)`, the daemon moves THIS
+  task to a `Pipeline Pending` board section (it doesn't go to Complete
+  yet). On every subsequent tick, the daemon checks whether all of your
+  pipelines have died. Once they have, the daemon re-runs your briefing's
+  `## Verification` against the post-pipeline working tree. Pass → Complete.
+  Fail → Backlog (retry), or Frozen on retry exhaustion.
+- You can call `pipeline_task_start` multiple times in one turn to spawn
+  parallel pipelines (use distinct `name` values per call). The daemon
+  waits for ALL of them to die before verifying.
+
+Examples that should pivot to pipeline mode:
+- `python -m stoch fetch --tickers SPY,AAPL,MSFT,...` (rate-limited,
+  multi-hour).
+- `uv run python sweep.py --params 256 --cores 8` (parameter sweep over
+  many runs).
+- `python train.py --epochs 100` (model training).
+
+Examples that stay inline:
+- Running tests (`uv run pytest -q`).
+- Editing source files + committing.
+- Reading existing data and emitting a one-shot report.
+
+When you DO pivot to pipeline mode, your `report_result` should briefly
+state what you dispatched, e.g.:
+    report_result(
+      status="complete",
+      summary="Dispatched pipeline 'spy-cache-prep' (pid 12345). Daemon will verify against the briefing's `## Verification` once the fetch completes."
+    )
+
+Do NOT also commit empty source changes just to satisfy the daemon — the
+daemon only re-runs verification (no extra commit needed). Do NOT ALSO
+attempt the work inline. The pipeline alone is the work.
 
 ## What the daemon and operator handle (do NOT touch)
 These files are either daemon-managed state or operator-curated. The SDK

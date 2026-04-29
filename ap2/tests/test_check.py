@@ -50,6 +50,7 @@ def test_section_out_of_order_is_error(cfg):
         "## Ready\n\n"
         "## Active\n\n"
         "## Backlog\n\n"
+        "## Pipeline Pending\n\n"
         "## Complete\n\n"
         "## Frozen\n"
     )
@@ -85,6 +86,7 @@ def test_malformed_task_line_is_error(cfg):
         "## Backlog\n\n"
         "  this is orphan prose, not a task\n"
         "\n"
+        "## Pipeline Pending\n\n"
         "## Complete\n\n"
         "## Frozen\n"
     )
@@ -100,7 +102,7 @@ def test_stale_briefing_link_is_warning(cfg):
         "## Active\n\n"
         "## Ready\n\n"
         "- [ ] **TB-1** **t** — desc [→ brief](.cc-autopilot/tasks/missing.md)\n\n"
-        "## Backlog\n\n## Complete\n\n## Frozen\n"
+        "## Backlog\n\n## Pipeline Pending\n\n## Complete\n\n## Frozen\n"
     )
     report = check.check_project(cfg)
     assert report.ok  # warnings don't fail
@@ -118,7 +120,7 @@ def test_resolved_briefing_link_no_issue(cfg):
         "## Active\n\n"
         "## Ready\n\n"
         f"- [ ] **TB-1** **t** — desc [→ brief](.cc-autopilot/tasks/tb1.md)\n\n"
-        "## Backlog\n\n## Complete\n\n## Frozen\n"
+        "## Backlog\n\n## Pipeline Pending\n\n## Complete\n\n## Frozen\n"
     )
     report = check.check_project(cfg)
     assert not any(

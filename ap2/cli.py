@@ -115,7 +115,8 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     pid = _read_pid(cfg)
     running = _is_running(pid)
     board = Board.load(cfg.tasks_file)
-    counts = {s: len(board.sections.get(s, [])) for s in ["Active", "Ready", "Backlog", "Complete", "Frozen"]}
+    counts = {s: len(board.sections.get(s, [])) for s in
+              ["Active", "Ready", "Backlog", "Pipeline Pending", "Complete", "Frozen"]}
     jobs = load_jobs(cfg.cron_file)
     state = load_state(cfg.cron_state_file)
     paused = cfg.pause_flag.exists()
@@ -137,7 +138,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
 
     print(f"daemon:   {'running' if running else 'stopped'} (pid {pid or '-'}){' [paused]' if paused else ''}")
     print(f"tick:     {cfg.tick_interval_s}s")
-    print(f"board:    {counts['Active']}A / {counts['Ready']}R / {counts['Backlog']}B / {counts['Complete']}C / {counts['Frozen']}F")
+    print(
+        f"board:    {counts['Active']}A / {counts['Ready']}R / "
+        f"{counts['Backlog']}B / {counts['Pipeline Pending']}P / "
+        f"{counts['Complete']}C / {counts['Frozen']}F"
+    )
     print(f"cron:     {len(jobs)} jobs ({', '.join(j.name for j in jobs) or '-'})")
     print(f"tasks:    {cfg.tasks_file}")
     print(f"events:   {cfg.events_file}")
@@ -301,11 +306,13 @@ def cmd_delete(cfg: Config, args: argparse.Namespace) -> int:
             print(f"{args.task_id} not on board", file=sys.stderr)
             return 1
         section, _ = loc
-        if section in ("Active", "Ready") and not args.force:
+        if section in ("Active", "Ready", "Pipeline Pending") and not args.force:
             print(
                 f"{args.task_id} is in {section} — refusing without --force.\n"
-                f"  Active tasks may be in-flight; Ready is next-to-dispatch.\n"
-                f"  `ap2 backlog {args.task_id}` first, or pass --force.",
+                f"  Active tasks may be in-flight; Ready is next-to-dispatch;\n"
+                f"  Pipeline Pending tasks have running subprocesses gating\n"
+                f"  verification.  `ap2 backlog {args.task_id}` first, or\n"
+                f"  pass --force.",
                 file=sys.stderr,
             )
             return 1

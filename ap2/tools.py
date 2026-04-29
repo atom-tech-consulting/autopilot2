@@ -80,6 +80,7 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
         "move_to_frozen": "Frozen",
         "move_to_complete": "Complete",
         "move_to_backlog": "Backlog",
+        "move_to_pipeline_pending": "Pipeline Pending",
     }
 
     try:
@@ -152,20 +153,29 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
 
 
 def do_pipeline_task_start(cfg: Config, args: dict) -> dict:
-    """Atomically launch a long-running pipeline + create a Backlog validation
-    task gated on the pipeline's PID liveness (TB-81).
+    """Launch a long-running pipeline as a detached OS subprocess (TB-114).
 
-    The launch agent's responsibility collapses from the TB-80 8-step recipe
-    (launch + Frozen stub + Backlog validation + monitor cron) to ONE call.
-    The validation task auto-promotes when the OS process dies, via
-    `Board.next_dispatchable` consulting `pipelines.is_blocking`.
+    Spawns the command and writes a `pipeline_start` event with name + pid +
+    started_at + command + log path. Returns immediately. The daemon
+    correlates the spawned pid back to the launching task by walking the
+    SDK message stream during `_consume` (see `daemon.run_task` — captures
+    `pipeline_task_start` tool calls). After the launch agent emits
+    `report_result(status="complete", ...)`, the daemon moves the task to
+    the `Pipeline Pending` board section. Each tick, the Pipeline-Pending
+    sweep checks every pid's liveness; once all of a task's pipelines have
+    died, the daemon runs the original briefing's `## Verification` against
+    the now-populated working tree, routing to Complete (pass) or Backlog
+    (fail) via `_handle_failure`.
+
+    Pre-TB-114 history: previously took `validation_title` /
+    `validation_briefing` and created a separate Backlog validation task
+    blocked on `pid:<N>@<TS>`. That two-task pattern was retired — the
+    launch task now carries verification itself.
     """
     name = (args.get("name") or "").strip()
     command = (args.get("command") or "").strip()
-    validation_title = (args.get("validation_title") or "").strip()
-    validation_briefing = args.get("validation_briefing") or ""
-    if not name or not command or not validation_title:
-        return _err("name, command, and validation_title are required")
+    if not name or not command:
+        return _err("name and command are required")
 
     log_dir = cfg.project_root / ".cc-autopilot" / "pipelines"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -192,9 +202,8 @@ def do_pipeline_task_start(cfg: Config, args: dict) -> dict:
         started_at = int(psutil.Process(proc.pid).create_time())
     except Exception:  # noqa: BLE001
         # Process may have died instantly, or psutil isn't importable. Fall
-        # back to wall clock so we still record SOMETHING — the validation
-        # task may unblock erroneously on PID recycling, but this branch is
-        # rare and operator-debuggable from the log file.
+        # back to wall clock so we still record SOMETHING. PID recycling
+        # detection downstream relies on the (pid, started_at) pair.
         started_at = int(time.time())
 
     log_path = log_dir / f"{name}-{proc.pid}.log"
@@ -203,32 +212,6 @@ def do_pipeline_task_start(cfg: Config, args: dict) -> dict:
     except OSError:
         log_path = log_tmp
 
-    blocker = f"pid:{proc.pid}@{started_at}"
-    description = f"(blocked on: {blocker})"
-
-    # Mirror add_backlog briefing-write logic: one file per task, slug-named,
-    # collision-suffixed. Briefing payloads from launch agents are typically
-    # full markdown; pass them through as-is.
-    slug = slugify(validation_title)
-    brief_path = cfg.tasks_dir / f"{slug}.md"
-    n = 2
-    while brief_path.exists():
-        brief_path = cfg.tasks_dir / f"{slug}-{n}.md"
-        n += 1
-    brief_path.parent.mkdir(parents=True, exist_ok=True)
-    brief_path.write_text(validation_briefing)
-    briefing_rel = str(brief_path.relative_to(cfg.project_root))
-
-    with locked_board(cfg.tasks_file) as board:
-        val_id = _allocate_id(board, cfg)
-        board.add(
-            "Backlog",
-            task_id=val_id,
-            title=validation_title,
-            description=description,
-            briefing=briefing_rel,
-        )
-
     events.append(
         cfg.events_file,
         "pipeline_start",
@@ -236,14 +219,12 @@ def do_pipeline_task_start(cfg: Config, args: dict) -> dict:
         pid=proc.pid,
         started_at=started_at,
         command=command,
-        validation=val_id,
         log=str(log_path),
     )
     return _ok(
         f"pipeline {name!r} started (pid {proc.pid})",
         pid=proc.pid,
         started_at=started_at,
-        validation_id=val_id,
         log=str(log_path),
     )
 
@@ -672,15 +653,22 @@ def build_mcp_server(cfg: Config):
 
     @tool(
         "pipeline_task_start",
-        "Atomically launch a long-running pipeline as a detached OS process "
-        "and create a single Backlog validation task gated on the process's "
-        "liveness. The validation task auto-promotes when the process dies. "
-        "Use for work that would take >10 minutes as a single agent dispatch.",
+        "Launch a long-running pipeline as a detached OS subprocess. Use this "
+        "when your task's work will exceed ~5 minutes of wall-clock time — "
+        "Polygon/Polygon-class data fetches, full-history backtests, "
+        "parameter sweeps, ML training. The daemon dispatches one task at a "
+        "time inside a single `await sdk.query(...)` slot, so a 30-min inline "
+        "run holds the only task slot for 30 min and risks tripping "
+        "AP2_TASK_TIMEOUT_S (default 1h). After this call returns, finish "
+        "your turn with `report_result(status='complete', ...)` summarizing "
+        "what you dispatched. The daemon will move the task to "
+        "`Pipeline Pending` and re-run your briefing's `## Verification` "
+        "against the post-pipeline working tree once every pid you spawned "
+        "has died. You can call this multiple times for parallel pipelines; "
+        "the daemon waits for all of them.",
         {
             "name": str,
             "command": str,
-            "validation_title": str,
-            "validation_briefing": str,
         },
     )
     async def pipeline_task_start(args):
