@@ -347,6 +347,103 @@ def test_task_complete_acknowledges(cfg):
 # TB-106: do_operator_log_append — operator-decision channel for ideation
 
 
+# TB-109: do_git_log_grep — replaces ideation's Bash `git log --grep` use
+
+
+def _git(cwd, *args):
+    """Run a git command in `cwd` and assert success."""
+    import subprocess
+    proc = subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=str(cwd), capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    return proc
+
+
+def test_git_log_grep_finds_matching_commit(cfg, tmp_path):
+    """Init a tmp git repo with a TB-N-prefixed commit; the tool
+    returns the matching one-line summary."""
+    _git(cfg.project_root, "init", "-q")
+    (cfg.project_root / "a.txt").write_text("hello\n")
+    _git(cfg.project_root, "add", "a.txt", "TASKS.md", "CLAUDE.md")
+    _git(cfg.project_root, "commit", "-q", "-m", "TB-42: do the thing")
+    (cfg.project_root / "b.txt").write_text("more\n")
+    _git(cfg.project_root, "add", "b.txt")
+    _git(cfg.project_root, "commit", "-q", "-m", "unrelated work")
+
+    res = tools.do_git_log_grep(cfg, {"query": "TB-42"})
+    body = _unwrap(res)
+    assert body["count"] == 1
+    assert any("TB-42: do the thing" in m for m in body["matches"]), body
+
+
+def test_git_log_grep_returns_empty_on_no_match(cfg):
+    _git(cfg.project_root, "init", "-q")
+    (cfg.project_root / "a.txt").write_text("hello\n")
+    _git(cfg.project_root, "add", "a.txt", "TASKS.md", "CLAUDE.md")
+    _git(cfg.project_root, "commit", "-q", "-m", "TB-1: x")
+
+    res = tools.do_git_log_grep(cfg, {"query": "TB-999"})
+    body = _unwrap(res)
+    assert body["count"] == 0
+    assert body["matches"] == []
+
+
+def test_git_log_grep_caps_max_results(cfg):
+    """Cap is 100 even if a higher value is passed."""
+    _git(cfg.project_root, "init", "-q")
+    _git(cfg.project_root, "add", "TASKS.md", "CLAUDE.md")
+    _git(cfg.project_root, "commit", "-q", "-m", "TB-1: x")
+    res = tools.do_git_log_grep(cfg, {"query": "TB-1", "max_results": 5000})
+    assert not res.get("isError")  # request succeeded
+
+
+def test_git_log_grep_requires_query(cfg):
+    res = tools.do_git_log_grep(cfg, {"query": ""})
+    assert res.get("isError"), res
+    assert "query is required" in res["content"][0]["text"]
+
+
+def test_git_log_grep_handles_non_git_project(cfg):
+    """No `.git` directory → graceful empty response, not an error."""
+    res = tools.do_git_log_grep(cfg, {"query": "TB-1"})
+    body = _unwrap(res)
+    assert body["count"] == 0
+
+
+def test_git_log_grep_query_is_shell_safe(cfg):
+    """The query goes via subprocess argv, not interpolated into a
+    shell string. Adversarial input shouldn't escape into command
+    injection — it just won't match anything."""
+    _git(cfg.project_root, "init", "-q")
+    _git(cfg.project_root, "add", "TASKS.md", "CLAUDE.md")
+    _git(cfg.project_root, "commit", "-q", "-m", "TB-1: real commit")
+
+    # If the query were interpolated, this would be `; touch /tmp/pwn`.
+    # With argv-form invocation it's a literal string git treats as a
+    # regex match — won't find anything but won't break things either.
+    adversarial = "; touch /tmp/should-not-exist; #"
+    res = tools.do_git_log_grep(cfg, {"query": adversarial})
+    body = _unwrap(res)
+    assert body["count"] == 0
+    # Sanity: the bogus file would only appear if the query escaped.
+    from pathlib import Path
+    assert not Path("/tmp/should-not-exist").exists()
+
+
+def test_git_log_grep_in_control_agent_tools_only():
+    """Pin: control agents (cron / ideation / mattermost handler) get
+    the tool; task agents don't (they have direct Bash access). And
+    `Bash` is NOT in CONTROL_AGENT_TOOLS — that's the whole point of
+    this tool's existence."""
+    assert "mcp__autopilot__git_log_grep" in tools.CONTROL_AGENT_TOOLS
+    assert "mcp__autopilot__git_log_grep" not in tools.TASK_AGENT_TOOLS
+    assert "Bash" not in tools.CONTROL_AGENT_TOOLS, (
+        "control agents must not have Bash — TB-109 closes that surface"
+    )
+
+
 def test_operator_log_append_creates_file_on_first_call(cfg):
     res = tools.do_operator_log_append(cfg, {"note": "abandoned TB-91"})
     body = _unwrap(res)

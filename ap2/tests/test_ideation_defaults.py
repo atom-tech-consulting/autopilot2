@@ -74,7 +74,9 @@ def test_ideation_prompt_pins_step15_failure_review():
         assert label in prompt, f"missing classification {label!r}"
     assert "exit=127" in prompt
     assert ">7 criteria" in prompt or "7 criteria" in prompt
-    assert "git log --grep" in prompt
+    # TB-109: ideation no longer has Bash; the `git_log_grep` MCP tool
+    # replaces the old `git log --grep="<TASK_ID>"` Bash invocation.
+    assert "git_log_grep" in prompt
     assert "Frozen" in prompt
     assert "verification_failed" in prompt
     assert "retry_exhausted" in prompt
@@ -104,12 +106,17 @@ def test_ideation_prompt_pins_step05_insights_read():
 
 
 def test_ideation_prompt_pins_ideation_state_write_tool():
-    """TB-90: `ideation_state_write` MCP tool named in Step 0."""
+    """TB-90: `ideation_state_write` MCP tool named in Step 0.
+    TB-109: ideation has no Bash, so the warnings about `tee`/`>` were
+    replaced with a clearer "you don't have Bash either" note. Pin the
+    new shape — the load-bearing fact is that `ideation_state_write`
+    is the ONLY way to land the file."""
     prompt = _default_prompt()
     assert "ideation_state_write" in prompt
     assert "`content`" in prompt or "content arg" in prompt or "content`" in prompt
-    assert "tee" in prompt
     assert "Write/Edit access" in prompt
+    flat = " ".join(prompt.split())
+    assert "ONLY way to write" in flat or "only way to write" in flat.lower()
     assert "Read" in prompt
 
 

@@ -28,10 +28,11 @@ load-bearing: the file's structure forces you to ground proposals in
 cited evidence and gives the next cycle's ideation memory of what
 you considered.
 
-The tool is the ONLY way to write the assessment file — do not use
-Bash to `tee` or `>` the path; you don't have Write/Edit access
-generally, and the tool handles atomic write + event emission for
-you. Reads stay through the regular `Read` tool.
+The tool is the ONLY way to write the assessment file. You don't
+have Write/Edit access to `.cc-autopilot/`, and you don't have Bash
+either (TB-109) — neither `tee` nor `> path` is available to you.
+The MCP tool handles atomic write + event emission. Reads stay
+through the regular `Read` tool.
 
 Use this exact schema for the `content` argument:
 
@@ -141,9 +142,12 @@ For each failed task, READ:
     field (often shows `exit=127`, `No such file or directory`, or for
     partial: SDK-judge timeout / malformed-JSON / "couldn't reach a
     confident verdict on a prose bullet").
-  - Any prior commits via `git log --grep="<TASK_ID>" --oneline` —
-    the agent may have committed partial work even if verification
-    failed, so the implementation may already be on disk.
+  - Any prior commits via the `git_log_grep` MCP tool — call
+    `git_log_grep(query="<TASK_ID>", max_results=20)` and read the
+    one-line summaries it returns. The agent may have committed
+    partial work even if verification failed, so the implementation
+    may already be on disk. (You don't have Bash; this MCP tool is
+    the only way to query git history.)
 
 `verification_partial` specifics: a `partial` verdict means at least one
 bullet was `unverified` (typically a prose bullet whose SDK judge
@@ -161,7 +165,7 @@ CLASSIFY each into ONE of:
    caused the failure. Heuristic: every `verification_failed` event
    shows the same bullet failing with `exit=127` / `command not found`
    / `No such file or directory` / similar shell shape, AND
-   `git log --grep` shows commits with file changes that plausibly
+   `git_log_grep` shows commits with file changes that plausibly
    cover the briefing scope. Action: propose ONE meta fix-task
    tagged `#fix-briefing` whose briefing instructs the agent to
    rewrite the broken bullets in the original briefing file. Cite

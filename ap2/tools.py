@@ -289,6 +289,59 @@ def do_task_complete(cfg: Config, args: dict) -> dict:
     return _ok(f"task_complete acknowledged (status={status})")
 
 
+def do_git_log_grep(cfg: Config, args: dict) -> dict:
+    """Search the project's git log for commits whose message matches `query`.
+
+    Replaces the ad-hoc `Bash("git log --grep=...")` that ideation Step
+    1.5 used to call (TB-109). Narrow MCP tool means control agents
+    don't need shell access for this — `Bash` was the only legitimate
+    dependency in CONTROL_AGENT_TOOLS, and dropping it closes the
+    shell-redirect-into-fenced-file corruption surface (TB-108 case).
+
+    Returns one line per match: `<short-sha> <subject>`. Capped at 100.
+    Subprocess runs git with arg-list (no `shell=True`), so the query
+    is shell-safe — it's a single argument to `--grep`, not interpolated.
+    """
+    query = str(args.get("query") or "").strip()
+    if not query:
+        return _err("query is required")
+    try:
+        max_results = int(args.get("max_results") or 20)
+    except (TypeError, ValueError):
+        max_results = 20
+    max_results = max(1, min(max_results, 100))
+
+    if not (cfg.project_root / ".git").exists():
+        return _ok("not a git repo", matches=[], count=0)
+
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "-c", "safe.directory=*",
+                "-C", str(cfg.project_root),
+                "log",
+                "--grep", query,
+                "--oneline",
+                "-n", str(max_results),
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        return _err("git log timed out after 10s")
+    except FileNotFoundError:
+        return _err("git not on PATH")
+    if proc.returncode != 0:
+        return _err(f"git log failed: {proc.stderr.strip()[-300:]}")
+
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    return _ok(
+        f"{len(lines)} commit(s) matched {query!r}",
+        matches=lines,
+        count=len(lines),
+    )
+
+
 def do_operator_log_append(cfg: Config, args: dict) -> dict:
     """Append a timestamped operator-decision line to
     `.cc-autopilot/operator_log.md` (TB-106).
@@ -567,6 +620,18 @@ def build_mcp_server(cfg: Config):
     # MCP server registered it. Renamed to `report_result` (no `task_`
     # prefix) so the namespace doesn't collide.
     @tool(
+        "git_log_grep",
+        "Search the project's git log for commits whose message matches "
+        "`query` (passed verbatim to `git log --grep=...`). Returns up to "
+        "`max_results` (default 20, capped at 100) one-line summaries. "
+        "Replaces the ad-hoc `Bash('git log --grep=...')` pattern — "
+        "control agents do not have Bash (TB-109).",
+        {"query": str, "max_results": int},
+    )
+    async def git_log_grep(args):
+        return do_git_log_grep(cfg, args)
+
+    @tool(
         "operator_log_append",
         "Append a timestamped operator-decision line to "
         ".cc-autopilot/operator_log.md (TB-106). Use ONLY for "
@@ -638,6 +703,7 @@ def build_mcp_server(cfg: Config):
             log_event,
             daemon_control,
             ideation_state_write,
+            git_log_grep,
             operator_log_append,
             report_result,
             pipeline_task_start,
@@ -645,17 +711,24 @@ def build_mcp_server(cfg: Config):
     )
 
 
+# Control agents (cron, ideation, mattermost handler) read project state
+# via `Read`/`Glob`/`Grep` and mutate it via narrow MCP tools. They do
+# NOT get `Bash` (TB-109) — the only legitimate use was ideation's
+# `git log --grep=<TASK_ID>` in Step 1.5, replaced by the `git_log_grep`
+# MCP tool. Dropping shell access closes the corruption surface that bit
+# stoch's TASKS.md (TB-108): a control agent's `Bash("echo > TASKS.md")`
+# bypassed every fence we'd built for task agents.
 CONTROL_AGENT_TOOLS = [
     "Read",
     "Glob",
     "Grep",
-    "Bash",
     "mcp__autopilot__board_edit",
     "mcp__autopilot__cron_edit",
     "mcp__autopilot__mattermost_reply",
     "mcp__autopilot__log_event",
     "mcp__autopilot__daemon_control",
     "mcp__autopilot__ideation_state_write",
+    "mcp__autopilot__git_log_grep",
     "mcp__autopilot__operator_log_append",
 ]
 

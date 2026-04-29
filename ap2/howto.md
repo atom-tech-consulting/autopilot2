@@ -204,7 +204,9 @@ by allowlist:
   fenced paths blocked).
 
 **Control agents** (cron, ideation, mattermost handler) —
-`CONTROL_AGENT_TOOLS`:
+`CONTROL_AGENT_TOOLS`. Read project state via `Read` / `Glob` / `Grep`;
+mutate via narrow MCP tools. **No Bash** (TB-109 — closed the
+shell-redirect-into-fenced-file corruption surface).
 - `board_edit(action, task_id, title, tags, briefing, description, blocked_on)` — add/move/remove tasks
 - `cron_edit(action, name, interval, prompt, active_when, max_turns)` — manage scheduled jobs
 - `mattermost_reply(channel, text, thread_id)` — post to MM
@@ -214,6 +216,11 @@ by allowlist:
 - `daemon_control(action, reason)` — pause/resume daemon
 - `ideation_state_write(content)` — overwrite `ideation_state.md`
   atomically (only the ideation agent uses this)
+- `git_log_grep(query, max_results)` — search git log by commit
+  message (replaces ideation's old `Bash("git log --grep=...")`)
+- `operator_log_append(note, task_id)` — append to
+  `.cc-autopilot/operator_log.md` (mattermost handler uses this on
+  `@claude-bot done: ...` messages)
 
 ## Event schema (the canonical timeline)
 
