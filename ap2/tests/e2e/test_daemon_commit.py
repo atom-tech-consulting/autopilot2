@@ -390,3 +390,55 @@ def test_blocked_task_keeps_debug_dumps(e2e_project):
     assert len(stream_lines) >= 1
     # Same `seq` ordering across the two files — caller jq-joins by seq.
     assert len(stream_lines) == len(messages_lines)
+
+
+
+# TB-112: cron.yaml + retry_state.json + operator_log.md are part of
+# `_STATE_FILE_NAMES` so the linear rollback design (TB-111) gets cohesion
+# for free.
+
+
+def test_state_file_names_includes_cron_yaml_and_retry_and_operator_log():
+    """Pin: every file the daemon mutates that affects FUTURE behavior
+    is in `_STATE_FILE_NAMES`. Files left out (cron_state.json,
+    mm_state.json, auto_diagnose_state.json, events.jsonl) are
+    deliberately ephemeral — rollback shouldn't replay them."""
+    from ap2.daemon import _STATE_FILE_NAMES
+
+    must_be_committed = {
+        "TASKS.md",
+        "CLAUDE.md",
+        ".cc-autopilot/progress.md",
+        ".cc-autopilot/ideation_state.md",
+        ".cc-autopilot/cron.yaml",
+        ".cc-autopilot/retry_state.json",
+        ".cc-autopilot/operator_log.md",
+    }
+    actual = set(_STATE_FILE_NAMES)
+    assert must_be_committed <= actual, (
+        f"missing from _STATE_FILE_NAMES: {must_be_committed - actual}"
+    )
+    must_NOT_be_committed = {
+        ".cc-autopilot/cron_state.json",
+        ".cc-autopilot/mm_state.json",
+        ".cc-autopilot/auto_diagnose_state.json",
+        ".cc-autopilot/events.jsonl",
+    }
+    leaked = must_NOT_be_committed & actual
+    assert not leaked, (
+        f"these files must stay gitignored (ephemeral runtime state): {leaked}"
+    )
+
+
+def test_init_template_does_not_gitignore_retry_state():
+    """TB-112: retry_state.json is now committed; init's nested .gitignore
+    template must not include it."""
+    from ap2.init import NESTED_GITIGNORE_BLOCKS
+
+    flat = []
+    for _, entries in NESTED_GITIGNORE_BLOCKS:
+        flat.extend(entries)
+    assert "retry_state.json" not in flat
+    for ephemeral in ("cron_state.json", "mm_state.json",
+                      "auto_diagnose_state.json", "events.jsonl"):
+        assert ephemeral in flat

@@ -991,6 +991,22 @@ _STATE_FILE_NAMES = (
     ".cc-autopilot/progress.md",
     "CLAUDE.md",
     ".cc-autopilot/ideation_state.md",
+    # TB-112: bring three more under daemon auto-commit so the linear
+    # rollback design (TB-111) gets cohesion for free.
+    #   - cron.yaml: schedule config; mutated via the cron_edit MCP
+    #     tool. Previously deferred (TB-83) as YAGNI; relevant now.
+    #   - retry_state.json: per-task retry counter. Un-gitignored at
+    #     the same time so commits succeed.
+    #   - operator_log.md: operator decisions (TB-106). Was committed
+    #     ad-hoc; now part of the canonical state-file set.
+    # Files that stay gitignored — cron_state.json, mm_state.json,
+    # auto_diagnose_state.json, events.jsonl — are ephemeral runtime
+    # state. Rollback should NOT re-fire crons / replay MM / re-fire
+    # watchdog / replay events; leaving them uncommitted gives that
+    # property for free.
+    ".cc-autopilot/cron.yaml",
+    ".cc-autopilot/retry_state.json",
+    ".cc-autopilot/operator_log.md",
 )
 # Directories whose contents are also daemon-owned audit trail. Staged with
 # `git add <dir>` so new briefings (from `add_backlog` auto-fill, ideation

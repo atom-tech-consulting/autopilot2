@@ -135,10 +135,17 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
         "daemon.pid",
         "daemon.log",
         "paused",
+        # Cron last-fired / mm cursor / auto-diagnose cooldown stay
+        # gitignored: rollback (TB-111) should NOT re-fire crons,
+        # replay mattermost, or re-trigger the watchdog. Ephemeral
+        # runtime state lives outside git so it flows forward across
+        # rollback boundaries.
         "cron_state.json",
         "mm_state.json",
-        "retry_state.json",
         "auto_diagnose_state.json",
+        # `retry_state.json` was here pre-TB-112; it's now committed
+        # as part of `_STATE_FILE_NAMES` so rollback restores per-task
+        # retry budgets coherently.
     ]),
     ("Per-run prompt + stream dumps for failure diagnosis (kept only on failure)", [
         "debug/",
