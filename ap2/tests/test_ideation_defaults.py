@@ -52,19 +52,16 @@ def test_ideation_prompt_mentions_followup_scan():
 
 
 def test_ideation_prompt_includes_pipeline_task_start_for_long_work():
-    """TB-115: ideation no longer pre-classifies into "launch task" +
-    "validation task". Long work goes into a regular briefing whose
-    `## Verification` checks output artifacts; the task agent decides
-    whether to dispatch via `pipeline_task_start` based on its self-
-    classification rule. Ideation's prompt still names the tool so a
-    proposer task can flag work it knows will exceed the threshold.
+    """The ideation prompt mentions `pipeline_task_start` so a long-work
+    proposer knows the tool exists, but otherwise stays out of the
+    inline-vs-pipeline decision (the task agent owns it at run time).
+    Pinned: tool name + 5-min threshold + "task agent" framing.
     """
     prompt = _default_prompt()
     lower = prompt.lower()
     assert "pipeline_task_start" in prompt
     assert "5 minutes" in lower or "5 min" in lower
-    assert "Pipeline Pending" in prompt
-    assert "progress bar" in lower or "fans out" in lower
+    assert "task agent" in lower
 
 
 def test_ideation_prompt_pins_step15_failure_review():
@@ -168,20 +165,19 @@ def test_ideation_prompt_reads_operator_log_and_treats_as_authoritative():
     assert "re-propose" in flat.lower()
 
 
-def test_ideation_prompt_pins_post_pipeline_verification_shape():
-    """TB-115: the briefing's `## Verification` section serves both
-    synchronous completion AND post-pipeline verification — same bullets,
-    re-run by `_sweep_pipeline_pending` once spawned pids die. Ideation
-    should write output-artifact bullets (not split them into a separate
-    validation_briefing — that two-tier split was retired).
+def test_ideation_prompt_says_briefings_for_long_work_use_same_shape():
+    """The ideation prompt instructs that long-running work uses the same
+    briefing shape as synchronous work — concrete scope + `## Verification`
+    bullets that check output artifacts. No two-tier split, no separate
+    validation_briefing sub-document.
     """
     prompt = _default_prompt()
     lower = prompt.lower()
-    assert "Pipeline Pending" in prompt
+    assert "## Verification" in prompt
     assert "test -f reports/" in prompt
-    # The retired pattern should NOT be advertised.
+    # Retired patterns must not creep back in.
     assert "two-tier" not in lower
-    assert "validation_briefing" not in prompt or "retired" in lower
+    assert "validation_briefing" not in prompt
 
 
 def test_ideation_prompt_warns_off_bare_python_and_path_pitfalls():

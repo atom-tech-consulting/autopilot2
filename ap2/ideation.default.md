@@ -238,42 +238,17 @@ concrete acceptance bullets that the per-task verifier can evaluate:
 A briefing with no `## Verification` section will be skipped by the
 verifier (legacy compat). New work should not opt into that path.
 
-## Long-running work — write briefings the agent can pivot to a pipeline (TB-115)
-If the proposed work plausibly takes more than ~5 minutes wall-clock
+## Long-running work
+If a proposed task plausibly takes more than ~5 minutes wall-clock
 (parameter sweeps, multi-day backtests, full-history data fetches
-against rate-limited APIs, ML training), the briefing should be the
-SAME shape as any synchronous briefing — concrete scope and a `##
-Verification` section that checks output artifacts. The task agent
-itself decides whether to dispatch via `pipeline_task_start(name,
-command)` or run inline based on its self-classification (the task
-prompt teaches the rule).
-
-When the agent does dispatch via pipeline, the daemon parks the
-launching task in `Pipeline Pending` (the 4th board section). On every
-subsequent tick, the daemon's `_sweep_pipeline_pending` checks whether
-all of the dispatched pids have died. Once they have, the daemon
-re-runs the briefing's `## Verification` against the post-pipeline
-working tree — pass moves the task to Complete, fail routes through
-Backlog → Frozen on retry exhaust. So the SAME `## Verification`
-section serves both synchronous and pipeline-dispatched runs;
-ideation does not need to pre-classify.
-
-What the briefing should include: concrete output-artifact checks
-where the work produces files (e.g. `test -f reports/<name>/grid.csv`,
-`test -f reports/<name>/best.json`, JSON schema validation), plus a
-test command (`uv run pytest -q tests/test_<feature>.py` if there's
-test scaffolding).
-
-What ideation should NOT do: include a `validation_briefing`
-sub-document (retired in TB-115), pre-classify the task as a "launch"
-task, or split into a fast-launch + slow-validation pair. The task
-agent owns the inline-vs-pipeline call.
-
-Heuristic for "more than 5 min": grid sweeps with >5 parameter
-combinations on minute-bar data; full-history backtests on >10
-tickers; anything that fans out across many subprocesses; anything
-whose existing CLI (e.g. `python -m stoch sweep`) has progress bars;
-data fetches against Polygon-class rate-limited APIs.
+against rate-limited APIs, ML training), write the briefing exactly
+like any other — concrete scope plus a `## Verification` section that
+checks output artifacts (`test -f reports/<name>/grid.csv`, JSON
+schema checks, `uv run pytest -q tests/test_<feature>.py`).
+The task agent has a `pipeline_task_start` MCP tool available and
+decides at run time whether to dispatch via that tool or run inline.
+Either way, the daemon evaluates the same `## Verification` section
+once the work has finished.
 
 ## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)
 The verifier runs each shell bullet via `/bin/sh -c <bullet>` in the
