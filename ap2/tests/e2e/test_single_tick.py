@@ -58,7 +58,7 @@ def test_single_tick_completes_via_task_complete_tool(e2e_project):
     sdk.on(
         "## Task\nTB-5",
         tool_call_respond(
-            "task_complete",
+            "report_result",
             {
                 "status": "complete",
                 "commit": "deadbeef",
@@ -91,7 +91,7 @@ def test_single_tick_tool_call_wins_over_legacy_result_block(e2e_project):
     sdk.on(
         "## Task\nTB-5",
         tool_call_respond(
-            "task_complete",
+            "report_result",
             {"status": "blocked", "summary": "tool says blocked"},
             prefix_text=(
                 "RESULT:\nstatus: complete\ncommit: aaaaaaaa\n"

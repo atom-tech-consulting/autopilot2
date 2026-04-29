@@ -84,19 +84,19 @@ Do not `Edit` or `Write` to any of the above. Bash workarounds (`echo > path`, `
 
 _TASK_FOOTER = """\
 
-## Output contract — call `task_complete(...)` when you finish
+## Output contract — call `report_result(...)` when you finish
 
-When you are done (success OR failure), call the `mcp__autopilot__task_complete`
+When you are done (success OR failure), call the `mcp__autopilot__report_result`
 MCP tool ONCE with your final result. Do not also emit a RESULT text block —
-the tool call is the canonical signal and the daemon prefers it. Example
-arguments:
+the tool call is the canonical signal and the daemon prefers it. Args (all
+strings, comma-separated where multi-valued):
 
-    task_complete(
-      status="complete",
-      commit="a1b2c3d4",                         # 7-40 char SHA, or "" if no commit
-      summary="Added X to Y, all tests pass.",   # one sentence
-      files_changed=["foo/bar.py", "foo/bar_test.py"],
-      tests_passed=true,
+    report_result(
+      status="complete",                          # required
+      commit="a1b2c3d4",                          # 7-40 char SHA, or ""
+      summary="Added X to Y, all tests pass.",    # one sentence
+      files_changed="foo/bar.py, foo/bar_test.py",
+      tests_passed="true",                        # "true" / "false"
     )
 
 Valid statuses:
@@ -106,17 +106,13 @@ Valid statuses:
 - `failed`     — tried and could not make progress.
 
 ### Proposing recurring work (optional)
-If your work should become scheduled, pass a `cron` list of structured dicts:
+If your work should become scheduled, pass a `cron` argument as a JSON-
+encoded list of `{action, name, interval, prompt}` dicts:
 
-    task_complete(
+    report_result(
       status="complete",
       ...,
-      cron=[
-        {"action": "add", "name": "<name>", "interval": "1h",
-         "prompt": "what to run"},
-        # or {"action": "remove", "name": "<name>"}
-        # or {"action": "update", "name": "<name>", "interval": "..."}
-      ],
+      cron='[{"action": "add", "name": "monitor-x", "interval": "1h", "prompt": "what to run"}]',
     )
 
 `add` requires `action`, `name`, `interval`, `prompt`. Directives are applied
@@ -136,7 +132,7 @@ files_changed: foo.py, bar.py
 tests_passed: true
 ```
 
-The daemon parses this only when no `task_complete` tool call landed. Prefer
+The daemon parses this only when no `report_result` tool call landed. Prefer
 the tool call.
 """
 

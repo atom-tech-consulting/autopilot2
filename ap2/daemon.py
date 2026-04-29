@@ -121,12 +121,15 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         with messages_dump.open("a") as f:
             full = {"seq": idx, **_serialize_message_full(msg)}
             f.write(_json.dumps(full, default=str) + "\n")
-        # TB-101: capture the structured payload from `task_complete` tool
-        # calls. Walk the message's content blocks directly (the streamed
-        # summaries truncate `args_preview` to 200 chars; we want full args).
-        # Last-write-wins if the agent calls task_complete more than once.
+        # TB-101: capture the structured payload from `report_result` tool
+        # calls. The real SDK delivers the tool name with the MCP server
+        # prefix (`mcp__autopilot__report_result`); FakeSDK in unit tests
+        # uses the bare name (`report_result`). Match both. Last-write-wins
+        # if the agent calls the tool more than once.
         for part in (getattr(msg, "content", None) or []):
-            if getattr(part, "name", None) == "task_complete":
+            if getattr(part, "name", None) in (
+                "report_result", "mcp__autopilot__report_result",
+            ):
                 inp = getattr(part, "input", None)
                 if isinstance(inp, dict):
                     task_complete_args.clear()
@@ -219,19 +222,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     if 'parsed_override' in locals():
         parsed = parsed_override
     elif task_complete_args:
-        parsed = TaskResult(
-            status=str(task_complete_args.get("status", "unknown")).lower(),
-            commit=str(task_complete_args.get("commit", "") or ""),
-            summary=str(task_complete_args.get("summary", "") or ""),
-            files_changed=[
-                str(f).strip()
-                for f in (task_complete_args.get("files_changed") or [])
-                if str(f).strip()
-            ],
-            tests_passed=task_complete_args.get("tests_passed"),
-            cron=[c for c in (task_complete_args.get("cron") or []) if isinstance(c, dict)],
-            raw="(via mcp__autopilot__task_complete tool call)",
-        )
+        parsed = _task_result_from_tool_args(task_complete_args)
     else:
         parsed = parse_result(result_text)
     if parsed.status not in _VALID_RESULT_STATUSES:
@@ -757,6 +748,60 @@ def _today() -> str:
 # parse_result returns one of these for a well-formed RESULT block. Anything
 # else (most often "unknown") triggers the commit-inference fallback below.
 _VALID_RESULT_STATUSES = {"complete", "incomplete", "blocked", "failed"}
+
+
+def _task_result_from_tool_args(args: dict) -> TaskResult:
+    """Build a TaskResult from a `task_complete` MCP tool call's args dict.
+
+    Tolerant of two shapes per field, because the @tool decorator's schema
+    is a hint not a contract — different agents and SDK versions hand the
+    same logical value as either a Python-native value or its string form.
+      - `files_changed`: list[str] OR comma-separated string
+      - `tests_passed`: bool OR "true"/"false" string
+      - `cron`: list[dict] OR JSON-encoded string of that
+    """
+    import json as _json
+
+    def _bool_like(v) -> bool | None:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return None
+        s = str(v).strip().lower()
+        if s in ("true", "yes", "1", "pass", "passed"):
+            return True
+        if s in ("false", "no", "0", "fail", "failed"):
+            return False
+        return None
+
+    def _list_str(v) -> list[str]:
+        if isinstance(v, list):
+            return [str(f).strip() for f in v if str(f).strip()]
+        if isinstance(v, str):
+            return [f.strip() for f in v.split(",") if f.strip()]
+        return []
+
+    def _list_dict(v) -> list[dict]:
+        if isinstance(v, list):
+            return [c for c in v if isinstance(c, dict)]
+        if isinstance(v, str) and v.strip():
+            try:
+                parsed = _json.loads(v)
+            except _json.JSONDecodeError:
+                return []
+            if isinstance(parsed, list):
+                return [c for c in parsed if isinstance(c, dict)]
+        return []
+
+    return TaskResult(
+        status=str(args.get("status", "unknown")).strip().lower(),
+        commit=str(args.get("commit", "") or "").strip(),
+        summary=str(args.get("summary", "") or "").strip(),
+        files_changed=_list_str(args.get("files_changed")),
+        tests_passed=_bool_like(args.get("tests_passed")),
+        cron=_list_dict(args.get("cron")),
+        raw="(via mcp__autopilot__task_complete tool call)",
+    )
 
 
 def _infer_result_from_head(cfg: Config, task) -> "TaskResult | None":

@@ -346,6 +346,8 @@ def test_task_complete_acknowledges(cfg):
 
 def test_task_complete_in_task_agent_tools_list():
     """Pin: the tool is in TASK_AGENT_TOOLS, not CONTROL_AGENT_TOOLS — task
-    agents call it; control/cron/ideation agents don't have a use for it."""
-    assert "mcp__autopilot__task_complete" in tools.TASK_AGENT_TOOLS
-    assert "mcp__autopilot__task_complete" not in tools.CONTROL_AGENT_TOOLS
+    agents call it; control/cron/ideation agents don't have a use for it.
+    Tool name avoids the `task_*` prefix because Claude Code reserves that
+    namespace for built-in TaskCreate/TaskUpdate/TaskList/TaskGet tools."""
+    assert "mcp__autopilot__report_result" in tools.TASK_AGENT_TOOLS
+    assert "mcp__autopilot__report_result" not in tools.CONTROL_AGENT_TOOLS

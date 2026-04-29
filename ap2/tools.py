@@ -511,25 +511,36 @@ def build_mcp_server(cfg: Config):
     async def ideation_state_write(args):
         return do_ideation_state_write(cfg, args)
 
+    # Tool name avoids the `task_*` prefix because Claude Code reserves that
+    # namespace for its built-in TaskCreate/TaskUpdate/TaskList/TaskGet
+    # subagent dispatch tools. Real-SDK smoke runs against `task_complete`
+    # showed Claude Code's tool surface filtered the name out — `ToolSearch`
+    # returned 0 results for `mcp__autopilot__task_complete` even though the
+    # MCP server registered it. Renamed to `report_result` (no `task_`
+    # prefix) so the namespace doesn't collide.
     @tool(
-        "task_complete",
-        "Report task completion to the daemon. Call this once at the end of "
-        "your run with the final status. Replaces the legacy `RESULT:` "
-        "free-text block. Pass: status (complete/incomplete/blocked/failed); "
-        "commit (the 7-40 char SHA you committed, or empty for none); "
-        "summary (one sentence); files_changed (list of paths); "
-        "tests_passed (true/false/null); cron (optional list of "
-        "{action, name, interval, prompt} dicts to update cron.yaml).",
+        "report_result",
+        "Report task completion to the autopilot daemon. Call this ONCE at "
+        "the end of your run instead of emitting a `RESULT:` text block. "
+        "Args: status='complete'|'incomplete'|'blocked'|'failed' (required); "
+        "commit=<7-40 char sha or empty>; summary=<one sentence>; "
+        "files_changed=<comma-separated paths>; tests_passed='true'|'false'; "
+        "cron=<JSON list of {action,name,interval,prompt} dicts, or empty>.",
+        # All-string schema — every other MCP tool in this server uses str-
+        # only fields. `list` / `bool` types in the schema correlated with
+        # Claude Code refusing to surface the tool in earlier smoke runs;
+        # strings round-trip cleanly and the daemon-side capture parses
+        # `tests_passed` / `files_changed` / `cron` from their string forms.
         {
             "status": str,
             "commit": str,
             "summary": str,
-            "files_changed": list,
-            "tests_passed": bool,
-            "cron": list,
+            "files_changed": str,
+            "tests_passed": str,
+            "cron": str,
         },
     )
-    async def task_complete(args):
+    async def report_result(args):
         return do_task_complete(cfg, args)
 
     @tool(
@@ -565,6 +576,7 @@ def build_mcp_server(cfg: Config):
             log_event,
             daemon_control,
             ideation_state_write,
+            report_result,
             pipeline_task_start,
         ],
     )
@@ -597,7 +609,7 @@ TASK_AGENT_TOOLS = [
     "Grep",
     "Bash",
     "mcp__autopilot__pipeline_task_start",
-    "mcp__autopilot__task_complete",
+    "mcp__autopilot__report_result",
 ]
 
 
