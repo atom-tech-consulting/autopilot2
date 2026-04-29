@@ -240,16 +240,35 @@ This convergence model — every tick is idempotent and corrective — is why th
 
 ## Tests
 
-`uv run pytest -q ap2/tests` runs the suite (312 tests as of TB-98). Notable test files:
+Three tiers, increasing in fidelity and cost.
+
+### Default — fast, no API cost
+
+`uv run pytest -q ap2/tests` runs the suite (~349 tests). All FakeSDK-based or pure-Python; no network, no API credits. Notable files:
 - `tests/test_board.py` — TASK_LINE_RE, malformed-line detection, blocked_on parsing.
 - `tests/test_cron.py` / `test_cron_defaults.py` — cron yaml parsing + bootstrapped jobs.
-- `tests/test_ideation_defaults.py` — pins on `ideation.default.md` content (Step 0 / Step 0.5 / Step 1.5 phrases — these are load-bearing for ideation behavior).
+- `tests/test_ideation_defaults.py` — pins on `ideation.default.md` content (Step 0 / Step 0.5 / Step 1.5 phrases — load-bearing for ideation behavior).
 - `tests/test_verify.py` / `test_briefing.py` — per-task verification + last-`## Verification`-section parsing.
 - `tests/test_diagnose.py` — watchdog report shape.
 - `tests/test_pipelines.py` — `pid:N@TS` blocker semantics.
+- `tests/test_mcp_inventory.py` — every advertised MCP tool ↔ allowlist match. Catches the "decorated but not in `tools=[...]`" bug class without a real SDK.
 - `tests/e2e/test_single_tick.py` / `test_multi_tick_cron.py` / `test_pipeline.py` / `test_mattermost_cron.py` — full `_tick` exercises with `FakeSDK`.
 
 The e2e tests use `FakeSDK` (`tests/e2e/_fakes.py`) — a programmable mock that responds to prompt substrings with canned message streams. Lets a single tick run through `run_task` / `run_cron` / `handle_message` deterministically without spawning a real subprocess.
+
+### Real-SDK smokes — opt-in, cost a few cents per run
+
+`AP2_REAL_SDK=1 uv run pytest ap2/tests/smoke/ -v -s` invokes the real Claude Agent SDK against tiny synthetic tasks. Validates what FakeSDK can't: tool advertisement reaches the agent, the agent actually calls the tool, and the daemon's stream-walking captures the structured payload. Default `pytest` skips them via a module-level `pytest.mark.skipif(not AP2_REAL_SDK)`.
+
+- `tests/smoke/test_report_result_real_sdk.py` — agent calls `report_result` MCP tool → daemon synthesizes valid `TaskResult`. Pins the TB-101 protocol.
+- `tests/smoke/test_pipeline_task_start_real_sdk.py` — agent calls `pipeline_task_start` → real OS subprocess spawns, `pipeline_start` event fires, Backlog validation task created with `pid:N@TS` blocker. Pins the TB-81 chain.
+- `tests/smoke/test_prose_judge_real_sdk.py` — `verify._judge_prose_bullet` against obvious-pass and obvious-fail diffs. Catches the `verification_partial`-from-judge-crash class (TB-146 round 2).
+
+When to run: after any change to MCP tool registration (`tools.py`), agent prompt (`prompts.py`, `ideation.default.md`), or the verifier judge (`verify._judge_prose_bullet`). Total ~30 seconds and a few cents.
+
+### Production smoke — stoch as a continuous validator
+
+The stoch daemon runs continuously and exercises every code path against real briefings. `events.jsonl` is the canonical signal: structured `task_complete` / `cron_complete` / `ideation_complete` / `pipeline_start` events confirm the contracts hold. The watchdog (`diagnose.MEANINGFUL_EVENT_TYPES`) flags daemon stalls; `verification_failed` events flag verifier regressions.
 
 ## Reading order for new contributors
 

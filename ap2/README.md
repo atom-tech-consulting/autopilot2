@@ -165,6 +165,26 @@ The daemon registers an `autopilot` MCP server with two pools of tools, partitio
 
 Task agents otherwise have `Read`, `Glob`, `Grep`, `Bash`, `Edit`, `Write` (project-scoped) — they edit code, commit, and exit.
 
+## Tests
+
+Three tiers, run independently:
+
+```bash
+# Default: ~349 tests, fast, no API cost. Run on every change.
+uv run pytest -q ap2/tests/
+
+# Real-SDK smokes: opt-in via env var. ~30s + a few cents per run.
+# Validates MCP tool round-trips that FakeSDK can't.
+AP2_REAL_SDK=1 uv run pytest ap2/tests/smoke/ -v -s
+```
+
+The default suite skips `ap2/tests/smoke/` automatically (each smoke file
+has a module-level `pytest.mark.skipif(not AP2_REAL_SDK)`). Run smokes
+after any change to MCP tool registration (`tools.py`), task-agent prompt
+(`prompts.py`), the ideation prompt (`ideation.default.md`), or the
+verifier judge (`verify._judge_prose_bullet`). See
+[`architecture.md`](architecture.md#tests) for what each tier covers.
+
 ## Versions
 
 Read the version from `pyproject.toml` via `ap2 --version`. Single source of truth.
