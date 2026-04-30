@@ -203,6 +203,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 setting_sources=["project"],
                 stderr=_stderr_sink,
                 model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+                extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
             ),
         ):
             _log_message(msg)
@@ -678,6 +679,7 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
                 max_turns=int(os.environ.get("AP2_CONTROL_MAX_TURNS", 15)),
                 setting_sources=["project"],
                 model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+                extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
             ),
         ):
             pass
@@ -752,6 +754,7 @@ async def _run_control_agent(
                 setting_sources=["project"],
                 stderr=stderr_sink,
                 model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+                extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
             ),
         ):
             pass

@@ -269,6 +269,7 @@ async def _judge_prose_bullet(
             max_turns=1,
             setting_sources=["project"],
             model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+            extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
         )
         text = ""
         async for msg in sdk.query(prompt=prompt, options=options):
