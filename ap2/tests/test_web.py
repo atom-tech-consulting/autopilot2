@@ -629,3 +629,122 @@ def test_read_jsonl_filters_by_since(project: Config, tmp_path):
     )
     rows = web._read_jsonl(p, since=2)
     assert [r["seq"] for r in rows] == [2]
+
+
+# --------- TB-130: daemon-bundled web lifecycle ---------
+
+
+def test_is_web_disabled_truthy_values(monkeypatch):
+    """The `AP2_WEB_DISABLED` env knob accepts the standard ap2 truthy
+    strings (1/true/yes/on, case-insensitive). Anything else (including
+    unset) keeps the UI on so daemon-spawned mode is the default."""
+    for val in ("1", "true", "TRUE", "Yes", "on"):
+        monkeypatch.setenv("AP2_WEB_DISABLED", val)
+        assert web.is_web_disabled() is True, val
+    for val in ("", "0", "false", "no", "off", "maybe"):
+        monkeypatch.setenv("AP2_WEB_DISABLED", val)
+        assert web.is_web_disabled() is False, val
+    monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
+    assert web.is_web_disabled() is False
+
+
+def test_daemon_web_port_default_and_override(monkeypatch):
+    """Default 8729 (TB-130 spec); `AP2_WEB_PORT` overrides; malformed
+    values fall back to the default rather than crashing the daemon at
+    startup."""
+    monkeypatch.delenv("AP2_WEB_PORT", raising=False)
+    assert web.daemon_web_port() == web.DEFAULT_DAEMON_WEB_PORT == 8729
+
+    monkeypatch.setenv("AP2_WEB_PORT", "9999")
+    assert web.daemon_web_port() == 9999
+
+    # A typo shouldn't kill the daemon — fall back rather than ValueError.
+    monkeypatch.setenv("AP2_WEB_PORT", "not-a-number")
+    assert web.daemon_web_port() == web.DEFAULT_DAEMON_WEB_PORT
+
+
+def _free_port() -> int:
+    """Bind 0 to grab a kernel-assigned port, then release it. Cheap; the
+    test grabs the same port a moment later for the real bind."""
+    import socket
+    s = socket.socket()
+    try:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
+
+
+def test_serve_async_serves_and_cancels_cleanly(project: Config):
+    """`serve_async` is the daemon-managed entry point: bind a real socket,
+    confirm a request lands, then cancel the task and confirm the port
+    frees up. End-to-end check that cancellation actually shuts down the
+    HTTP server thread (otherwise restarting the daemon would EADDRINUSE)."""
+    import asyncio
+    import urllib.request
+
+    port = _free_port()
+
+    async def _exercise() -> tuple[int, str]:
+        task = asyncio.create_task(
+            web.serve_async(project, host="127.0.0.1", port=port)
+        )
+        # The bind happens synchronously inside `serve_async` before it
+        # parks on Event.wait, but the thread's first accept() takes a
+        # tick — yield control once so the listener is ready.
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            try:
+                resp = await asyncio.to_thread(
+                    urllib.request.urlopen,
+                    f"http://127.0.0.1:{port}/", None, 2.0,
+                )
+                body = resp.read().decode()
+                status = resp.status
+                resp.close()
+                break
+            except Exception:  # noqa: BLE001
+                continue
+        else:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise AssertionError("server never accepted a request")
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return status, body
+
+    status, body = asyncio.run(_exercise())
+    assert status == 200
+    assert "<!DOCTYPE html>" in body
+    # And the port is releasable — otherwise the next daemon restart trips
+    # EADDRINUSE. `_free_port` will throw or return a different port if
+    # this one is still bound; a fresh bind on the same port should work.
+    import socket
+    s = socket.socket()
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", port))
+    finally:
+        s.close()
+
+
+def test_serve_async_propagates_bind_error(project: Config):
+    """A port collision should surface as `OSError` from `serve_async` so
+    the daemon can log a `web_error` event instead of crashing the loop."""
+    import asyncio
+    import socket
+
+    port = _free_port()
+    blocker = socket.socket()
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocker.bind(("127.0.0.1", port))
+    blocker.listen(1)
+
+    async def _go():
+        with pytest.raises(OSError):
+            await web.serve_async(project, host="127.0.0.1", port=port)
+
+    try:
+        asyncio.run(_go())
+    finally:
+        blocker.close()

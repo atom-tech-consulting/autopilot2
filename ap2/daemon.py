@@ -25,7 +25,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import diagnose, events, ideation, prompts, retry, rollback, tools, verify
+from . import diagnose, events, ideation, prompts, retry, rollback, tools, verify, web
 from .board import Board, board_file_lock
 from .config import Config
 from .cron import (
@@ -1831,6 +1831,17 @@ async def main_loop(cfg: Config) -> None:
     # `_mm_loop` adds; the set's discard-on-done keeps it bounded.
     handler_tasks: set[asyncio.Task] = set()
 
+    # TB-130: the read-only web UI is now part of the daemon lifecycle.
+    # Spawned as an asyncio task on the same loop so its lifetime is
+    # bounded by `main_loop` — no orphaned `ap2 web` process pointing at
+    # a stale events.jsonl after the daemon dies. `AP2_WEB_DISABLED=1`
+    # opts out (CI / headless). The bind itself happens inside
+    # `_web_loop_for_daemon`, with bind errors logged as `web_error` and
+    # otherwise swallowed so a port collision can't take the daemon down.
+    web_task: asyncio.Task | None = None
+    if not web.is_web_disabled():
+        web_task = asyncio.create_task(_web_loop_for_daemon(cfg))
+
     try:
         await asyncio.gather(
             _main_tick_loop(cfg, sdk, mcp_server),
@@ -1844,11 +1855,54 @@ async def main_loop(cfg: Config) -> None:
             for t in handler_tasks:
                 t.cancel()
             await asyncio.gather(*handler_tasks, return_exceptions=True)
+        # Cancel and drain the web task. `serve_async` traps the cancel,
+        # shuts down the HTTP server cleanly, and emits a `web_stop` from
+        # `_web_loop_for_daemon` for symmetry with `web_start`.
+        if web_task is not None:
+            web_task.cancel()
+            await asyncio.gather(web_task, return_exceptions=True)
         events.append(cfg.events_file, "daemon_stop")
         try:
             cfg.pid_file.unlink()
         except OSError:
             pass
+
+
+async def _web_loop_for_daemon(cfg: Config) -> None:
+    """Wrapper around `web.serve_async` for the daemon lifecycle (TB-130).
+
+    Resolves host/port, emits `web_start` / `web_stop` lifecycle events
+    around the run, and translates a port-bind `OSError` into a
+    `web_error` event so a clash (e.g. an `ap2 web` already listening on
+    the port) can't take the rest of the daemon down. The web UI is a
+    convenience — its absence shouldn't impact task dispatch.
+    """
+    host = "127.0.0.1"
+    port = web.daemon_web_port()
+    url = f"http://{host}:{port}/"
+    try:
+        events.append(
+            cfg.events_file, "web_start",
+            host=host, port=port, url=url,
+        )
+        await web.serve_async(cfg, host=host, port=port)
+    except asyncio.CancelledError:
+        # Normal shutdown path — main_loop's finally cancelled us.
+        raise
+    except OSError as e:
+        events.append(
+            cfg.events_file, "web_error",
+            host=host, port=port,
+            error=f"{type(e).__name__}: {e}",
+        )
+    except Exception as e:  # noqa: BLE001
+        events.append(
+            cfg.events_file, "web_error",
+            host=host, port=port,
+            error=f"{type(e).__name__}: {e}",
+        )
+    finally:
+        events.append(cfg.events_file, "web_stop", host=host, port=port)
 
 
 async def _main_tick_loop(cfg: Config, sdk, mcp_server) -> None:

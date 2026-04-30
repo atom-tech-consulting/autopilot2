@@ -120,6 +120,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     jobs = load_jobs(cfg.cron_file)
     state = load_state(cfg.cron_state_file)
     paused = cfg.pause_flag.exists()
+    # TB-130: when the daemon is up and the web UI wasn't disabled, surface
+    # the URL so operators don't have to remember to run `ap2 web`
+    # separately. Resolution mirrors the daemon's own — same env vars, same
+    # default — so what we print is the URL the daemon is actually serving.
+    web_url = _resolve_web_url(cfg) if running else None
 
     if args.json:
         out = {
@@ -132,6 +137,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             "cron_last_run": state,
             "tasks_file": str(cfg.tasks_file),
             "events_file": str(cfg.events_file),
+            "web_url": web_url,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -146,10 +152,30 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     print(f"cron:     {len(jobs)} jobs ({', '.join(j.name for j in jobs) or '-'})")
     print(f"tasks:    {cfg.tasks_file}")
     print(f"events:   {cfg.events_file}")
+    if web_url:
+        print(f"web:      {web_url}")
     nxt = board.next_ready()
     if nxt:
         print(f"next:     {nxt.id} {nxt.title}")
     return 0
+
+
+def _resolve_web_url(cfg: Config) -> str | None:
+    """The URL the daemon-spawned web UI is serving on, or `None` when off.
+
+    Returns `None` when `AP2_WEB_DISABLED` is set (the operator opted out
+    of the bundled UI for this daemon process). Otherwise resolves
+    host/port the same way `ap2.daemon._web_loop_for_daemon` does, so the
+    printed URL matches reality. We don't grep events.jsonl for a
+    `web_start` line — the daemon writes the same URL we'd compute, and
+    spinning up file IO for status is wasteful.
+    """
+    from . import web as _web
+
+    if _web.is_web_disabled():
+        return None
+    port = _web.daemon_web_port()
+    return f"http://127.0.0.1:{port}/"
 
 
 def cmd_add(cfg: Config, args: argparse.Namespace) -> int:

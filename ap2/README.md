@@ -81,7 +81,7 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 resume` | Clear the pause flag. |
 | `ap2 cron list` | List cron jobs + last-fired timestamps. |
 | `ap2 ack [-t TB-N] "<note>"` | Append an operator-decision line to `.cc-autopilot/operator_log.md` (TB-106). Ideation reads this and won't re-propose actions you've logged. |
-| `ap2 web` | Start a local read-only web UI (default `127.0.0.1:7820`). Routes: `/`, `/events`, `/tasks`, `/task/<TB-N>`, `/pipelines`, `/insights`, `/insight/<name>`, `/ideation_state`, `/commits`. Full event payloads (no truncation). |
+| `ap2 web` | Start a local read-only web UI standalone (default `127.0.0.1:7820`). Used when the daemon is not running and you just want to browse past events; `ap2 start` already spawns the UI in the daemon process on port 8729 (configurable via `AP2_WEB_PORT`, opt out with `AP2_WEB_DISABLED=1`). Routes: `/`, `/events`, `/tasks`, `/task/<TB-N>`, `/task-run/<run-id>`, `/pipelines`, `/insights`, `/insight/<name>`, `/ideation_state`, `/commits`. Full event payloads (no truncation). |
 | `ap2 sandbox …` | OS-level sandbox-user + project-clone helpers (see below). |
 | `ap2 --version` | Print installed `autopilot2` version. |
 
@@ -115,6 +115,8 @@ All `AP2_*` variables can be set in shell, in `<project>/.cc-autopilot/env` (KEY
 |---|---|---|
 | `AP2_TICK_S` | `30` | Main tick interval for scheduled work (cron, pipeline sweep, task dispatch, ideation). |
 | `AP2_MM_TICK_S` | `10` | Mattermost polling interval (s). Runs in a separate concurrent loop so operator messages are handled promptly even during long-running tasks. |
+| `AP2_WEB_PORT` | `8729` | Port for the bundled read-only web UI that `ap2 start` spawns alongside the daemon. Bound to `127.0.0.1` only. Standalone `ap2 web` keeps its own default of `7820`. |
+| `AP2_WEB_DISABLED` | (unset) | Set `1`/`true`/`yes` to skip spawning the bundled web UI when the daemon starts (headless / CI). The standalone `ap2 web` command is unaffected. |
 | `AP2_TASK_TIMEOUT_S` | `1200` | Per-task SDK query timeout (s). |
 | `AP2_TASK_MAX_TURNS` | `50` | Max turns per task agent. |
 | `AP2_CONTROL_TIMEOUT_S` | `300` | Per-control-agent SDK query timeout (s). |
@@ -152,9 +154,9 @@ Per-project overrides. The daemon reads:
 
 Events are JSONL lines in `.cc-autopilot/events.jsonl`. Every line has `ts` (UTC ISO-8601) and `type`; other fields vary. `ap2 logs` tails them.
 
-**Lifecycle.** `daemon_start`, `daemon_stop`, `daemon_pause`, `daemon_resume`, `task_start`, `task_complete`, `cron_start`, `cron_complete`, `ideation_empty_board`, `ideation_complete`.
+**Lifecycle.** `daemon_start`, `daemon_stop`, `daemon_pause`, `daemon_resume`, `task_start`, `task_complete`, `cron_start`, `cron_complete`, `ideation_empty_board`, `ideation_complete`, `web_start`, `web_stop`.
 
-**Failure.** `task_error`, `task_timeout`, `verification_failed` (per-task or project-wide gate), `verification_partial`, `retry_exhausted`, `cron_error`, `cron_timeout`, `ideation_error`, `ideation_timeout`, `mattermost_error`, `mattermost_timeout`, `mm_poll_error`, `state_commit_error`, `auto_diagnose_post_error`.
+**Failure.** `task_error`, `task_timeout`, `verification_failed` (per-task or project-wide gate), `verification_partial`, `retry_exhausted`, `cron_error`, `cron_timeout`, `ideation_error`, `ideation_timeout`, `mattermost_error`, `mattermost_timeout`, `mm_poll_error`, `state_commit_error`, `auto_diagnose_post_error`, `web_error`.
 
 **State / observability.** `task_implicit_commit` (HEAD-salvage on crash), `task_unfrozen`, `backlog_auto_promoted`, `cron_bootstrap`, `cron_proposed`, `cron_proposal_rejected`, `cron_proposal_error`, `ideation_state_updated`, `pipeline_start`, `orphan_recovery`, `board_malformed_line`, `mattermost`, `auto_diagnose_fired`, `auto_diagnose_no_destination`.
 

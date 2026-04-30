@@ -5,6 +5,7 @@ rather than spawning a subprocess.
 """
 from __future__ import annotations
 
+import os
 from argparse import Namespace
 from pathlib import Path
 
@@ -269,4 +270,67 @@ def test_delete_unknown_task_returns_error(tmp_path: Path, capsys):
     rc = cmd_delete(cfg, Namespace(task_id="TB-999", force=False))
     assert rc == 1
     assert "not on board" in capsys.readouterr().err
+
+
+# --------- TB-130: `ap2 status` reports the bundled web URL ---------
+
+
+def test_status_prints_web_url_when_running(tmp_path: Path, monkeypatch, capsys):
+    """When the daemon is running and the web UI wasn't disabled, status
+    prints the URL operators should point a browser at. Uses the same env
+    resolution as the daemon — `AP2_WEB_PORT` overrides — so what's
+    printed matches what the daemon is actually serving."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    # Fake "daemon is running" by writing the current pid into the pid file
+    # (`_is_running` just os.kill(pid, 0)s; our own pid is alive).
+    cfg.pid_file.write_text(str(os.getpid()))
+    monkeypatch.setenv("AP2_WEB_PORT", "9123")
+    monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "web:" in out
+    assert "http://127.0.0.1:9123/" in out
+
+    # JSON variant carries the URL under `web_url`.
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["web_url"] == "http://127.0.0.1:9123/"
+
+
+def test_status_omits_web_url_when_disabled(tmp_path: Path, monkeypatch, capsys):
+    """`AP2_WEB_DISABLED=1` — operator opted out of the bundled UI for
+    this daemon — so status must not print a URL the operator can't
+    actually reach. Covers the headless / CI path."""
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    cfg.pid_file.write_text(str(os.getpid()))
+    monkeypatch.setenv("AP2_WEB_DISABLED", "1")
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "web:" not in out
+
+
+def test_status_omits_web_url_when_daemon_stopped(tmp_path: Path, monkeypatch, capsys):
+    """No daemon running → no daemon-spawned web UI → no URL. Avoids the
+    misleading case where status prints a URL but nothing is listening
+    because the operator stopped the daemon (or it crashed)."""
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    # No pid file — daemon not running.
+    monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "web:" not in out
 

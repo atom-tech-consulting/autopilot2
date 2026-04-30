@@ -23,6 +23,7 @@ Pages:
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import html
 import http.server
@@ -31,12 +32,49 @@ import os
 import re
 import socketserver
 import subprocess
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from . import diagnose, events as ev_mod, insights as ins_mod
 from .board import Board
 from .config import Config
+
+
+# TB-130: when the daemon spawns the web UI as part of `ap2 start`, this is
+# the default port. Standalone `ap2 web` keeps its historical default
+# (7820) so operators who already have a tab pointed at the legacy URL
+# don't have to rebookmark. Override either with `AP2_WEB_PORT`.
+DEFAULT_DAEMON_WEB_PORT = 8729
+DEFAULT_STANDALONE_WEB_PORT = 7820
+
+
+def is_web_disabled() -> bool:
+    """True when the operator opted out of the daemon-spawned web UI.
+
+    Centralized so the daemon, the CLI status command, and tests share one
+    parsing rule. Accepts the same truthy strings as the rest of ap2's env
+    knobs (`1`, `true`, `yes`, case-insensitive).
+    """
+    return os.environ.get("AP2_WEB_DISABLED", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def daemon_web_port() -> int:
+    """Resolve the daemon-spawned web port from env, falling back to default.
+
+    A malformed `AP2_WEB_PORT` (e.g. `"abc"`) falls back to the default
+    rather than crashing the daemon at startup — the operator's typo
+    shouldn't kill the whole loop.
+    """
+    raw = os.environ.get("AP2_WEB_PORT", "").strip()
+    if not raw:
+        return DEFAULT_DAEMON_WEB_PORT
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_DAEMON_WEB_PORT
 
 
 # TB-129: terminal event types for a task run. Once one of these lands for the
@@ -1327,18 +1365,85 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         return
 
 
-def serve(cfg: Config, host: str = "127.0.0.1", port: int = 7820) -> None:
+class _ThreadingTCPServer(socketserver.ThreadingTCPServer):
+    """`ThreadingTCPServer` with `allow_reuse_address` flipped on by default.
+
+    Without this, restarting the daemon (or switching from `ap2 web` to
+    daemon-spawned mode) trips a `OSError: [Errno 48] Address already in
+    use` on the port for ~60s while the kernel waits out TIME_WAIT.
+    Daemon threads on the request handlers so a stuck request can't keep
+    `srv.shutdown()` blocked when the operator wants out.
+    """
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def _build_server(
+    cfg: Config, host: str, port: int
+) -> _ThreadingTCPServer:
+    """Bind the read-only HTTP server. Subclass of TCPServer so `_Handler`'s
+    base class assumptions still hold."""
+    handler_cls = type("Handler", (_Handler,), {"cfg": cfg})
+    return _ThreadingTCPServer((host, port), handler_cls)
+
+
+def serve(cfg: Config, host: str = "127.0.0.1", port: int = DEFAULT_STANDALONE_WEB_PORT) -> None:
     """Start the read-only web UI. Blocks until SIGINT.
 
     Default bind is 127.0.0.1 deliberately — there's no auth and the page
     surfaces full event payloads (briefing text, prompt dump paths,
     Mattermost message bodies, etc.) that should never leave the box.
     """
-    handler_cls = type("Handler", (_Handler,), {"cfg": cfg})
-    with socketserver.TCPServer((host, port), handler_cls) as srv:
-        srv.allow_reuse_address = True
+    with _build_server(cfg, host, port) as srv:
         print(f"ap2 web: http://{host}:{port}/  (project={cfg.project_root})")
         try:
             srv.serve_forever()
         except KeyboardInterrupt:
             print("\nap2 web: stopped")
+
+
+async def serve_async(
+    cfg: Config,
+    *,
+    host: str = "127.0.0.1",
+    port: int = DEFAULT_DAEMON_WEB_PORT,
+) -> None:
+    """Run the read-only web UI as an awaitable, cooperatively cancellable.
+
+    Companion to the blocking `serve()` (which `ap2 web` still uses for the
+    standalone case). Used by the daemon's `main_loop` so `ap2 start`
+    brings up both daemon + web in one process — no second terminal, no
+    risk of leaving the UI pointed at a stale events.jsonl after the
+    daemon was restarted (TB-130).
+
+    Lifecycle:
+      - Bind the server on the calling event loop's thread, then run
+        `serve_forever` in a background daemon thread (the stdlib HTTP
+        handler is sync; `serve_forever` blocks).
+      - Block this coroutine indefinitely on a sleep loop. Cancellation
+        (the daemon's teardown path) lands as `CancelledError`, which
+        triggers `srv.shutdown()` to wake `serve_forever`.
+      - Re-raises the bind `OSError` so the caller can decide whether
+        `EADDRINUSE` means "already running" (skip) or "real error" (log).
+    """
+    srv = _build_server(cfg, host, port)
+    server_thread = threading.Thread(
+        target=srv.serve_forever, name="ap2-web", daemon=True,
+    )
+    server_thread.start()
+    try:
+        # `asyncio.Event().wait()` is the textbook "park forever, wake on
+        # cancel" pattern — cleaner than a poll loop, and unaffected by
+        # `RUNNING` (which the daemon flips on signals; we get
+        # `CancelledError` from the parent's `task.cancel()` call instead).
+        await asyncio.Event().wait()
+    finally:
+        # `shutdown()` is idempotent and safe from any thread; it sets the
+        # internal flag, then waits for the request loop to notice on its
+        # next poll. `server_close()` releases the listening socket so a
+        # subsequent restart can bind. The thread is `daemon=True` so a
+        # stuck handler can't keep the process alive.
+        srv.shutdown()
+        srv.server_close()
+        server_thread.join(timeout=5)

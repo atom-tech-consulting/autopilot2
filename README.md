@@ -38,9 +38,16 @@ export CLAUDE_CODE_OAUTH_TOKEN=...          # required
 ap2 start                                   # daemon runs in the background
 ap2 status                                  # board state + daemon liveness
 ap2 logs -n 20                              # tail recent events
+open http://127.0.0.1:8729/                 # bundled read-only web UI (TB-130)
 ```
 
 Stop with `ap2 stop`. Pause without stopping with `ap2 pause` / `ap2 resume`.
+
+`ap2 start` brings up the read-only web UI in the same process and tears it
+down when the daemon stops. Override the port with `AP2_WEB_PORT`; opt out
+entirely with `AP2_WEB_DISABLED=1` (CI/headless). The standalone `ap2 web`
+command stays available for browsing past events when the daemon is not
+running.
 
 For long-running work (>5 min) and OS-level isolation, see the
 [sandbox runbook](plan/sandboxed-user-setup.md) — the daemon is designed to
