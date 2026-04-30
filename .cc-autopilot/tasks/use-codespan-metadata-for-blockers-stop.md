@@ -49,3 +49,10 @@ Why not full AST: TB-119 (mistune AST for the Board parser) is the bigger-but-co
 - TB-119's full mistune-AST migration of the Board parser.
 - TB-133's briefing-frontmatter approach (broader, lands later).
 - Migrating any pre-existing `(blocked on: ...)` clauses in production data — this repo has none right now.
+## Attempts
+
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] New unit test in `test_board.py`: `Task.blocked_on` returns `["TB-5"]` for a task with ``@blocked:TB-5`` codespan and ig; [fail] New unit test in `test_board.py`: `Task.render()` emits ``@blocked:...`` codespans after `#tags`, before the em-dash; ro; [fail] New unit test in `test_board.py`: a task with only legacy `(blocked on: TB-5)` in description (no codespan) keeps parsin; [fail] New un
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T211503Z-TB-132.prompt.md`, `stream: .cc-autopilot/debug/20260430T211503Z-TB-132.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T211503Z-TB-132.messages.jsonl`
