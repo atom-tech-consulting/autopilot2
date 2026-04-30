@@ -249,3 +249,383 @@ def test_event_extra_handles_dict_and_list(project: Config):
     assert "last_messages" in out
     # newlines collapsed for the one-line summary
     assert "\n" not in out
+
+
+# --------- TB-129: live task-run detail page ---------
+
+
+import json as _json
+
+
+def _seed_run(
+    project: Config,
+    *,
+    run_id: str,
+    rows: list[dict],
+    full_rows: list[dict] | None = None,
+    prompt: str = "system prompt body…\n\nUser: do the thing.",
+) -> tuple[Path, Path, Path]:
+    """Synthesize a debug-dump triple on disk — mirror of `_prep_debug_dumps`."""
+    d = project.project_root / ".cc-autopilot" / "debug"
+    d.mkdir(parents=True, exist_ok=True)
+    prompt_p = d / f"{run_id}.prompt.md"
+    stream_p = d / f"{run_id}.stream.jsonl"
+    messages_p = d / f"{run_id}.messages.jsonl"
+    prompt_p.write_text(prompt)
+    stream_p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    messages_p.write_text(
+        "\n".join(_json.dumps(r) for r in (full_rows or rows)) + "\n"
+    )
+    return prompt_p, stream_p, messages_p
+
+
+def test_find_run_id_for_event_exact_match(project: Config):
+    """Compact-ts derivation matches debug filename exactly when daemon and
+    event ts agree (the common case — `_prep_debug_dumps` runs immediately
+    after the task_start append)."""
+    _seed_run(project, run_id="20260430T120000Z-TB-7", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+    ])
+    rid = web._find_run_id_for_event(project, "2026-04-30T12:00:00Z", "TB-7")
+    assert rid == "20260430T120000Z-TB-7"
+
+
+def test_find_run_id_for_event_skew_tolerated(project: Config):
+    """Debug-file ts is allowed to lag the task_start event by a few
+    seconds — the daemon writes the event first, allocates files second.
+    `_find_run_id_for_event` picks the closest run within a 60s window."""
+    _seed_run(project, run_id="20260430T120003Z-TB-8", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+    ])
+    rid = web._find_run_id_for_event(project, "2026-04-30T12:00:00Z", "TB-8")
+    assert rid == "20260430T120003Z-TB-8"
+
+
+def test_find_run_id_for_event_returns_none_when_pruned(project: Config):
+    """No `.stream.jsonl` on disk → `None`. Operators don't get dead links
+    pointing at debug dumps the gitignore swept away."""
+    rid = web._find_run_id_for_event(project, "2026-04-30T12:00:00Z", "TB-99")
+    assert rid is None
+
+
+def test_terminal_event_for_run_in_flight(project: Config):
+    """No matching task_complete/task_error/task_state_violation after the
+    run start → `None` (in-flight)."""
+    ev_mod.append(project.events_file, "task_start", task="TB-50",
+                  title="In flight one")
+    out = web._terminal_event_for_run(
+        project, "20260430T130000Z", "TB-50",
+    )
+    assert out is None
+
+
+def test_terminal_event_for_run_picks_matching_terminal(project: Config):
+    """First terminal event with `task=<id>` and `ts >= run_start` wins."""
+    ev_mod.append(project.events_file, "task_start", task="TB-51",
+                  title="t")
+    ev_mod.append(project.events_file, "task_complete", task="TB-51",
+                  status="complete", commit="deadbee", summary="done")
+    out = web._terminal_event_for_run(
+        project, "20260430T120000Z", "TB-51",
+    )
+    assert out is not None
+    assert out["type"] == "task_complete"
+    assert out["status"] == "complete"
+
+
+def test_terminal_event_ignores_prior_attempts(project: Config):
+    """A terminal event for an earlier attempt should NOT attach to a
+    later run — important for retry loops where the same task id has
+    multiple complete cycles."""
+    ev_mod.append(project.events_file, "task_complete", task="TB-52",
+                  status="failed", commit="oldbeef")
+    # Later run starts after that prior terminal.
+    out = web._terminal_event_for_run(
+        project, "20990101T000000Z", "TB-52",
+    )
+    assert out is None
+
+
+def test_render_task_run_renders_prompt_and_rows(project: Config):
+    """Detail page surfaces the prompt and a row per stream entry, with
+    color-coded classes by row role (assistant/tool/tool-result/result)."""
+    _seed_run(project, run_id="20260430T140000Z-TB-20", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+        {"seq": 1, "type": "AssistantMessage",
+         "text_preview": "thinking out loud", "model": "claude-opus-4-7"},
+        {"seq": 2, "type": "AssistantMessage",
+         "tool_calls": [{"name": "Bash",
+                         "args_preview": '{"command": "ls"}'}]},
+        {"seq": 3, "type": "UserMessage",
+         "tool_results": [{"tool_use_id": "toolu_xyz",
+                           "is_error": False, "preview": "file1\nfile2"}]},
+        {"seq": 4, "type": "ResultMessage", "subtype": "success",
+         "stop_reason": "end_turn", "num_turns": 5,
+         "total_cost_usd": 0.1234},
+    ])
+    h = web._render_task_run(project, "20260430T140000Z-TB-20")
+    # Page header
+    assert "20260430T140000Z-TB-20" in h
+    # Prompt block
+    assert "system prompt body" in h
+    # All five rows render
+    for seq in range(5):
+        assert f'data-seq="{seq}"' in h
+    # Tool call name + args
+    assert "Bash" in h and "ls" in h
+    # Tool result preview survives
+    assert "file1" in h
+    # ResultMessage cost rendered as $-formatted dollars
+    assert "$0.1234" in h
+    # Color-code classes appear
+    assert "row-assistant" in h
+    assert "row-tool" in h
+    assert "row-tool-result" in h
+    assert 'row-result is-success' in h
+    assert "row-system" in h
+
+
+def test_render_task_run_in_flight_emits_poll_script(project: Config):
+    """When no terminal event has landed, the page includes the auto-refresh
+    `<script>` and the in-flight banner. Without the script, operators have
+    to F5 manually — the whole point of this view is live-watch."""
+    ev_mod.append(project.events_file, "task_start", task="TB-21", title="t")
+    _seed_run(project, run_id="20260430T140000Z-TB-21", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+        {"seq": 1, "type": "AssistantMessage", "text_preview": "go"},
+    ])
+    h = web._render_task_run(project, "20260430T140000Z-TB-21")
+    assert "in-flight" in h
+    assert "setInterval" in h
+    # The script builds the URL via `'/task-run/' + encodeURIComponent(runId)
+    # + '/stream.json?since=' + since` — the literal pieces show up in the
+    # source even though the full path is concatenated at call time.
+    assert "'/task-run/'" in h
+    assert "/stream.json?since='" in h
+    assert '"20260430T140000Z-TB-21"' in h  # runId injected via json.dumps
+    # since-cursor seeded at max(seq)+1 (rows seq 0,1 → since starts at 2)
+    assert "since = 2" in h
+
+
+def test_render_task_run_terminal_omits_script_and_shows_verdict(project: Config):
+    """Once terminal, no polling — and a verdict banner displays the final
+    status + commit prefix from the matching event."""
+    _seed_run(project, run_id="20260430T140100Z-TB-22", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+        {"seq": 1, "type": "ResultMessage", "subtype": "success",
+         "stop_reason": "end_turn", "num_turns": 3, "total_cost_usd": 0.05},
+    ])
+    ev_mod.append(project.events_file, "task_complete", task="TB-22",
+                  status="complete", commit="cafe1234abcd",
+                  summary="all good")
+    h = web._render_task_run(project, "20260430T140100Z-TB-22")
+    assert "setInterval" not in h
+    assert "verdict success" in h
+    assert "cafe1234" in h  # commit prefix in verdict
+    assert "all good" in h  # summary surfaced
+
+
+def test_render_task_run_invalid_run_id_blocks_path_traversal(project: Config):
+    """`run_id` must match `<compact_ts>-<task_id>` — anything else (slashes,
+    `..` segments, unmatched shape) is rejected without touching disk."""
+    h = web._render_task_run(project, "../../../etc/passwd")
+    assert "invalid run-id" in h
+    h = web._render_task_run(project, "not-a-valid-shape")
+    assert "invalid run-id" in h
+
+
+def test_render_task_run_missing_files_returns_friendly_error(project: Config):
+    """Run-id is well-formed but no `.stream.jsonl` on disk → friendly
+    message + back-link to the task page (debug files were pruned)."""
+    h = web._render_task_run(project, "20260101T000000Z-TB-NOPE")
+    assert "No stream.jsonl" in h
+    assert "/task/TB-NOPE" in h
+
+
+def test_stream_json_endpoint_returns_new_rows_with_cursor(project: Config):
+    """`/task-run/<rid>/stream.json?since=N` returns rows with seq >= N,
+    advances next_since past the max seen, and reports in_flight."""
+    _seed_run(project, run_id="20260430T150000Z-TB-30", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+        {"seq": 1, "type": "AssistantMessage", "text_preview": "hi"},
+        {"seq": 2, "type": "AssistantMessage",
+         "tool_calls": [{"name": "Bash", "args_preview": "{}"}]},
+    ])
+    status, data = web._render_task_run_stream_json(
+        project, "20260430T150000Z-TB-30", since=1,
+    )
+    assert status == 200
+    j = _json.loads(data)
+    assert j["run_id"] == "20260430T150000Z-TB-30"
+    assert j["in_flight"] is True
+    assert j["terminal"] is None
+    seqs = [r["seq"] for r in j["rows"]]
+    assert seqs == [1, 2]
+    assert j["next_since"] == 3
+    # body_html includes the type-specific content (tool name for the call row)
+    tool_row = next(r for r in j["rows"] if r["seq"] == 2)
+    assert "Bash" in tool_row["body_html"]
+    assert tool_row["css_class"] == "row-tool"
+
+
+def test_stream_json_endpoint_rejects_bad_run_id(project: Config):
+    """400 on an invalid shape — no disk touch, no JSON injection."""
+    status, data = web._render_task_run_stream_json(project, "../etc", since=0)
+    assert status == 400
+    assert b"invalid" in data
+
+
+def test_stream_json_endpoint_404_when_missing(project: Config):
+    """404 when the stream file is gone — JS poller treats this as a soft
+    error (catch in the fetch chain) and stops gracefully."""
+    status, data = web._render_task_run_stream_json(
+        project, "20260101T000000Z-TB-MIA", since=0,
+    )
+    assert status == 404
+
+
+def test_stream_json_endpoint_reports_terminal(project: Config):
+    """When a terminal event exists for the run's task, the JSON response
+    flips `in_flight=False` and includes the terminal event under
+    `terminal` — the JS poller's signal to stop the timer."""
+    _seed_run(project, run_id="20260430T160000Z-TB-40", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+    ])
+    ev_mod.append(project.events_file, "task_complete", task="TB-40",
+                  status="complete", commit="abc123de")
+    status, data = web._render_task_run_stream_json(
+        project, "20260430T160000Z-TB-40", since=0,
+    )
+    j = _json.loads(data)
+    assert status == 200
+    assert j["in_flight"] is False
+    assert j["terminal"]["type"] == "task_complete"
+    assert j["terminal"]["status"] == "complete"
+
+
+def test_events_table_links_task_start_rows_to_run_view(project: Config):
+    """`task_start` rows in the events table get a `→ live` link to
+    `/task-run/<run-id>` when the debug files exist on disk; rows without
+    files get no link (avoids 404s for pruned runs)."""
+    _seed_run(project, run_id="20260430T170000Z-TB-60", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+    ])
+    ev_mod.append(project.events_file, "task_start", task="TB-60",
+                  title="With debug files",
+                  ts="2026-04-30T17:00:00Z")
+    # Manually inject a task_start whose ts matches the seeded run since
+    # `events.append` stamps `ts` itself; we rebuild via the public renderer.
+    # Hack: write directly to the events file with controlled ts.
+    extra = {"ts": "2026-04-30T17:00:00Z", "type": "task_start",
+             "task": "TB-60", "title": "Seeded run"}
+    with project.events_file.open("a") as f:
+        f.write(_json.dumps(extra) + "\n")
+    # Also one whose files do NOT exist — should NOT produce a link.
+    extra2 = {"ts": "2026-04-30T17:00:00Z", "type": "task_start",
+              "task": "TB-NONE", "title": "No debug"}
+    with project.events_file.open("a") as f:
+        f.write(_json.dumps(extra2) + "\n")
+    h = web._render_events(project, typ="task_start", n=10)
+    assert "/task-run/20260430T170000Z-TB-60" in h
+    assert "/task-run/20260430T000000Z-TB-NONE" not in h
+    # Non-task_start rows never get the run-link badge.
+    h_all = web._render_events(project, typ=None, n=50)
+    # Confirm the link badge text is row-anchored to task_start
+    rows_block = h_all.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    for row in rows_block.split("<tr "):
+        if "→ live" in row:
+            assert "task_start" in row, "run-link should only appear on task_start"
+
+
+def test_task_page_lists_runs_with_status_badges(project: Config):
+    """Per-task page includes a Runs section sourced from disk, newest first,
+    each row linked to `/task-run/<rid>` with a terminal-status badge when
+    known. Pruned runs show `none on disk`."""
+    # Two runs: one terminal, one in-flight.
+    _seed_run(project, run_id="20260430T180000Z-TB-70", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+    ])
+    _seed_run(project, run_id="20260430T190000Z-TB-70", rows=[
+        {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+    ])
+    ev_mod.append(project.events_file, "task_complete", task="TB-70",
+                  status="complete", commit="abc12345",
+                  ts="2026-04-30T18:30:00Z")
+    # Inject the task_complete with a controlled ts so it sits between the
+    # two run starts (terminating only the first).
+    with project.events_file.open("a") as f:
+        f.write(_json.dumps({
+            "ts": "2026-04-30T18:30:00Z", "type": "task_complete",
+            "task": "TB-70", "status": "complete", "commit": "abc12345",
+        }) + "\n")
+    # Add the task to the board so /task/TB-70 renders.
+    board = Board.load(project.tasks_file)
+    board.add("Backlog", task_id="TB-70", title="Two-run task")
+    board.save()
+    h = web._render_task(project, "TB-70")
+    assert "runs" in h.lower()
+    assert "/task-run/20260430T180000Z-TB-70" in h
+    assert "/task-run/20260430T190000Z-TB-70" in h
+    # Newest first: 19:00 should appear before 18:00
+    assert h.index("20260430T190000Z-TB-70") < h.index("20260430T180000Z-TB-70")
+    # Status badges
+    assert "in-flight" in h  # 19:00 has no terminal
+
+
+def test_task_page_runs_section_handles_no_disk_files(project: Config):
+    """Task with no debug dumps on disk shows a friendly placeholder, not
+    a broken/empty table."""
+    board = Board.load(project.tasks_file)
+    board.add("Backlog", task_id="TB-71", title="No runs yet")
+    board.save()
+    h = web._render_task(project, "TB-71")
+    assert "none on disk" in h
+
+
+def test_classify_row_assigns_expected_classes():
+    """White-box check on the row-class mapping. The CSS depends on these
+    exact class strings; renaming one without updating the stylesheet would
+    silently strip color-coding."""
+    assert web._classify_row({"type": "AssistantMessage",
+                              "text_preview": "x"})[0] == "row-assistant"
+    assert web._classify_row({"type": "AssistantMessage",
+                              "tool_calls": [{}]})[0] == "row-tool"
+    assert web._classify_row({"type": "UserMessage",
+                              "tool_results": [{"is_error": False}]})[0] \
+        == "row-tool-result"
+    assert web._classify_row({"type": "UserMessage",
+                              "tool_results": [{"is_error": True}]})[0] \
+        == "row-tool-result is-error"
+    assert web._classify_row({"type": "ResultMessage",
+                              "subtype": "success"})[0] \
+        == "row-result is-success"
+    assert web._classify_row({"type": "ResultMessage",
+                              "subtype": "error_max_turns"})[0] \
+        == "row-result"
+    assert web._classify_row({"type": "SystemMessage"})[0] == "row-system"
+
+
+def test_read_jsonl_tolerates_partial_trailing_line(project: Config, tmp_path):
+    """The daemon appends to .stream.jsonl while we read — a half-written
+    final line must NOT make `_read_jsonl` raise. The next poll picks it up."""
+    p = tmp_path / "partial.jsonl"
+    p.write_text(
+        '{"seq": 0, "type": "SystemMessage"}\n'
+        '{"seq": 1, "type": "Assistant"}\n'
+        '{"seq": 2, "type": "Result"'  # truncated, no closing brace
+    )
+    rows = web._read_jsonl(p)
+    assert [r["seq"] for r in rows] == [0, 1]
+
+
+def test_read_jsonl_filters_by_since(project: Config, tmp_path):
+    """`since` cursor: rows with seq < since are skipped — what the live
+    poller relies on to avoid re-rendering history every tick."""
+    p = tmp_path / "since.jsonl"
+    p.write_text(
+        '{"seq": 0, "type": "SystemMessage"}\n'
+        '{"seq": 1, "type": "Assistant"}\n'
+        '{"seq": 2, "type": "Result"}\n'
+    )
+    rows = web._read_jsonl(p, since=2)
+    assert [r["seq"] for r in rows] == [2]
