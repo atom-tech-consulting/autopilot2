@@ -192,3 +192,8 @@ it; new task agents pick up the new tool.
 - **kind:** per_task
 - **failed_criteria:** [fail] [shell] `uv run pytest -q ap2/tests/` (regression gate); [fail] [shell] `grep -q 'cron_propose' ap2/tools.py` (tool registered); [fail] [shell] `! grep -E '"cron":\s*str' ap2/tools.py` (the`report_result` `cron` field is gone) (gating); [fail] [shell] `! grep -E 'cron=<JSON' ap2/tools.py` (description textfor the dropped field is gone); [fail] New unit test: `do_cron_propose({"name":"x","sc
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T085130Z-TB-123.prompt.md`, `stream: .cc-autopilot/debug/20260430T085130Z-TB-123.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T085130Z-TB-123.messages.jsonl`
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] [shell] `uv run pytest -q ap2/tests/` (regression gate); [fail] [shell] `grep -q 'cron_propose' ap2/tools.py` (tool registered); [fail] [shell] `! grep -E '"cron":\s*str' ap2/tools.py` (the`report_result` `cron` field is gone) (gating); [fail] [shell] `! grep -E 'cron=<JSON' ap2/tools.py` (description textfor the dropped field is gone); [fail] New unit test: `do_cron_propose({"name":"x","sc
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T090138Z-TB-123.prompt.md`, `stream: .cc-autopilot/debug/20260430T090138Z-TB-123.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T090138Z-TB-123.messages.jsonl`
