@@ -53,3 +53,9 @@
 - **Summary:** cli.cmd_add, do_board_edit, and do_operator_queue_append now reject newline/CR in title, description, tags, and blocked_on with a clear "single line — break long content into briefing.md instead, or summarize to one line" message; CLI exits 1, MCP returns isError; SKILL.md documents the constraint; new unit tests in test_cli.py and test_tools.py; full pytest suite (574 tests) green.
 - **Files:** ap2/cli.py, ap2/tools.py, ap2/tests/test_cli.py, ap2/tests/test_tools.py, skills/ap2-task/SKILL.md
 - **Tests:** pass
+
+## [2026-04-30] TB-136: Verifier: cumulative diff across retries + direct repo file reads
+- **Commit:** `6413a37`
+- **Summary:** Replaced verify._find_task_commit/_git_show_for_task with _find_first_task_commit + _cumulative_task_diff (anchors at OLDEST <task_id>: commit, runs `git diff <first>^..HEAD -- :!.cc-autopilot/`, falls back to HEAD show + handles root commit via empty-tree SHA); upgraded _judge_prose_bullet to allow Read/Glob/Grep tools (JUDGE_REPO_READ_TOOLS, cwd-scoped, max_turns 8) and rewrote prompt to instruct judge that HEAD is authoritative and to use Grep/Glob before declaring artifacts missing; added 18 unit tests covering 1/2/3 task-id commits with interleaved state commits, root-commit edge case, exclude-set pin, and SDK-options pin for the judge tools; 610/610 ap2 tests pass.
+- **Files:** ap2/verify.py, ap2/tests/test_verify_retry_diff.py
+- **Tests:** pass
