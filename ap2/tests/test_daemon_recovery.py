@@ -33,7 +33,12 @@ def cfg(tmp_path: Path) -> Config:
         "## Autopilot\n\n- Task list: `TASKS.md`\n- Next task ID: TB-10\n"
     )
     # Keep retries low so the retry-exhaustion test is quick.
+    # Clear AP2_VERIFY_CMD so a project-level verify setting in the caller's
+    # environment doesn't leak into these unit tests and cause run_task to run
+    # the real test suite against a tmp-dir skeleton (which fails and moves
+    # tasks to Frozen instead of Complete, breaking all completion assertions).
     import os
+    _saved_verify = os.environ.pop("AP2_VERIFY_CMD", None)
     os.environ["AP2_MAX_RETRIES"] = "2"
     os.environ["AP2_TASK_TIMEOUT_S"] = "60"
     cfg_ = Config.load(tmp_path)
@@ -41,6 +46,8 @@ def cfg(tmp_path: Path) -> Config:
     yield cfg_
     os.environ.pop("AP2_MAX_RETRIES", None)
     os.environ.pop("AP2_TASK_TIMEOUT_S", None)
+    if _saved_verify is not None:
+        os.environ["AP2_VERIFY_CMD"] = _saved_verify
 
 
 # ---------- fake SDK ----------
