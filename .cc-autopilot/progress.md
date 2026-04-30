@@ -77,3 +77,9 @@
 - **Summary:** Bumped AP2_VERIFY_JUDGE_MAX_TURNS default from 8 to 20 in verify._judge_prose_bullet (single-line change at verify.py:303); pinned the new default and the env-override path with two new tests in test_verify_retry_diff.py (default-is-20 + AP2_VERIFY_JUDGE_MAX_TURNS=4 override). Full ap2/tests/ suite passes (631 tests). uv.lock picked up the prior 0.2.0 → 0.3.0 pyproject sync.
 - **Files:** ap2/verify.py, ap2/tests/test_verify_retry_diff.py, uv.lock
 - **Tests:** pass
+
+## [2026-04-30] TB-123: Promote cron proposal to a task-agent MCP tool, drop report_result.cron
+- **Commit:** `ee59130`
+- **Summary:** TB-123 implementation landed in a2e3d6a (cron_propose MCP tool + dropped report_result.cron + contextvar plumb for proposed_by_task + unit/e2e/real-SDK smoke tests); previous attempt blocked only on the 'smokes still green' bullet because of a pre-existing TB-136 fallout in test_prose_judge_real_sdk.py — fixed in ee59130 by materializing the asserted file into project_root so the working-tree-authoritative judge can verify it. Full regression now 631 passed, both prose-judge smokes pass.
+- **Files:** ap2/tests/smoke/test_prose_judge_real_sdk.py
+- **Tests:** pass
