@@ -17,3 +17,9 @@
 - **Summary:** Threaded a `paths` allowlist through every _commit_state_files caller (run_task, pipeline-pending sweep, _recover_orphans, run_cron, _maybe_ideate) so each `state:` commit stages only files the current operation touched; added `_filter_state_paths` (defense-in-depth), `_task_state_paths` (shared run_task path-set), and `_snapshot_state_paths` + `_changed_state_paths` (snapshot/diff for control-agent callers). 481 tests pass.
 - **Files:** ap2/daemon.py, ap2/ideation.py, ap2/tests/e2e/test_daemon_commit.py
 - **Tests:** pass
+
+## [2026-04-30] TB-127: Verifier mis-reads retry diff; fails already-committed task work
+- **Commit:** `09831b1`
+- **Summary:** Per-task verifier now resolves task_id → commit-subject `<task_id>:` → that commit's diff (with HEAD fallback) so retries of already-committed tasks judge against the real implementation diff instead of the daemon's bookkeeping diff. New `_find_task_commit` + `_git_show_for_task` helpers in verify.py; daemon._maybe_per_task_verify plumbs task.id through. 9 new unit tests + 1 e2e regression pin; 491/491 tests pass.
+- **Files:** ap2/verify.py, ap2/daemon.py, ap2/tests/test_verify_retry_diff.py, ap2/tests/e2e/test_verify_per_task.py
+- **Tests:** pass
