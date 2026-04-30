@@ -41,3 +41,9 @@
 - **Summary:** Bundled the read-only web UI into the daemon lifecycle: web.serve_async runs in a cancellable task spawned by main_loop, daemon emits web_start/web_stop/web_error events, AP2_WEB_PORT (default 8729) + AP2_WEB_DISABLED env knobs honor the briefing, ap2 status prints the URL, ap2 web stays available standalone (default 7820). 535/535 ap2 tests pass.
 - **Files:** ap2/web.py, ap2/daemon.py, ap2/cli.py, ap2/tests/test_web.py, ap2/tests/test_daemon_web.py, ap2/tests/test_cli.py, README.md, ap2/README.md
 - **Tests:** pass
+
+## [2026-04-30] TB-131: Operator queue: stage board edits, drain between daemon runs
+- **Commit:** `bf7921a`
+- **Summary:** Operator board ops (ap2 add/backlog/unfreeze/delete + new operator_queue_append MCP tool) now stage records in .cc-autopilot/operator_queue.jsonl; the daemon's _tick first stage drains them under board_file_lock with uuid-based idempotency in operator_queue_state.json, an audit line per op in operator_log.md, and queue depth surfaced by ap2 status. ID pre-allocation stays synchronous so ap2 add still prints "TB-N (queued; will land at next tick)". 561 tests pass (24 new for the queue + 2 new e2e tick tests).
+- **Files:** ap2/tools.py, ap2/cli.py, ap2/daemon.py, ap2/init.py, ap2/prompts.py, ap2/architecture.md, .cc-autopilot/.gitignore, ap2/tests/test_operator_queue.py, ap2/tests/e2e/test_operator_queue_tick.py, ap2/tests/test_cli.py, ap2/tests/e2e/test_verify.py
+- **Tests:** pass
