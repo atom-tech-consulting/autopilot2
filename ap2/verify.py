@@ -238,6 +238,15 @@ def _run_shell_bullet(
     )
 
 
+#: Read-only repo-inspection tools the prose-bullet judge may use to verify
+#: claims directly against the working tree at HEAD. Belt-and-suspenders
+#: companion to the cumulative diff (TB-136): the diff catches the common
+#: case of a multi-retry implementation; direct repo reads catch the edge
+#: cases (file moved, symbol renamed, test split across files, the working
+#: tree drifted from the diff's last hunk because of state commits).
+JUDGE_REPO_READ_TOOLS = ["Read", "Glob", "Grep"]
+
+
 async def _judge_prose_bullet(
     bullet: VerifyBullet,
     *,
@@ -245,28 +254,53 @@ async def _judge_prose_bullet(
     sdk,
     diff_text: str,
 ) -> CriterionResult:
-    """Ask the SDK whether `bullet.text` is satisfied by `diff_text`.
+    """Ask the SDK whether `bullet.text` is satisfied by `diff_text` plus the
+    working tree at HEAD.
 
-    Asks for a structured one-line JSON response; falls back to `unverified`
+    The judge gets two evidence sources:
+
+      1. ``diff_text`` — the cumulative diff across all task-id commits
+         (TB-136). Reasoning over a diff is fast and catches most cases.
+      2. ``Read``/``Glob``/``Grep`` tools scoped to ``project_root`` — the
+         judge can confirm a test/symbol actually exists in HEAD before
+         declaring it missing. This is the authoritative check when the
+         diff is ambiguous (file moved, symbol renamed, or the diff was
+         truncated). TB-136.
+
+    Asks for a structured one-line JSON response; falls back to ``unverified``
     on parse failure rather than failing the whole verification (the prose
     judge is best-effort).
     """
     prompt = (
         "You are evaluating ONE acceptance bullet from a task's verification "
-        "section against the agent's diff. Answer with ONE LINE of JSON: "
+        "section against the agent's CUMULATIVE diff (every code commit "
+        "across any retries of this task, with daemon state-file noise "
+        "filtered out) AND the project's working tree at HEAD. Answer with "
+        "ONE LINE of JSON: "
         '{"status": "pass" | "fail", "rationale": "<one sentence>"}. '
-        "Do not include any other text.\n\n"
+        "Do not include any other text outside that JSON line.\n\n"
+        "Evidence priority — when the diff and the working tree disagree, "
+        "the working tree at HEAD is AUTHORITATIVE. The diff can be "
+        "truncated, span renames, or simply not show what's actually on "
+        "disk after a multi-retry sequence. You have Read, Glob, and Grep "
+        "tools scoped to the project root; before declaring a test or "
+        "symbol or file missing, USE Grep/Glob to confirm it isn't present "
+        "in HEAD under a different name or path. If you can find the "
+        "asserted test/symbol/file in the working tree (Read it to verify "
+        "shape if needed), the bullet PASSES regardless of whether the "
+        "diff makes that obvious.\n\n"
         f"Bullet:\n  {bullet.text}\n\n"
-        f"Diff:\n```\n{diff_text[:8000]}\n```\n"
+        f"Cumulative diff:\n```\n{diff_text[:8000]}\n```\n"
     )
     try:
-        # Build the same kind of options used elsewhere; allowed_tools=[] —
-        # the judge doesn't need to take action, just evaluate.
+        # The judge can take a few tool roundtrips (Grep → Read) before
+        # emitting its final verdict, so allow a handful of turns. The
+        # tools are read-only and scoped to project_root via cwd.
         options = sdk.ClaudeAgentOptions(
             cwd=str(project_root),
-            allowed_tools=[],
+            allowed_tools=list(JUDGE_REPO_READ_TOOLS),
             permission_mode="bypassPermissions",
-            max_turns=1,
+            max_turns=int(os.environ.get("AP2_VERIFY_JUDGE_MAX_TURNS", 8)),
             setting_sources=["project"],
             model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
             extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
@@ -349,24 +383,30 @@ def _git_show_head(project_root: Path) -> str:
     return r.stdout if r.returncode == 0 else ""
 
 
-def _find_task_commit(project_root: Path, task_id: str) -> str | None:
-    """Return the SHA of the most recent commit reachable from HEAD whose
-    subject begins with `<task_id>:` (the convention pinned by the task-agent
-    prompt — see `daemon._infer_result_from_head`).
+#: Pathspec excludes folded into every cumulative-diff invocation. Keeps the
+#: prose judge from drowning in the daemon's bookkeeping diffs (TASKS.md
+#: state moves, retry counters, Attempts blocks appended to briefings,
+#: events.jsonl appends). Listed here rather than inlined so the test suite
+#: can pin the exact set.
+CUMULATIVE_DIFF_EXCLUDES = (":!.cc-autopilot/",)
 
-    On retry of a task whose first attempt already committed an
-    implementation, HEAD points at a daemon `state:` bookkeeping commit
-    (TASKS.md + retry_state.json + briefing Attempts) — `git show HEAD` then
-    only contains those board-move artifacts. Diffing prose-bullet
-    judgments against that hallucinates "no new tests added" / "diff
-    contains no changes to file X" even though the work is reachable a few
-    commits back. TB-127. By walking the log for the task-id-prefixed
-    subject, we hand the prose judge the actual implementation diff
-    regardless of whether the agent's commit is at HEAD or buried under
-    daemon state commits.
 
-    Returns None if the project isn't a git repo, the log call fails, or
-    no commit subject matches the convention.
+def _find_first_task_commit(project_root: Path, task_id: str) -> str | None:
+    """Return the SHA of the OLDEST commit reachable from HEAD whose subject
+    begins with ``<task_id>:`` (the convention pinned by the task-agent
+    prompt — see ``daemon._infer_result_from_head``).
+
+    Why the OLDEST and not the most recent (TB-136): when a task retries
+    multiple times, the FIRST ``<task_id>:`` commit usually carries the
+    bulk of the implementation; subsequent retry commits are incremental
+    fixes. The TB-127 helper picked the most recent, so the prose judge
+    only saw the small follow-up diff and falsely failed bullets whose
+    evidence lived in the original commit (TB-135 case). Anchoring at
+    the oldest task-id commit and diffing forward to HEAD gives the judge
+    EVERY code change across the retry chain.
+
+    Returns ``None`` if the project isn't a git repo, the log call fails,
+    or no commit subject matches the convention.
     """
     if not (project_root / ".git").exists():
         return None
@@ -381,6 +421,7 @@ def _find_task_commit(project_root: Path, task_id: str) -> str | None:
     if log.returncode != 0:
         return None
     import re as _re
+    oldest: str | None = None
     for line in log.stdout.splitlines():
         if "\x00" not in line:
             continue
@@ -391,29 +432,75 @@ def _find_task_commit(project_root: Path, task_id: str) -> str | None:
         # "TB-127: ...").
         first_token = _re.split(r"[:\s]", subject, maxsplit=1)[0]
         if first_token == task_id:
-            return sha
-    return None
+            # `git log` orders newest-first; keep overwriting so the LAST
+            # match (= oldest commit) wins.
+            oldest = sha
+    return oldest
 
 
-def _git_show_for_task(project_root: Path, task_id: str | None) -> str:
-    """Return `git show <sha>` for the task's implementation commit if one
-    is reachable from HEAD, else fall back to `git show HEAD`.
+#: Git's universal SHA for the empty tree. Used as the synthetic base when
+#: the first task-id commit is the repo's root commit (no parent to take
+#: ``^`` of). Stable across all git versions:
+#:   $ git hash-object -t tree /dev/null
+#:   4b825dc642cb6eb9a060e54bf8d69288fbee4904
+_EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-    `task_id=None` preserves the legacy behavior (verify_task callers that
-    haven't been updated, smoke tests, etc.). When `task_id` is provided
-    we prefer the dedicated commit so retries (where HEAD is a daemon
-    state commit) still judge against the real implementation diff. TB-127.
+
+def _cumulative_task_diff(project_root: Path, task_id: str | None) -> str:
+    """Return the cumulative code diff across every retry of this task.
+
+    Implementation: anchor at the OLDEST commit whose subject starts with
+    ``<task_id>:`` (call it ``<first>``), then run::
+
+        git diff <first>^..HEAD -- :!.cc-autopilot/
+
+    so the prose judge sees every code change from ``<first>`` forward,
+    minus daemon state-file noise (TASKS.md state moves, retry_state.json,
+    events.jsonl appends, attempt blocks the daemon writes back into the
+    briefing). TB-136.
+
+    Edge cases:
+
+      - ``task_id`` is ``None`` (legacy callers, smoke tests): fall back
+        to ``git show HEAD``.
+      - No ``<task_id>:`` commit reachable yet (agent didn't commit on
+        first attempt; or this is the very first run pre-commit): fall
+        back to ``git show HEAD`` so the judge still has SOMETHING to
+        evaluate against.
+      - ``<first>`` is the repo's root commit (no parent): use the empty
+        tree as the synthetic base, so the diff is ``<empty>..HEAD``.
+      - Project isn't a git repo: return ``""`` (matches the contract of
+        ``_git_show_head``).
     """
-    if task_id:
-        sha = _find_task_commit(project_root, task_id)
-        if sha:
-            r = subprocess.run(
-                ["git", "-C", str(project_root), "show", sha],
-                capture_output=True, text=True,
-            )
-            if r.returncode == 0:
-                return r.stdout
-    return _git_show_head(project_root)
+    if not task_id:
+        return _git_show_head(project_root)
+    if not (project_root / ".git").exists():
+        return ""
+    sha = _find_first_task_commit(project_root, task_id)
+    if not sha:
+        return _git_show_head(project_root)
+
+    # Resolve <first>^. If <first> is the root commit, rev-parse fails and
+    # we substitute git's empty-tree SHA so the diff is still well-formed.
+    parent = subprocess.run(
+        ["git", "-C", str(project_root), "rev-parse", "--verify", f"{sha}^"],
+        capture_output=True, text=True,
+    )
+    base = parent.stdout.strip() if parent.returncode == 0 else _EMPTY_TREE_SHA
+
+    diff = subprocess.run(
+        [
+            "git", "-C", str(project_root),
+            "diff", f"{base}..HEAD", "--",
+            *CUMULATIVE_DIFF_EXCLUDES,
+        ],
+        capture_output=True, text=True,
+    )
+    if diff.returncode != 0:
+        # Surface git's stderr in the fallback path rather than leaving the
+        # judge with an empty string.
+        return _git_show_head(project_root)
+    return diff.stdout
 
 
 async def verify_task(
@@ -433,12 +520,12 @@ async def verify_task(
 
     The skip cases let pre-TB-69 tasks proceed unchanged through the daemon.
 
-    `task_id` (TB-127) is used to resolve which commit's diff to hand the
-    prose-bullet judge. When provided, we look for a commit whose subject
-    starts with `<task_id>:` (the agent commit-prefix convention) and diff
-    against that — covering the retry case where HEAD is a daemon
-    bookkeeping commit and the real implementation is one or more commits
-    back. Without `task_id` we fall back to `git show HEAD`.
+    `task_id` (TB-127, refined in TB-136) is used to resolve the diff
+    handed to the prose-bullet judge. When provided, we anchor at the
+    OLDEST commit whose subject starts with `<task_id>:` and diff
+    forward to HEAD, with `.cc-autopilot/` paths excluded — the
+    cumulative diff covers every retry's code change without daemon
+    state-file noise. Without `task_id` we fall back to `git show HEAD`.
     """
     if briefing_text is None:
         return None
@@ -464,7 +551,7 @@ async def verify_task(
                 ))
                 continue
             if diff_text is None:
-                diff_text = _git_show_for_task(project_root, task_id)
+                diff_text = _cumulative_task_diff(project_root, task_id)
             results.append(await _judge_prose_bullet(
                 b, project_root=project_root, sdk=sdk, diff_text=diff_text,
             ))
