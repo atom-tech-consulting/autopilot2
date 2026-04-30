@@ -14,14 +14,15 @@ verify._judge_prose_bullet caps each per-bullet judge at AP2_VERIFY_JUDGE_MAX_TU
 
 ## Verification
 
-Concrete acceptance criteria the daemon's per-task verifier (TB-69)
-runs after the agent's commit. Shell-command bullets (backtick-fenced
-at the start of the bullet) are run automatically; prose bullets are
-judged by an SDK call against the diff.
-
-- `uv run pytest -q` — full suite passes
-- (additional shell or prose bullets)
+- `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
+- `grep -qE 'AP2_VERIFY_JUDGE_MAX_TURNS.{0,8}20' ap2/verify.py` — new default value of 20 present at the call site
+- `! grep -qE "AP2_VERIFY_JUDGE_MAX_TURNS.{0,8}\\b8\\b" ap2/verify.py` — old hard-coded 8 fallback is gone (so a missing env var picks up 20, not 8)
+- New / updated unit test in `test_verify_retry_diff.py` (or wherever the judge max_turns is currently pinned): with `AP2_VERIFY_JUDGE_MAX_TURNS` unset, the SDK options handed to `_judge_prose_bullet` carry `max_turns=20`.
+- Updated unit test: with `AP2_VERIFY_JUDGE_MAX_TURNS=4` set, the SDK options carry `max_turns=4` — the env-override path keeps working so operators can still tighten the budget.
+- The diff does NOT introduce new code paths or env vars beyond bumping the default. Single-line change in verify.py plus the test pin update.
 
 ## Out of scope
 
-- (filled in)
+- Adding a separate hard timeout on the judge SDK call (separate concern; the user explicitly opted out earlier).
+- Changing the per-bullet vs. batched judge structure.
+- Tuning AP2_VERIFY_JUDGE_MAX_TURNS for daemon-wide cost — operators can override via env.
