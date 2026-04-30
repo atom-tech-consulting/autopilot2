@@ -30,3 +30,6 @@ dist/
 # daemon.pid, mm_state.json, debug/, …) is filtered by `.cc-autopilot/.gitignore`,
 # which `ap2 init` writes.
 TASKS.md.lock
+
+# Local utility scripts — workspace-only, never committed.
+adhoc/
