@@ -34,3 +34,10 @@ Today ap2 add auto-fills a skeleton briefing (tools.py:115 → render_briefing) 
 - Auto-extracting title/tags from the briefing if frontmatter isn't there: convention parse from `# Title` H1 + a `Tags:` line is acceptable, but full structured-metadata extraction belongs to TB-133.
 - Retroactively re-prepping existing skeleton briefings (TB-131 etc.).
 - Removing `render_briefing` from `init.py` entirely if other callers still need it (just stop calling it from `do_board_edit`); deletion can be a follow-up once it's truly orphaned.
+## Attempts
+
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] New unit test in `test_tools.py`: passing a non-empty `briefing` text payload still succeeds — daemon-internal callers (; [fail] The diff updates `skills/ap2-task/SKILL.md` (and `skills/migrate-to-ap2/SKILL.md` if relevant) to require briefing autho; [fail] If editor-driven mode is included: `ap2 add` with no args opens `$EDITOR` against the template and uses the saved buffer
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T195346Z-TB-135.prompt.md`, `stream: .cc-autopilot/debug/20260430T195346Z-TB-135.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T195346Z-TB-135.messages.jsonl`
