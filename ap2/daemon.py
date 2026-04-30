@@ -195,6 +195,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 max_turns=int(os.environ.get("AP2_TASK_MAX_TURNS", 50)),
                 setting_sources=["project"],
                 stderr=_stderr_sink,
+                model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
             ),
         ):
             _log_message(msg)
@@ -652,6 +653,7 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
                 permission_mode="bypassPermissions",
                 max_turns=int(os.environ.get("AP2_CONTROL_MAX_TURNS", 15)),
                 setting_sources=["project"],
+                model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
             ),
         ):
             pass
@@ -725,6 +727,7 @@ async def _run_control_agent(
                 max_turns=max_turns,
                 setting_sources=["project"],
                 stderr=stderr_sink,
+                model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
             ),
         ):
             pass

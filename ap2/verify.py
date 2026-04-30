@@ -35,6 +35,7 @@ without verification sections keep working unchanged.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -267,6 +268,7 @@ async def _judge_prose_bullet(
             permission_mode="bypassPermissions",
             max_turns=1,
             setting_sources=["project"],
+            model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
         )
         text = ""
         async for msg in sdk.query(prompt=prompt, options=options):
