@@ -157,10 +157,21 @@ so new contributors can ramp without DM'"'"'ing the maintainers.
 ' | sudo -u claude-agent -- "$(command -v ap2)" --project ~claude-agent/repos/stoch add -s Backlog --briefing-file -
 ```
 
+## Structured task metadata: `@<key>:<value>` codespans (TB-132)
+
+Some structured fields live on the rendered task line as backtick codespans, parallel to `#tags`. Single rule: any backtick span starting with `#` is a tag, any starting with `@` is structured metadata. Currently consumed:
+
+- **`@blocked:<csv>`** — comma-separated blocker tokens. Each is either a `TB-N` task id or a `<scheme>:<value>` external blocker (currently `pid:<N>@<TS>`). Auto-promotion skips a task as long as any blocker token is unsatisfied. Pass via `ap2 add --blocked TB-5,TB-7` — the CLI writes the codespan; **do NOT** stuff `(blocked on: ...)` into the briefing or the description. The parser no longer regexes prose for that phrase, so writing it as descriptive text is harmless (and writing it as the only blocker carrier silently does nothing on new tasks).
+
+The format extends naturally to `@priority:high`, `@owner:alice`, `@due_date:2026-05-15`, etc. without expanding the parser regex — `Task.meta` is a free-form dict on the parsed task. Add a CLI surface (or another writer) per-field as the need arises.
+
+A pre-TB-132 transition fallback still parses `(blocked on: ...)` from descriptions for tasks authored before the codespan format landed, so existing tasks aren't broken. New tasks should always go through `--blocked`.
+
 ## Rules
 
 - **Sandbox is canonical.** Never write to `TASKS.md` in the human's local clone — even if the daemon has uncommitted changes, the sandbox's state is what matters.
 - **One task per invocation.** No batching. Re-run for additional tasks.
 - **Briefing required (TB-135).** Every `ap2 add` call needs `--briefing-file`. The minimum useful briefing is H1 + a `## Verification` section with at least one bullet beyond the regression gate. Skipping the briefing is now a hard error, not a free pass to a skeleton.
-- **Single line for tags / titles.** Tag tokens and the H1 itself must be single-line — embedded newlines break the line-oriented parser (TB-134). For richer prose, put it inside the briefing's `## Goal` / `## Scope` sections.
+- **Single line for tags / titles / blocked.** Tag tokens, the H1 itself, and `--blocked` values must be single-line — embedded newlines break the line-oriented parser (TB-134). For richer prose, put it inside the briefing's `## Goal` / `## Scope` sections.
+- **Blockers go in `--blocked`, not in the description (TB-132).** Pass `--blocked TB-5,TB-7` to declare structured blockers; the CLI emits a `@blocked:TB-5,TB-7` codespan on the task line. Don't write `(blocked on: ...)` into the briefing prose — TB-132 ended that path because it collided with descriptive text (TB-121 self-blocked on the literal phrase).
 - **Run sudo directly when invoking from the main user.** Call it through Bash like any other command. Only fall back to handing the `! sudo …` form to the user if sudo prompts for a password and the call fails.

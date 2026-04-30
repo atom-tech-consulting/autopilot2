@@ -383,17 +383,21 @@ def _add_args(
     tags: list[str] | None = None,
     briefing_file: str | None = None,
     no_verify: bool = False,
+    blocked: str | None = None,
 ) -> Namespace:
     """Build a Namespace shaped like cmd_add's argparse output.
 
     TB-135: the positional `title`, `-d/--description` are gone — title /
     description live in the briefing. `_add_args` no longer accepts them.
+    TB-132: `--blocked CSV` writes a `@blocked:<csv>` codespan onto the
+    rendered task line.
     """
     return Namespace(
         section=section,
         tags=tags,
         briefing_file=briefing_file,
         no_verify=no_verify,
+        blocked=blocked,
     )
 
 
@@ -567,6 +571,62 @@ def test_add_extends_briefing_tags_with_flag(tmp_path: Path):
     assert "#extra" in found.tags
     # `#cli` not duplicated.
     assert found.tags.count("#cli") == 1
+
+
+def test_add_with_blocked_writes_codespan_not_description(tmp_path: Path):
+    """TB-132: `ap2 add --blocked TB-5,review` writes a `@blocked:` codespan
+    on the rendered task line and leaves the description prose untouched.
+    The legacy `(blocked on: ...)` description-injection path is gone.
+    """
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    rc = cmd_add(
+        cfg,
+        _add_args(briefing_file=str(brief), blocked="TB-5,review"),
+    )
+
+    assert rc == 0
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None
+    # Codespan landed in meta and survives Task.blocked_on parsing.
+    assert found.meta.get("blocked") == "TB-5,review"
+    assert found.blocked_on == ["TB-5", "review"]
+    # The rendered task line has the codespan after tags, before the
+    # em-dash — round-trip-readable for the next parse.
+    raw_line = next(
+        (line for line in cfg.tasks_file.read_text().splitlines()
+         if found.id in line),
+        "",
+    )
+    assert "`@blocked:TB-5,review`" in raw_line
+    # Description prose is NOT carrying the legacy clause.
+    assert "blocked on" not in (found.description or "").lower()
+    assert "(blocked on:" not in raw_line
+
+
+def test_add_rejects_newline_in_blocked_flag(tmp_path: Path, capsys):
+    """TB-134 carry-forward, TB-132: a `--blocked` value with embedded
+    newlines breaks TASK_LINE_RE same as a multi-line tag would. Reject
+    with the same single-line error so the `@blocked:` codespan stays a
+    single line on the rendered task."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    rc = cmd_add(
+        cfg,
+        _add_args(briefing_file=str(brief), blocked="TB-5\nreview"),
+    )
+
+    assert rc == 1
+    assert "single line" in capsys.readouterr().err
 
 
 def test_add_rejects_newline_in_tag_flag(tmp_path: Path, capsys):

@@ -21,22 +21,40 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import ClassVar, Iterator
 
 SECTIONS = ["Active", "Ready", "Backlog", "Pipeline Pending", "Complete", "Frozen"]
 SECTION_RE = re.compile(
     r"^## (Active|Ready|Backlog|Pipeline Pending|Complete|Frozen)\s*$", re.M,
 )
+# TB-132: backtick spans on a task line are a uniform metadata surface —
+# any span starting with `#` is a tag, any span starting with `@<key>:` is
+# a structured field. Single capture group `spans` collects them all; the
+# `parse_task_line` helper below splits the two shapes apart. This stops
+# the parser from regexing free-text descriptions for clause syntax — the
+# old `(blocked on: ...)` regex collided with prose (TB-121's description
+# literally contained the phrase as descriptive text and auto-blocked the
+# task on the non-existent token `review`).
 TASK_LINE_RE = re.compile(
     r"^- \[(?P<check>[ x])\] \*\*(?P<id>TB-\d+)\*\* \*\*(?P<title>[^*]+)\*\*"
-    r"(?P<tags>(?:\s+`#[^`]+`)*)"
+    r"(?P<spans>(?:\s+`[^`]+`)*)"
     r"(?:\s+—\s*(?P<desc>.*?))?"
     r"(?:\s*\[→ brief\]\((?P<briefing>[^)]+)\))?\s*$"
 )
+# Codespan splitters: `#tag` vs `@key:value`. The key shape mirrors a
+# Python identifier (so `@blocked` / `@owner` / `@due_date` all work) and
+# the value is everything up to the closing backtick, comma-delimited
+# inside for multi-token fields like `@blocked:TB-5,TB-7`.
+_TAG_SPAN_RE = re.compile(r"`(#[^`]+)`")
+_META_SPAN_RE = re.compile(r"`@([A-Za-z][A-Za-z0-9_]*):([^`]*)`")
 
-# Matches a `(blocked on: ...)` clause anywhere in a task's description.
-# Tokens inside are comma-separated; each is either a TB-N task id or a
-# `<scheme>:<value>` external blocker (TB-81 — currently `pid:<N>@<TS>`).
+# Legacy `(blocked on: ...)` description clause — kept ONLY as a transition
+# fallback for tasks authored before the `@blocked:...` codespan format
+# landed (TB-132). New tasks should set `meta['blocked']` via the codespan;
+# `Task.legacy_blocked_fallback = False` disables this fallback so prose
+# like TB-121's "(blocked on: review)" descriptive text never registers as
+# a structural blocker. Drop the regex entirely once the in-flight backlog
+# has migrated.
 _BLOCKED_CLAUSE_RE = re.compile(r"\(blocked on:\s*([^)]+)\)", re.IGNORECASE)
 # Token splitter: comma OR `and` (case-insensitive) so natural-language phrases
 # like "TB-5 and TB-7" still parse. Whitespace-only fragments are dropped.
@@ -49,10 +67,24 @@ class Task:
     title: str
     section: str
     tags: list[str] = field(default_factory=list)
+    # TB-132: structured metadata captured from `@<key>:<value>` codespans
+    # on the task line. Sits alongside `tags` rather than mining the
+    # description prose. Currently consumed: `meta['blocked']` (comma-
+    # separated TB-N or scheme:value tokens). Format extends naturally to
+    # `@priority`, `@owner`, `@due_date`, etc. without expanding the regex.
+    meta: dict[str, str] = field(default_factory=dict)
     description: str = ""
     briefing: str | None = None
     checked: bool = False
     raw: str = ""  # original line for lossless preservation
+
+    # Class-level toggle for the legacy `(blocked on: ...)` description-
+    # regex fallback. Kept True so existing tasks (authored pre-TB-132)
+    # still parse blockers from prose; flip to False to verify the
+    # original auto-block-on-prose failure mode is gone (the briefing's
+    # TB-121 test case). Drop the entire fallback once every in-flight
+    # blocker has migrated to the `@blocked:...` codespan.
+    legacy_blocked_fallback: ClassVar[bool] = True
 
     @property
     def num(self) -> int:
@@ -60,13 +92,30 @@ class Task:
 
     @property
     def blocked_on(self) -> list[str]:
-        """Tokens listed in a `(blocked on: ...)` clause in the description.
+        """Tokens declared as blockers via the `@blocked:<csv>` codespan.
 
-        Each token is either a `TB-N` task id or a `<scheme>:<value>` blocker
-        (currently only `pid:<N>@<TS>` is consumed by the daemon — see TB-81).
-        Empty list for tasks without the clause, so the dependency check is a
-        no-op for existing tasks that don't explicitly declare blockers.
+        Codespan format: `` `@blocked:TB-5,TB-7` `` — comma-separated.
+        Each token is either a `TB-N` task id or a `<scheme>:<value>`
+        external blocker (currently only `pid:<N>@<TS>` is consumed by
+        the daemon — see TB-81). Empty list when no blockers are
+        declared, so the dependency check is a no-op for tasks that
+        don't explicitly declare any.
+
+        TB-132 transition: if the codespan is absent and
+        `Task.legacy_blocked_fallback` is True (the default), fall back
+        to the historical `(blocked on: ...)` description regex so
+        existing tasks aren't broken. Disable the fallback (test-only)
+        to verify TB-121's prose ("(blocked on: review)" as descriptive
+        text) no longer registers as a blocker.
         """
+        if "blocked" in self.meta:
+            return [
+                tok.strip()
+                for tok in self.meta["blocked"].split(",")
+                if tok.strip()
+            ]
+        if not Task.legacy_blocked_fallback:
+            return []
         m = _BLOCKED_CLAUSE_RE.search(self.description)
         if not m:
             return []
@@ -79,9 +128,18 @@ class Task:
     def render(self) -> str:
         check = "x" if self.checked else " "
         tag_str = "".join(f" `{t}`" for t in self.tags)
+        # TB-132: meta codespans render after tags, before the em-dash —
+        # mirrors how a reader scans the line (id → title → tags → meta
+        # → prose). dict iteration is insertion-ordered (3.7+) so a
+        # round-trip parse → render preserves the codespan order the
+        # author wrote.
+        meta_str = "".join(f" `@{k}:{v}`" for k, v in self.meta.items())
         desc = f" — {self.description}" if self.description else ""
         brief = f" [→ brief]({self.briefing})" if self.briefing else ""
-        return f"- [{check}] **{self.id}** **{self.title}**{tag_str}{desc}{brief}"
+        return (
+            f"- [{check}] **{self.id}** **{self.title}**"
+            f"{tag_str}{meta_str}{desc}{brief}"
+        )
 
 
 @contextlib.contextmanager
@@ -210,6 +268,7 @@ class Board:
         task_id: str,
         title: str,
         tags: list[str] | None = None,
+        meta: dict[str, str] | None = None,
         description: str = "",
         briefing: str | None = None,
     ) -> Task:
@@ -220,6 +279,7 @@ class Board:
             title=title,
             section=section,
             tags=[_norm_tag(x) for x in (tags or [])],
+            meta=dict(meta or {}),
             description=description,
             briefing=briefing,
         )
@@ -297,12 +357,22 @@ def parse_task_line(line: str, section: str) -> Task | None:
     m = TASK_LINE_RE.match(line)
     if not m:
         return None
-    tags = re.findall(r"`(#[^`]+)`", m.group("tags") or "")
+    spans = m.group("spans") or ""
+    # Single backtick-span list captures both shapes; split here so the
+    # TASK_LINE_RE itself stays a single regex rule (TB-132). Spans not
+    # matching either shape (e.g. a stray `` `code` `` inside the
+    # tags-and-meta block) are ignored by both extractors and won't
+    # silently end up in tags or meta.
+    tags = _TAG_SPAN_RE.findall(spans)
+    meta: dict[str, str] = {}
+    for kv in _META_SPAN_RE.finditer(spans):
+        meta[kv.group(1)] = kv.group(2)
     return Task(
         id=m.group("id"),
         title=m.group("title").strip(),
         section=section,
         tags=tags,
+        meta=meta,
         description=(m.group("desc") or "").strip(),
         briefing=m.group("briefing"),
         checked=m.group("check") == "x",

@@ -89,6 +89,11 @@ def test_board_edit_move_missing_id(cfg):
 
 
 def test_board_edit_add_ready_honors_blocked_on(cfg):
+    """TB-132: blocked_on now lands on the task line as a `@blocked:<csv>`
+    codespan (in `meta`), not as a `(blocked on: ...)` clause baked into
+    the description prose. The blocker semantic is identical
+    (`Task.blocked_on` returns the same tokens) — what changed is where
+    the parser reads them from."""
     res = tools.do_board_edit(
         cfg,
         {
@@ -100,7 +105,11 @@ def test_board_edit_add_ready_honors_blocked_on(cfg):
     b = Board.load(cfg.tasks_file)
     t = b.get(body["task_id"])
     assert t is not None
-    assert "blocked on: TB-5" in t.description
+    assert t.meta.get("blocked") == "TB-5"
+    assert t.blocked_on == ["TB-5"]
+    # Description prose is no longer the blocker carrier — TB-132 ended
+    # the regex-on-description failure mode (TB-121's prose collision).
+    assert "blocked on" not in t.description.lower()
 
 
 def test_board_edit_add_backlog_honors_blocked_on(cfg):
@@ -115,7 +124,9 @@ def test_board_edit_add_backlog_honors_blocked_on(cfg):
     b = Board.load(cfg.tasks_file)
     t = b.get(body["task_id"])
     assert t is not None
-    assert "blocked on: TB-5" in t.description
+    assert t.meta.get("blocked") == "TB-5"
+    assert t.blocked_on == ["TB-5"]
+    assert "blocked on" not in t.description.lower()
 
 
 def test_board_edit_add_frozen_still_honors_blocked_on(cfg):
@@ -130,7 +141,9 @@ def test_board_edit_add_frozen_still_honors_blocked_on(cfg):
     b = Board.load(cfg.tasks_file)
     t = b.get(body["task_id"])
     assert t is not None
-    assert "blocked on: TB-5" in t.description
+    assert t.meta.get("blocked") == "TB-5"
+    assert t.blocked_on == ["TB-5"]
+    assert "blocked on" not in t.description.lower()
 
 
 def test_cron_edit_add_and_remove(cfg):

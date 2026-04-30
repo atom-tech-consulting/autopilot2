@@ -185,15 +185,21 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     brief_path.parent.mkdir(parents=True, exist_ok=True)
                     brief_path.write_text(briefing)
                     briefing_rel = str(brief_path.relative_to(cfg.project_root))
-                desc = description
+                # TB-132: blocked_on goes onto the task line as a
+                # `@blocked:<csv>` codespan (alongside `#tags`) rather
+                # than being injected into the description as
+                # `(blocked on: ...)`. The codespan lives in `meta` and
+                # round-trips through Task.render() / parse_task_line.
+                meta: dict[str, str] = {}
                 if blocked_on:
-                    desc = (desc + " " if desc else "") + f"(blocked on: {blocked_on})"
+                    meta["blocked"] = blocked_on
                 board.add(
                     add_map[action],
                     task_id=new_id,
                     title=title,
                     tags=tags,
-                    description=desc,
+                    meta=meta,
+                    description=description,
                     briefing=briefing_rel,
                 )
                 return _ok(
@@ -656,15 +662,20 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             brief_path.write_text(briefing_content)
             briefing_rel = str(brief_path.relative_to(cfg.project_root))
 
-        desc = description
+        # TB-132: blocked_on rides on the task line as a `@blocked:<csv>`
+        # codespan, not as `(blocked on: ...)` in the description. The
+        # drain side reads `meta` from the queue record and passes it to
+        # `board.add(..., meta=...)`.
+        meta: dict[str, str] = {}
         if blocked_on:
-            desc = (desc + " " if desc else "") + f"(blocked on: {blocked_on})"
+            meta["blocked"] = blocked_on
 
         rec_args = {
             "task_id": preallocated_task_id,
             "title": title,
             "tags": tags,
-            "description": desc,
+            "description": description,
+            "meta": meta,
             "briefing_path": briefing_rel,
         }
     else:
@@ -865,6 +876,10 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             task_id=args["task_id"],
             title=args["title"],
             tags=list(args.get("tags") or []),
+            # TB-132: meta dict carries the `@blocked:...` codespan (and
+            # any future `@<key>:<value>` structured fields). Defaults
+            # to {} for queued ops authored before TB-132 landed.
+            meta=dict(args.get("meta") or {}),
             description=args.get("description") or "",
             briefing=args.get("briefing_path"),
         )

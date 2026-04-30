@@ -408,6 +408,14 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     # through TASK_LINE_RE so the marker persists across daemon restarts.
     if getattr(args, "no_verify", False) and "#no-verify" not in tags:
         tags.append("#no-verify")
+    # TB-132: --blocked CSV → `@blocked:<csv>` codespan on the rendered
+    # task line. Validate single-line so a stray newline in the operator's
+    # input doesn't smuggle TASK_LINE_RE-busting bytes onto the board.
+    blocked = (getattr(args, "blocked", None) or "").strip()
+    err = tools._validate_single_line("blocked", blocked)
+    if err:
+        print(f"ap2 add: {err}", file=sys.stderr)
+        return 1
     # TB-131: stage through the operator queue rather than mutate TASKS.md
     # directly. The TB-N is pre-allocated synchronously (so we can print
     # it immediately), the briefing file is pre-written, and only the
@@ -419,6 +427,7 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
             "title": title,
             "tags": tags,
             "description": "",
+            "blocked_on": blocked,
             "briefing": briefing,
         },
     )
@@ -828,6 +837,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the AP2_VERIFY_CMD project-wide test gate for this task "
              "(adds `#no-verify` to its tags)",
+    )
+    # TB-132: blockers live in a `@blocked:<csv>` codespan on the task line
+    # (parallel to `#tags`), not in the description prose. Comma-separated
+    # tokens; each is either a TB-N task id or a `<scheme>:<value>` blocker
+    # token.
+    s.add_argument(
+        "--blocked",
+        default=None,
+        metavar="CSV",
+        help="comma-separated blocker tokens (TB-N or scheme:value); written "
+             "as a `@blocked:<csv>` codespan on the task line so the parser "
+             "never has to regex the description prose (TB-132).",
     )
     s.set_defaults(func=cmd_add)
 

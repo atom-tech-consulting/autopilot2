@@ -391,6 +391,185 @@ def test_is_blocker_satisfied_unknown_scheme_fails_safe(tmp_path):
     assert b._is_blocker_satisfied("pid:1@2", set()) is False
 
 
+# ---------------------------------------------------------------------------
+# TB-132: structured `@<key>:<value>` codespans replace prose-regex blocker
+# parsing. Tags (`#tag`) and meta (`@k:v`) live in the same backtick-span
+# list; the parser keeps them distinct in `tags` vs `meta` on Task.
+
+def test_parse_task_line_populates_meta_alongside_tags():
+    """TASK_LINE_RE captures all backtick spans; parse_task_line splits
+    them into `tags` (`#`-prefix) vs `meta` (`@key:value`). The two
+    surfaces are kept distinct so a future `@<key>:<value>` field
+    doesn't accidentally show up in `tags` or vice versa."""
+    line = (
+        "- [ ] **TB-42** **t** `#infra` `#urgent` "
+        "`@blocked:TB-5,TB-7` `@owner:alice` — go"
+    )
+    t = parse_task_line(line, "Ready")
+    assert t is not None
+    assert t.tags == ["#infra", "#urgent"]
+    assert t.meta == {"blocked": "TB-5,TB-7", "owner": "alice"}
+
+
+def test_blocked_on_reads_from_meta_codespan_only():
+    """TB-132: when a `@blocked:` codespan is set, `Task.blocked_on`
+    sources its tokens from there and ignores any `(blocked on: ...)`
+    substring in the description — including descriptive prose that
+    used to false-trigger the legacy regex (TB-121's failure mode)."""
+    from ap2.board import Task
+
+    t = Task(
+        id="TB-2",
+        title="t",
+        section="Backlog",
+        meta={"blocked": "TB-5"},
+        description=(
+            "ideation emits each proposed task with (blocked on: review); "
+            "auto-promotion already skips blocked tasks."
+        ),
+    )
+    assert t.blocked_on == ["TB-5"]
+
+
+def test_render_emits_meta_after_tags_before_emdash():
+    """Render order: id → title → tags → meta → em-dash → description →
+    briefing link. Round-trip parse → render is byte-identical so the
+    Board's lossless preservation invariant still holds."""
+    from ap2.board import Task
+
+    t = Task(
+        id="TB-2",
+        title="title",
+        section="Backlog",
+        tags=["#infra", "#urgent"],
+        meta={"blocked": "TB-5,TB-7"},
+        description="prose",
+        briefing=".cc-autopilot/tasks/x.md",
+    )
+    expected = (
+        "- [ ] **TB-2** **title** `#infra` `#urgent` `@blocked:TB-5,TB-7` "
+        "— prose [→ brief](.cc-autopilot/tasks/x.md)"
+    )
+    assert t.render() == expected
+    # Round-trip: parse the rendered line, render it back, must be byte-
+    # identical. Pins ordering (tags before meta) and that no whitespace
+    # gets lost in either direction.
+    t2 = parse_task_line(expected, "Backlog")
+    assert t2 is not None
+    assert t2.render() == expected
+
+
+def test_legacy_blocked_clause_still_parses_under_transition_fallback():
+    """TB-132 transition: a task with only the legacy `(blocked on: TB-5)`
+    clause in its description (no `@blocked:` codespan) must still
+    parse as blocked, so existing pre-codespan tasks keep working
+    until they're migrated. Drop this fallback (and this test) once
+    the in-flight backlog has fully migrated."""
+    from ap2.board import Task
+
+    assert Task.legacy_blocked_fallback is True, (
+        "transition fallback should default-on so existing tasks aren't "
+        "broken when TB-132 lands"
+    )
+    t = Task(
+        id="TB-2",
+        title="t",
+        section="Backlog",
+        description="depends (blocked on: TB-5)",
+    )
+    assert t.blocked_on == ["TB-5"]
+
+
+def test_tb121_prose_does_not_block_when_legacy_fallback_dropped():
+    """TB-132's specific failure-mode test: TB-121's exact prose contains
+    `(blocked on: review)` as descriptive text (the design literally
+    quoted the proposed clause syntax). Under the legacy regex, that
+    prose auto-blocked TB-121 on the non-existent token `review` and
+    stranded it in Backlog forever. With the legacy fallback dropped,
+    a task whose only blocker signal is the description prose now
+    parses with `blocked_on == []` — the original failure mode is
+    gone."""
+    from ap2.board import Task
+
+    saved = Task.legacy_blocked_fallback
+    Task.legacy_blocked_fallback = False
+    try:
+        t = Task(
+            id="TB-121",
+            title="Gate ideation-proposed tasks behind human review",
+            section="Backlog",
+            description=(
+                "Stop the daemon from autonomously dispatching tasks "
+                "ideation just invented. Ideation emits each proposed "
+                "task with (blocked on: review); auto-promotion already "
+                "skips blocked tasks."
+            ),
+        )
+        assert t.blocked_on == []
+    finally:
+        Task.legacy_blocked_fallback = saved
+
+
+def test_codespan_blocker_skipped_when_target_incomplete(tmp_path):
+    """End-to-end: a task with `@blocked:TB-5` and TB-5 NOT in Complete
+    must not be auto-dispatched. Mirrors `test_next_ready_skips_blocked_task`
+    but exercises the codespan path instead of the legacy clause."""
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        - [ ] **TB-3** **needs TB-1** `@blocked:TB-1` — depends on TB-1
+        - [ ] **TB-4** **standalone** — no blockers
+
+        ## Backlog
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    t = b.next_ready()
+    assert t is not None
+    assert t.id == "TB-4"
+
+
+def test_codespan_blocker_dispatches_when_target_completes(tmp_path):
+    """The same task becomes dispatchable once TB-5 lands in Complete —
+    exercises that the codespan path drives `next_ready` exactly the
+    way the legacy clause does, just sourced from `meta` instead of
+    description regex."""
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        - [ ] **TB-3** **depends** `@blocked:TB-1` — needs TB-1
+
+        ## Backlog
+
+        ## Complete
+
+        - [x] **TB-1** **blocker** — done
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    t = b.next_ready()
+    assert t is not None
+    assert t.id == "TB-3"
+
+
 def test_next_dispatchable_pid_blocker_strands_task(tmp_path):
     """TB-117: the retired `pid:N@TS` scheme always evaluates to "not
     satisfied" — any pre-TB-115 task whose Backlog line still carries
