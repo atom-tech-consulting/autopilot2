@@ -300,7 +300,7 @@ async def _judge_prose_bullet(
             cwd=str(project_root),
             allowed_tools=list(JUDGE_REPO_READ_TOOLS),
             permission_mode="bypassPermissions",
-            max_turns=int(os.environ.get("AP2_VERIFY_JUDGE_MAX_TURNS", 8)),
+            max_turns=int(os.environ.get("AP2_VERIFY_JUDGE_MAX_TURNS", 20)),
             setting_sources=["project"],
             model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
             extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},

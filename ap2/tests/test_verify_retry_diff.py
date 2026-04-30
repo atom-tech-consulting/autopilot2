@@ -451,6 +451,88 @@ def test_judge_passes_read_glob_grep_to_sdk():
     assert int(opts.get("max_turns", 0)) >= 2, opts
 
 
+def test_judge_max_turns_default_is_twenty(monkeypatch):
+    """TB-137: with `AP2_VERIFY_JUDGE_MAX_TURNS` unset, the SDK options handed
+    to `_judge_prose_bullet` carry ``max_turns=20``. Eight (the previous
+    default) was too tight for non-trivial repo navigation — a bullet
+    asserting a test exists in a moved file may take 3-4 Grep/Glob/Read
+    round-trips, and hitting the cap mid-investigation forced an
+    unverified/fail verdict despite the bullet being satisfied in HEAD.
+    """
+    import asyncio
+
+    from ap2 import verify
+
+    monkeypatch.delenv("AP2_VERIFY_JUDGE_MAX_TURNS", raising=False)
+
+    captured: dict = {}
+
+    class _OptionsRecorder:
+        def __init__(self, **kw):
+            captured["options"] = kw
+
+    async def _gen(prompt, options):  # noqa: ARG001
+        from ap2.tests.e2e._fakes import _FakeMsg
+        yield _FakeMsg('{"status": "pass", "rationale": "ok"}')
+
+    class _SDK:
+        ClaudeAgentOptions = _OptionsRecorder
+
+        @staticmethod
+        def query(*, prompt, options):
+            return _gen(prompt, options)
+
+    bullet = verify.VerifyBullet(kind="prose", text="some bullet")
+    asyncio.run(verify._judge_prose_bullet(
+        bullet,
+        project_root=Path("/tmp"),
+        sdk=_SDK,
+        diff_text="diff goes here",
+    ))
+
+    assert int(captured["options"]["max_turns"]) == 20, captured["options"]
+
+
+def test_judge_max_turns_env_override_still_works(monkeypatch):
+    """TB-137: bumping the default from 8 to 20 must not break the env
+    override path. Operators who want to tighten the budget for cost
+    reasons can still set ``AP2_VERIFY_JUDGE_MAX_TURNS=4`` and have it
+    flow through to the SDK options unchanged.
+    """
+    import asyncio
+
+    from ap2 import verify
+
+    monkeypatch.setenv("AP2_VERIFY_JUDGE_MAX_TURNS", "4")
+
+    captured: dict = {}
+
+    class _OptionsRecorder:
+        def __init__(self, **kw):
+            captured["options"] = kw
+
+    async def _gen(prompt, options):  # noqa: ARG001
+        from ap2.tests.e2e._fakes import _FakeMsg
+        yield _FakeMsg('{"status": "pass", "rationale": "ok"}')
+
+    class _SDK:
+        ClaudeAgentOptions = _OptionsRecorder
+
+        @staticmethod
+        def query(*, prompt, options):
+            return _gen(prompt, options)
+
+    bullet = verify.VerifyBullet(kind="prose", text="some bullet")
+    asyncio.run(verify._judge_prose_bullet(
+        bullet,
+        project_root=Path("/tmp"),
+        sdk=_SDK,
+        diff_text="diff goes here",
+    ))
+
+    assert int(captured["options"]["max_turns"]) == 4, captured["options"]
+
+
 def test_judge_prompt_instructs_to_treat_working_tree_as_authoritative():
     """The prose-judge prompt must tell the judge that when the diff and
     the working tree disagree, HEAD wins. Without this instruction the
