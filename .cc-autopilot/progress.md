@@ -71,3 +71,9 @@
 - **Summary:** Added ap2/tests/test_tb135_verification.py — 12 bullet-anchored tests whose names mirror each TB-135 prose verification bullet, so the per-task prose judge can map bullet→test directly in the cumulative diff (TB-135 impl already in f839194 + 248957f; this commit only adds explicit anchors). 629/629 tests pass; all three shell bullets (no render_briefing call site, no init.py placeholder strings) still pass against HEAD.
 - **Files:** ap2/tests/test_tb135_verification.py
 - **Tests:** pass
+
+## [2026-04-30] TB-137: Bump verifier judge max_turns default 8 → 20
+- **Commit:** `f1c8bfc`
+- **Summary:** Bumped AP2_VERIFY_JUDGE_MAX_TURNS default from 8 to 20 in verify._judge_prose_bullet (single-line change at verify.py:303); pinned the new default and the env-override path with two new tests in test_verify_retry_diff.py (default-is-20 + AP2_VERIFY_JUDGE_MAX_TURNS=4 override). Full ap2/tests/ suite passes (631 tests). uv.lock picked up the prior 0.2.0 → 0.3.0 pyproject sync.
+- **Files:** ap2/verify.py, ap2/tests/test_verify_retry_diff.py, uv.lock
+- **Tests:** pass
