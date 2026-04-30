@@ -23,3 +23,9 @@
 - **Summary:** Per-task verifier now resolves task_id → commit-subject `<task_id>:` → that commit's diff (with HEAD fallback) so retries of already-committed tasks judge against the real implementation diff instead of the daemon's bookkeeping diff. New `_find_task_commit` + `_git_show_for_task` helpers in verify.py; daemon._maybe_per_task_verify plumbs task.id through. 9 new unit tests + 1 e2e regression pin; 491/491 tests pass.
 - **Files:** ap2/verify.py, ap2/daemon.py, ap2/tests/test_verify_retry_diff.py, ap2/tests/e2e/test_verify_per_task.py
 - **Tests:** pass
+
+## [2026-04-30] TB-128: Status-report cron emits stale text; not reflecting current state
+- **Commit:** `16c56eb`
+- **Summary:** Two-layer fix for stale status-report cron: prompts.build_control_prompt now injects a fresh `## Current state` block (UTC `now:`, board counts, `git log -n 10`) and pins a `_STATUS_REPORT_CONTRACT` for the status-report job (use snapshot timestamp verbatim, re-read events.jsonl+TASKS.md, skip when idle); daemon._status_report_should_skip + run_cron gate short-circuits the SDK invocation when no interesting events appeared since the last cron_complete (positional walk, self-noise filters), emitting cron_skipped + advancing cron_state. cron.default.yaml prompt rewritten to match. 504/504 tests pass (11 new). Operator note: live `.cc-autopilot/cron.yaml` is fenced for task agents; daemon-side block + skip gate cover existing installs without requiring a cron_edit / re-bootstrap.
+- **Files:** ap2/cron.default.yaml, ap2/daemon.py, ap2/prompts.py, ap2/tests/test_prompts.py, ap2/tests/test_status_report_skip.py
+- **Tests:** pass
