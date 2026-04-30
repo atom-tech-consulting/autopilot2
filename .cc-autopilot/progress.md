@@ -47,3 +47,9 @@
 - **Summary:** Operator board ops (ap2 add/backlog/unfreeze/delete + new operator_queue_append MCP tool) now stage records in .cc-autopilot/operator_queue.jsonl; the daemon's _tick first stage drains them under board_file_lock with uuid-based idempotency in operator_queue_state.json, an audit line per op in operator_log.md, and queue depth surfaced by ap2 status. ID pre-allocation stays synchronous so ap2 add still prints "TB-N (queued; will land at next tick)". 561 tests pass (24 new for the queue + 2 new e2e tick tests).
 - **Files:** ap2/tools.py, ap2/cli.py, ap2/daemon.py, ap2/init.py, ap2/prompts.py, ap2/architecture.md, .cc-autopilot/.gitignore, ap2/tests/test_operator_queue.py, ap2/tests/e2e/test_operator_queue_tick.py, ap2/tests/test_cli.py, ap2/tests/e2e/test_verify.py
 - **Tests:** pass
+
+## [2026-04-30] TB-134: Reject ap2 add when description contains newlines
+- **Commit:** `bb04ae1`
+- **Summary:** cli.cmd_add, do_board_edit, and do_operator_queue_append now reject newline/CR in title, description, tags, and blocked_on with a clear "single line — break long content into briefing.md instead, or summarize to one line" message; CLI exits 1, MCP returns isError; SKILL.md documents the constraint; new unit tests in test_cli.py and test_tools.py; full pytest suite (574 tests) green.
+- **Files:** ap2/cli.py, ap2/tools.py, ap2/tests/test_cli.py, ap2/tests/test_tools.py, skills/ap2-task/SKILL.md
+- **Tests:** pass
