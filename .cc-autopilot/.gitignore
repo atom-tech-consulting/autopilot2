@@ -1,0 +1,30 @@
+
+# Runtime — per-user, not committed
+flag
+checkpoints/
+sessions/
+metrics/
+decisions.log
+context.json
+events.jsonl
+daemon.pid
+daemon.log
+paused
+cron_state.json
+mm_state.json
+auto_diagnose_state.json
+
+# Per-run prompt + stream dumps for failure diagnosis (kept only on failure)
+debug/
+
+# Pipeline log dirs (TB-81) — local debug-only, never committed
+pipelines/
+
+# Local/sandbox-specific env (secrets, channel IDs) — keep out of git
+env
+
+# Runtime fcntl locks (cron_state.json.lock, retry_state.json.lock, etc.)
+*.lock
+
+# On-disk backups created during ap2 upgrades
+*.bak

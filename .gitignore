@@ -22,6 +22,11 @@ dist/
 # OS
 .DS_Store
 
-# ap2 runtime (when running the daemon in this tree)
-.cc-autopilot/
+# ap2 runtime (when running the daemon in this tree). Intentionally
+# does NOT exclude `.cc-autopilot/` — this repo is itself managed by ap2,
+# so daemon-owned state files (progress.md, ideation_state.md, tasks/,
+# insights/, cron.yaml, retry_state.json, operator_log.md) get committed
+# alongside source. The runtime junk inside `.cc-autopilot/` (events.jsonl,
+# daemon.pid, mm_state.json, debug/, …) is filtered by `.cc-autopilot/.gitignore`,
+# which `ap2 init` writes.
 TASKS.md.lock
