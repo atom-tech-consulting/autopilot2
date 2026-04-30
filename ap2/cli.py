@@ -190,9 +190,11 @@ def _resolve_web_url(cfg: Config) -> str | None:
 
 
 _BRIEFING_TEMPLATE_HINT = (
-    "ap2 add: --briefing-file is required.\n"
+    "ap2 add: --briefing-file is required (or set $EDITOR for the\n"
+    "  git-commit-style editor flow).\n"
     "  Author a briefing markdown file first (H1 sets the title, an\n"
     "  optional `Tags: #foo #bar` line sets tags), then re-run as:\n"
+    "      ap2 add                                    # opens $EDITOR with the template\n"
     "      ap2 add --briefing-file <path>             # from a file\n"
     "      ap2 add --briefing-file -                  # from stdin\n"
     "  See ap2/init.py:BRIEFING_TEMPLATE for the canonical shape; the\n"
@@ -200,6 +202,88 @@ _BRIEFING_TEMPLATE_HINT = (
     "  this file to score the task — a missing briefing means no\n"
     "  scope-specific verification (TB-135)."
 )
+
+
+# TB-135: editor-driven authoring (git-commit-style). When `ap2 add` is
+# invoked without `--briefing-file`, fall back to opening $EDITOR against
+# this template and use the saved buffer as the briefing. Aborting the
+# editor (empty save, unchanged template, or non-zero exit) makes
+# `ap2 add` exit non-zero without mutating TASKS.md. The template is
+# intentionally distinct from `ap2.init.BRIEFING_TEMPLATE`: that one is
+# rendered post-add (TB-N is known) and used by the daemon-prep flow,
+# whereas this one is pre-add (TB-N is allocated *after* the briefing
+# parses) so the H1 has a placeholder rather than `{task_id}`.
+_EDITOR_TEMPLATE = (
+    "# (your title here — single line; no `TB-N` prefix, the daemon allocates the id)\n\n"
+    "Tags: #area #kind\n\n"
+    "## Goal\n\n"
+    "(one paragraph — what success looks like, why this matters)\n\n"
+    "## Scope\n\n"
+    "- (file / module to change)\n\n"
+    "## Design\n\n"
+    "(how this will be built — surface, data flow, edge cases)\n\n"
+    "## Verification\n\n"
+    "Concrete acceptance criteria the daemon's per-task verifier (TB-69)\n"
+    "runs after the agent's commit. Shell-command bullets (backtick-fenced\n"
+    "at the start of the bullet) are run automatically; prose bullets are\n"
+    "judged by an SDK call against the diff.\n\n"
+    "- `uv run pytest -q` — full suite passes\n"
+    "- (one or more concrete shell or prose bullets the verifier can score)\n\n"
+    "## Out of scope\n\n"
+    "- (what's explicitly NOT in this task)\n"
+)
+
+
+def _compose_briefing_via_editor() -> str | None:
+    """Open $EDITOR against `_EDITOR_TEMPLATE`; return the edited buffer.
+
+    Mirrors `git commit`'s editor-driven message authoring. Returns the
+    edited text on a clean save, or `None` if the operator aborted (any
+    of: $EDITOR unset, editor exited non-zero, saved buffer was empty,
+    or the buffer was unchanged from the template). The caller treats
+    `None` as a user abort and exits non-zero without mutating the
+    board — same contract as `git commit` aborting on an empty commit
+    message.
+
+    The temp file lives under tempfile.gettempdir() (so the operator's
+    swap files don't pollute the project tree) and is removed regardless
+    of editor exit. The full path is passed to the editor as a single
+    argv element so paths with spaces survive.
+    """
+    editor = os.environ.get("EDITOR", "").strip()
+    if not editor:
+        return None
+    import shlex
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".md", delete=False, prefix="ap2-briefing-",
+    ) as tf:
+        tf.write(_EDITOR_TEMPLATE)
+        tmp_path = tf.name
+    try:
+        # `$EDITOR` is canonically a shell-tokenized command (e.g.
+        # `vim -p` or `code --wait`), so split it the way git does.
+        cmd = shlex.split(editor) + [tmp_path]
+        try:
+            rc = subprocess.call(cmd)
+        except (FileNotFoundError, OSError):
+            return None
+        if rc != 0:
+            return None
+        text = Path(tmp_path).read_text()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    if not text.strip():
+        return None
+    if text == _EDITOR_TEMPLATE:
+        # Operator saved without changes — treat as an abort, same as
+        # `git commit` refusing an empty/unchanged commit message.
+        return None
+    return text
 
 
 # TB-135: convention parse — title from H1, tags from a `Tags:` line
@@ -260,22 +344,33 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     if not op:
         print(f"unknown section: {args.section}", file=sys.stderr)
         return 2
-    # TB-135: --briefing-file is now required. The auto-fill skeleton
-    # path (which produced briefings whose `## Verification` had only a
-    # placeholder bullet) is gone, so callers must author the briefing
-    # up-front. Without a real Verification section the per-task verifier
-    # has nothing scope-specific to score against.
-    if not args.briefing_file:
-        print(_BRIEFING_TEMPLATE_HINT, file=sys.stderr)
-        return 1
-    try:
-        briefing = _read_briefing_file(args.briefing_file)
-    except OSError as e:
-        print(f"ap2 add: {e}", file=sys.stderr)
-        return 1
+    # TB-135: briefing authoring is now required. Resolution order:
+    #   1. `--briefing-file <path>` (or `-` for stdin) — explicit caller
+    #      contract; what scripts and the ap2-task skill use.
+    #   2. `$EDITOR` — git-commit-style fallback when neither is set:
+    #      open the template in $EDITOR, use the saved buffer. Aborting
+    #      the editor (empty save, unchanged template, non-zero exit)
+    #      drops through to the usage hint and exits non-zero without
+    #      mutating TASKS.md.
+    #   3. Neither — print the usage hint, exit 1.
+    # The auto-fill skeleton path (which produced briefings whose
+    # `## Verification` had only a placeholder bullet) is gone — without
+    # a real Verification section the per-task verifier has nothing
+    # scope-specific to score against.
+    if args.briefing_file:
+        try:
+            briefing = _read_briefing_file(args.briefing_file)
+        except OSError as e:
+            print(f"ap2 add: {e}", file=sys.stderr)
+            return 1
+    else:
+        briefing = _compose_briefing_via_editor() or ""
+        if not briefing:
+            print(_BRIEFING_TEMPLATE_HINT, file=sys.stderr)
+            return 1
     if not briefing.strip():
         print(
-            "ap2 add: briefing file is empty — refusing.\n"
+            "ap2 add: briefing is empty — refusing.\n"
             "  An empty briefing means no scope-specific verification "
             "(TB-135).",
             file=sys.stderr,

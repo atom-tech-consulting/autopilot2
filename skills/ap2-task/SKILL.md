@@ -30,9 +30,15 @@ Editing `TASKS.md` directly from the human's clone causes ID collisions and merg
 
 ## ap2 add now requires a briefing file (TB-135)
 
-`ap2 add` no longer accepts free-form `-t`/`-d`/positional title args by themselves. You **must** pass `--briefing-file <path>` (or `--briefing-file -` for stdin); title and tags are parsed from the briefing's H1 and an optional `Tags:` line. The pre-TB-135 auto-fill skeleton is gone — without a real `## Verification` section the per-task verifier had no scope-specific scoring and tasks "passed" on the regression gate alone (TB-131 hit this on 2026-04-30).
+`ap2 add` no longer accepts free-form `-t`/`-d`/positional title args by themselves. You **must** supply a briefing one of three ways — title and tags are parsed from the briefing's H1 and an optional `Tags:` line:
 
-The canonical briefing template is in `ap2/init.py:BRIEFING_TEMPLATE` — H1, optional `Tags:` line, `## Goal`, `## Scope`, `## Design`, `## Verification`, `## Out of scope`. The daemon's per-task verifier (TB-69) reads `## Verification` to score the task's commit, so include at least one concrete shell or prose bullet there.
+- `--briefing-file <path>` — point the flag at a markdown file you wrote.
+- `--briefing-file -` — read the briefing from stdin (this skill's default — no temp file).
+- `ap2 add` with no args + `$EDITOR` set — git-commit-style: opens `$EDITOR` against the template and uses the saved buffer. Aborting the editor (empty save, unchanged template, non-zero exit) makes `ap2 add` exit non-zero. **This skill's flow uses `--briefing-file -` instead** so it works headless without an interactive terminal; the editor flow is for human operators at a tty.
+
+The pre-TB-135 auto-fill skeleton is gone — without a real `## Verification` section the per-task verifier had no scope-specific scoring and tasks "passed" on the regression gate alone (TB-131 hit this on 2026-04-30).
+
+**The canonical briefing template lives in `ap2/init.py:BRIEFING_TEMPLATE`** — H1, optional `Tags:` line, `## Goal`, `## Scope`, `## Design`, `## Verification`, `## Out of scope`. The daemon's per-task verifier (TB-69) reads `## Verification` to score the task's commit, so include at least one concrete shell or prose bullet there beyond the project-wide regression gate.
 
 ## Steps
 

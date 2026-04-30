@@ -845,6 +845,76 @@ def test_board_edit_add_with_briefing_text_succeeds(cfg, tmp_path):
     assert brief_path.read_text() == body
 
 
+def test_board_edit_non_empty_briefing_payload_unaffected_for_daemon_callers(cfg):
+    """TB-135 explicit pin: passing a non-empty `briefing` text payload
+    still succeeds for every add_* op so daemon-internal callers
+    (ideation, MM handler, operator-queue drain reconstructing add_*
+    ops) keep working. The new requirement only rejects empty/missing
+    briefing — non-empty briefings on add_ready / add_backlog /
+    add_frozen all land normally.
+
+    This is the symmetric happy-path companion to the three
+    `*_requires_briefing` tests above: they prove empty briefings are
+    rejected; this one proves non-empty briefings still go through.
+    """
+    body = (
+        "# Daemon-built briefing\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
+    for action, expected_section in (
+        ("add_ready", "Ready"),
+        ("add_backlog", "Backlog"),
+        ("add_frozen", "Frozen"),
+    ):
+        res = tools.do_board_edit(
+            cfg,
+            {
+                "action": action,
+                "title": f"daemon-style {action}",
+                "briefing": body,
+            },
+        )
+        out = _unwrap(res)
+        # TB-N issued, task lands in the expected section, briefing
+        # round-trips to disk under .cc-autopilot/tasks/.
+        assert out["task_id"].startswith("TB-"), (action, out)
+        brief_path = cfg.project_root / out["briefing_path"]
+        assert brief_path.exists(), (action, out)
+        assert brief_path.read_text() == body, action
+        b = Board.load(cfg.tasks_file)
+        assert b.find(out["task_id"])[0] == expected_section, action
+
+
+def test_operator_queue_append_non_empty_briefing_payload_succeeds(cfg, tmp_path):
+    """TB-135 happy-path companion at the operator-queue layer (the path
+    `ap2 add` and `@claude-bot add ...` both route through). Daemon
+    callers (MM handler, future ideation operator-queue use) pass a
+    real briefing payload; the queue accepts every add_* op and
+    materializes the briefing under .cc-autopilot/tasks/."""
+    body = (
+        "# MM-style briefing\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
+    for action in ("add_ready", "add_backlog", "add_frozen"):
+        res = tools.do_operator_queue_append(
+            cfg,
+            {
+                "op": action,
+                "title": f"queued {action}",
+                "briefing": body,
+            },
+        )
+        out = _unwrap(res)
+        assert out["task_id"].startswith("TB-"), (action, out)
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    assert queue_path.exists()
+    # Three records queued — one per add_* action.
+    lines = [
+        ln for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 3
+
+
 def test_operator_queue_append_add_backlog_requires_briefing(cfg, tmp_path):
     """The CLI `ap2 add` and MM-handler `operator_queue_append` paths both
     route through here; the gate must fire BEFORE TB-N pre-allocation so

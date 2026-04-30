@@ -405,11 +405,18 @@ _GOOD_BRIEFING = (
 )
 
 
-def test_add_requires_briefing_file(tmp_path: Path, capsys):
-    """TB-135 verification: `ap2 add` without `--briefing-file` exits
-    non-zero with a clear usage hint pointing at where to find the
-    canonical template. Nothing is queued; nothing lands in TASKS.md."""
+def test_add_requires_briefing_file(tmp_path: Path, monkeypatch, capsys):
+    """TB-135 verification: `ap2 add` without `--briefing-file` AND with no
+    `$EDITOR` set exits non-zero with a clear usage hint pointing at where
+    to find the canonical template. Nothing is queued; nothing lands in
+    TASKS.md.
+
+    EDITOR is explicitly unset so this test exercises the
+    no-briefing-no-editor path; the editor-driven flow has its own tests
+    below.
+    """
     cfg = _project(tmp_path)
+    monkeypatch.delenv("EDITOR", raising=False)
     before = cfg.tasks_file.read_text()
 
     rc = cmd_add(cfg, _add_args(briefing_file=None))
@@ -577,4 +584,144 @@ def test_add_rejects_newline_in_tag_flag(tmp_path: Path, capsys):
 
     assert rc == 1
     assert "single line" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# TB-135: editor-driven authoring fallback. When `--briefing-file` isn't
+# supplied AND `$EDITOR` is set, `ap2 add` opens the editor against the
+# template and uses the saved buffer as the briefing — git-commit-style.
+# Aborting (empty save, unchanged template, or non-zero exit) makes
+# `ap2 add` exit non-zero without mutating TASKS.md or queuing anything.
+
+
+def _fake_editor(tmp_path: Path, name: str, body: str) -> str:
+    """Write a one-shot fake-editor shell script that replaces the
+    target buffer with `body` and exits 0. Returns its absolute path
+    suitable for `EDITOR=<path>`."""
+    script = tmp_path / name
+    # `$1` is the temp-file path the CLI hands the editor.
+    script.write_text(
+        "#!/bin/sh\n"
+        "cat > \"$1\" <<'EOF'\n"
+        f"{body}"
+        + ("" if body.endswith("\n") else "\n")
+        + "EOF\n"
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_add_with_no_args_opens_editor_and_uses_saved_buffer(
+    tmp_path: Path, monkeypatch,
+):
+    """`ap2 add` (no args) with `$EDITOR` set opens the template,
+    operator saves a real briefing, and the add proceeds exactly as
+    if `--briefing-file` had been used. Pins the happy path of the
+    editor-driven flow."""
+    cfg = _project(tmp_path)
+    monkeypatch.setenv(
+        "EDITOR", _fake_editor(tmp_path, "ed-good.sh", _GOOD_BRIEFING),
+    )
+
+    rc = cmd_add(cfg, _add_args(briefing_file=None))
+
+    assert rc == 0
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None
+    # Briefing bytes round-tripped from $EDITOR's saved buffer onto disk.
+    assert found.briefing is not None
+    target = cfg.project_root / found.briefing
+    assert target.exists()
+    assert "## Verification" in target.read_text()
+
+
+def test_add_with_no_args_aborts_when_editor_saves_empty(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """Empty save (truncated buffer) is the editor-flow equivalent of
+    `git commit` aborting on an empty message: exit non-zero, mutate
+    nothing — no TB-N allocated, no TASKS.md touched, no operator-queue
+    record."""
+    cfg = _project(tmp_path)
+    # Editor truncates the buffer to empty.
+    script = tmp_path / "ed-empty.sh"
+    script.write_text("#!/bin/sh\n: > \"$1\"\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("EDITOR", str(script))
+    before_tasks = cfg.tasks_file.read_text()
+    before_claude = (cfg.project_root / "CLAUDE.md").read_text()
+
+    rc = cmd_add(cfg, _add_args(briefing_file=None))
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "--briefing-file" in err
+    # No TB-N leaked — CLAUDE.md unchanged.
+    assert (cfg.project_root / "CLAUDE.md").read_text() == before_claude
+    # TASKS.md unchanged.
+    assert cfg.tasks_file.read_text() == before_tasks
+    # Nothing queued.
+    queue = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    assert not queue.exists() or queue.read_text() == ""
+
+
+def test_add_with_no_args_aborts_when_editor_exits_nonzero(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """Non-zero editor exit (operator hit `:cq` in vim or killed the
+    process) is also an abort — same no-mutation contract as the empty
+    case."""
+    cfg = _project(tmp_path)
+    script = tmp_path / "ed-nonzero.sh"
+    script.write_text("#!/bin/sh\nexit 1\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("EDITOR", str(script))
+    before_tasks = cfg.tasks_file.read_text()
+
+    rc = cmd_add(cfg, _add_args(briefing_file=None))
+
+    assert rc == 1
+    assert cfg.tasks_file.read_text() == before_tasks
+    queue = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    assert not queue.exists() or queue.read_text() == ""
+
+
+def test_add_with_no_args_aborts_when_editor_unchanged(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """If the operator saves the template verbatim (no edits), treat
+    it as an abort — the placeholders aren't a real briefing. Mirrors
+    `git commit` refusing an unmodified commit-message template."""
+    from ap2.cli import _EDITOR_TEMPLATE
+
+    cfg = _project(tmp_path)
+    # Editor leaves the template untouched (no write).
+    script = tmp_path / "ed-noop.sh"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("EDITOR", str(script))
+    # Sanity-check fixture — confirm template has the placeholder so
+    # `text == _EDITOR_TEMPLATE` is the path being exercised.
+    assert "your title here" in _EDITOR_TEMPLATE
+    before_tasks = cfg.tasks_file.read_text()
+
+    rc = cmd_add(cfg, _add_args(briefing_file=None))
+
+    assert rc == 1
+    assert cfg.tasks_file.read_text() == before_tasks
+
+
+def test_compose_briefing_via_editor_returns_none_without_editor(monkeypatch):
+    """Direct unit on the helper: no `$EDITOR` set → return `None`
+    immediately (no temp file created, no editor spawned). Lets
+    `cmd_add` distinguish the no-editor path cleanly."""
+    from ap2.cli import _compose_briefing_via_editor
+
+    monkeypatch.delenv("EDITOR", raising=False)
+    assert _compose_briefing_via_editor() is None
 

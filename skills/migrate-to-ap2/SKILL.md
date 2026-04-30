@@ -100,9 +100,31 @@ After scaffolding succeeds, list the paths that should be tracked:
 
 If any of the legacy task sources (`TODO.md`, etc.) became redundant, ask the user whether to `git rm` them. Don't delete on your own.
 
+## Adding new tasks after migration: briefing required (TB-135)
+
+Once the migration lands, **future** `ap2 add` calls require a briefing
+file — the pre-TB-135 auto-fill skeleton is gone. Three ways to author
+the briefing (whichever fits the invocation context):
+
+- `ap2 add --briefing-file <path>` — point at a markdown file you wrote.
+- `ap2 add --briefing-file -` — read the briefing from stdin.
+- `ap2 add` (no args, with `$EDITOR` set) — git-commit-style: opens
+  `$EDITOR` against the canonical template and uses the saved buffer.
+
+The canonical template is at `ap2/init.py:BRIEFING_TEMPLATE` — H1 (title),
+optional `Tags:` line, `## Goal`, `## Scope`, `## Design`, `## Verification`,
+`## Out of scope`. The daemon's per-task verifier (TB-69) reads
+`## Verification` to score the task's commit, so include at least one
+concrete shell or prose bullet beyond the project-wide regression gate —
+without it, the verifier has nothing scope-specific to score against.
+
+Already-migrated tasks on disk are unaffected: the briefing requirement
+gates only **future** `add_*` calls.
+
 ## Rules
 
 - **Non-destructive on TASKS.md.** If the file already exists with content, never overwrite — show the user the old content vs. the proposed migration and let them decide.
 - **Idempotent.** Re-running on an already-migrated project should detect that and skip steps 1-2.
 - **Project-local.** Only modify files in the current project directory.
 - **No sudo.** Sandbox-user setup is out of scope for this skill — `ap2 doctor` will tell the user what to run.
+- **Briefing-required for future adds (TB-135).** The migration converts existing items in place; new tasks added after migration must be briefing-backed (`--briefing-file <path|->`, or `ap2 add` with `$EDITOR` set). The `/ap2-task` skill handles the briefing-authoring end-to-end.
