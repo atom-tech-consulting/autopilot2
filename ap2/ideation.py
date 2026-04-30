@@ -112,6 +112,12 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
 
     full_prompt = prompts.build_control_prompt(cfg, IDEATION_NAME, load_prompt(cfg))
     max_turns = int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT))
+    # TB-126: snapshot the state surface before ideation runs so the post-
+    # run state commit only stages paths ideation actually touched (new
+    # briefings, ideation_state.md, TASKS.md / CLAUDE.md from add_backlog,
+    # any insights). Briefings already in the working tree from a prior op
+    # do NOT ride along.
+    pre_snapshot = _daemon._snapshot_state_paths(cfg)
     timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
         cfg,
         sdk,
@@ -140,4 +146,8 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     # Always advance the cooldown — even on failure — so a broken
     # ideation agent doesn't get hammered every tick.
     mark_run(cfg.cron_state_file, IDEATION_NAME)
-    _daemon._commit_state_files(cfg, "state: ideation")
+    touched = _daemon._changed_state_paths(
+        pre_snapshot, _daemon._snapshot_state_paths(cfg)
+    )
+    if touched:
+        _daemon._commit_state_files(cfg, "state: ideation", paths=touched)

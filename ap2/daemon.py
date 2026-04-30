@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -345,7 +346,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         board_after = Board.load(cfg.tasks_file)
         loc = board_after.find(task.id)
         dest = loc[0] if loc else "?"
-        _commit_state_files(cfg, f"state: {task.id} → {dest}")
+        _commit_state_files(
+            cfg, f"state: {task.id} → {dest}",
+            paths=_task_state_paths(task),
+        )
         return
 
     # No violation. If consume failed without HEAD salvage we now do the
@@ -434,7 +438,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         board_after = Board.load(cfg.tasks_file)
         loc = board_after.find(task.id)
         dest = loc[0] if loc else "?"
-        _commit_state_files(cfg, f"state: {task.id} → {dest}")
+        _commit_state_files(
+            cfg, f"state: {task.id} → {dest}",
+            paths=_task_state_paths(task),
+        )
         return
     if parsed.status == "complete":
         # Project-wide regression gate: when AP2_VERIFY_CMD is set, run it
@@ -558,13 +565,18 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         commit=commit_hash,
         summary=parsed.summary[:300],
     )
-    # Commit state-file updates (TASKS.md, progress.md, CLAUDE.md) right after
-    # the task agent's own source-code commit. Reflects the post-task board
-    # location so reverts/bisects stay semantic.
+    # Commit state-file updates (TASKS.md, progress.md, retry_state.json,
+    # the task's briefing) right after the task agent's own source-code
+    # commit. Narrowed allowlist (TB-126) ensures unrelated dirty briefings
+    # in `.cc-autopilot/tasks/` don't ride along — `git log -- <file>`
+    # blames the right state commit on revert/bisect.
     board_after = Board.load(cfg.tasks_file)
     loc = board_after.find(task.id)
     dest = loc[0] if loc else "?"
-    _commit_state_files(cfg, f"state: {task.id} → {dest}")
+    _commit_state_files(
+        cfg, f"state: {task.id} → {dest}",
+        paths=_task_state_paths(task),
+    )
 
 
 def _handle_failure(
@@ -616,7 +628,13 @@ def _recover_orphans(cfg: Config) -> None:
         do_board_edit(cfg, {"action": "move_to_ready", "task_id": tid})
         events.append(cfg.events_file, "orphan_recovery", task=tid)
     if orphans:
-        _commit_state_files(cfg, f"state: recovered {len(orphans)} orphan(s): {', '.join(orphans)}")
+        # Orphan recovery only mutates TASKS.md (move_to_ready writes the
+        # board). retry_state / progress / briefings are not touched here.
+        _commit_state_files(
+            cfg,
+            f"state: recovered {len(orphans)} orphan(s): {', '.join(orphans)}",
+            paths=["TASKS.md"],
+        )
 
 
 async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
@@ -750,6 +768,10 @@ async def _run_control_agent(
 async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     prompt = prompts.build_control_prompt(cfg, job.name, job.prompt)
     events.append(cfg.events_file, "cron_start", job=job.name)
+    # TB-126: snapshot the state surface before the cron runs so we can
+    # commit ONLY paths the cron actually mutated. Without this, a leftover
+    # dirty briefing from a prior op rides along with the next cron commit.
+    pre_snapshot = _snapshot_state_paths(cfg)
     timed_out, error, stderr_tail, prompt_dump = await _run_control_agent(
         cfg,
         sdk,
@@ -780,7 +802,9 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     mark_run(cfg.cron_state_file, job.name)
     events.append(cfg.events_file, "cron_complete", job=job.name)
     # No-op for crons that didn't touch the board (e.g. status-report).
-    _commit_state_files(cfg, f"state: cron {job.name}")
+    touched = _changed_state_paths(pre_snapshot, _snapshot_state_paths(cfg))
+    if touched:
+        _commit_state_files(cfg, f"state: cron {job.name}", paths=touched)
 
 
 def _extract_text(msg) -> str:
@@ -1487,7 +1511,10 @@ async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
         board_after = Board.load(cfg.tasks_file)
         loc = board_after.find(task.id)
         dest = loc[0] if loc else "?"
-        _commit_state_files(cfg, f"state: {task.id} → {dest}")
+        _commit_state_files(
+            cfg, f"state: {task.id} → {dest}",
+            paths=_task_state_paths(task),
+        )
 
 
 def _pipeline_alive(pipeline: dict) -> bool:
@@ -1523,30 +1550,32 @@ def _pipeline_alive(pipeline: dict) -> bool:
     return True
 
 
-def _commit_state_files(cfg: Config, message: str) -> None:
-    """Stage + commit the daemon-owned state files if any are modified.
+def _commit_state_files(
+    cfg: Config,
+    message: str,
+    *,
+    paths: Iterable[str],
+) -> None:
+    """Stage + commit a narrow allowlist of daemon-owned state files.
 
-    Silently no-ops when nothing is staged (e.g. a status-report cron that
-    didn't touch the board). Failures emit `state_commit_error` events but
-    don't raise — a broken commit shouldn't wedge the daemon.
+    `paths` is a caller-supplied list of repo-relative paths the current
+    operation actually touched (TB-126). Only paths inside the daemon-owned
+    state set (`_STATE_FILE_NAMES` ∪ `_STATE_DIRS`) AND that exist on disk
+    are staged — anything else is dropped defensively. This keeps state
+    commits semantically narrow: a `state: TB-N → Backlog` commit no longer
+    rides along with an unrelated briefing that happened to be dirty in the
+    working tree from a prior operation.
+
+    Silently no-ops when the working tree is clean for the supplied paths
+    (e.g. a status-report cron that didn't touch any state file). Failures
+    emit `state_commit_error` events but don't raise — a broken commit
+    shouldn't wedge the daemon.
     """
     # Silent no-op when the project isn't a git repo — lets tests and non-git
     # experimentation use ap2 without every tick emitting a commit error.
     if not (cfg.project_root / ".git").exists():
         return
-    rel_paths: list[str] = []
-    for name in _STATE_FILE_NAMES:
-        p = cfg.project_root / name
-        if p.exists():
-            rel_paths.append(name)
-    for name in _STATE_DIRS:
-        p = cfg.project_root / name
-        # Skip empty dirs — `git commit -- <empty_dir>` errors with
-        # "pathspec did not match" since there's nothing tracked or staged
-        # under it. Any contents (including untracked files about to be
-        # `git add`'d below) is enough for the pathspec to match.
-        if p.exists() and any(p.iterdir()):
-            rel_paths.append(name)
+    rel_paths = _filter_state_paths(cfg, paths)
     if not rel_paths:
         return
     root = str(cfg.project_root)
@@ -1571,6 +1600,120 @@ def _commit_state_files(cfg: Config, message: str) -> None:
     if commit.returncode != 0:
         events.append(cfg.events_file, "state_commit_error",
                       stage="commit", message=message, error=commit.stderr[:300])
+
+
+def _filter_state_paths(cfg: Config, paths: Iterable[str]) -> list[str]:
+    """Filter caller-supplied paths to existing files inside the state set.
+
+    Defensive: a caller threading the wrong path through (e.g. a source file)
+    silently no-ops rather than letting a state commit pull in unrelated
+    code. Dedupes while preserving caller order so commit log reads
+    naturally. Callers may pass POSIX-style or `Path`-style relative strings.
+    """
+    allowed_files = set(_STATE_FILE_NAMES)
+    allowed_dirs = tuple(_STATE_DIRS)
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in paths:
+        # Normalize: posix slashes, drop a `./` prefix if present. NOT a
+        # `lstrip("./")` — that's a charset strip and would eat the leading
+        # dot in `.cc-autopilot/...`.
+        rel = str(p).replace("\\", "/")
+        if rel.startswith("./"):
+            rel = rel[2:]
+        if rel in seen:
+            continue
+        # Path must be either an explicit state file or live inside a state dir.
+        if rel not in allowed_files and not any(
+            rel == d or rel.startswith(d.rstrip("/") + "/")
+            for d in allowed_dirs
+        ):
+            continue
+        full = cfg.project_root / rel
+        if not full.exists():
+            continue
+        seen.add(rel)
+        out.append(rel)
+    return out
+
+
+def _snapshot_state_paths(cfg: Config) -> dict[str, str]:
+    """Hash every state-relevant path's working-tree content.
+
+    Used by control-agent paths (cron tick, ideation) where we don't know
+    statically which subset of the state surface the agent will touch.
+    Caller compares pre/post snapshots via `_changed_state_paths` and
+    threads the delta into `_commit_state_files`.
+
+    Missing files are absent from the dict (so `_changed_state_paths` sees
+    "appeared" / "disappeared" as a hash mismatch). Unreadable files map to
+    a sentinel so a transient I/O error doesn't crash the snapshot.
+    """
+    import hashlib
+
+    out: dict[str, str] = {}
+
+    def _hash(p: Path) -> str | None:
+        if not p.is_file():
+            return None
+        try:
+            return hashlib.sha1(p.read_bytes()).hexdigest()
+        except OSError:
+            return "unreadable"
+
+    for name in _STATE_FILE_NAMES:
+        h = _hash(cfg.project_root / name)
+        if h is not None:
+            out[name] = h
+    for d in _STATE_DIRS:
+        dpath = cfg.project_root / d
+        if not dpath.is_dir():
+            continue
+        for f in dpath.rglob("*"):
+            if not f.is_file():
+                continue
+            try:
+                rel = str(f.relative_to(cfg.project_root))
+            except ValueError:
+                continue
+            h = _hash(f)
+            if h is not None:
+                out[rel.replace("\\", "/")] = h
+    return out
+
+
+def _changed_state_paths(
+    before: dict[str, str], after: dict[str, str]
+) -> list[str]:
+    """Return state-relevant paths whose hash differs between snapshots.
+
+    Includes paths that appeared (new file) or disappeared (deletion). Sort
+    keeps commit-log diffs deterministic.
+    """
+    keys = set(before) | set(after)
+    return sorted(k for k in keys if before.get(k) != after.get(k))
+
+
+def _task_state_paths(task) -> list[str]:
+    """Repo-relative state paths a task-completion (or failure) operation
+    can dirty. Used by `run_task` and the pipeline-pending sweep.
+
+    - `TASKS.md`: every board move.
+    - `progress.md`: `_append_progress` on Complete.
+    - `retry_state.json`: `bump_attempt` / `reset_attempt`.
+    - The task's briefing: `_append_attempts` on every failure mode.
+
+    Files that exist but weren't actually modified are filtered downstream
+    by `git diff --cached --quiet`, so passing a fixed superset is safe.
+    """
+    paths = [
+        "TASKS.md",
+        ".cc-autopilot/progress.md",
+        ".cc-autopilot/retry_state.json",
+    ]
+    if task.briefing:
+        paths.append(str(task.briefing).replace("\\", "/"))
+    return paths
 
 
 async def main_loop(cfg: Config) -> None:

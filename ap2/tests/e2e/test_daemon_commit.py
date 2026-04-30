@@ -38,7 +38,7 @@ def test_commit_state_files_noop_without_git(e2e_project, tmp_path):
     """When the project isn't a git repo, the helper silently returns."""
     cfg = e2e_project()
     (cfg.project_root / "TASKS.md").write_text("modified content\n")
-    _commit_state_files(cfg, "state: TB-1 → Complete")
+    _commit_state_files(cfg, "state: TB-1 → Complete", paths=["TASKS.md"])
     evts = events.tail(cfg.events_file, 10)
     assert not any(e["type"] == "state_commit_error" for e in evts)
 
@@ -52,7 +52,7 @@ def test_commit_state_files_no_op_when_clean(e2e_project):
     _git(["commit", "-m", "baseline"], cfg.project_root)
     sha_before = _git(["rev-parse", "HEAD"], cfg.project_root).stdout.strip()
 
-    _commit_state_files(cfg, "state: nothing changed")
+    _commit_state_files(cfg, "state: nothing changed", paths=["TASKS.md"])
 
     sha_after = _git(["rev-parse", "HEAD"], cfg.project_root).stdout.strip()
     assert sha_before == sha_after
@@ -70,7 +70,7 @@ def test_commit_state_files_commits_dirty_files(e2e_project):
     (cfg.project_root / "TASKS.md").write_text(
         "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n## Complete\n\n- [x] new\n\n## Frozen\n"
     )
-    _commit_state_files(cfg, "state: TB-5 → Complete")
+    _commit_state_files(cfg, "state: TB-5 → Complete", paths=["TASKS.md"])
 
     log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
     assert "state: TB-5 → Complete" in log
@@ -100,7 +100,10 @@ def test_commit_state_files_includes_briefing_dir(e2e_project):
         "\n## Complete\n\n## Frozen\n"
     )
 
-    _commit_state_files(cfg, "state: cron ideation")
+    _commit_state_files(
+        cfg, "state: cron ideation",
+        paths=["TASKS.md", ".cc-autopilot/tasks/auto-filled-brief.md"],
+    )
 
     log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
     assert "state: cron ideation" in log
@@ -133,7 +136,10 @@ def test_commit_state_files_includes_ideation_state_md(e2e_project):
         "## Mission alignment\nServing the Mission per TB-87 / TB-89.\n"
     )
 
-    _commit_state_files(cfg, "state: cron ideation")
+    _commit_state_files(
+        cfg, "state: cron ideation",
+        paths=[".cc-autopilot/ideation_state.md"],
+    )
 
     log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
     assert "state: cron ideation" in log
@@ -157,13 +163,87 @@ def test_commit_state_files_picks_up_briefing_only_change(e2e_project):
     # Modify only the briefing, not TASKS.md / CLAUDE.md / progress.md.
     brief.write_text(brief.read_text() + "\n## Attempts\n- second draft\n")
 
-    _commit_state_files(cfg, "state: TB-1 → Backlog")
+    _commit_state_files(
+        cfg, "state: TB-1 → Backlog",
+        paths=[".cc-autopilot/tasks/evolving.md"],
+    )
 
     log = _git(["log", "--oneline", "-1"], cfg.project_root).stdout
     assert "state: TB-1 → Backlog" in log
     # Confirm the diff actually includes the briefing change.
     diff = _git(["log", "-1", "--name-only", "--format="], cfg.project_root).stdout
     assert "evolving.md" in diff
+
+
+def test_commit_state_files_skips_paths_outside_allowlist(e2e_project):
+    """Defense-in-depth: a caller threading a non-state path through is
+    silently dropped — the helper never stages source code or anything
+    outside `_STATE_FILE_NAMES` ∪ `_STATE_DIRS`. Without this, a buggy
+    caller could pull arbitrary files into a `state:` commit."""
+    cfg = e2e_project()
+    _git_init(cfg.project_root)
+    src = cfg.project_root / "src.py"
+    src.write_text("# original\n")
+    _git(["add", "TASKS.md", "CLAUDE.md", "src.py"], cfg.project_root)
+    _git(["commit", "-m", "baseline"], cfg.project_root)
+    sha_before = _git(["rev-parse", "HEAD"], cfg.project_root).stdout.strip()
+
+    # Dirty BOTH a state file and a non-state file.
+    (cfg.project_root / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n"
+        "- [ ] **TB-9** **dirty marker**\n\n"
+        "## Backlog\n\n## Complete\n\n## Frozen\n"
+    )
+    src.write_text("# tampered\n")
+
+    _commit_state_files(
+        cfg, "state: should ignore src.py",
+        paths=["TASKS.md", "src.py"],
+    )
+
+    sha_after = _git(["rev-parse", "HEAD"], cfg.project_root).stdout.strip()
+    assert sha_before != sha_after, "state commit must still fire for TASKS.md"
+    diff = _git(["log", "-1", "--name-only", "--format="], cfg.project_root).stdout
+    assert "TASKS.md" in diff
+    assert "src.py" not in diff
+    # src.py stays dirty — the helper never staged it.
+    status = _git(["status", "--porcelain"], cfg.project_root).stdout
+    assert "src.py" in status
+
+
+def test_commit_state_files_does_not_bundle_unrelated_dirty_briefing(e2e_project):
+    """TB-126 regression: the daemon used to blindly `git add -- .cc-autopilot/tasks`,
+    so a briefing left dirty by an earlier op rode along with the next state
+    commit. With explicit allowlists, only the briefing(s) in `paths` get
+    staged — unrelated dirty briefings stay dirty for the op that owns them.
+    """
+    cfg = e2e_project()
+    _git_init(cfg.project_root)
+    cfg.tasks_dir.mkdir(parents=True, exist_ok=True)
+    mine = cfg.tasks_dir / "mine.md"
+    other = cfg.tasks_dir / "other.md"
+    mine.write_text("# my briefing\n")
+    other.write_text("# other briefing\n")
+    _git(["add", "TASKS.md", "CLAUDE.md",
+          ".cc-autopilot/tasks/mine.md", ".cc-autopilot/tasks/other.md"],
+         cfg.project_root)
+    _git(["commit", "-m", "baseline"], cfg.project_root)
+
+    # BOTH briefings dirty — but only `mine.md` belongs to the current op.
+    mine.write_text("# my briefing\n\n## Attempts\n- this run\n")
+    other.write_text("# other briefing\n\nstray edit from a prior op\n")
+
+    _commit_state_files(
+        cfg, "state: TB-1 → Backlog",
+        paths=["TASKS.md", ".cc-autopilot/tasks/mine.md"],
+    )
+
+    diff = _git(["log", "-1", "--name-only", "--format="], cfg.project_root).stdout
+    assert "mine.md" in diff
+    assert "other.md" not in diff
+    # `other.md` stays dirty so the next op (whoever owns it) commits it.
+    status = _git(["status", "--porcelain"], cfg.project_root).stdout
+    assert "other.md" in status
 
 
 def test_tick_creates_state_commit_on_task_complete(e2e_project):
@@ -190,6 +270,47 @@ def test_tick_creates_state_commit_on_task_complete(e2e_project):
     assert "state: TB-5 → Complete" in log
     board = Board.load(cfg.tasks_file)
     assert board.find("TB-5")[0] == "Complete"
+
+
+def test_tick_state_commit_does_not_pull_in_unrelated_briefing(e2e_project):
+    """TB-126 end-to-end: a tick that completes TB-5 must NOT bundle a
+    briefing for an unrelated task that happened to be dirty in the working
+    tree (e.g. left over from a prior operation). The TB-5 state commit
+    should touch ONLY TB-5's path-set."""
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+    _git_init(cfg.project_root)
+    # Track an UNRELATED briefing at baseline so this run can dirty it
+    # without staging it.
+    cfg.tasks_dir.mkdir(parents=True, exist_ok=True)
+    other = cfg.tasks_dir / "stray-other-briefing.md"
+    other.write_text("# stray briefing\n\nleft dirty by a prior op\n")
+    _git(["add", "TASKS.md", "CLAUDE.md",
+          ".cc-autopilot/tasks/stray-other-briefing.md"], cfg.project_root)
+    _git(["commit", "-m", "baseline"], cfg.project_root)
+    # Re-dirty `stray` AFTER baseline — simulates a leftover from an
+    # unrelated op that didn't get committed.
+    other.write_text("# stray briefing\n\ndirty leftover\n")
+
+    sdk = FakeSDK()
+    sdk.on(
+        "## Task\nTB-5",
+        tool_call_respond(
+            "report_result",
+            {"status": "complete", "commit": "abc12345",
+             "summary": "did it", "files_changed": "a.py"},
+        ),
+    )
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    # The state commit fired for TB-5 → Complete.
+    log = _git(["log", "--oneline"], cfg.project_root).stdout
+    assert "state: TB-5 → Complete" in log
+    # And it did NOT pull in the stray briefing.
+    diff = _git(["log", "-1", "--name-only", "--format="], cfg.project_root).stdout
+    assert "stray-other-briefing.md" not in diff
+    # The stray is still dirty — the next op that owns it will commit it.
+    status = _git(["status", "--porcelain"], cfg.project_root).stdout
+    assert "stray-other-briefing.md" in status
 
 
 def test_tick_state_commit_reflects_backlog_on_blocked_task(e2e_project):
