@@ -177,6 +177,101 @@ def test_verifier_partial_with_unverified_prose_completes_with_event(e2e_project
     assert "pass" in statuses and "unverified" in statuses
 
 
+def test_verifier_uses_task_commit_diff_on_retry_not_head(e2e_project):
+    """TB-127 regression pin: on retry of a task whose first attempt already
+    committed an implementation, the prose-bullet judge must see the
+    implementation diff (the `<task_id>: ...` commit), NOT HEAD's daemon
+    bookkeeping diff.
+
+    Setup mirrors the bug observed live (TB-122 / TB-123 on 2026-04-30):
+      1. An "implementation commit" with subject `TB-60: implement foo`
+         introduces `foo.py`.
+      2. A daemon `state:` commit on top — this is what HEAD points at
+         when the retry tick begins.
+      3. A task is seeded Ready with a prose bullet referring to `foo.py`.
+      4. The fake task agent emits `report_result(complete)` without
+         making a new commit (the agent correctly recognized the work is
+         already done).
+      5. The fake judge inspects the diff it receives and passes only if
+         it contains `foo.py` + `def foo`.
+
+    Before the fix: judge would receive HEAD's diff (TASKS.md only), say
+    fail, task lands in Backlog. After the fix: judge receives the
+    implementation commit's diff, says pass, task lands in Complete.
+    """
+    import subprocess
+
+    def _git(args: list[str], cwd) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "-C", str(cwd)] + args,
+            capture_output=True, text=True, check=True,
+        )
+
+    cfg = e2e_project()
+    root = cfg.project_root
+
+    # Init git, plant baseline + implementation + state commit.
+    _git(["init", "--initial-branch=main"], root)
+    _git(["config", "user.email", "test@example.com"], root)
+    _git(["config", "user.name", "Test"], root)
+    _git(["commit", "--allow-empty", "-m", "init"], root)
+
+    (root / "foo.py").write_text("def foo():\n    return 42\n")
+    _git(["add", "foo.py"], root)
+    _git(["commit", "-m", "TB-60: implement foo"], root)
+
+    # Daemon state commit on top — simulates what HEAD looks like when
+    # the retry tick begins.
+    (root / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n"
+        "## Complete\n\n## Frozen\n"
+    )
+    _git(["add", "TASKS.md"], root)
+    _git(["commit", "-m", "state: TB-60 → Backlog"], root)
+
+    # Seed Ready with a prose-bullet briefing.
+    _seed_ready_with_briefing(
+        cfg, "TB-60",
+        briefing_section=(
+            "- `true` — shell bullet passes\n"
+            "- The diff adds `foo.py` with a `def foo` definition\n"
+        ),
+    )
+
+    sdk = FakeSDK()
+    _complete_responder(sdk, "TB-60")
+
+    # Custom judge responder: pass iff the diff carries the implementation
+    # file. This is the discriminator — without TB-127's fix the judge
+    # would see only TASKS.md and the assertion below would fail.
+    captured: dict = {}
+
+    async def _judge_gen(prompt, options):  # noqa: ARG001
+        captured["prompt"] = prompt
+        from ap2.tests.e2e._fakes import _FakeMsg
+        if "foo.py" in prompt and "def foo" in prompt:
+            yield _FakeMsg('{"status": "pass", "rationale": "foo.py present"}')
+        else:
+            yield _FakeMsg('{"status": "fail", "rationale": "no foo.py in diff"}')
+
+    sdk.on("evaluating ONE acceptance bullet", _judge_gen)
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    # The judge actually got called.
+    assert "prompt" in captured, "judge responder was never invoked"
+    # Pin the discriminator: the implementation file landed in the diff.
+    assert "foo.py" in captured["prompt"]
+    assert "def foo" in captured["prompt"]
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-60")[0] == "Complete", (
+        "task should land in Complete because the prose judge saw the real "
+        "implementation diff and passed; if this asserts Backlog the verifier "
+        "is back to feeding HEAD-only diffs to the judge (TB-127 regression)."
+    )
+
+
 def test_add_backlog_writes_template_when_briefing_omitted():
     """Pin the auto-fill: do_board_edit add_backlog without `briefing` writes
     the BRIEFING_TEMPLATE, including the `## Verification` section."""

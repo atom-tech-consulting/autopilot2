@@ -349,12 +349,80 @@ def _git_show_head(project_root: Path) -> str:
     return r.stdout if r.returncode == 0 else ""
 
 
+def _find_task_commit(project_root: Path, task_id: str) -> str | None:
+    """Return the SHA of the most recent commit reachable from HEAD whose
+    subject begins with `<task_id>:` (the convention pinned by the task-agent
+    prompt — see `daemon._infer_result_from_head`).
+
+    On retry of a task whose first attempt already committed an
+    implementation, HEAD points at a daemon `state:` bookkeeping commit
+    (TASKS.md + retry_state.json + briefing Attempts) — `git show HEAD` then
+    only contains those board-move artifacts. Diffing prose-bullet
+    judgments against that hallucinates "no new tests added" / "diff
+    contains no changes to file X" even though the work is reachable a few
+    commits back. TB-127. By walking the log for the task-id-prefixed
+    subject, we hand the prose judge the actual implementation diff
+    regardless of whether the agent's commit is at HEAD or buried under
+    daemon state commits.
+
+    Returns None if the project isn't a git repo, the log call fails, or
+    no commit subject matches the convention.
+    """
+    if not (project_root / ".git").exists():
+        return None
+    # Bound the walk: 200 commits is far more than any retry chain produces.
+    log = subprocess.run(
+        [
+            "git", "-C", str(project_root),
+            "log", "-200", "--format=%H%x00%s", "HEAD",
+        ],
+        capture_output=True, text=True,
+    )
+    if log.returncode != 0:
+        return None
+    import re as _re
+    for line in log.stdout.splitlines():
+        if "\x00" not in line:
+            continue
+        sha, subject = line.split("\x00", 1)
+        # Match `daemon._infer_result_from_head` exactly: the first
+        # colon-or-whitespace-delimited token must equal `task_id`. This
+        # avoids substring false positives (e.g. "TB-12" in a subject for
+        # "TB-127: ...").
+        first_token = _re.split(r"[:\s]", subject, maxsplit=1)[0]
+        if first_token == task_id:
+            return sha
+    return None
+
+
+def _git_show_for_task(project_root: Path, task_id: str | None) -> str:
+    """Return `git show <sha>` for the task's implementation commit if one
+    is reachable from HEAD, else fall back to `git show HEAD`.
+
+    `task_id=None` preserves the legacy behavior (verify_task callers that
+    haven't been updated, smoke tests, etc.). When `task_id` is provided
+    we prefer the dedicated commit so retries (where HEAD is a daemon
+    state commit) still judge against the real implementation diff. TB-127.
+    """
+    if task_id:
+        sha = _find_task_commit(project_root, task_id)
+        if sha:
+            r = subprocess.run(
+                ["git", "-C", str(project_root), "show", sha],
+                capture_output=True, text=True,
+            )
+            if r.returncode == 0:
+                return r.stdout
+    return _git_show_head(project_root)
+
+
 async def verify_task(
     *,
     briefing_text: str | None,
     project_root: Path,
     timeout_s: int = 300,
     sdk=None,
+    task_id: str | None = None,
 ) -> VerifyVerdict | None:
     """Run the per-task verifier. Returns None when there's nothing to check.
 
@@ -364,6 +432,13 @@ async def verify_task(
       - The section is present but has no bullets.
 
     The skip cases let pre-TB-69 tasks proceed unchanged through the daemon.
+
+    `task_id` (TB-127) is used to resolve which commit's diff to hand the
+    prose-bullet judge. When provided, we look for a commit whose subject
+    starts with `<task_id>:` (the agent commit-prefix convention) and diff
+    against that — covering the retry case where HEAD is a daemon
+    bookkeeping commit and the real implementation is one or more commits
+    back. Without `task_id` we fall back to `git show HEAD`.
     """
     if briefing_text is None:
         return None
@@ -389,7 +464,7 @@ async def verify_task(
                 ))
                 continue
             if diff_text is None:
-                diff_text = _git_show_head(project_root)
+                diff_text = _git_show_for_task(project_root, task_id)
             results.append(await _judge_prose_bullet(
                 b, project_root=project_root, sdk=sdk, diff_text=diff_text,
             ))

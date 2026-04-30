@@ -1286,6 +1286,13 @@ async def _maybe_per_task_verify(cfg: Config, sdk, task) -> "verify.VerifyVerdic
         project_root=cfg.project_root,
         timeout_s=cfg.verify_timeout_s,
         sdk=sdk,
+        # TB-127: hand the verifier the task id so prose-bullet judging
+        # can locate the task's actual implementation commit (subject
+        # `<task.id>: ...`) instead of HEAD. On retries of an
+        # already-committed task, HEAD is a daemon state-bookkeeping
+        # commit; without `task_id` the prose judge sees only that and
+        # hallucinates "no changes to file X".
+        task_id=task.id,
     )
 
 
