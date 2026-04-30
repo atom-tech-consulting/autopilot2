@@ -9,6 +9,7 @@ agent having to know them.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import ssl
@@ -23,6 +24,19 @@ from .board import Board, locked_board
 from .config import Config, bump_next_task_id
 from .cron import update_job
 from .init import render_briefing
+
+
+# TB-123: contextvar plumb so `do_cron_propose` can stamp the calling task's
+# TB-id onto the `cron_proposed` event without forcing the agent to pass its
+# own id through the tool args. `daemon.run_task` sets this before awaiting
+# `sdk.query(...)` and resets it on exit. The MCP tool handlers run in the
+# same asyncio task as run_task, so the value is visible during dispatch.
+# Tests that call `do_cron_propose` directly (no daemon) see the default ""
+# and the event simply omits `proposed_by_task` — that's fine for the unit
+# shape; the e2e test exercises the daemon-set path.
+_task_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "ap2_task_id", default="",
+)
 
 
 def slugify(text: str, max_len: int = 40) -> str:
@@ -255,11 +269,16 @@ def do_task_complete(cfg: Config, args: dict) -> dict:
     """Acknowledge a `task_complete` tool call from a task agent (TB-101).
 
     The structured payload (status / commit / summary / files_changed /
-    tests_passed / cron) is captured by `daemon.run_task` walking the
-    SDK message stream — this handler exists only to give the SDK a
-    valid response so the agent doesn't loop or treat the call as
-    failed. No state mutation here; the daemon owns the routing
-    decision after the query returns.
+    tests_passed) is captured by `daemon.run_task` walking the SDK
+    message stream — this handler exists only to give the SDK a valid
+    response so the agent doesn't loop or treat the call as failed. No
+    state mutation here; the daemon owns the routing decision after the
+    query returns.
+
+    TB-123: cron-proposal moved off `report_result` and into a dedicated
+    `cron_propose` MCP tool — the `cron` arg is no longer part of the
+    schema. Pre-existing `cron_proposed` event semantics are preserved
+    via `do_cron_propose`.
 
     Replaces the `RESULT:\\n status: ...` free-text contract that
     `result.py` parsed via regex.
@@ -268,6 +287,75 @@ def do_task_complete(cfg: Config, args: dict) -> dict:
     if not isinstance(status, str) or not status.strip():
         return _err("status is required")
     return _ok(f"task_complete acknowledged (status={status})")
+
+
+def do_cron_propose(cfg: Config, args: dict) -> dict:
+    """Propose a recurring cron job for operator review (TB-123).
+
+    Task agents call this to surface "while doing X I noticed Y should
+    fire on a schedule" without mutating `cron.yaml` directly. Pre-TB-123
+    this lived as a JSON-stringified `cron=` field on `report_result`;
+    the dedicated tool gets:
+      - structured args (`name` / `schedule` / `prompt` / `rationale`),
+        no in-string JSON escaping,
+      - per-proposal `cron_proposed` events with rationale (the operator
+        review surface — `ap2 cron list` etc. — is what makes them live),
+      - failure isolation: a malformed call doesn't take down the
+        result-reporting path.
+
+    Symmetric with control agents' `cron_edit` (direct mutation, only
+    for cron + ideation control agents — TB-101's privilege split). Task
+    agents get the proposal layer; operator promotes via review.
+
+    Args:
+      name: short stable identifier, e.g. "weekly-perf-snapshot"
+      schedule: interval string ("1h" / "1d" / "30m") — same vocabulary
+        cron.yaml accepts; not parsed/validated here, just recorded for
+        the operator's read.
+      prompt: the prompt body the cron job will use when fired.
+      rationale: one short sentence on why this should fire on a
+        schedule. Becomes part of the audit trail.
+
+    Emits `cron_proposed` event with all four fields plus
+    `proposed_by_task` (taken from the daemon-set contextvar). Does NOT
+    mutate `cron.yaml` — the operator review layer handles promotion.
+    """
+    name = (args.get("name") or "").strip()
+    schedule = (args.get("schedule") or "").strip()
+    prompt = (args.get("prompt") or "").strip()
+    rationale = (args.get("rationale") or "").strip()
+
+    missing = [
+        label
+        for label, value in (
+            ("name", name), ("schedule", schedule),
+            ("prompt", prompt), ("rationale", rationale),
+        )
+        if not value
+    ]
+    if missing:
+        return _err(
+            f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} required"
+        )
+
+    # `proposed_by_task` is sourced from the daemon's contextvar plumb. If
+    # not set (unit tests that bypass the daemon, or a control-agent
+    # context), `task_id` is "" and the field is omitted.
+    task_id = _task_id_ctx.get()
+    payload: dict = {
+        "name": name,
+        "schedule": schedule,
+        "prompt": prompt,
+        "rationale": rationale,
+    }
+    if task_id:
+        payload["proposed_by_task"] = task_id
+    events.append(cfg.events_file, "cron_proposed", **payload)
+    return _ok(
+        f"proposed cron job {name!r} ({schedule}) for review",
+        name=name,
+        schedule=schedule,
+    )
 
 
 def do_git_log_grep(cfg: Config, args: dict) -> dict:
@@ -632,24 +720,54 @@ def build_mcp_server(cfg: Config):
         "the end of your run instead of emitting a `RESULT:` text block. "
         "Args: status='complete'|'incomplete'|'blocked'|'failed' (required); "
         "commit=<7-40 char sha or empty>; summary=<one sentence>; "
-        "files_changed=<comma-separated paths>; tests_passed='true'|'false'; "
-        "cron=<JSON list of {action,name,interval,prompt} dicts, or empty>.",
+        "files_changed=<comma-separated paths>; tests_passed='true'|'false'. "
+        "To propose a recurring cron job, call `cron_propose` separately — "
+        "it is not bundled into this result (TB-123).",
         # All-string schema — every other MCP tool in this server uses str-
         # only fields. `list` / `bool` types in the schema correlated with
         # Claude Code refusing to surface the tool in earlier smoke runs;
         # strings round-trip cleanly and the daemon-side capture parses
-        # `tests_passed` / `files_changed` / `cron` from their string forms.
+        # `tests_passed` / `files_changed` from their string forms.
+        #
+        # TB-123: `cron` field dropped — proposals are now their own MCP
+        # tool (`cron_propose`) so each proposal gets a structured arg
+        # surface, its own event, and failure isolation from result
+        # reporting.
         {
             "status": str,
             "commit": str,
             "summary": str,
             "files_changed": str,
             "tests_passed": str,
-            "cron": str,
         },
     )
     async def report_result(args):
         return do_task_complete(cfg, args)
+
+    @tool(
+        "cron_propose",
+        "Propose a recurring cron job for operator review (TB-123). Use this "
+        "when, while working on a task, you notice that some operation should "
+        "fire on a schedule (e.g. a weekly perf snapshot, an hourly health "
+        "check). The proposal is queued for operator review — it does NOT "
+        "mutate cron.yaml directly. Symmetric with control agents' "
+        "`cron_edit` (which DOES mutate, but is unavailable to task agents). "
+        "Each call emits a `cron_proposed` event with the calling task's "
+        "TB-id, so you can call it multiple times in one task — each "
+        "proposal is independent. Args: name (short stable identifier, "
+        "e.g. 'weekly-perf-snapshot'); schedule (interval like '1h' / '1d' "
+        "/ '30m'); prompt (the prompt body the cron job will use); "
+        "rationale (one short sentence on why this should fire on a "
+        "schedule — part of the operator's review).",
+        {
+            "name": str,
+            "schedule": str,
+            "prompt": str,
+            "rationale": str,
+        },
+    )
+    async def cron_propose(args):
+        return do_cron_propose(cfg, args)
 
     @tool(
         "pipeline_task_start",
@@ -694,6 +812,7 @@ def build_mcp_server(cfg: Config):
             git_log_grep,
             operator_log_append,
             report_result,
+            cron_propose,
             pipeline_task_start,
         ],
     )
@@ -763,6 +882,12 @@ TASK_AGENT_TOOLS = [
     "Bash",
     "mcp__autopilot__pipeline_task_start",
     "mcp__autopilot__report_result",
+    # TB-123: cron-proposal lifted out of report_result's args into a dedicated
+    # tool. Task agents call `cron_propose(name, schedule, prompt, rationale)`
+    # one or more times to surface "this should fire on a schedule" without
+    # bundling it into the result reporting. Symmetric with control agents'
+    # `cron_edit` — task agents propose, operator promotes via review.
+    "mcp__autopilot__cron_propose",
 ]
 
 

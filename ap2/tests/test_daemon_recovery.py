@@ -282,63 +282,157 @@ def test_run_task_progress_skips_empty_fields(cfg):
     assert "Tests:" not in text
 
 
-def test_run_task_applies_cron_add_on_complete(cfg):
+def test_run_task_cron_propose_emits_event_with_proposed_by_task(cfg):
+    """TB-123: a task agent calling `cron_propose(...)` mid-run emits a
+    `cron_proposed` event with all four args populated AND a
+    `proposed_by_task` field stamped from the daemon's contextvar plumb.
+    The cron.yaml is NOT mutated — proposals are queued for operator
+    review, not auto-applied.
+
+    Pre-TB-123 the cron list piggybacked on `report_result(cron=...)` and
+    the daemon called `do_cron_edit` directly to mutate the registry.
+    Splitting the proposal off into its own MCP tool gives each proposal
+    its own event with rationale, decouples failure isolation, and
+    clarifies the privilege boundary (control agents mutate via
+    `cron_edit`; task agents propose via `cron_propose`).
+    """
     from ap2.cron import load_jobs
+    from types import SimpleNamespace
 
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding_report({
-        "status": "complete",
-        "commit": "beefcafe",
-        "summary": "wired it up",
-        "cron": '[{"action": "add", "name": "newjob", "interval": "2h", "prompt": "do thing"}]',
-    })
+
+    # Two messages: a `cron_propose` tool call followed by a `report_result`
+    # tool call that ends the run. The fake SDK delivers both as ToolUseBlock
+    # parts so the daemon's `_log_message` walker sees the cron_propose name
+    # and `do_cron_propose` runs (which emits the event using the
+    # contextvar's value of task.id).
+    async def gen():
+        # Real SDK exposes tool_use blocks via `name` + `input` attributes —
+        # mirror that. We invoke `do_cron_propose` ourselves so the test
+        # exercises the same handler the live MCP server would route to.
+        from ap2 import tools
+
+        # Simulate the agent calling cron_propose during the SDK query
+        # window — call the handler directly under the contextvar that
+        # run_task sets.
+        tools.do_cron_propose(cfg, {
+            "name": "weekly-perf",
+            "schedule": "1d",
+            "prompt": "run the perf suite",
+            "rationale": "operator wanted weekly visibility",
+        })
+        yield _FakeToolMsg("report_result", {
+            "status": "complete",
+            "commit": "beefcafe",
+            "summary": "wired it up",
+        })
+
+    sdk = _make_sdk(gen)
     asyncio.run(run_task(cfg, sdk, None, task))
 
-    jobs = {j.name: j for j in load_jobs(cfg.cron_file)}
-    assert "newjob" in jobs
-    assert jobs["newjob"].interval_s == 2 * 3600
-    assert jobs["newjob"].prompt == "do thing"
-    evts = events.tail(cfg.events_file, 20)
-    assert any(
-        e["type"] == "cron_proposed" and e.get("name") == "newjob" for e in evts
-    )
+    # cron.yaml stays empty — proposals don't auto-promote.
+    assert load_jobs(cfg.cron_file) == []
+
+    evts = events.tail(cfg.events_file, 30)
+    proposals = [e for e in evts if e["type"] == "cron_proposed"]
+    assert len(proposals) == 1, proposals
+    p = proposals[0]
+    assert p["name"] == "weekly-perf"
+    assert p["schedule"] == "1d"
+    assert p["prompt"] == "run the perf suite"
+    assert p["rationale"] == "operator wanted weekly visibility"
+    assert p["proposed_by_task"] == "TB-5"
 
 
-def test_run_task_skips_cron_on_incomplete(cfg):
-    from ap2.cron import load_jobs
-
+def test_run_task_cron_propose_event_fires_regardless_of_status(cfg):
+    """Pre-TB-123 the cron-directive dispatch only ran on `status=complete`.
+    Post-TB-123 the proposal IS the event — there's no post-result
+    dispatch step to gate. Even if the agent ends up reporting `blocked`,
+    a `cron_propose` call made earlier in the run still records a
+    proposal (the operator can decide whether to follow up). The "do not
+    apply on incomplete" semantic moves to the operator review surface,
+    not the daemon's event-emission gate.
+    """
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding_report({
-        "status": "blocked",
-        "summary": "stuck",
-        "cron": '[{"action": "add", "name": "shouldnotappear", "interval": "1h", "prompt": "noop"}]',
-    })
+
+    async def gen():
+        from ap2 import tools
+        tools.do_cron_propose(cfg, {
+            "name": "midwork-proposal",
+            "schedule": "1h",
+            "prompt": "noop",
+            "rationale": "noticed during partial work",
+        })
+        yield _FakeToolMsg("report_result", {
+            "status": "blocked",
+            "summary": "stuck",
+        })
+
+    sdk = _make_sdk(gen)
     asyncio.run(run_task(cfg, sdk, None, task))
 
-    jobs = load_jobs(cfg.cron_file)
-    assert not any(j.name == "shouldnotappear" for j in jobs)
+    evts = events.tail(cfg.events_file, 30)
+    proposals = [e for e in evts if e["type"] == "cron_proposed"]
+    assert any(p.get("name") == "midwork-proposal" for p in proposals)
+    # Stamped with the calling task even though report_result said blocked.
+    assert proposals[-1]["proposed_by_task"] == "TB-5"
 
 
-def test_run_task_logs_rejected_cron_directive(cfg):
+def test_run_task_cron_propose_supports_multiple_proposals(cfg):
+    """Each `cron_propose` call gets its own event with its own rationale.
+    Pre-TB-123 the agent had to bundle all proposals into one JSON list
+    inside `report_result(cron=...)`; post-TB-123 each call is
+    independent so the operator's review surface sees one row per
+    proposal."""
     board = Board.load(cfg.tasks_file)
     task = board.get("TB-5")
-    sdk = _sdk_yielding_report({
-        "status": "complete",
-        "summary": "tried a bad directive",
-        "cron": '[{"action": "bogus-action", "name": "x"}]',
-    })
+
+    async def gen():
+        from ap2 import tools
+        for i, name in enumerate(("alpha", "beta", "gamma")):
+            tools.do_cron_propose(cfg, {
+                "name": name,
+                "schedule": f"{i + 1}h",
+                "prompt": f"prompt for {name}",
+                "rationale": f"why {name}",
+            })
+        yield _FakeToolMsg("report_result", {
+            "status": "complete",
+            "commit": "feedface",
+            "summary": "three proposals filed",
+        })
+
+    sdk = _make_sdk(gen)
     asyncio.run(run_task(cfg, sdk, None, task))
-    evts = events.tail(cfg.events_file, 20)
-    # Post-TB-104 the cron list arrives as structured dicts (no `_error`
-    # markers from the regex parser); a bogus action goes through
-    # do_cron_edit and surfaces as `cron_proposal_error` instead.
-    assert any(
-        e["type"] == "cron_proposal_error"
-        and e.get("action") == "bogus-action"
-        for e in evts
-    )
+
+    evts = events.tail(cfg.events_file, 30)
+    proposals = [e for e in evts if e["type"] == "cron_proposed"]
+    names = [p["name"] for p in proposals]
+    assert names == ["alpha", "beta", "gamma"]
+    # All stamped with the same task id.
+    for p in proposals:
+        assert p["proposed_by_task"] == "TB-5"
+
+
+def test_run_task_cron_propose_requires_all_four_fields(cfg):
+    """`do_cron_propose` returns an error result when any of name /
+    schedule / prompt / rationale is missing, and does NOT emit a
+    `cron_proposed` event. Failure-isolation pin: a malformed proposal
+    must not crash result reporting (the whole reason TB-123 split it
+    out of `report_result`)."""
+    from ap2 import tools
+
+    res = tools.do_cron_propose(cfg, {
+        "name": "x", "schedule": "1h", "prompt": "p",
+        # rationale missing
+    })
+    assert res.get("isError"), res
+    assert "rationale" in res["content"][0]["text"]
+
+    evts = events.tail(cfg.events_file, 30)
+    assert not any(e["type"] == "cron_proposed" for e in evts)
 
 
 def test_run_task_blocked_moves_to_backlog_and_writes_attempts(cfg, tmp_path):

@@ -512,3 +512,105 @@ def test_task_complete_in_task_agent_tools_list():
     namespace for built-in TaskCreate/TaskUpdate/TaskList/TaskGet tools."""
     assert "mcp__autopilot__report_result" in tools.TASK_AGENT_TOOLS
     assert "mcp__autopilot__report_result" not in tools.CONTROL_AGENT_TOOLS
+
+
+# ---------------------------------------------------------------------------
+# TB-123: cron_propose — task-agent MCP tool, replaces the JSON-stringified
+# `cron=` arg on `report_result`. Validates four required string args, emits
+# a `cron_proposed` event with all four fields, and (when run via the daemon)
+# stamps `proposed_by_task` from the contextvar plumb. cron.yaml is NOT
+# mutated — proposals are queued for operator review.
+
+
+def test_cron_propose_emits_event_with_four_fields(cfg):
+    res = tools.do_cron_propose(cfg, {
+        "name": "x",
+        "schedule": "1h",
+        "prompt": "do x",
+        "rationale": "y",
+    })
+    body = _unwrap(res)
+    assert body["name"] == "x"
+    assert body["schedule"] == "1h"
+
+    from ap2.events import tail
+
+    evts = tail(cfg.events_file, 5)
+    proposals = [e for e in evts if e["type"] == "cron_proposed"]
+    assert len(proposals) == 1
+    p = proposals[0]
+    assert p["name"] == "x"
+    assert p["schedule"] == "1h"
+    assert p["prompt"] == "do x"
+    assert p["rationale"] == "y"
+
+
+def test_cron_propose_does_not_mutate_cron_yaml(cfg):
+    """The whole point of the proposal layer (vs. control agents'
+    `cron_edit`) — task agents queue, operator promotes."""
+    from ap2.cron import load_jobs
+
+    tools.do_cron_propose(cfg, {
+        "name": "shouldnotappear",
+        "schedule": "1h",
+        "prompt": "noop",
+        "rationale": "test that nothing lands",
+    })
+    assert load_jobs(cfg.cron_file) == []
+
+
+def test_cron_propose_requires_each_field(cfg):
+    """Missing name / schedule / prompt / rationale → error, no event."""
+    from ap2.events import tail
+
+    base = {
+        "name": "x", "schedule": "1h", "prompt": "p", "rationale": "r",
+    }
+    for missing in ("name", "schedule", "prompt", "rationale"):
+        args = dict(base)
+        args[missing] = ""
+        res = tools.do_cron_propose(cfg, args)
+        assert res.get("isError"), (missing, res)
+        assert missing in res["content"][0]["text"]
+    # No `cron_proposed` events leaked from the rejected calls.
+    evts = tail(cfg.events_file, 10)
+    assert not any(e["type"] == "cron_proposed" for e in evts)
+
+
+def test_cron_propose_uses_contextvar_for_proposed_by_task(cfg):
+    """When `tools._task_id_ctx` is set (the daemon's plumb during
+    run_task), the emitted event carries `proposed_by_task=<TB-id>`.
+    Outside that scope (this unit test, by default) the field is omitted.
+    """
+    from ap2.events import tail
+
+    # Default: contextvar unset → no proposed_by_task in event.
+    tools.do_cron_propose(cfg, {
+        "name": "no-ctx", "schedule": "1h",
+        "prompt": "p", "rationale": "r",
+    })
+    evts = tail(cfg.events_file, 5)
+    p = next(e for e in evts if e.get("name") == "no-ctx")
+    assert "proposed_by_task" not in p
+
+    # Within a contextvar set → field present and correct.
+    token = tools._task_id_ctx.set("TB-42")
+    try:
+        tools.do_cron_propose(cfg, {
+            "name": "with-ctx", "schedule": "1h",
+            "prompt": "p", "rationale": "r",
+        })
+    finally:
+        tools._task_id_ctx.reset(token)
+    evts = tail(cfg.events_file, 10)
+    p = next(e for e in evts if e.get("name") == "with-ctx")
+    assert p["proposed_by_task"] == "TB-42"
+
+
+def test_cron_propose_in_task_agent_tools_only():
+    """Pin: cron_propose is task-agent only — control agents have
+    `cron_edit` (direct mutation) and don't need the proposal layer.
+    Symmetric privilege split: task agents propose, control agents
+    promote (or operator promotes via review)."""
+    assert "mcp__autopilot__cron_propose" in tools.TASK_AGENT_TOOLS
+    assert "mcp__autopilot__cron_propose" not in tools.CONTROL_AGENT_TOOLS

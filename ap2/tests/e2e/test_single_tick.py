@@ -100,6 +100,74 @@ def test_single_tick_no_tool_call_routes_through_head_recovery(e2e_project):
     assert board.find("TB-5")[0] == "Backlog"
 
 
+def test_single_tick_cron_propose_round_trip(e2e_project):
+    """TB-123: task agent calls `cron_propose(...)` once during the run and
+    `report_result(status=complete, ...)` to finish. The daemon's `_tick`
+    wiring should:
+      - dispatch the task,
+      - capture the `cron_proposed` event with all four fields populated
+        AND `proposed_by_task=TB-5` (from the contextvar plumb in
+        run_task),
+      - route the task to Complete based on the report_result payload,
+      - leave `cron.yaml` untouched (proposals are queued for operator
+        review, not auto-applied — symmetric with the privilege split
+        between task agents (`cron_propose`) and control agents
+        (`cron_edit`)).
+    """
+    from ap2 import tools
+    from ap2.cron import load_jobs
+    from ap2.tests.e2e._fakes import _FakeMixedMsg, _FakeToolUseBlock
+
+    cfg = e2e_project(ready_task=("TB-5", "Run the thing"))
+
+    def factory(prompt, options):  # noqa: ARG001
+        async def gen():
+            # Mimic an MCP dispatch — the real SDK would route the tool
+            # call to the registered handler; FakeSDK doesn't, so we
+            # invoke do_cron_propose directly under the contextvar that
+            # daemon.run_task sets before _consume() awaits.
+            tools.do_cron_propose(cfg, {
+                "name": "weekly-perf",
+                "schedule": "1d",
+                "prompt": "run the perf suite each Monday",
+                "rationale": "operator wanted weekly visibility on the gate",
+            })
+            yield _FakeMixedMsg([_FakeToolUseBlock(
+                name="report_result",
+                input={
+                    "status": "complete",
+                    "commit": "abc12345",
+                    "summary": "did the work + filed a cron proposal",
+                    "files_changed": "x.py",
+                    "tests_passed": "true",
+                },
+            )])
+        return gen()
+
+    sdk = FakeSDK()
+    sdk.on("## Task\nTB-5", factory)
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    # Task routed to Complete via report_result.
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-5")[0] == "Complete"
+
+    # cron_proposed event landed with all four fields + proposed_by_task.
+    evts = events.tail(cfg.events_file, 30)
+    proposals = [e for e in evts if e["type"] == "cron_proposed"]
+    assert len(proposals) == 1, proposals
+    p = proposals[0]
+    assert p["name"] == "weekly-perf"
+    assert p["schedule"] == "1d"
+    assert p["prompt"] == "run the perf suite each Monday"
+    assert p["rationale"] == "operator wanted weekly visibility on the gate"
+    assert p["proposed_by_task"] == "TB-5"
+
+    # cron.yaml is NOT mutated — proposal layer queues for review.
+    assert load_jobs(cfg.cron_file) == []
+
+
 def test_single_tick_no_mm_no_cron(e2e_project):
     """With no channels and no cron, neither branch of `_tick` fires events."""
     cfg = e2e_project(ready_task=("TB-5", "Run the thing"))

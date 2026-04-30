@@ -45,7 +45,6 @@ from .tools import (
     TASK_AGENT_TOOLS,
     build_mcp_server,
     do_board_edit,
-    do_cron_edit,
 )
 
 
@@ -220,6 +219,12 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     early_failure_status: str | None = None
     early_failure_extras: dict[str, str] = {}
     result_text = ""
+    # TB-123: plumb the current task id into a contextvar so MCP tool handlers
+    # (specifically `do_cron_propose`) can stamp `proposed_by_task` on the
+    # `cron_proposed` event without forcing the agent to pass its own id.
+    # Reset right after `_consume()` returns so a subsequent run / unrelated
+    # tool dispatch sees a clean slate.
+    _ctx_token = tools._task_id_ctx.set(task.id)
     try:
         result_text = await asyncio.wait_for(_consume(), timeout=cfg.task_timeout_s)
     except asyncio.TimeoutError:
@@ -281,6 +286,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 "error": f"{type(e).__name__}: {e}",
                 "stderr_tail": "\n".join(stderr_lines[-30:]),
             }
+    finally:
+        # TB-123: clear the task-id contextvar regardless of how the SDK
+        # query exited (success, timeout, or arbitrary exception).
+        tools._task_id_ctx.reset(_ctx_token)
 
     # TB-110: post-hoc state-file violation check. Hash-compare fenced
     # files against the pre_run_fenced snapshot taken right after
@@ -516,7 +525,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 do_board_edit(cfg, {"action": "move_to_complete", "task_id": task.id})
                 retry.reset_attempt(cfg.retry_state_file, task.id)
                 _append_progress(cfg, task, parsed)
-                _dispatch_cron_directives(cfg, task.id, parsed.cron)
+                # TB-123: cron-proposal moved off result-parsing onto the
+                # `cron_propose` MCP tool. `cron_proposed` events fire from
+                # `do_cron_propose` during the SDK query (with `proposed_by_task`
+                # set via the contextvar above). No post-run dispatch step.
                 # Delete the per-run debug dumps on success — only keep evidence for
                 # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
                 for p in (prompt_dump, stream_dump, messages_dump):
@@ -592,38 +604,6 @@ def _handle_failure(
         debug_paths=debug_paths,
         extras=extras,
     )
-
-
-def _dispatch_cron_directives(cfg: Config, task_id: str, directives: list[dict]) -> None:
-    """Apply any `cron:` directives from a successful RESULT via do_cron_edit."""
-    for d in directives:
-        if "_error" in d:
-            events.append(
-                cfg.events_file,
-                "cron_proposal_rejected",
-                task=task_id,
-                reason=d.get("_error"),
-                raw=d.get("_raw", "")[:200],
-            )
-            continue
-        res = do_cron_edit(cfg, d)
-        if res.get("isError"):
-            events.append(
-                cfg.events_file,
-                "cron_proposal_error",
-                task=task_id,
-                action=d.get("action"),
-                name=d.get("name"),
-                error=res["content"][0]["text"][:300],
-            )
-        else:
-            events.append(
-                cfg.events_file,
-                "cron_proposed",
-                task=task_id,
-                action=d.get("action"),
-                name=d.get("name"),
-            )
 
 
 def _recover_orphans(cfg: Config) -> None:
@@ -1093,16 +1073,20 @@ _VALID_RESULT_STATUSES = {"complete", "incomplete", "blocked", "failed"}
 
 
 def _task_result_from_tool_args(args: dict) -> TaskResult:
-    """Build a TaskResult from a `task_complete` MCP tool call's args dict.
+    """Build a TaskResult from a `report_result` MCP tool call's args dict.
 
     Tolerant of two shapes per field, because the @tool decorator's schema
     is a hint not a contract — different agents and SDK versions hand the
     same logical value as either a Python-native value or its string form.
       - `files_changed`: list[str] OR comma-separated string
       - `tests_passed`: bool OR "true"/"false" string
-      - `cron`: list[dict] OR JSON-encoded string of that
+
+    TB-123: the `cron` field was dropped from `report_result` — cron
+    proposals now flow through the `cron_propose` MCP tool, which emits
+    its own `cron_proposed` events at call time. The `TaskResult.cron`
+    dataclass field is retained as default-empty per the briefing's
+    "out of scope" note (deferred deletion in a follow-up).
     """
-    import json as _json
 
     def _bool_like(v) -> bool | None:
         if isinstance(v, bool):
@@ -1123,26 +1107,13 @@ def _task_result_from_tool_args(args: dict) -> TaskResult:
             return [f.strip() for f in v.split(",") if f.strip()]
         return []
 
-    def _list_dict(v) -> list[dict]:
-        if isinstance(v, list):
-            return [c for c in v if isinstance(c, dict)]
-        if isinstance(v, str) and v.strip():
-            try:
-                parsed = _json.loads(v)
-            except _json.JSONDecodeError:
-                return []
-            if isinstance(parsed, list):
-                return [c for c in parsed if isinstance(c, dict)]
-        return []
-
     return TaskResult(
         status=str(args.get("status", "unknown")).strip().lower(),
         commit=str(args.get("commit", "") or "").strip(),
         summary=str(args.get("summary", "") or "").strip(),
         files_changed=_list_str(args.get("files_changed")),
         tests_passed=_bool_like(args.get("tests_passed")),
-        cron=_list_dict(args.get("cron")),
-        raw="(via mcp__autopilot__task_complete tool call)",
+        raw="(via mcp__autopilot__report_result tool call)",
     )
 
 

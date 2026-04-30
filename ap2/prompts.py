@@ -139,18 +139,24 @@ Valid statuses:
 - `blocked`    — hit a blocker you can't resolve; explain in `summary`.
 - `failed`     — tried and could not make progress.
 
-### Proposing recurring work (optional)
-If your work should become scheduled, pass a `cron` argument as a JSON-
-encoded list of `{action, name, interval, prompt}` dicts:
+### Proposing recurring work (optional) — `cron_propose`
+If, while working on this task, you noticed that some operation should fire
+on a schedule (e.g. a weekly perf snapshot, an hourly health check), call
+the `mcp__autopilot__cron_propose` MCP tool — once per proposal. It is its
+own tool, NOT an argument of `report_result`. It does NOT mutate
+`cron.yaml` directly; the proposal is queued for operator review.
 
-    report_result(
-      status="complete",
-      ...,
-      cron='[{"action": "add", "name": "monitor-x", "interval": "1h", "prompt": "what to run"}]',
+    cron_propose(
+      name="weekly-perf-snapshot",     # short stable identifier
+      schedule="1d",                   # interval like "1h" / "1d" / "30m"
+      prompt="Run the perf suite ...", # the prompt body the cron will use
+      rationale="Catches drift early — operator wanted weekly visibility.",
     )
 
-`add` requires `action`, `name`, `interval`, `prompt`. Directives are applied
-only when `status: complete`. Malformed entries are logged and skipped.
+You may call `cron_propose` multiple times in one task — each proposal is
+independent and gets its own `cron_proposed` event with its own rationale.
+Skip the call entirely if your task didn't surface a scheduling need; this
+is a side-channel, not part of the result contract.
 
 ### What if you forget?
 If you end your turn without calling `report_result`, the daemon synthesizes

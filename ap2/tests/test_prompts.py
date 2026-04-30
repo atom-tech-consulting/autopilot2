@@ -110,6 +110,26 @@ def test_task_fenced_paths_includes_goal_md():
     assert "goal.md" in TASK_AGENT_FENCED_PATHS
 
 
+def test_prompt_advertises_cron_propose_for_recurring_proposals(tmp_path):
+    """TB-123: the `cron=` arg was lifted off `report_result` and into a
+    dedicated `cron_propose` MCP tool. The prompt footer must surface the
+    new tool by name (so the agent can discover it) and must NOT
+    instruct the agent to pass cron via `report_result`'s args (which
+    would silently fail since the field is gone from the schema).
+    """
+    cfg = _cfg(tmp_path)
+    t = Task(id="TB-99", title="x", section="Active")
+    p = build_task_prompt(cfg, t)
+    # New tool surfaced by name with all four arg fields.
+    assert "cron_propose" in p
+    assert "rationale" in p
+    assert "schedule" in p
+    # Drop-pin: the obsolete `cron=` arg phrasing in `report_result` is
+    # gone — the JSON-list-in-string contract no longer exists.
+    assert "cron='[" not in p
+    assert '"action": "add"' not in p
+
+
 def test_mattermost_prompt_pins_explicit_thread_id(tmp_path):
     """The handler agent must reply in the user's thread, not in some thread_id
     it picks up from the recent-events block (which often contains an unrelated
