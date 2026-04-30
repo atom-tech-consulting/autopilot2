@@ -290,7 +290,7 @@ async def _judge_prose_bullet(
         "shape if needed), the bullet PASSES regardless of whether the "
         "diff makes that obvious.\n\n"
         f"Bullet:\n  {bullet.text}\n\n"
-        f"Cumulative diff:\n```\n{diff_text[:8000]}\n```\n"
+        f"Cumulative diff:\n```\n{diff_text[:100_000]}\n```\n"
     )
     try:
         # The judge can take a few tool roundtrips (Grep → Read) before
