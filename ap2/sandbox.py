@@ -21,6 +21,16 @@ from pathlib import Path
 
 DEFAULT_USER = "claude-agent"
 
+# Repo-local git identity written by `project-setup` so the daemon's first
+# state commit (typically the `state: cron status-report` commit on tick #1)
+# succeeds. Fresh sandbox-user clones inherit no git user.name/user.email
+# (global unset for claude-agent; repo-local unset on clone), and `git
+# commit` fatals with "Author identity unknown" if neither is set. The
+# operator can override either default via project-setup's --git-name /
+# --git-email flags.
+DEFAULT_GIT_NAME = "ap2 daemon"
+DEFAULT_GIT_EMAIL = "ap2-daemon@localhost"
+
 # Labels used by the sentinel-block writer. One label per "topic" (OAuth token,
 # MM credentials, MM channel) so re-running any single flow replaces just its
 # block without touching others.
@@ -262,6 +272,33 @@ def project_audit(path: Path, user: str = DEFAULT_USER) -> AuditResult:
             res.add("FAIL", f"'local' remote points at missing path: {bare}")
     else:
         res.add("INFO", "no 'local' remote (add one to push safely)")
+
+    # Repo-local git identity. Without it, the daemon's first state-commit
+    # tick fatals with "Author identity unknown" — fresh clones inherit no
+    # name/email when the cloning user (sandbox claude-agent) has neither
+    # repo-local nor global config set. project-setup writes these by
+    # default; this check catches old clones that pre-date that fix.
+    name = subprocess.run(
+        ["sudo", "-u", user, "git", "-C", str(path), "config", "user.name"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    email = subprocess.run(
+        ["sudo", "-u", user, "git", "-C", str(path), "config", "user.email"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    if name and email:
+        res.add("OK", f"git identity: {name} <{email}>")
+    else:
+        missing = " + ".join(
+            k for k, v in [("user.name", name), ("user.email", email)] if not v
+        )
+        res.add(
+            "FAIL",
+            f"git {missing} unset — daemon's first state commit will fatal "
+            f"'Author identity unknown'. Fix: "
+            f"sudo -u {user} git -C {path} config user.name '{DEFAULT_GIT_NAME}' && "
+            f"sudo -u {user} git -C {path} config user.email '{DEFAULT_GIT_EMAIL}'",
+        )
 
     if (path / ".venv").is_dir():
         res.add("OK", "project .venv present")
@@ -763,6 +800,8 @@ def project_setup(
     *,
     assume_yes: bool = False,
     mm_channel: str | None = None,
+    git_name: str = DEFAULT_GIT_NAME,
+    git_email: str = DEFAULT_GIT_EMAIL,
 ) -> int:
     source = source.resolve()
     if not _user_exists(user):
@@ -796,12 +835,22 @@ def project_setup(
     # We use `*` rather than the exact path because git matches against the
     # gitdir (`<source>/.git`), not the worktree, and the exact form is
     # awkward to get right across bare / non-bare / submodule cases.
+    # Repo-local git identity is set immediately after the clone so the
+    # daemon's first state-commit tick (cron status-report) doesn't fatal
+    # with "Author identity unknown". The sandbox user's global git config
+    # is intentionally bare (cred-clean), and a fresh clone has no
+    # repo-local user.name/user.email — without this, the very first
+    # commit blows up before any task can run.
     cmds = [
         ["sudo", "-u", user, "mkdir", "-p", str(home / "repos")],
         ["sudo", "-u", user, "git", "-c", "safe.directory=*",
          "clone", "--origin", "upstream", str(source), str(dst)],
         ["sudo", "-u", user, "git", "-C", str(dst),
          "remote", "set-url", "--push", "upstream", "/dev/null"],
+        ["sudo", "-u", user, "git", "-C", str(dst),
+         "config", "user.name", git_name],
+        ["sudo", "-u", user, "git", "-C", str(dst),
+         "config", "user.email", git_email],
         ["sudo", "-u", user, "git", "init", "--bare", str(bare)],
         ["sudo", "-u", user, "git", "-C", str(dst),
          "remote", "add", "local", str(bare)],
@@ -890,6 +939,8 @@ def cmd_project_setup(cfg, args) -> int:     # noqa: ARG001
         args.user,
         assume_yes=args.yes,
         mm_channel=getattr(args, "mm_channel", None),
+        git_name=getattr(args, "git_name", None) or DEFAULT_GIT_NAME,
+        git_email=getattr(args, "git_email", None) or DEFAULT_GIT_EMAIL,
     )
 
 

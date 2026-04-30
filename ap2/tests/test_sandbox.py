@@ -216,6 +216,98 @@ def test_project_audit_wrong_owner(monkeypatch, tmp_path):
     )
 
 
+def test_project_audit_flags_missing_git_identity(monkeypatch, tmp_path):
+    """TB-125: project_audit must FAIL when repo-local git user.name or
+    user.email is unset — without an identity the daemon's first state
+    commit (cron status-report) fatals with 'Author identity unknown'.
+    """
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_path_owner", lambda p: "claude-agent")
+    # All git/test calls return rc=1 stdout="" — including `git config
+    # user.name|user.email`, simulating a fresh clone with no identity set.
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=""),
+    )
+
+    res = sandbox.project_audit(repo, "claude-agent")
+    assert res.ok is False
+    fails = [m for lvl, m in res.messages if lvl == "FAIL"]
+    # Single FAIL covers both fields and includes the actionable fix command.
+    identity_fail = next(
+        (m for m in fails if "Author identity unknown" in m), None,
+    )
+    assert identity_fail is not None, fails
+    assert "user.name" in identity_fail and "user.email" in identity_fail
+    # Fix command is scoped to the right repo.
+    assert f"-C {repo}" in identity_fail
+    # Defaults from constants appear in the fix command.
+    assert sandbox.DEFAULT_GIT_NAME in identity_fail
+    assert sandbox.DEFAULT_GIT_EMAIL in identity_fail
+
+
+def test_project_audit_only_user_email_missing(monkeypatch, tmp_path):
+    """When only user.email is unset, the FAIL message names exactly that
+    field (not user.name)."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_path_owner", lambda p: "claude-agent")
+
+    def fake(argv, *a, **kw):
+        if "config" in argv and "user.name" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="someone\n", stderr="")
+        # user.email and everything else: empty / failure.
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake)
+
+    res = sandbox.project_audit(repo, "claude-agent")
+    fails = [m for lvl, m in res.messages if lvl == "FAIL"]
+    identity_fail = next(
+        (m for m in fails if "Author identity unknown" in m), None,
+    )
+    assert identity_fail is not None
+    assert "user.email unset" in identity_fail
+    assert "user.name unset" not in identity_fail
+
+
+def test_project_audit_ok_when_git_identity_set(monkeypatch, tmp_path):
+    """When both user.name and user.email are set, project_audit reports
+    an OK line that surfaces the configured identity."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_path_owner", lambda p: "claude-agent")
+
+    def fake(argv, *a, **kw):
+        if "config" in argv and "user.name" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout="ap2 daemon\n", stderr="",
+            )
+        if "config" in argv and "user.email" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout="ap2-daemon@localhost\n", stderr="",
+            )
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake)
+
+    res = sandbox.project_audit(repo, "claude-agent")
+    oks = [m for lvl, m in res.messages if lvl == "OK"]
+    assert any(
+        "git identity: ap2 daemon <ap2-daemon@localhost>" in m for m in oks
+    ), oks
+    # No identity FAIL.
+    assert not any(
+        "Author identity unknown" in m
+        for lvl, m in res.messages if lvl == "FAIL"
+    )
+
+
 def test_project_audit_flags_live_upstream_push(monkeypatch, tmp_path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -331,6 +423,104 @@ def test_project_setup_rejects_non_repo(monkeypatch, tmp_path, capsys):
     rc = sandbox.project_setup(tmp_path / "plain", "claude-agent")
     assert rc == 1
     assert "not a git repo" in capsys.readouterr().err
+
+
+def _wire_project_setup(monkeypatch, tmp_path):
+    """Common harness: a fake source repo + sandbox-user home, with all
+    permission checks and audits stubbed so project_setup runs end-to-end
+    against an in-memory subprocess.run capture.
+    """
+    source = tmp_path / "source"
+    (source / ".git").mkdir(parents=True)
+    home = tmp_path / "agent-home"
+    home.mkdir()
+
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+    monkeypatch.setattr(sandbox, "_can_read_as", lambda u, p: True)
+    # Skip the post-clone audit (it stats real paths that this harness
+    # never creates because subprocess.run is faked).
+    monkeypatch.setattr(
+        sandbox, "project_audit", lambda p, u: sandbox.AuditResult(),
+    )
+    return source, home
+
+
+def test_project_setup_writes_default_git_identity(monkeypatch, tmp_path):
+    """TB-125: project-setup must run `git config user.name/email` against
+    the fresh clone so the daemon's first state commit doesn't fatal
+    'Author identity unknown'."""
+    source, _home = _wire_project_setup(monkeypatch, tmp_path)
+
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *a, **kw):
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    rc = sandbox.project_setup(source, "claude-agent", assume_yes=True)
+    assert rc == 0
+
+    name_cfgs = [a for a in seen
+                 if "config" in a and "user.name" in a]
+    email_cfgs = [a for a in seen
+                  if "config" in a and "user.email" in a]
+    assert len(name_cfgs) == 1, name_cfgs
+    assert len(email_cfgs) == 1, email_cfgs
+    # Both run as the sandbox user via sudo, scoped via -C <dst>.
+    for argv in name_cfgs + email_cfgs:
+        assert argv[:3] == ["sudo", "-u", "claude-agent"]
+        assert "-C" in argv
+    assert name_cfgs[0][-1] == sandbox.DEFAULT_GIT_NAME
+    assert email_cfgs[0][-1] == sandbox.DEFAULT_GIT_EMAIL
+
+
+def test_project_setup_git_identity_runs_after_clone(monkeypatch, tmp_path):
+    """The config commands must be ordered AFTER `git clone` (otherwise
+    there's no work-tree to scope them to)."""
+    source, _home = _wire_project_setup(monkeypatch, tmp_path)
+
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *a, **kw):
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    sandbox.project_setup(source, "claude-agent", assume_yes=True)
+
+    clone_idx = next(i for i, a in enumerate(seen) if "clone" in a)
+    name_idx = next(i for i, a in enumerate(seen)
+                    if "config" in a and "user.name" in a)
+    email_idx = next(i for i, a in enumerate(seen)
+                     if "config" in a and "user.email" in a)
+    assert clone_idx < name_idx
+    assert clone_idx < email_idx
+
+
+def test_project_setup_honors_operator_overrides(monkeypatch, tmp_path):
+    """Operator can override the defaults via git_name / git_email kwargs."""
+    source, _home = _wire_project_setup(monkeypatch, tmp_path)
+
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *a, **kw):
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    rc = sandbox.project_setup(
+        source, "claude-agent", assume_yes=True,
+        git_name="Custom Name",
+        git_email="custom@example.com",
+    )
+    assert rc == 0
+
+    name_cfg = next(a for a in seen if "config" in a and "user.name" in a)
+    email_cfg = next(a for a in seen if "config" in a and "user.email" in a)
+    assert name_cfg[-1] == "Custom Name"
+    assert email_cfg[-1] == "custom@example.com"
 
 
 # ---------------------------------------------------------------------------

@@ -748,6 +748,10 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--mm-channel", metavar="NAME",
                     help="resolve #NAME via MATTERMOST_URL/TOKEN in current env and "
                          "write AP2_MM_CHANNELS=<id> into <project>/.cc-autopilot/env")
+    sc.add_argument("--git-name", default=sandbox.DEFAULT_GIT_NAME,
+                    help=f"repo-local git user.name (default: {sandbox.DEFAULT_GIT_NAME!r})")
+    sc.add_argument("--git-email", default=sandbox.DEFAULT_GIT_EMAIL,
+                    help=f"repo-local git user.email (default: {sandbox.DEFAULT_GIT_EMAIL!r})")
     sc.set_defaults(func=sandbox.cmd_project_setup)
 
     sc = sub_sbx.add_parser(
