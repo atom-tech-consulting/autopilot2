@@ -44,19 +44,19 @@ CLAUDE_AUTOPILOT_TEMPLATE = (
 # from CLAUDE.md + progress.md when the file is missing or all-placeholder.
 BRIEFING_TEMPLATE = (
     "# {task_id} — {title}\n\n"
+    "Tags: \n\n"
     "## Goal\n\n"
     "{description}\n\n"
     "## Scope\n\n"
     "- (file / module to change)\n\n"
     "## Design\n\n"
-    "(filled in by /tb prep or by the ideation agent)\n\n"
+    "(how this will be built — surface, data flow, edge cases)\n\n"
     "## Verification\n\n"
     "Concrete acceptance criteria the daemon's per-task verifier (TB-69)\n"
     "runs after the agent's commit. Shell-command bullets (backtick-fenced\n"
     "at the start of the bullet) are run automatically; prose bullets are\n"
     "judged by an SDK call against the diff.\n\n"
-    "- `uv run pytest -q` — full suite passes\n"
-    "- (additional shell or prose bullets)\n\n"
+    "- `uv run pytest -q` — full suite passes\n\n"
     "## Out of scope\n\n"
     "- (filled in)\n"
 )
@@ -68,10 +68,21 @@ def render_briefing(
     title: str,
     description: str = "",
 ) -> str:
-    """Fill `BRIEFING_TEMPLATE` for a new task. Used by `do_board_edit`'s
-    `add_backlog` path when no explicit briefing payload is provided (TB-69).
+    """Fill `BRIEFING_TEMPLATE` for a new task.
 
     Pure formatter — no side effects, idempotent for the same inputs.
+
+    History: pre-TB-135 this was called from `do_board_edit` /
+    `do_operator_queue_append` to auto-populate a skeleton briefing when
+    `add_backlog` was invoked with no payload. That auto-fill path was
+    retired (TB-135) — `## Verification` lacking real bullets meant the
+    per-task verifier scored prose placeholders against an empty diff and
+    "passed" with zero scope-specific evidence, completing tasks like
+    TB-131 on regression-gate pass alone. Briefing authorship is now the
+    caller's responsibility (CLI: `--briefing-file`; ideation / MM
+    handler: build the payload directly). The function survives only as
+    a convenience formatter — the CLI uses it (`ap2 add` editor mode,
+    pending) and the test suite pins its shape.
     """
     desc = description.strip() or "(one-paragraph description of what success looks like)"
     return BRIEFING_TEMPLATE.format(

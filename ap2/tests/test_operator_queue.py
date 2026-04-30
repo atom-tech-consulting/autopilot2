@@ -39,6 +39,23 @@ def _unwrap(res: dict) -> dict:
     return json.loads(res["content"][0]["text"])
 
 
+# TB-135: every `add_*` op now requires a briefing payload — the
+# auto-fill skeleton path is gone. These queue tests don't actually
+# care about the briefing's contents (the queue handler treats it as
+# opaque bytes), but they need to pass a non-empty one to clear the
+# new gate. Helper to keep the call sites short.
+_BRIEFING = (
+    "# Test briefing\n\n"
+    "## Verification\n- `uv run pytest -q` — gates pass\n"
+)
+
+
+def _add(op: str = "add_backlog", title: str = "t", **extra) -> dict:
+    payload = {"op": op, "title": title, "briefing": _BRIEFING}
+    payload.update(extra)
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # do_operator_queue_append — write path shared by CLI + MCP
 
@@ -54,6 +71,7 @@ def test_queue_append_add_backlog_preallocates_id(cfg: Config):
             "op": "add_backlog",
             "title": "deferred work",
             "description": "do the thing",
+            "briefing": _BRIEFING,
         },
     )
     body = _unwrap(res)
@@ -80,7 +98,7 @@ def test_queue_append_add_backlog_preallocates_id(cfg: Config):
 
 def test_queue_append_emits_event(cfg: Config):
     tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "evented"}
+        cfg, {"op": "add_backlog", "title": "evented", "briefing": _BRIEFING}
     )
     evts = events.tail(cfg.events_file, 5)
     appends = [e for e in evts if e["type"] == "operator_queue_append"]
@@ -148,10 +166,10 @@ def test_drain_applies_pending_ops(cfg: Config):
     """Multiple queued ops drain in append order; TASKS.md ends up in
     the expected post-state."""
     r1 = _unwrap(tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "first"}
+        cfg, {"op": "add_backlog", "title": "first", "briefing": _BRIEFING}
     ))
     r2 = _unwrap(tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "second"}
+        cfg, {"op": "add_backlog", "title": "second", "briefing": _BRIEFING}
     ))
     summary = tools.drain_operator_queue(cfg)
     assert summary["applied"] == 2
@@ -168,7 +186,7 @@ def test_drain_is_idempotent_via_uuid(cfg: Config):
     """
     # Stage a single op.
     body = _unwrap(tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "once"}
+        cfg, {"op": "add_backlog", "title": "once", "briefing": _BRIEFING}
     ))
     tid = body["task_id"]
 
@@ -263,7 +281,7 @@ def test_drain_appends_audit_line_to_operator_log(cfg: Config):
     to operator_log.md so the operator-decisions surface tracks
     queue activity without bloating the queue file."""
     body = _unwrap(tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "audited add"}
+        cfg, {"op": "add_backlog", "title": "audited add", "briefing": _BRIEFING}
     ))
     tools.drain_operator_queue(cfg)
     log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
@@ -272,8 +290,8 @@ def test_drain_appends_audit_line_to_operator_log(cfg: Config):
 
 
 def test_drain_emits_drained_event_with_count(cfg: Config):
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "a"})
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "b"})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "a", "briefing": _BRIEFING})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "b", "briefing": _BRIEFING})
     tools.drain_operator_queue(cfg)
     evts = events.tail(cfg.events_file, 10)
     drained = [e for e in evts if e["type"] == "operator_queue_drained"]
@@ -285,8 +303,8 @@ def test_drain_compacts_queue_file_after_apply(cfg: Config):
     """After a successful drain the queue file shrinks — applied uuids
     are dropped so the file doesn't grow unboundedly. (We don't
     truncate the state file: it's the durable applied-uuid record.)"""
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "x"})
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "y"})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "x", "briefing": _BRIEFING})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "y", "briefing": _BRIEFING})
     qpath = tools.operator_queue_path(cfg)
     assert len([ln for ln in qpath.read_text().splitlines() if ln.strip()]) == 2
     tools.drain_operator_queue(cfg)
@@ -305,7 +323,7 @@ def test_drain_failure_in_one_op_doesnt_halt_others(cfg: Config):
     applies."""
     # Queue one valid + one bogus op.
     tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "valid"}
+        cfg, {"op": "add_backlog", "title": "valid", "briefing": _BRIEFING}
     )
     # Hand-write a bogus record referencing a non-existent task. We
     # bypass the snapshot validation that the public API would do
@@ -321,7 +339,7 @@ def test_drain_failure_in_one_op_doesnt_halt_others(cfg: Config):
         f.write(json.dumps(bogus) + "\n")
     # And one more valid op AFTER the bogus one.
     tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "after bogus"}
+        cfg, {"op": "add_backlog", "title": "after bogus", "briefing": _BRIEFING}
     )
 
     summary = tools.drain_operator_queue(cfg)
@@ -338,8 +356,8 @@ def test_drain_failure_in_one_op_doesnt_halt_others(cfg: Config):
 
 def test_pending_count_reflects_queue_depth(cfg: Config):
     assert tools.operator_queue_pending_count(cfg) == 0
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p1"})
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p2"})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p1", "briefing": _BRIEFING})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p2", "briefing": _BRIEFING})
     assert tools.operator_queue_pending_count(cfg) == 2
     tools.drain_operator_queue(cfg)
     assert tools.operator_queue_pending_count(cfg) == 0
@@ -380,23 +398,29 @@ def test_operator_queue_append_survives_mm_handler_restricted_filter():
 # CLI integration — `ap2 add` prints the pre-allocated id with "queued"
 
 
-def test_cmd_add_prints_queued_message(cfg: Config, capsys):
+def test_cmd_add_prints_queued_message(cfg: Config, capsys, tmp_path: Path):
+    """UX preserved per TB-131 scope (3): print TB-N + "(queued; will
+    land at next tick)". TB-135: --briefing-file is now required, so
+    the test stages a briefing on disk first."""
     from ap2.cli import cmd_add
+
+    brief = tmp_path / "brief.md"
+    brief.write_text(
+        "# hello world\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
 
     rc = cmd_add(
         cfg,
         Namespace(
-            title="hello world",
             section="Backlog",
             tags=[],
-            description="",
-            briefing_file=None,
+            briefing_file=str(brief),
             no_verify=False,
         ),
     )
     assert rc == 0
     out = capsys.readouterr().out
-    # UX preserved per TB-131 scope (3): print TB-N + "(queued; will land at next tick)".
     assert "queued" in out
     assert "TB-" in out
 
@@ -405,8 +429,8 @@ def test_cmd_status_surfaces_pending_queue_depth(cfg: Config, capsys, monkeypatc
     """`ap2 status` shows `pending: N operator op(s)` when ops are queued."""
     from ap2.cli import cmd_status
 
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p1"})
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p2"})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p1", "briefing": _BRIEFING})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "p2", "briefing": _BRIEFING})
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
@@ -426,7 +450,7 @@ def test_cmd_status_omits_pending_line_when_queue_empty(cfg: Config, capsys):
 def test_cmd_status_json_includes_operator_queue_pending(cfg: Config, capsys):
     from ap2.cli import cmd_status
 
-    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "j"})
+    tools.do_operator_queue_append(cfg, {"op": "add_backlog", "title": "j", "briefing": _BRIEFING})
     rc = cmd_status(cfg, Namespace(json=True))
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)

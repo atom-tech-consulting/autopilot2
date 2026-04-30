@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -188,8 +189,67 @@ def _resolve_web_url(cfg: Config) -> str | None:
     return f"http://127.0.0.1:{port}/"
 
 
+_BRIEFING_TEMPLATE_HINT = (
+    "ap2 add: --briefing-file is required.\n"
+    "  Author a briefing markdown file first (H1 sets the title, an\n"
+    "  optional `Tags: #foo #bar` line sets tags), then re-run as:\n"
+    "      ap2 add --briefing-file <path>             # from a file\n"
+    "      ap2 add --briefing-file -                  # from stdin\n"
+    "  See ap2/init.py:BRIEFING_TEMPLATE for the canonical shape; the\n"
+    "  daemon's per-task verifier (TB-69) reads `## Verification` from\n"
+    "  this file to score the task — a missing briefing means no\n"
+    "  scope-specific verification (TB-135)."
+)
+
+
+# TB-135: convention parse — title from H1, tags from a `Tags:` line
+# (case-insensitive). Any leading `TB-N — ` on the H1 is stripped because
+# TB-N is allocated AFTER add — what's on disk pre-add is the bare title.
+# `Tags:` accepts either `#a #b` or `a, b` shapes; both round-trip onto
+# the rendered task line. YAML frontmatter (TB-133's job) takes precedence
+# if it eventually lands; this fallback handles the no-frontmatter case
+# the briefing's "Out of scope" section calls out.
+_TITLE_TBN_RE = re.compile(r"^TB-\d+\s*[—\-:]\s*", re.IGNORECASE)
+_TAG_TOKEN_RE = re.compile(r"#?([A-Za-z0-9][A-Za-z0-9_\-]*)")
+
+
+def _parse_briefing_metadata(text: str) -> tuple[str, list[str]]:
+    """Pull (title, tags) out of a briefing markdown buffer.
+
+    Title: first non-empty line beginning with `# ` (H1). Strip a leading
+    `TB-N — ` if present so a re-add or daemon-prepped briefing doesn't
+    bake the prior id into the new task line. Empty/missing → "" so the
+    caller can surface a clear error.
+
+    Tags: first line matching `^Tags:` (case-insensitive). Tokens are
+    `#`-prefixed words OR comma/whitespace-separated words; each tag is
+    normalized to `#<word>` so the rendered task line is uniform.
+    """
+    title = ""
+    tags: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not title and line.startswith("# "):
+            title = _TITLE_TBN_RE.sub("", line[2:].strip())
+        if not tags and line.lower().startswith("tags:"):
+            payload = line.split(":", 1)[1]
+            tags = [
+                f"#{m.group(1).lower()}"
+                for m in _TAG_TOKEN_RE.finditer(payload)
+            ]
+        if title and tags:
+            break
+    return title, tags
+
+
+def _read_briefing_file(arg: str) -> str:
+    """`--briefing-file -` reads stdin; otherwise reads the path."""
+    if arg == "-":
+        return sys.stdin.read()
+    return Path(arg).read_text()
+
+
 def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
-    title = args.title
     section = args.section.capitalize()
     section_map = {
         "Ready": "add_ready",
@@ -200,28 +260,52 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     if not op:
         print(f"unknown section: {args.section}", file=sys.stderr)
         return 2
-    # TB-134: reject multi-line title / description / tags before we
-    # touch the operator queue. The same gate fires inside
-    # `do_operator_queue_append`, but failing fast at the CLI keeps the
-    # error message obviously CLI-shaped (no "ERROR:" prefix) and avoids
-    # any half-written briefing-file state.
-    for field_name, value in (
-        ("title", title),
-        ("description", args.description or ""),
-    ):
-        err = tools._validate_single_line(field_name, value)
-        if err:
-            print(f"ap2 add: {err}", file=sys.stderr)
-            return 1
-    for tag in args.tags or []:
+    # TB-135: --briefing-file is now required. The auto-fill skeleton
+    # path (which produced briefings whose `## Verification` had only a
+    # placeholder bullet) is gone, so callers must author the briefing
+    # up-front. Without a real Verification section the per-task verifier
+    # has nothing scope-specific to score against.
+    if not args.briefing_file:
+        print(_BRIEFING_TEMPLATE_HINT, file=sys.stderr)
+        return 1
+    try:
+        briefing = _read_briefing_file(args.briefing_file)
+    except OSError as e:
+        print(f"ap2 add: {e}", file=sys.stderr)
+        return 1
+    if not briefing.strip():
+        print(
+            "ap2 add: briefing file is empty — refusing.\n"
+            "  An empty briefing means no scope-specific verification "
+            "(TB-135).",
+            file=sys.stderr,
+        )
+        return 1
+    parsed_title, parsed_tags = _parse_briefing_metadata(briefing)
+    if not parsed_title:
+        print(
+            "ap2 add: briefing has no `# Title` H1 — refusing.\n"
+            "  The first H1 sets the task title on TASKS.md (TB-135).",
+            file=sys.stderr,
+        )
+        return 1
+
+    title = parsed_title
+    # Tags: union of briefing-derived (`Tags:` line) and `--tags` flag.
+    # The flag is preserved as a convenience override; if both are
+    # provided, the briefing's tags win and the flag's tokens are
+    # appended (deduped) so neither side is silently dropped.
+    tags = list(parsed_tags)
+    for t in args.tags or []:
+        if t not in tags:
+            tags.append(t)
+    # TB-134: still validate single-line for tags — a tag with embedded
+    # newlines breaks TASK_LINE_RE even when the title parses cleanly.
+    for tag in tags:
         err = tools._validate_single_line("tag", tag)
         if err:
             print(f"ap2 add: {err}", file=sys.stderr)
             return 1
-    briefing = None
-    if args.briefing_file:
-        briefing = Path(args.briefing_file).read_text()
-    tags = list(args.tags or [])
     # --no-verify becomes a `#no-verify` tag on the task line. The daemon
     # checks for this tag in `_run_verify` to skip the project-wide gate
     # for tasks the operator already knows can't be meaningfully verified
@@ -239,7 +323,7 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
             "op": op,
             "title": title,
             "tags": tags,
-            "description": args.description or "",
+            "description": "",
             "briefing": briefing,
         },
     )
@@ -621,12 +705,29 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_status)
 
-    s = sub.add_parser("add", help="add a task")
-    s.add_argument("title")
+    s = sub.add_parser(
+        "add",
+        help="add a task — `--briefing-file` is required (TB-135). The "
+             "title and tags are parsed from the briefing's H1 and an "
+             "optional `Tags:` line; pass `-` to read the briefing from "
+             "stdin.",
+    )
+    # Not argparse-required so cmd_add can emit a hint that points at
+    # the canonical template instead of argparse's terse
+    # "the following arguments are required" line (TB-135).
+    s.add_argument(
+        "--briefing-file",
+        default=None,
+        help="path to the briefing markdown file (or `-` for stdin). "
+             "Required since TB-135 — the daemon's per-task verifier "
+             "needs a real `## Verification` section.",
+    )
     s.add_argument("-s", "--section", default="Ready", help="Ready|Backlog|Frozen")
-    s.add_argument("-t", "--tags", nargs="*")
-    s.add_argument("-d", "--description", default="")
-    s.add_argument("--briefing-file", help="path to a briefing markdown file")
+    s.add_argument(
+        "-t", "--tags", nargs="*",
+        help="extra tags appended to those parsed from the briefing's "
+             "`Tags:` line (deduped).",
+    )
     s.add_argument(
         "--no-verify",
         action="store_true",

@@ -171,12 +171,17 @@ def test_cli_no_verify_flag_writes_tag(e2e_project):
     from ap2.cli import cmd_add
 
     cfg = e2e_project()
+    # TB-135: --briefing-file is required; stage one on disk so the
+    # --no-verify plumb is what's under test, not the briefing gate.
+    brief = cfg.project_root / "_test_brief.md"
+    brief.write_text(
+        "# docs-only change\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
     args = Namespace(
-        title="docs-only change",
         section="Backlog",
         tags=None,
-        description="",
-        briefing_file=None,
+        briefing_file=str(brief),
         no_verify=True,
     )
     rc = cmd_add(cfg, args)

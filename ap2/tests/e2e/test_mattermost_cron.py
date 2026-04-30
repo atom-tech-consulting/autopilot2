@@ -49,6 +49,18 @@ def _mm_handler_adds_pipeline(cfg):
                 "action": "add_ready",
                 "title": "Pipeline",
                 "tags": ["#pipeline"],
+                # TB-135: briefing is required for every add_*; the MM
+                # handler in production builds one before calling the
+                # tool, so the test stand-in does the same. We omit
+                # `## Verification` so the per-task verifier returns
+                # None (skip) — this test is about the
+                # mm-add → cron-unfreeze → pipeline-complete chain,
+                # not the verifier, and the e2e fixture's working tree
+                # has no real pytest target for a shell bullet to score.
+                "briefing": (
+                    "# Pipeline\n\n"
+                    "## Goal\nKick the pipeline.\n"
+                ),
             },
         )
         yield _FakeMsg("(mattermost handler done)")

@@ -33,10 +33,21 @@ def _unwrap(res: dict) -> dict:
     return json.loads(res["content"][0]["text"])
 
 
+_DEFAULT_BRIEFING = (
+    "# Brand new\n\n"
+    "## Goal\n\nDoes a thing.\n\n"
+    "## Verification\n- `uv run pytest -q` — gates pass\n"
+)
+
+
 def test_board_edit_add_ready_assigns_id(cfg, tmp_path):
     res = tools.do_board_edit(
         cfg,
-        {"action": "add_ready", "title": "Brand new", "tags": ["#auto"]},
+        {
+            "action": "add_ready", "title": "Brand new", "tags": ["#auto"],
+            # TB-135: briefing payload is now required for every add_*.
+            "briefing": _DEFAULT_BRIEFING,
+        },
     )
     body = _unwrap(res)
     assert body["task_id"] == "TB-10"
@@ -80,7 +91,10 @@ def test_board_edit_move_missing_id(cfg):
 def test_board_edit_add_ready_honors_blocked_on(cfg):
     res = tools.do_board_edit(
         cfg,
-        {"action": "add_ready", "title": "Waiter", "blocked_on": "TB-5"},
+        {
+            "action": "add_ready", "title": "Waiter", "blocked_on": "TB-5",
+            "briefing": _DEFAULT_BRIEFING,
+        },
     )
     body = _unwrap(res)
     b = Board.load(cfg.tasks_file)
@@ -92,7 +106,10 @@ def test_board_edit_add_ready_honors_blocked_on(cfg):
 def test_board_edit_add_backlog_honors_blocked_on(cfg):
     res = tools.do_board_edit(
         cfg,
-        {"action": "add_backlog", "title": "Waiter", "blocked_on": "TB-5"},
+        {
+            "action": "add_backlog", "title": "Waiter", "blocked_on": "TB-5",
+            "briefing": _DEFAULT_BRIEFING,
+        },
     )
     body = _unwrap(res)
     b = Board.load(cfg.tasks_file)
@@ -104,7 +121,10 @@ def test_board_edit_add_backlog_honors_blocked_on(cfg):
 def test_board_edit_add_frozen_still_honors_blocked_on(cfg):
     res = tools.do_board_edit(
         cfg,
-        {"action": "add_frozen", "title": "Waiter", "blocked_on": "TB-5"},
+        {
+            "action": "add_frozen", "title": "Waiter", "blocked_on": "TB-5",
+            "briefing": _DEFAULT_BRIEFING,
+        },
     )
     body = _unwrap(res)
     b = Board.load(cfg.tasks_file)
@@ -711,7 +731,10 @@ def test_board_edit_accepts_single_line_description(cfg):
     """Regression: single-line descriptions still go through."""
     res = tools.do_board_edit(
         cfg,
-        {"action": "add_backlog", "title": "ok", "description": "one line"},
+        {
+            "action": "add_backlog", "title": "ok",
+            "description": "one line", "briefing": _DEFAULT_BRIEFING,
+        },
     )
     assert not res.get("isError"), res
 
@@ -736,3 +759,152 @@ def test_operator_queue_append_rejects_newline_in_description(cfg, tmp_path):
     assert (tmp_path / "TASKS.md").read_text() == before
     after_queue = queue_path.read_text() if queue_path.exists() else ""
     assert after_queue == before_queue
+
+
+# ---------------------------------------------------------------------------
+# TB-135: do_board_edit / do_operator_queue_append require an explicit
+# briefing payload for every add_* op. The skeleton-template auto-fill that
+# used to land for add_backlog is gone — a briefing whose `## Verification`
+# was just a `(additional shell or prose bullets)` placeholder bypassed the
+# per-task verifier (TB-131 hit this on 2026-04-30, "passed" on regression
+# gate alone with zero scope-specific scoring). MCP-driven callers (ideation,
+# MM handler) already construct the payload, so the gate doesn't break them;
+# CLI authorship is now the operator's responsibility (cmd_add tests below).
+
+
+def test_board_edit_add_backlog_requires_briefing(cfg, tmp_path):
+    """Empty/missing briefing on add_backlog → isError; nothing landed
+    on the board, no briefing file under .cc-autopilot/tasks."""
+    tasks_dir = tmp_path / ".cc-autopilot" / "tasks"
+    before_briefings = (
+        sorted(p.name for p in tasks_dir.iterdir()) if tasks_dir.exists() else []
+    )
+    before_tasks = (tmp_path / "TASKS.md").read_text()
+
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_backlog", "title": "needs briefing", "briefing": ""},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "briefing is required" in msg
+    # Board untouched, no briefing file written.
+    assert (tmp_path / "TASKS.md").read_text() == before_tasks
+    after_briefings = (
+        sorted(p.name for p in tasks_dir.iterdir()) if tasks_dir.exists() else []
+    )
+    assert after_briefings == before_briefings
+
+
+def test_board_edit_add_ready_requires_briefing(cfg, tmp_path):
+    """Same gate fires on add_ready — pre-TB-135 only add_backlog
+    auto-filled, but the new requirement covers every add_* action."""
+    before = (tmp_path / "TASKS.md").read_text()
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_ready", "title": "no briefing"},
+    )
+    assert res.get("isError")
+    assert "briefing is required" in res["content"][0]["text"]
+    assert (tmp_path / "TASKS.md").read_text() == before
+
+
+def test_board_edit_add_frozen_requires_briefing(cfg, tmp_path):
+    """add_frozen also gated. Operators sometimes seed Frozen with
+    superseded ideas; the briefing requirement prevents the same
+    placeholder-verifier hole from showing up there."""
+    before = (tmp_path / "TASKS.md").read_text()
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_frozen", "title": "no briefing"},
+    )
+    assert res.get("isError")
+    assert "briefing is required" in res["content"][0]["text"]
+    assert (tmp_path / "TASKS.md").read_text() == before
+
+
+def test_board_edit_add_with_briefing_text_succeeds(cfg, tmp_path):
+    """Daemon-internal callers (ideation, MM handler) construct the
+    briefing payload themselves — they're unaffected by TB-135 as long
+    as they pass a non-empty `briefing`. Pin the happy path.
+    """
+    body = (
+        "# Real briefing\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_backlog", "title": "ideation-style", "briefing": body},
+    )
+    out = _unwrap(res)
+    assert out["task_id"].startswith("TB-")
+    # Briefing bytes round-trip into .cc-autopilot/tasks/<slug>.md.
+    brief_path = cfg.project_root / out["briefing_path"]
+    assert brief_path.exists()
+    assert brief_path.read_text() == body
+
+
+def test_operator_queue_append_add_backlog_requires_briefing(cfg, tmp_path):
+    """The CLI `ap2 add` and MM-handler `operator_queue_append` paths both
+    route through here; the gate must fire BEFORE TB-N pre-allocation so
+    a rejected add doesn't leak a hole in the TB-N sequence (the bump of
+    CLAUDE.md's `Next task ID` happens inside `_allocate_id` and is not
+    reversible)."""
+    before_claude = (tmp_path / "CLAUDE.md").read_text()
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    before_queue = queue_path.read_text() if queue_path.exists() else ""
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "needs briefing"},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "briefing is required" in msg
+    # CLAUDE.md untouched (no TB-N allocated for the rejected add).
+    assert (tmp_path / "CLAUDE.md").read_text() == before_claude
+    # Nothing queued.
+    after_queue = queue_path.read_text() if queue_path.exists() else ""
+    assert after_queue == before_queue
+
+
+def test_operator_queue_append_add_ready_requires_briefing(cfg):
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "add_ready", "title": "no briefing"},
+    )
+    assert res.get("isError")
+    assert "briefing is required" in res["content"][0]["text"]
+
+
+def test_operator_queue_append_add_frozen_requires_briefing(cfg):
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "add_frozen", "title": "no briefing"},
+    )
+    assert res.get("isError")
+    assert "briefing is required" in res["content"][0]["text"]
+
+
+def test_operator_queue_append_add_with_briefing_text_succeeds(cfg, tmp_path):
+    """MM-handler / ideation pass the briefing as a payload field. Pin
+    the happy path: the queue gets one record, the briefing bytes land
+    on disk under .cc-autopilot/tasks/."""
+    body = (
+        "# MM-handler briefing\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "mm-style", "briefing": body},
+    )
+    out = _unwrap(res)
+    assert out["task_id"].startswith("TB-")
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    assert queue_path.exists()
+    # Briefing bytes round-trip into .cc-autopilot/tasks/<slug>.md.
+    slug_files = sorted(
+        p for p in (tmp_path / ".cc-autopilot" / "tasks").iterdir()
+        if p.suffix == ".md"
+    )
+    assert any(p.read_text() == body for p in slug_files)

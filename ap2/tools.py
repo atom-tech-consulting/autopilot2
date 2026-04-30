@@ -26,7 +26,6 @@ from . import events, retry
 from .board import Board, board_file_lock, locked_board
 from .config import Config, bump_next_task_id
 from .cron import update_job
-from .init import render_briefing
 
 
 # TB-123: contextvar plumb so `do_cron_propose` can stamp the calling task's
@@ -149,22 +148,31 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
         "move_to_pipeline_pending": "Pipeline Pending",
     }
 
+    # TB-135: briefing is now required for every add_* op. The auto-fill
+    # skeleton path (TB-69) generated briefings whose `## Verification`
+    # had only a placeholder bullet — the per-task verifier then
+    # "passed" prose like "(additional shell or prose bullets)" through
+    # the LLM judge with no real diff to score against, completing
+    # tasks with zero scope-specific verification (TB-131 hit this on
+    # 2026-04-30). Pushing authorship to the caller (CLI:
+    # --briefing-file; ideation / MM handler: already construct the
+    # payload) closes the gap. Validate BEFORE taking `locked_board`'s
+    # save-on-exit lock so a rejected add doesn't side-effect TASKS.md
+    # whitespace normalization.
+    if action in add_map and not (briefing or "").strip():
+        return _err(
+            "briefing is required for add actions (TB-135). "
+            "Author a briefing markdown with a real "
+            "`## Verification` section and pass it as the "
+            "`briefing` arg."
+        )
+
     try:
         with locked_board(cfg.tasks_file) as board:
             if action in add_map:
                 if not title:
                     return _err("title is required for add actions")
                 new_id = _allocate_id(board, cfg)
-                # TB-69: when add_backlog is called without an explicit briefing
-                # payload, auto-fill the briefing with the standard template so
-                # every newly-discovered task lands with a load-bearing
-                # `## Verification` section. add_ready / add_frozen still pass
-                # through — those are for cases where the briefing is being
-                # explicitly managed by the caller.
-                if action == "add_backlog" and not (briefing or "").strip():
-                    briefing = render_briefing(
-                        task_id=new_id, title=title, description=description,
-                    )
                 briefing_rel = None
                 if briefing:
                     slug = slugify(title)
@@ -615,6 +623,19 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             if err:
                 return _err(err)
 
+        # TB-135: briefing is required for every add_* op. The
+        # auto-fill skeleton path is gone — without a real
+        # `## Verification` section the per-task verifier scores prose
+        # placeholders against an empty diff and "passes" with zero
+        # scope-specific evidence. We refuse before allocating an ID
+        # so a rejected add doesn't leak a hole in the TB-N sequence.
+        if not (briefing_content or "").strip():
+            return _err(
+                "briefing is required for add ops (TB-135). Author a "
+                "briefing markdown with a real `## Verification` "
+                "section and pass it as the `briefing` arg."
+            )
+
         # Allocate ID + bump CLAUDE.md under the file lock so concurrent
         # CLI invocations don't collide. board_file_lock (not
         # locked_board) — _allocate_id reads max_id but doesn't mutate
@@ -622,16 +643,6 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         with board_file_lock(cfg.tasks_file):
             board = Board.load(cfg.tasks_file)
             preallocated_task_id = _allocate_id(board, cfg)
-
-        # add_backlog with no caller-provided briefing: render the
-        # standard template so every queued task lands with a
-        # `## Verification` section (mirrors do_board_edit).
-        if op == "add_backlog" and not (briefing_content or "").strip():
-            briefing_content = render_briefing(
-                task_id=preallocated_task_id,
-                title=title,
-                description=description,
-            )
 
         briefing_rel: str | None = None
         if briefing_content:

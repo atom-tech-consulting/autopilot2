@@ -23,7 +23,18 @@ def test_tick_drains_operator_queue_before_task(e2e_project):
     # Operator queues an add_backlog. ID is pre-allocated synchronously,
     # but TASKS.md is not yet mutated.
     body = tools.do_operator_queue_append(
-        cfg, {"op": "add_backlog", "title": "queued by operator"}
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "queued by operator",
+            # TB-135: briefing is required for every add_*; the CLI
+            # passes the buffer it read from --briefing-file.
+            "briefing": (
+                "# queued by operator\n\n"
+                "## Verification\n"
+                "- `uv run pytest -q` — gates pass\n"
+            ),
+        },
     )
     import json
     qbody = json.loads(body["content"][0]["text"])

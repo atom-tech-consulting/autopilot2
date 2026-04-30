@@ -368,96 +368,213 @@ def test_status_omits_web_url_when_daemon_stopped(tmp_path: Path, monkeypatch, c
 
 
 # ---------------------------------------------------------------------------
-# TB-134: ap2 add rejects multi-line title / description / tags.
+# TB-135: ap2 add requires --briefing-file. Title and tags are parsed from
+# the briefing's H1 and an optional `Tags:` line; -t/-d are repurposed (-t
+# extends the briefing's tags; -d is dropped — descriptions live in the
+# briefing). Pre-TB-135 a missing --briefing-file silently auto-filled a
+# skeleton whose `## Verification` had only a placeholder bullet, so the
+# per-task verifier "passed" tasks on regression-gate alone (TB-131 hit
+# this on 2026-04-30). Test that authoring is now mandatory and that the
+# happy-path round-trips the briefing bytes onto disk.
 
 
 def _add_args(
-    title: str = "valid title",
     section: str = "Backlog",
-    description: str = "",
     tags: list[str] | None = None,
     briefing_file: str | None = None,
     no_verify: bool = False,
 ) -> Namespace:
+    """Build a Namespace shaped like cmd_add's argparse output.
+
+    TB-135: the positional `title`, `-d/--description` are gone — title /
+    description live in the briefing. `_add_args` no longer accepts them.
+    """
     return Namespace(
-        title=title,
         section=section,
-        description=description,
         tags=tags,
         briefing_file=briefing_file,
         no_verify=no_verify,
     )
 
 
-def test_add_rejects_newline_in_description(tmp_path: Path, capsys):
-    """Multi-line descriptions used to round-trip into TASKS.md as actual
-    newline bytes, splitting the rendered task line and stranding the
-    `[→ brief](...)` link. Reject up-front with a message that points
-    operators at briefing.md (the right place for prose) instead of
-    silently auto-collapsing newlines to spaces."""
+_GOOD_BRIEFING = (
+    "# Add foo helper\n\n"
+    "Tags: #cli #helpers\n\n"
+    "## Goal\n\nReal goal text.\n\n"
+    "## Verification\n- `uv run pytest -q` — gates pass\n"
+)
+
+
+def test_add_requires_briefing_file(tmp_path: Path, capsys):
+    """TB-135 verification: `ap2 add` without `--briefing-file` exits
+    non-zero with a clear usage hint pointing at where to find the
+    canonical template. Nothing is queued; nothing lands in TASKS.md."""
     cfg = _project(tmp_path)
     before = cfg.tasks_file.read_text()
 
-    rc = cmd_add(cfg, _add_args(description="first\nsecond"))
+    rc = cmd_add(cfg, _add_args(briefing_file=None))
 
     assert rc == 1
     err = capsys.readouterr().err
-    assert "single line" in err
-    assert "briefing" in err  # nudge to the right place for richer prose
-    # Nothing was queued and nothing landed in TASKS.md.
+    # Hint mentions both the flag and where to find the template.
+    assert "--briefing-file" in err
+    assert "BRIEFING_TEMPLATE" in err or "init.py" in err
+    # Nothing landed.
     assert cfg.tasks_file.read_text() == before
     queue = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
     assert not queue.exists() or queue.read_text() == ""
 
 
-def test_add_rejects_carriage_return_in_description(tmp_path: Path, capsys):
-    """\\r alone is the same hazard as \\n — TASK_LINE_RE is per-line and
-    a stray CR breaks the rendered task line just as cleanly."""
+def test_add_with_briefing_file_succeeds(tmp_path: Path):
+    """Happy path: `ap2 add --briefing-file <path>` allocates a TB-N,
+    queues the add, and (after the daemon's drain) lands a task line
+    whose `[→ brief](...)` points at the briefing on disk. Briefing
+    bytes round-trip into .cc-autopilot/tasks/<slug>.md."""
     cfg = _project(tmp_path)
-    before = cfg.tasks_file.read_text()
+    brief = tmp_path / "input-briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
 
-    rc = cmd_add(cfg, _add_args(description="first\rsecond"))
-
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "single line" in err
-    assert "briefing" in err
-    assert cfg.tasks_file.read_text() == before
-
-
-def test_add_rejects_newline_in_title(tmp_path: Path):
-    """Title goes on the same line as description in TASKS.md — same
-    hazard, same gate."""
-    cfg = _project(tmp_path)
-    rc = cmd_add(
-        cfg,
-        _add_args(title="title with\nnewline", briefing_file=None),
-    )
-    assert rc == 1
-
-
-def test_add_rejects_newline_in_tag(tmp_path: Path):
-    """Tags render as `\\`#foo\\`` on the task line — a newline inside
-    one breaks the same line-oriented parser."""
-    cfg = _project(tmp_path)
-    rc = cmd_add(cfg, _add_args(tags=["#cli", "#bro\nken"]))
-    assert rc == 1
-
-
-def test_add_succeeds_with_single_line_description(tmp_path: Path):
-    """Regression: the single-line gate doesn't break the happy path."""
-    cfg = _project(tmp_path)
-
-    rc = cmd_add(cfg, _add_args(description="single-line description"))
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
 
     assert rc == 0
     _drain(cfg)
     board = Board.load(cfg.tasks_file)
-    # Title from _add_args() default is "valid title".
+    # H1 sets the title.
     found = next(
-        (t for t in board.iter_tasks() if t.title == "valid title"),
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None, list(board.iter_tasks())
+    # Briefing link present, pointing under .cc-autopilot/tasks/.
+    assert found.briefing is not None
+    assert ".cc-autopilot/tasks/" in found.briefing
+    # Briefing bytes landed on disk verbatim.
+    target = cfg.project_root / found.briefing
+    assert target.exists()
+    assert target.read_text() == _GOOD_BRIEFING
+    # Tags: line in briefing → tags on the task line (lower-cased,
+    # `#`-prefixed). The `_GOOD_BRIEFING` carries `#cli #helpers`.
+    assert "#cli" in found.tags
+    assert "#helpers" in found.tags
+
+
+def test_add_with_briefing_file_stdin(tmp_path: Path, monkeypatch):
+    """`ap2 add --briefing-file -` reads the briefing from stdin and
+    behaves identically to the file path. Operator-flow case: piping a
+    here-doc into the CLI without leaving a file behind."""
+    import io
+
+    cfg = _project(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(_GOOD_BRIEFING))
+
+    rc = cmd_add(cfg, _add_args(briefing_file="-"))
+
+    assert rc == 0
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
         None,
     )
     assert found is not None
-    assert "single-line description" in found.description
+    assert found.briefing is not None
+    target = cfg.project_root / found.briefing
+    assert target.read_text() == _GOOD_BRIEFING
+
+
+def test_add_rejects_briefing_file_without_h1(tmp_path: Path, capsys):
+    """No H1 → no title can be derived → refuse. The error points at
+    H1 specifically so the operator can fix the briefing."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "no-h1.md"
+    brief.write_text("Just some prose, no heading.\n\n## Verification\n- `pytest`\n")
+
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "H1" in err or "title" in err.lower()
+
+
+def test_add_rejects_empty_briefing_file(tmp_path: Path, capsys):
+    """Empty briefing means no `## Verification` either — verifier would
+    have nothing to score. Refuse, don't fall back to a skeleton."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "empty.md"
+    brief.write_text("")
+
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "empty" in err.lower()
+
+
+def test_add_strips_tbn_prefix_from_h1(tmp_path: Path):
+    """Briefings on disk often carry `# TB-N — Title` once the daemon's
+    prep step has stamped them. A re-add (e.g. operator copies a frozen
+    briefing into a new add) must not bake the prior id into the new
+    task's title — strip the `TB-N — ` prefix on parse."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "prefixed.md"
+    brief.write_text(
+        "# TB-99 — Real title here\n\n"
+        "## Verification\n- `uv run pytest -q` — passes\n"
+    )
+
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
+
+    assert rc == 0
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    titles = [t.title for t in board.iter_tasks()]
+    assert "Real title here" in titles
+    # No `TB-99` substring leaked through.
+    assert not any("TB-99" in t for t in titles)
+
+
+def test_add_extends_briefing_tags_with_flag(tmp_path: Path):
+    """`-t` is repurposed (TB-135) as an APPEND of extra tags on top of
+    those parsed from the briefing's `Tags:` line. Both sources land on
+    the rendered task line; duplicates are deduped."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)  # Tags: #cli #helpers
+
+    rc = cmd_add(
+        cfg,
+        _add_args(briefing_file=str(brief), tags=["#extra", "#cli"]),
+    )
+
+    assert rc == 0
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None
+    # Tags from the briefing AND the flag both present.
+    assert "#cli" in found.tags
+    assert "#helpers" in found.tags
+    assert "#extra" in found.tags
+    # `#cli` not duplicated.
+    assert found.tags.count("#cli") == 1
+
+
+def test_add_rejects_newline_in_tag_flag(tmp_path: Path, capsys):
+    """TB-134 carry-forward: a `--tags` value with embedded newlines
+    breaks TASK_LINE_RE. Reject up-front with the same single-line
+    error."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    rc = cmd_add(
+        cfg,
+        _add_args(briefing_file=str(brief), tags=["#cli", "#bro\nken"]),
+    )
+
+    assert rc == 1
+    assert "single line" in capsys.readouterr().err
 

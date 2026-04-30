@@ -272,9 +272,13 @@ def test_verifier_uses_task_commit_diff_on_retry_not_head(e2e_project):
     )
 
 
-def test_add_backlog_writes_template_when_briefing_omitted():
-    """Pin the auto-fill: do_board_edit add_backlog without `briefing` writes
-    the BRIEFING_TEMPLATE, including the `## Verification` section."""
+def test_add_backlog_rejects_missing_briefing():
+    """TB-135 inversion of the prior auto-fill test: without an explicit
+    `briefing` payload the call now fails with `briefing is required`,
+    nothing lands on the board, no briefing file is written. The
+    auto-fill skeleton (TB-69) was retired because its placeholder
+    `## Verification` line slipped through the per-task verifier and
+    completed tasks like TB-131 with zero scope-specific scoring."""
     import tempfile
     from pathlib import Path
     from ap2.config import Config
@@ -287,23 +291,22 @@ def test_add_backlog_writes_template_when_briefing_omitted():
         cfg = Config.load(root)
         cfg.ensure_dirs()
 
+        before_tasks = (root / "TASKS.md").read_text()
+        tasks_dir = root / ".cc-autopilot" / "tasks"
+        before_briefings = sorted(p.name for p in tasks_dir.iterdir())
+
         res = do_board_edit(cfg, {
             "action": "add_backlog",
-            "title": "auto-template task",
+            "title": "no briefing",
             "tags": [],
             "description": "what success looks like",
-            # briefing omitted on purpose
+            # briefing intentionally omitted — must error.
         })
-        assert not res.get("isError"), res
-
-        # The briefing file should exist and have the Verification section.
-        import json as _json
-        body = _json.loads(res["content"][0]["text"])
-        brief_path = root / body["briefing_path"]
-        assert brief_path.exists()
-        text = brief_path.read_text()
-        assert "## Verification" in text
-        assert "uv run pytest" in text
+        assert res.get("isError"), res
+        assert "briefing is required" in res["content"][0]["text"]
+        # Board untouched, no briefing file written.
+        assert (root / "TASKS.md").read_text() == before_tasks
+        assert sorted(p.name for p in tasks_dir.iterdir()) == before_briefings
 
 
 def test_add_backlog_preserves_explicit_briefing():
