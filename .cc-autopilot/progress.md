@@ -29,3 +29,9 @@
 - **Summary:** Two-layer fix for stale status-report cron: prompts.build_control_prompt now injects a fresh `## Current state` block (UTC `now:`, board counts, `git log -n 10`) and pins a `_STATUS_REPORT_CONTRACT` for the status-report job (use snapshot timestamp verbatim, re-read events.jsonl+TASKS.md, skip when idle); daemon._status_report_should_skip + run_cron gate short-circuits the SDK invocation when no interesting events appeared since the last cron_complete (positional walk, self-noise filters), emitting cron_skipped + advancing cron_state. cron.default.yaml prompt rewritten to match. 504/504 tests pass (11 new). Operator note: live `.cc-autopilot/cron.yaml` is fenced for task agents; daemon-side block + skip gate cover existing installs without requiring a cron_edit / re-bootstrap.
 - **Files:** ap2/cron.default.yaml, ap2/daemon.py, ap2/prompts.py, ap2/tests/test_prompts.py, ap2/tests/test_status_report_skip.py
 - **Tests:** pass
+
+## [2026-04-30] TB-129: Web view: live task-detail page with prompt + streaming response
+- **Commit:** `c40dc6d`
+- **Summary:** Added /task-run/<run-id> live detail page (prompt + color-coded stream rows), JSON sub-endpoint /task-run/<run-id>/stream.json?since=N for 3s polling that auto-stops on terminal events, → live links on task_start rows in /events + home, and a Runs section on /task/<TB-N> sourced from disk; 21 new tests, full 525-test suite green.
+- **Files:** ap2/web.py, ap2/tests/test_web.py
+- **Tests:** pass
