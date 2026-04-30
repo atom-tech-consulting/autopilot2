@@ -1,0 +1,10 @@
+jobs:
+  - name: status-report
+    interval: 2h
+    prompt: |
+      Read the last 50 events from events.jsonl and the last 20 lines of
+      progress.md. Post a concise summary to the mattermost channel identified
+      by AP2_MM_REPORT_CHANNEL (or #autopilot if unset). Cover: tasks completed,
+      tasks failed, pipelines/cron activity, open issues. Keep under 10 lines.
+    max_turns: 10
+    created_by: bootstrap

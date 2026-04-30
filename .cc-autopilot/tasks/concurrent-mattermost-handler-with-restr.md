@@ -212,3 +212,12 @@ concrete need for the full set.
   picked as the safer mode; full-set-when-idle preserves today's
   behavior. Implementer may choose always-restricted if that turns
   out simpler.
+## Attempts
+
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T073933Z-TB-122.prompt.md`, `stream: .cc-autopilot/debug/20260430T073933Z-TB-122.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T073933Z-TB-122.messages.jsonl`
