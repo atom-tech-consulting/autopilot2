@@ -180,3 +180,10 @@ it; new task agents pick up the new tool.
   `cron_proposed` event shape stable so the operator-review surface
   (whatever it is today) doesn't need to change. Symmetric with
   `cron_edit` for control agents.
+## Attempts
+
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] [shell] `uv run pytest -q ap2/tests/` (regression gate); [fail] All 423+ default tests still green; smokes still green.
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T075758Z-TB-123.prompt.md`, `stream: .cc-autopilot/debug/20260430T075758Z-TB-123.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T075758Z-TB-123.messages.jsonl`
