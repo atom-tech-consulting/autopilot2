@@ -8,12 +8,93 @@ Prompts share a common shape:
 """
 from __future__ import annotations
 
+import datetime as _dt
+import subprocess
 from pathlib import Path
 
 from . import events
 from .board import Board, Task
 from .config import Config
 from .tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED
+
+
+# TB-128: status-report cron was emitting reports with stale headline
+# timestamps (the agent re-rendered text from a prior context's cache
+# rather than the current moment). Fix: inject a deterministic "right
+# now" snapshot — UTC timestamp, board counts, recent commits — at the
+# top of every control prompt. The status-report prompt then references
+# this block by name ("use the `now:` timestamp verbatim"), so there's
+# no ambiguity about which timestamp belongs in the headline.
+def _current_state_block(cfg: Config) -> str:
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    counts_line = "(board not found)"
+    if cfg.tasks_file.exists():
+        try:
+            board = Board.load(cfg.tasks_file)
+            c = {s: len(board.sections.get(s, [])) for s in
+                 ["Active", "Ready", "Backlog", "Pipeline Pending",
+                  "Complete", "Frozen"]}
+            counts_line = (
+                f"{c['Active']}A / {c['Ready']}R / {c['Backlog']}B / "
+                f"{c['Pipeline Pending']}P / {c['Complete']}C / "
+                f"{c['Frozen']}F"
+            )
+        except Exception as e:  # noqa: BLE001
+            counts_line = f"(board load error: {type(e).__name__})"
+
+    commits = "(git log unavailable)"
+    if (cfg.project_root / ".git").exists():
+        try:
+            proc = subprocess.run(
+                [
+                    "git", "-c", "safe.directory=*",
+                    "-C", str(cfg.project_root),
+                    "log", "--oneline", "-n", "10",
+                ],
+                capture_output=True, text=True, timeout=5,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                commits = proc.stdout.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    return (
+        "## Current state (rendered just before this prompt was sent)\n"
+        f"- now: {now}\n"
+        f"- board: {counts_line} (Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)\n"
+        "- recent commits (HEAD~10):\n"
+        + "\n".join(f"  {ln}" for ln in commits.splitlines())
+        + "\n"
+    )
+
+
+# TB-128: the status-report cron has historically posted reports with
+# headline timestamps copied from prior runs' contexts. The fix is two-
+# pronged: (1) the daemon-injected `## Current state` block above gives
+# a deterministic `now:` value; (2) this addendum tells the agent
+# explicitly to use that value verbatim, re-read events.jsonl + the
+# board fresh, and skip posting if nothing has changed since the last
+# `status_report` event. The deterministic skip-gate in
+# `daemon.run_cron` is belt-and-braces in case the agent ignores this.
+_STATUS_REPORT_CONTRACT = """\
+## Status-report contract (TB-128)
+- The headline timestamp in your post MUST be the literal `now:` value
+  from the `## Current state` block above. Do NOT reuse a timestamp from
+  the events tail, your own prior turns, or any cached briefing.
+- Re-read `.cc-autopilot/events.jsonl` (last 50 lines) and `TASKS.md`
+  with the `Read` tool before composing the post — the embedded events
+  tail is a courtesy, not a substitute. The board counts in the snapshot
+  block above are authoritative.
+- Skip the Mattermost post entirely if nothing meaningful has happened
+  since the last `status_report` event in the tail (i.e. no new
+  task_start / task_complete / verification_failed / pipeline_* /
+  retry_exhausted / daemon_pause / daemon_resume / operator_ack /
+  cron_proposed / ideation_complete events). When you skip, still call
+  `log_event(type="status_report", summary="skipped: no activity since
+  <ts>")` so the daemon sees a marker.
+- Always call `log_event(type="status_report", summary=...)` before
+  finishing — posted or skipped.
+"""
 
 
 _TASK_HEADER = """\
@@ -334,9 +415,16 @@ def build_control_prompt(cfg: Config, job_name: str, job_prompt: str) -> str:
     `ideation._maybe_ideate`. The `## Control job` framing replaces the
     old `## Scheduled job` framing — ideation isn't on a schedule, and
     "control job" matches the broader CONTROL_AGENT_TOOLS partition.
+
+    TB-128: a `## Current state` block (now/board/recent commits) is
+    injected above the job prompt so the agent has a deterministic
+    "right now" snapshot. The status-report job additionally gets an
+    explicit timestamp / freshness contract appended.
     """
     parts = [
         _CONTROL_HEADER,
+        "",
+        _current_state_block(cfg),
         f"\n## Control job: {job_name}",
         "",
         job_prompt,
@@ -346,6 +434,9 @@ def build_control_prompt(cfg: Config, job_name: str, job_prompt: str) -> str:
         "- Log a summary via `log_event` before you finish.",
         "- Do not loop; one pass per invocation.",
         "",
-        _events_block(cfg),
     ]
+    if job_name == "status-report":
+        parts.append(_STATUS_REPORT_CONTRACT)
+        parts.append("")
+    parts.append(_events_block(cfg))
     return "\n".join(parts)

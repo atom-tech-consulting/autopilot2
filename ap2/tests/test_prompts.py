@@ -8,7 +8,11 @@ from pathlib import Path
 
 from ap2.board import Task
 from ap2.config import Config
-from ap2.prompts import build_mattermost_prompt, build_task_prompt
+from ap2.prompts import (
+    build_control_prompt,
+    build_mattermost_prompt,
+    build_task_prompt,
+)
 
 
 def _cfg(tmp_path: Path) -> Config:
@@ -188,3 +192,64 @@ def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
     # Idle prompt does NOT contain the concurrent-task header.
     p_idle = build_mattermost_prompt(cfg, msg)
     assert "task agent is currently running" not in p_idle
+
+
+# ---------------------------------------------------------------------------
+# TB-128: control prompts must inject a fresh "right now" snapshot, and the
+# status-report job must get an explicit timestamp / freshness contract.
+
+def test_control_prompt_injects_current_state_block(tmp_path):
+    """Every control-agent prompt (cron + ideation) must carry a
+    `## Current state` block with a freshly computed UTC `now:` timestamp,
+    board counts, and recent commits. This is the deterministic anchor the
+    status-report cron uses for its headline (TB-128) — no more re-rendering
+    text from a prior context.
+    """
+    cfg = _cfg(tmp_path)
+    p = build_control_prompt(cfg, "status-report", "post a status report")
+    assert "## Current state" in p
+    assert "rendered just before this prompt was sent" in p
+    # Headline timestamp is a real ISO-Z string formatted right now.
+    import re
+
+    assert re.search(
+        r"now: 20\d\d-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\dZ", p
+    ), "expected a current ISO-Z `now:` timestamp in the snapshot block"
+    # Board counts use the same A/R/B/P/C/F shape as `ap2 status`.
+    assert "(Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)" in p
+
+
+def test_control_prompt_status_report_pins_freshness_contract(tmp_path):
+    """For the `status-report` job specifically, the prompt must spell out
+    the load-bearing rules so the agent can't drift back to copying a stale
+    timestamp from prior turns: (1) headline timestamp = the snapshot's
+    `now:` value verbatim, (2) re-read events.jsonl + TASKS.md fresh,
+    (3) skip the post if nothing has changed since the last status_report.
+    """
+    cfg = _cfg(tmp_path)
+    p = build_control_prompt(cfg, "status-report", "post a status report")
+    # (1) Use the snapshot timestamp verbatim — no copying from elsewhere.
+    assert "Status-report contract" in p
+    assert "literal `now:` value" in p
+    assert "Do NOT reuse a timestamp from" in p
+    # (2) Fresh reads of the canonical state files.
+    assert ".cc-autopilot/events.jsonl" in p
+    assert "TASKS.md" in p
+    # (3) Skip-when-idle directive (defense in depth — daemon also gates).
+    assert "Skip the Mattermost post entirely" in p
+    assert "no activity since" in p
+
+
+def test_control_prompt_non_status_jobs_skip_status_report_contract(tmp_path):
+    """The status-report contract is keyed on job name. Other control jobs
+    (e.g. ideation) must not get the status-report-specific addendum
+    appended to their prompt — it's noise for them and would confuse
+    ideation's own freshness model.
+    """
+    cfg = _cfg(tmp_path)
+    p_status = build_control_prompt(cfg, "status-report", "x")
+    p_other = build_control_prompt(cfg, "ideation", "x")
+    assert "Status-report contract" in p_status
+    assert "Status-report contract" not in p_other
+    # The shared `## Current state` block IS in both — it's harmless context.
+    assert "## Current state" in p_other
