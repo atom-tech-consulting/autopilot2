@@ -85,4 +85,4 @@ AP2_REAL_SDK=1 uv run pytest ap2/tests/smoke/ -v -s
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+All rights reserved — see [LICENSE](LICENSE).
