@@ -200,6 +200,24 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     if not op:
         print(f"unknown section: {args.section}", file=sys.stderr)
         return 2
+    # TB-134: reject multi-line title / description / tags before we
+    # touch the operator queue. The same gate fires inside
+    # `do_operator_queue_append`, but failing fast at the CLI keeps the
+    # error message obviously CLI-shaped (no "ERROR:" prefix) and avoids
+    # any half-written briefing-file state.
+    for field_name, value in (
+        ("title", title),
+        ("description", args.description or ""),
+    ):
+        err = tools._validate_single_line(field_name, value)
+        if err:
+            print(f"ap2 add: {err}", file=sys.stderr)
+            return 1
+    for tag in args.tags or []:
+        err = tools._validate_single_line("tag", tag)
+        if err:
+            print(f"ap2 add: {err}", file=sys.stderr)
+            return 1
     briefing = None
     if args.briefing_file:
         briefing = Path(args.briefing_file).read_text()

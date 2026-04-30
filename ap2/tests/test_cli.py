@@ -19,7 +19,14 @@ import pytest
 
 from ap2 import events, retry, tools
 from ap2.board import Board
-from ap2.cli import _require_oauth_token, cmd_backlog, cmd_delete, cmd_start, cmd_unfreeze
+from ap2.cli import (
+    _require_oauth_token,
+    cmd_add,
+    cmd_backlog,
+    cmd_delete,
+    cmd_start,
+    cmd_unfreeze,
+)
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -358,4 +365,99 @@ def test_status_omits_web_url_when_daemon_stopped(tmp_path: Path, monkeypatch, c
     assert rc == 0
     out = capsys.readouterr().out
     assert "web:" not in out
+
+
+# ---------------------------------------------------------------------------
+# TB-134: ap2 add rejects multi-line title / description / tags.
+
+
+def _add_args(
+    title: str = "valid title",
+    section: str = "Backlog",
+    description: str = "",
+    tags: list[str] | None = None,
+    briefing_file: str | None = None,
+    no_verify: bool = False,
+) -> Namespace:
+    return Namespace(
+        title=title,
+        section=section,
+        description=description,
+        tags=tags,
+        briefing_file=briefing_file,
+        no_verify=no_verify,
+    )
+
+
+def test_add_rejects_newline_in_description(tmp_path: Path, capsys):
+    """Multi-line descriptions used to round-trip into TASKS.md as actual
+    newline bytes, splitting the rendered task line and stranding the
+    `[→ brief](...)` link. Reject up-front with a message that points
+    operators at briefing.md (the right place for prose) instead of
+    silently auto-collapsing newlines to spaces."""
+    cfg = _project(tmp_path)
+    before = cfg.tasks_file.read_text()
+
+    rc = cmd_add(cfg, _add_args(description="first\nsecond"))
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "single line" in err
+    assert "briefing" in err  # nudge to the right place for richer prose
+    # Nothing was queued and nothing landed in TASKS.md.
+    assert cfg.tasks_file.read_text() == before
+    queue = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    assert not queue.exists() or queue.read_text() == ""
+
+
+def test_add_rejects_carriage_return_in_description(tmp_path: Path, capsys):
+    """\\r alone is the same hazard as \\n — TASK_LINE_RE is per-line and
+    a stray CR breaks the rendered task line just as cleanly."""
+    cfg = _project(tmp_path)
+    before = cfg.tasks_file.read_text()
+
+    rc = cmd_add(cfg, _add_args(description="first\rsecond"))
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "single line" in err
+    assert "briefing" in err
+    assert cfg.tasks_file.read_text() == before
+
+
+def test_add_rejects_newline_in_title(tmp_path: Path):
+    """Title goes on the same line as description in TASKS.md — same
+    hazard, same gate."""
+    cfg = _project(tmp_path)
+    rc = cmd_add(
+        cfg,
+        _add_args(title="title with\nnewline", briefing_file=None),
+    )
+    assert rc == 1
+
+
+def test_add_rejects_newline_in_tag(tmp_path: Path):
+    """Tags render as `\\`#foo\\`` on the task line — a newline inside
+    one breaks the same line-oriented parser."""
+    cfg = _project(tmp_path)
+    rc = cmd_add(cfg, _add_args(tags=["#cli", "#bro\nken"]))
+    assert rc == 1
+
+
+def test_add_succeeds_with_single_line_description(tmp_path: Path):
+    """Regression: the single-line gate doesn't break the happy path."""
+    cfg = _project(tmp_path)
+
+    rc = cmd_add(cfg, _add_args(description="single-line description"))
+
+    assert rc == 0
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    # Title from _add_args() default is "valid title".
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "valid title"),
+        None,
+    )
+    assert found is not None
+    assert "single-line description" in found.description
 

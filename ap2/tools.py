@@ -67,6 +67,38 @@ def _err(text: str) -> dict:
 # ---------------- implementations (SDK-free, directly testable) ----------------
 
 
+# TB-134: TASKS.md is a line-oriented format — TASK_LINE_RE in board.py is
+# a per-line regex, so a multi-line title/description/tag silently splits the
+# rendered task across physical lines, stranding the trailing `[→ brief](...)`
+# link on a different line and dropping it from the parsed Task. The first
+# line still parses; subsequent lines surface as `board_malformed_line`
+# events but stay on disk. Hit on TB-132 / TB-133 (operator had to manually
+# re-collapse). Auto-collapsing newlines to spaces would silently produce
+# 400-char run-on lines that nobody actually wanted; rejecting forces the
+# caller to choose between summarizing inline OR moving the rich content
+# into the briefing file — the right semantic split.
+SINGLE_LINE_ERR = (
+    "{field} must be a single line — break long content into briefing.md "
+    "instead, or summarize to one line"
+)
+
+
+def _validate_single_line(field: str, value: str | None) -> str | None:
+    """Reject a multi-line operator input (newline / carriage-return).
+
+    Returns an error message string if `value` contains \\n or \\r;
+    returns `None` if the value is single-line (or empty / None).
+    Used by `cmd_add` (CLI), `do_board_edit` (MCP), and
+    `do_operator_queue_append` (MCP + CLI bridge) so every entry point
+    that can land a task on TASKS.md hits the same gate.
+    """
+    if not value:
+        return None
+    if "\n" in value or "\r" in value:
+        return SINGLE_LINE_ERR.format(field=field)
+    return None
+
+
 def _allocate_id(board: Board, cfg: Config) -> str:
     """Pick the next TB-N, using max(board max + 1, CLAUDE.md next_task_id)."""
     candidate = max(board.max_id() + 1, cfg.next_task_id)
@@ -85,6 +117,23 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
     briefing = args.get("briefing")
     description = (args.get("description") or "").strip()
     blocked_on = (args.get("blocked_on") or "").strip()
+
+    # TB-134: reject multi-line title / description / tags up-front so the
+    # MCP-driven path (ideation, MM handler) sees the same gate as the CLI.
+    # Briefing content is exempt — that's free-form prose and lives in its
+    # own file, not on the TASKS.md task line.
+    for field_name, value in (
+        ("title", title),
+        ("description", description),
+        ("blocked_on", blocked_on),
+    ):
+        err = _validate_single_line(field_name, value)
+        if err:
+            return _err(err)
+    for tag in tags:
+        err = _validate_single_line("tag", tag)
+        if err:
+            return _err(err)
 
     add_map = {
         "add_ready": "Ready",
@@ -549,6 +598,22 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         description = (args.get("description") or "").strip()
         blocked_on = (args.get("blocked_on") or "").strip()
         briefing_content = args.get("briefing")
+
+        # TB-134: reject multi-line title / description / tags before
+        # writing anything to disk — pre-allocating a TB-N or briefing
+        # file for an input we're going to refuse would leak state.
+        for field_name, value in (
+            ("title", title),
+            ("description", description),
+            ("blocked_on", blocked_on),
+        ):
+            err = _validate_single_line(field_name, value)
+            if err:
+                return _err(err)
+        for tag in tags:
+            err = _validate_single_line("tag", tag)
+            if err:
+                return _err(err)
 
         # Allocate ID + bump CLAUDE.md under the file lock so concurrent
         # CLI invocations don't collide. board_file_lock (not

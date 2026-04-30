@@ -614,3 +614,125 @@ def test_cron_propose_in_task_agent_tools_only():
     promote (or operator promotes via review)."""
     assert "mcp__autopilot__cron_propose" in tools.TASK_AGENT_TOOLS
     assert "mcp__autopilot__cron_propose" not in tools.CONTROL_AGENT_TOOLS
+
+
+# ---------------------------------------------------------------------------
+# TB-134: do_board_edit / do_operator_queue_append reject multi-line input.
+#
+# The MCP-driven path (ideation, MM handler, future operator-queue ops)
+# needs the same gate as the CLI — otherwise an MCP caller can still
+# write a multi-line task line into TASKS.md and break the line-oriented
+# parser. _err / isError lets the calling agent retry with a rephrasing.
+
+
+def test_board_edit_rejects_newline_in_description(cfg, tmp_path):
+    """do_board_edit({description: 'a\\nb'}) → isError; nothing landed
+    on the board, no briefing file under .cc-autopilot/tasks."""
+    tasks_dir = tmp_path / ".cc-autopilot" / "tasks"
+    before_briefings = (
+        sorted(p.name for p in tasks_dir.iterdir()) if tasks_dir.exists() else []
+    )
+    before_tasks = (tmp_path / "TASKS.md").read_text()
+
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_backlog", "title": "valid", "description": "a\nb"},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "single line" in msg
+    assert "briefing" in msg  # nudge, not a silent auto-collapse
+    # Board untouched.
+    assert (tmp_path / "TASKS.md").read_text() == before_tasks
+    after_briefings = (
+        sorted(p.name for p in tasks_dir.iterdir()) if tasks_dir.exists() else []
+    )
+    assert after_briefings == before_briefings
+
+
+def test_board_edit_rejects_newline_in_description_add_ready(cfg, tmp_path):
+    """add_ready hits the same gate as add_backlog."""
+    before = (tmp_path / "TASKS.md").read_text()
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_ready", "title": "valid", "description": "a\nb"},
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+    assert (tmp_path / "TASKS.md").read_text() == before
+
+
+def test_board_edit_rejects_newline_in_description_add_frozen(cfg, tmp_path):
+    """add_frozen hits the same gate."""
+    before = (tmp_path / "TASKS.md").read_text()
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_frozen", "title": "valid", "description": "a\nb"},
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+    assert (tmp_path / "TASKS.md").read_text() == before
+
+
+def test_board_edit_rejects_carriage_return_in_description(cfg, tmp_path):
+    """\\r is the same hazard — reject with the same message."""
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_backlog", "title": "valid", "description": "a\rb"},
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+
+
+def test_board_edit_rejects_newline_in_title(cfg, tmp_path):
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_backlog", "title": "title with\nnewline"},
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+
+
+def test_board_edit_rejects_newline_in_tag(cfg, tmp_path):
+    res = tools.do_board_edit(
+        cfg,
+        {
+            "action": "add_backlog",
+            "title": "valid",
+            "tags": ["#cli", "#bro\nken"],
+        },
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+
+
+def test_board_edit_accepts_single_line_description(cfg):
+    """Regression: single-line descriptions still go through."""
+    res = tools.do_board_edit(
+        cfg,
+        {"action": "add_backlog", "title": "ok", "description": "one line"},
+    )
+    assert not res.get("isError"), res
+
+
+def test_operator_queue_append_rejects_newline_in_description(cfg, tmp_path):
+    """The CLI `ap2 add` path now routes through do_operator_queue_append
+    (TB-131); this is the gate that protects MM-handler + CLI alike."""
+    before = (tmp_path / "TASKS.md").read_text()
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    before_queue = queue_path.read_text() if queue_path.exists() else ""
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "valid", "description": "a\nb"},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "single line" in msg
+    assert "briefing" in msg
+    # Board untouched, nothing queued.
+    assert (tmp_path / "TASKS.md").read_text() == before
+    after_queue = queue_path.read_text() if queue_path.exists() else ""
+    assert after_queue == before_queue

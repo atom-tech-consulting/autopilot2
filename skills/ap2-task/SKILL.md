@@ -38,9 +38,9 @@ Editing `TASKS.md` directly from the human's clone causes ID collisions and merg
 
 ### 2. Parse `<content>` into title / description / tags
 
-- **Title**: the first non-empty line, or the first sentence if the content is a single block. Keep under ~70 chars; trim trailing punctuation. Imperative verb preferred ("Add X", "Write Y", "Fix Z"). If the content is too vague to derive a clear title, ask once for a title.
-- **Description**: the full content (yes, including the title line). Pass via `-d`. If the content is a single short line that's basically the title, omit `-d`.
-- **Tags**: extract any `#word` tokens from the content, lowercased, with the `#` stripped (the CLI re-adds it). If none are present, infer 1-2 from project context (e.g. `#docs`, `#data`, `#engine`, `#strategy`, `#metrics`, `#reporting`, `#infra`, `#risk`, `#validation`, `#tooling`, `#cli`). Don't over-tag — 1-2 is plenty.
+- **Title**: the first non-empty line, or the first sentence if the content is a single block. Keep under ~70 chars; trim trailing punctuation. Imperative verb preferred ("Add X", "Write Y", "Fix Z"). If the content is too vague to derive a clear title, ask once for a title. **Single line only** — no embedded newlines.
+- **Description**: a one-line summary suitable for the rendered task on `TASKS.md`. Pass via `-d`. If the content is a single short line that's basically the title, omit `-d`. **Single line only**: `ap2 add` rejects descriptions containing `\n` or `\r` (TB-134) — for richer prose, edit the briefing file under `.cc-autopilot/tasks/<slug>.md` after the add (the daemon's prep step also picks up briefing edits). Do not try to work around the gate by collapsing newlines yourself; either summarize to one line or move the detail into the briefing.
+- **Tags**: extract any `#word` tokens from the content, lowercased, with the `#` stripped (the CLI re-adds it). If none are present, infer 1-2 from project context (e.g. `#docs`, `#data`, `#engine`, `#strategy`, `#metrics`, `#reporting`, `#infra`, `#risk`, `#validation`, `#tooling`, `#cli`). Don't over-tag — 1-2 is plenty. **Single line only** — newlines inside a tag are also rejected.
 
 ### 3. Detect who's running this skill
 
