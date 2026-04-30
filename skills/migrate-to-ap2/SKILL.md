@@ -55,7 +55,7 @@ Rules for translating items:
 - **One bullet per task.** Multi-line items collapse to a single line; the briefing is where details live.
 - **Section assignment:**
   - Done / completed items → `## Complete`, with `- [x]` checkbox.
-  - Items that are concrete enough to start tomorrow → `## Backlog`. Don't put anything in `## Ready` — `Ready` requires a briefing file, which only `/tb prep` produces.
+  - Items that are concrete enough to start tomorrow → `## Backlog`. Don't put anything in `## Ready` — `Ready` requires a briefing file, which the daemon's prep step writes when it auto-promotes.
   - Pure ideas / "maybe someday" → `## Backlog` with `#proposed` tag (or `## Frozen` if the user wants them parked).
 - **TB-N IDs:** assign sequentially starting from `TB-1`. Even completed items get IDs, so the audit trail is consistent. Keep IDs stable — once assigned, never renumber.
 - **Task line format** (matches `TASK_LINE_RE` in `ap2/board.py`):
@@ -93,7 +93,7 @@ This reports the project skeleton state, sandbox user state, and whether the san
 After scaffolding succeeds, list the paths that should be tracked:
 
 - `.cc-autopilot/cron.yaml` (created on first daemon start; commit then)
-- `.cc-autopilot/tasks/` (briefings — empty until `/tb prep` runs)
+- `.cc-autopilot/tasks/` (briefings — populated by the daemon's prep step on auto-promote)
 - `.cc-autopilot/progress.md`
 - `TASKS.md`
 - `CLAUDE.md` (the new Autopilot section)

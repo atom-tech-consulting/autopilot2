@@ -83,7 +83,7 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 ack [-t TB-N] "<note>"` | Append an operator-decision line to `.cc-autopilot/operator_log.md` (TB-106). Ideation reads this and won't re-propose actions you've logged. |
 | `ap2 web` | Start a local read-only web UI (default `127.0.0.1:7820`). Routes: `/`, `/events`, `/tasks`, `/task/<TB-N>`, `/pipelines`, `/insights`, `/insight/<name>`, `/ideation_state`, `/commits`. Full event payloads (no truncation). |
 | `ap2 sandbox …` | OS-level sandbox-user + project-clone helpers (see below). |
-| `ap2 --version` | Print installed `claude-automation` version. |
+| `ap2 --version` | Print installed `autopilot2` version. |
 
 `ap2 --project /abs/path …` runs against any project root; default is `cwd`.
 

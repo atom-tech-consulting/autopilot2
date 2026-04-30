@@ -328,6 +328,6 @@ This is why ap2 can run for weeks without operator attention.
    operator-readable prose.
 3. `.cc-autopilot/events.jsonl` (tail) — the structured timeline.
 4. `git log --oneline -30` — what code shipped.
-5. The full ap2 docs at `/Users/lzhang/dev/atom/claude/ap2/README.md`
-   and `architecture.md` — design rationale, agent kinds, MCP tool
-   wiring, dependency graph.
+5. The full ap2 docs — `ap2/README.md` and `ap2/architecture.md` in the
+   ap2 source tree (https://github.com/lzhang/autopilot2) — for design
+   rationale, agent kinds, MCP tool wiring, dependency graph.

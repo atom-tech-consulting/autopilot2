@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Tooling
+.direnv/
+.envrc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# ap2 runtime (when running the daemon in this tree)
+.cc-autopilot/
+TASKS.md.lock

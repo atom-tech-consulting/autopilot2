@@ -539,14 +539,14 @@ def _add_mm_url_token_args(p: argparse.ArgumentParser) -> None:
 
 
 def _version_string() -> str:
-    """Read the installed `claude-automation` version. Single source of truth
-    is `pyproject.toml`; we read it via importlib so the CLI tracks the
-    installed build and we don't have to keep two version strings in sync.
+    """Read the installed `autopilot2` version. Single source of truth is
+    `pyproject.toml`; we read it via importlib so the CLI tracks the installed
+    build and we don't have to keep two version strings in sync.
     """
     from importlib.metadata import PackageNotFoundError, version
 
     try:
-        return version("claude-automation")
+        return version("autopilot2")
     except PackageNotFoundError:
         return "unknown"
 
