@@ -51,3 +51,8 @@ Today ap2 add auto-fills a skeleton briefing (tools.py:115 → render_briefing) 
 - **kind:** per_task
 - **failed_criteria:** [fail] New unit test in `test_cli.py`: `ap2 add --briefing-file <path>` succeeds: a TB-N is allocated, TASKS.md gets a task lin; [fail] New unit test in `test_cli.py`: `ap2 add --briefing-file -` reads briefing text from stdin and behaves identically.; [fail] New unit test in `test_tools.py`: `do_board_edit({"action":"add_backlog", ..., "briefing": ""})` returns `isError=True` ; [fail] New unit te
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T203347Z-TB-135.prompt.md`, `stream: .cc-autopilot/debug/20260430T203347Z-TB-135.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T203347Z-TB-135.messages.jsonl`
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] New unit test in `test_cli.py`: `ap2 add "title"` (no `--briefing-file`) exits non-zero with a clear usage error pointin; [fail] New unit test in `test_cli.py`: `ap2 add --briefing-file <path>` succeeds: a TB-N is allocated, TASKS.md gets a task lin; [fail] New unit test in `test_cli.py`: `ap2 add --briefing-file -` reads briefing text from stdin and behaves identically.; [fail] New unit te
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T214050Z-TB-135.prompt.md`, `stream: .cc-autopilot/debug/20260430T214050Z-TB-135.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T214050Z-TB-135.messages.jsonl`
