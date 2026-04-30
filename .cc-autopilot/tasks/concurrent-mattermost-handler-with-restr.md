@@ -221,3 +221,8 @@ concrete need for the full set.
 - **exit_code:** 1
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T073933Z-TB-122.prompt.md`, `stream: .cc-autopilot/debug/20260430T073933Z-TB-122.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T073933Z-TB-122.messages.jsonl`
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] [shell] `uv run pytest -q ap2/tests/` (regression gate); [fail] New unit test: `build_mattermost_prompt` returns`MM_HANDLER_TOOLS_RESTRICTED` when board has Active tasks and`MM_HANDLER; [fail] New e2e test (`tests/e2e/test_concurrent_mm.py`): seed Active task; [fail] New e2e test: idle board + MM mention. : handler getsthe full set.; [fail] New e2e test: handler attempts `mcp__autopilot__cr
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T084719Z-TB-122.prompt.md`, `stream: .cc-autopilot/debug/20260430T084719Z-TB-122.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T084719Z-TB-122.messages.jsonl`
