@@ -14,14 +14,23 @@ Today ap2 add auto-fills a skeleton briefing (tools.py:115 → render_briefing) 
 
 ## Verification
 
-Concrete acceptance criteria the daemon's per-task verifier (TB-69)
-runs after the agent's commit. Shell-command bullets (backtick-fenced
-at the start of the bullet) are run automatically; prose bullets are
-judged by an SDK call against the diff.
-
-- `uv run pytest -q` — full suite passes
-- (additional shell or prose bullets)
+- `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
+- `! grep -qE "render_briefing\\(" ap2/tools.py` — auto-fill call site removed from `do_board_edit`.
+- `! grep -qE "additional shell or prose bullets" ap2/init.py` — placeholder template line removed.
+- `! grep -qE "filled in by /tb prep or by the ideation agent" ap2/init.py` — the misleading "auto-prep" comment is gone.
+- New unit test in `test_cli.py`: `ap2 add "title"` (no `--briefing-file`) exits non-zero with a clear usage error pointing at where to find the template.
+- New unit test in `test_cli.py`: `ap2 add --briefing-file <path>` succeeds: a TB-N is allocated, TASKS.md gets a task line whose `[→ brief](...)` points at the supplied (or moved) briefing file, and the briefing's bytes round-trip into `.cc-autopilot/tasks/<slug>.md`.
+- New unit test in `test_cli.py`: `ap2 add --briefing-file -` reads briefing text from stdin and behaves identically.
+- New unit test in `test_tools.py`: `do_board_edit({"action":"add_backlog", ..., "briefing": ""})` returns `isError=True` with a message naming the missing briefing.
+- New unit test in `test_tools.py`: `do_board_edit({"action":"add_ready", ..., "briefing": ""})` and `add_frozen` likewise.
+- New unit test in `test_tools.py`: passing a non-empty `briefing` text payload still succeeds — daemon-internal callers (ideation, MM handler) are unaffected.
+- Existing skeleton briefings on disk (TB-131 et al.) remain valid and the daemon continues to dispatch them — the new requirement only gates *future* `add_*` calls, not historical state.
+- The diff updates `skills/ap2-task/SKILL.md` (and `skills/migrate-to-ap2/SKILL.md` if relevant) to require briefing authoring before `ap2 add`, with a pointer to the template.
+- If editor-driven mode is included: `ap2 add` with no args opens `$EDITOR` against the template and uses the saved buffer as the briefing on close. Aborting the editor (empty save or non-zero exit) makes `ap2 add` exit non-zero without mutating TASKS.md.
 
 ## Out of scope
 
-- (filled in)
+- Adding YAML frontmatter to the briefing — that's TB-133's job.
+- Auto-extracting title/tags from the briefing if frontmatter isn't there: convention parse from `# Title` H1 + a `Tags:` line is acceptable, but full structured-metadata extraction belongs to TB-133.
+- Retroactively re-prepping existing skeleton briefings (TB-131 etc.).
+- Removing `render_briefing` from `init.py` entirely if other callers still need it (just stop calling it from `do_board_edit`); deletion can be a follow-up once it's truly orphaned.

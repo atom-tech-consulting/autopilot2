@@ -34,14 +34,18 @@ Why not full AST: TB-119 (mistune AST for the Board parser) is the bigger-but-co
 
 ## Verification
 
-Concrete acceptance criteria the daemon's per-task verifier (TB-69)
-runs after the agent's commit. Shell-command bullets (backtick-fenced
-at the start of the bullet) are run automatically; prose bullets are
-judged by an SDK call against the diff.
-
-- `uv run pytest -q` — full suite passes
-- (additional shell or prose bullets)
+- `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
+- `grep -qE "@<key>:|@blocked" ap2/board.py` — new codespan parser added
+- New unit test in `test_board.py`: `parse_task_line` populates a `meta` dict from `@<key>:<value>` codespans alongside the existing `tags` from `#<tag>` codespans; tags and meta are kept distinct.
+- New unit test in `test_board.py`: `Task.blocked_on` returns `["TB-5"]` for a task with `` `@blocked:TB-5` `` codespan and ignores any `(blocked on: ...)` substring in the description.
+- New unit test in `test_board.py`: `Task.render()` emits `` `@blocked:...` `` codespans after `#tags`, before the em-dash; round-trip parse → render is byte-identical.
+- New unit test in `test_board.py`: a task with only legacy `(blocked on: TB-5)` in description (no codespan) keeps parsing as blocked under the transition fallback, so existing tasks aren't broken.
+- New unit test in `test_board.py`: TB-121's exact prose (description containing `(blocked on: review)` as descriptive text, no `@blocked` codespan) parses with `blocked_on == []` once the legacy fallback is dropped — the original failure mode no longer happens.
+- New unit test: `ap2 add --blocked TB-5,review "title" --briefing-file ...` writes the codespan in the rendered task line and not into the description.
+- The diff updates `skills/ap2-task/SKILL.md` (or the equivalent doc) to mention the new `@<key>:<value>` codespan convention so future callers don't reach for `(blocked on: ...)` again.
 
 ## Out of scope
 
-- (filled in)
+- TB-119's full mistune-AST migration of the Board parser.
+- TB-133's briefing-frontmatter approach (broader, lands later).
+- Migrating any pre-existing `(blocked on: ...)` clauses in production data — this repo has none right now.

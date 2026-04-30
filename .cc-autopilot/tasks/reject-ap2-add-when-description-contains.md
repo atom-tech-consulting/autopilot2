@@ -14,14 +14,19 @@ Today operator board ops accept multi-line descriptions silently — they round-
 
 ## Verification
 
-Concrete acceptance criteria the daemon's per-task verifier (TB-69)
-runs after the agent's commit. Shell-command bullets (backtick-fenced
-at the start of the bullet) are run automatically; prose bullets are
-judged by an SDK call against the diff.
-
-- `uv run pytest -q` — full suite passes
-- (additional shell or prose bullets)
+- `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
+- New unit test in `test_cli.py`: `ap2 add "title" -d $'first\nsecond"` (real newline) exits non-zero, prints a clear error message mentioning "single line" and pointing at the briefing, AND TASKS.md is unchanged on disk.
+- New unit test in `test_cli.py`: same with a `\r` byte → also rejected with the same error.
+- New unit test in `test_cli.py`: `ap2 add "title with\nnewline" --briefing-file ...` (newline in title) is rejected.
+- New unit test in `test_cli.py`: a tag containing a newline is rejected.
+- New unit test in `test_cli.py`: regression — `ap2 add "title" -d "single-line description" ...` continues to succeed unchanged.
+- New unit test in `test_tools.py`: `do_board_edit({"action":"add_backlog","title":"t","description":"a\nb",...})` returns `isError=True` with a message matching the CLI's; nothing is written to TASKS.md or the briefings dir.
+- New unit test in `test_tools.py`: same for `add_ready` and `add_frozen`.
+- The error message text guides the operator to two correct paths: (a) summarize to one line, (b) put the rich content in the briefing file. Avoid suggesting auto-collapse.
+- The diff updates `skills/ap2-task/SKILL.md` documenting the single-line constraint for `description`, `title`, and tags.
 
 ## Out of scope
 
-- (filled in)
+- Any auto-collapse / auto-fix behavior — the whole point is to reject loudly.
+- Length limits on description (separate concern).
+- Validating tag character classes beyond newline rejection.
