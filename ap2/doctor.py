@@ -21,6 +21,7 @@ from .sandbox import (
     DEFAULT_USER,
     _user_exists,
     _user_home,
+    _user_login_shell,
     project_audit,
     user_audit,
 )
@@ -47,8 +48,13 @@ def _ap2_installed_for_user(user: str) -> AuditResult:
     if not _user_exists(user):
         res.add("FAIL", f"user {user!r} does not exist (run: ap2 sandbox user-setup)")
         return res
+    # Probe via the user's actual login shell — `uv tool install` puts
+    # `~/.local/bin` on PATH via `~/.zshenv` for zsh users, and a bash
+    # probe wouldn't source it. See sandbox._user_login_shell for the
+    # full rationale.
+    shell = _user_login_shell(user)
     r = subprocess.run(
-        ["sudo", "-u", user, "-i", "bash", "-c", "command -v ap2 || true"],
+        ["sudo", "-u", user, "-i", shell, "-c", "command -v ap2 || true"],
         capture_output=True, text=True,
     )
     path = r.stdout.strip()

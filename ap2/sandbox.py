@@ -47,6 +47,25 @@ def _user_home(user: str) -> Path | None:
         return None
 
 
+def _user_login_shell(user: str) -> str:
+    """Return the user's login shell from passwd, or `/bin/sh` as a fallback.
+
+    Doctor's env probes (`user_audit`, `_ap2_installed_for_user`) shell out
+    via `sudo -u <user> -i <shell> -c '<cmd>'`. We must use the user's
+    actual login shell (typically zsh on macOS, bash on Linux) so the probe
+    sees the same environment the daemon will see when it is started from
+    the user's normal shell. In particular, `~/.zshenv` — where `ap2 sandbox
+    install-token` writes `CLAUDE_CODE_OAUTH_TOKEN` — is sourced by zsh on
+    every invocation but ignored by bash, so a hard-coded `bash` probe
+    produces a false `CLAUDE_CODE_OAUTH_TOKEN unset` WARN and a false
+    `ap2 not on $PATH` FAIL when the user's real shell (zsh) sees both.
+    """
+    try:
+        return pwd.getpwnam(user).pw_shell or "/bin/sh"
+    except KeyError:
+        return "/bin/sh"
+
+
 def _path_owner(path: Path) -> str:
     return pwd.getpwuid(os.stat(path).st_uid).pw_name
 
@@ -152,9 +171,16 @@ def user_audit(user: str = DEFAULT_USER) -> AuditResult:
         else:
             res.add("OK", f"{desc} absent")
 
+    # Probe via the user's actual login shell (typically /bin/zsh on macOS,
+    # /bin/bash on Linux). A hard-coded `bash` would miss exports installed
+    # to `~/.zshenv` by `ap2 sandbox install-token` — bash login shells
+    # don't source zsh's rc files, so the probe's view of the env diverges
+    # from what the daemon will see when started from the user's real shell.
+    shell = _user_login_shell(user)
+
     for var in ENV_VARS:
         r = subprocess.run(
-            ["sudo", "-u", user, "-i", "bash", "-c", f"printenv {var} 2>/dev/null || true"],
+            ["sudo", "-u", user, "-i", shell, "-c", f"printenv {var} 2>/dev/null || true"],
             capture_output=True, text=True,
         )
         val = r.stdout.strip()
@@ -168,7 +194,7 @@ def user_audit(user: str = DEFAULT_USER) -> AuditResult:
     # sessions and causes `claude` to exit-1 with empty stderr. Unset = WARN
     # on macOS (daemon will silently fail), INFO on Linux (no keychain issue).
     r = subprocess.run(
-        ["sudo", "-u", user, "-i", "bash", "-c",
+        ["sudo", "-u", user, "-i", shell, "-c",
          "printenv CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true"],
         capture_output=True, text=True,
     )

@@ -87,6 +87,31 @@ def test_audit_result_fail_flips_ok():
 
 
 # ---------------------------------------------------------------------------
+# _user_login_shell
+
+def test_user_login_shell_returns_pwd_shell(monkeypatch):
+    class _PW:
+        pw_shell = "/bin/zsh"
+    monkeypatch.setattr(sandbox.pwd, "getpwnam", lambda u: _PW())
+    assert sandbox._user_login_shell("anyone") == "/bin/zsh"
+
+
+def test_user_login_shell_falls_back_for_unknown_user(monkeypatch):
+    def _raise(u):
+        raise KeyError(u)
+    monkeypatch.setattr(sandbox.pwd, "getpwnam", _raise)
+    assert sandbox._user_login_shell("ghost") == "/bin/sh"
+
+
+def test_user_login_shell_falls_back_for_empty_pw_shell(monkeypatch):
+    """Some passwd backends report an empty pw_shell — don't pass `""` to sudo."""
+    class _PW:
+        pw_shell = ""
+    monkeypatch.setattr(sandbox.pwd, "getpwnam", lambda u: _PW())
+    assert sandbox._user_login_shell("anyone") == "/bin/sh"
+
+
+# ---------------------------------------------------------------------------
 # user_audit
 
 def test_user_audit_missing_user(monkeypatch):
@@ -475,6 +500,62 @@ def test_user_audit_token_missing_info_on_linux(monkeypatch, tmp_path):
     assert res.ok is True
     infos = [m for lvl, m in res.messages if lvl == "INFO"]
     assert any("CLAUDE_CODE_OAUTH_TOKEN" in m for m in infos)
+
+
+def test_user_audit_probes_via_user_login_shell_not_bash(monkeypatch, tmp_path):
+    """TB-124: probes must use the user's pw_shell so .zshenv is sourced.
+
+    A bash login shell ignores ~/.zshenv (where install-token writes
+    CLAUDE_CODE_OAUTH_TOKEN), producing false WARN/FAIL verdicts. The
+    probe argv must therefore carry the user's actual login shell, not
+    a hard-coded bash.
+    """
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+    monkeypatch.setattr(sandbox, "_user_login_shell", lambda u: "/bin/zsh")
+
+    seen_argvs: list[list[str]] = []
+
+    def fake_run(argv, *a, **kw):
+        seen_argvs.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    sandbox.user_audit("fakeuser")
+
+    # Every printenv probe (ENV_VARS + CLAUDE_CODE_OAUTH_TOKEN) goes through
+    # `sudo -u fakeuser -i /bin/zsh -c "printenv ..."` — never bash.
+    probes = [argv for argv in seen_argvs if "printenv" in " ".join(argv)]
+    assert probes, "expected at least one printenv probe"
+    for argv in probes:
+        assert argv[:5] == ["sudo", "-u", "fakeuser", "-i", "/bin/zsh"], argv
+        assert "bash" not in argv, f"probe still uses bash: {argv}"
+
+
+def test_user_audit_probes_use_bash_when_user_shell_is_bash(monkeypatch, tmp_path):
+    """Linux users typically have /bin/bash as pw_shell — the helper must
+    propagate that exactly, so the probe matches the daemon's view."""
+    home = tmp_path / "agent-home"
+    home.mkdir()
+    monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
+    monkeypatch.setattr(sandbox, "_user_home", lambda u: home)
+    monkeypatch.setattr(sandbox, "_user_login_shell", lambda u: "/bin/bash")
+
+    seen: list[list[str]] = []
+
+    def fake_run(argv, *a, **kw):
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    sandbox.user_audit("fakeuser")
+
+    probes = [argv for argv in seen if "printenv" in " ".join(argv)]
+    assert probes
+    for argv in probes:
+        assert argv[:5] == ["sudo", "-u", "fakeuser", "-i", "/bin/bash"], argv
 
 
 # ---------------------------------------------------------------------------
