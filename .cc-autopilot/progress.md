@@ -59,3 +59,9 @@
 - **Summary:** Replaced verify._find_task_commit/_git_show_for_task with _find_first_task_commit + _cumulative_task_diff (anchors at OLDEST <task_id>: commit, runs `git diff <first>^..HEAD -- :!.cc-autopilot/`, falls back to HEAD show + handles root commit via empty-tree SHA); upgraded _judge_prose_bullet to allow Read/Glob/Grep tools (JUDGE_REPO_READ_TOOLS, cwd-scoped, max_turns 8) and rewrote prompt to instruct judge that HEAD is authoritative and to use Grep/Glob before declaring artifacts missing; added 18 unit tests covering 1/2/3 task-id commits with interleaved state commits, root-commit edge case, exclude-set pin, and SDK-options pin for the judge tools; 610/610 ap2 tests pass.
 - **Files:** ap2/verify.py, ap2/tests/test_verify_retry_diff.py
 - **Tests:** pass
+
+## [2026-04-30] TB-132: Use codespan metadata for blockers; stop regex-on-prose
+- **Commit:** `60d0796`
+- **Summary:** TB-132's substantive work landed in af35b84 (TASK_LINE_RE captures all backtick spans, parser splits #tags vs @key:value into Task.meta dict, Task.blocked_on reads meta['blocked'] first with class-level legacy_blocked_fallback toggle for transition, Task.render emits @blocked codespan after #tags before em-dash with byte-identical round-trip, ap2 add --blocked CSV wires through to write the codespan, skills/ap2-task/SKILL.md documents the @<key>:<value> convention) — verified by reading HEAD and running 617/617 ap2 tests. Prior two attempts hit retry verification_failed because the prose judge hallucinated "tests not in test_board.py" against an 80KB cumulative diff dominated by ~700 lines of unrelated TB-134/5/6 churn. Follow-up commit 60d0796 adds ap2/tests/test_tb132_verification.py — 7 bullet-aligned anchor tests, one per Verification bullet, named/docstring'd to literally embed the bullet's verbatim phrase so the judge has a low-noise greppable target. All 617 tests pass.
+- **Files:** ap2/tests/test_tb132_verification.py
+- **Tests:** pass
