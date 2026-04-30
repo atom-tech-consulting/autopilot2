@@ -108,6 +108,8 @@ Failure paths (`task_timeout`, `task_error`) try `_infer_result_from_head` first
 | `.cc-autopilot/retry_state.json` | daemon | `fcntl.flock` | no |
 | `.cc-autopilot/mm_state.json` | daemon | none (single-writer) | no |
 | `.cc-autopilot/auto_diagnose_state.json` | daemon | none | no |
+| `.cc-autopilot/operator_queue.jsonl` | CLI / MM-handler (via `do_operator_queue_append`) | `board_file_lock` for ID alloc; append is line-atomic | no (gitignored) |
+| `.cc-autopilot/operator_queue_state.json` | daemon (drain bookkeeping; applied uuids) | none (single-writer) | no (gitignored) |
 | `.cc-autopilot/ideation_state.md` | ideation agent (via `ideation_state_write`) | atomic write (tmpfile + rename) | yes |
 | `.cc-autopilot/tasks/<TB-N>.md` | operator + ideation + `do_board_edit` | none | yes |
 | `.cc-autopilot/insights/<topic>.md` | task agents + operator | none | yes |

@@ -160,8 +160,14 @@ def test_verify_skipped_for_no_verify_tag(e2e_project, monkeypatch):
 def test_cli_no_verify_flag_writes_tag(e2e_project):
     """`ap2 add --no-verify` plumbs through to a `#no-verify` tag on the
     rendered task line, so the runtime check (`"#no-verify" in task.tags`)
-    actually finds it after a daemon round-trip."""
+    actually finds it after a daemon round-trip.
+
+    TB-131: cmd_add stages through the operator queue; the daemon's drain
+    materializes the task on TASKS.md. Drain explicitly here so the post-
+    state assertion still fires.
+    """
     from argparse import Namespace
+    from ap2 import tools
     from ap2.cli import cmd_add
 
     cfg = e2e_project()
@@ -175,6 +181,7 @@ def test_cli_no_verify_flag_writes_tag(e2e_project):
     )
     rc = cmd_add(cfg, args)
     assert rc == 0
+    tools.drain_operator_queue(cfg)
 
     board = Board.load(cfg.tasks_file)
     backlog = list(board.iter_tasks("Backlog"))

@@ -13,13 +13,12 @@ import sys
 import time
 from pathlib import Path
 
-from . import doctor, events, retry, rollback, sandbox
-from .board import Board, board_file_lock, locked_board
+from . import doctor, events, rollback, sandbox
+from .board import Board, board_file_lock
 from .config import Config
 from .cron import load_jobs, load_state
 from .init import init_project
 from . import tools
-from .tools import do_board_edit
 
 
 def _read_pid(cfg: Config) -> int | None:
@@ -120,6 +119,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     jobs = load_jobs(cfg.cron_file)
     state = load_state(cfg.cron_state_file)
     paused = cfg.pause_flag.exists()
+    # TB-131: pending operator-queued ops (CLI / MM-handler appends that
+    # haven't been drained by the daemon's tick yet). Visible here so an
+    # operator can spot a stalled queue (depth > 0 with the daemon down
+    # ⇒ ops will sit until the daemon comes back up).
+    queue_pending = tools.operator_queue_pending_count(cfg)
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -138,6 +142,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             "tasks_file": str(cfg.tasks_file),
             "events_file": str(cfg.events_file),
             "web_url": web_url,
+            "operator_queue_pending": queue_pending,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -154,6 +159,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     print(f"events:   {cfg.events_file}")
     if web_url:
         print(f"web:      {web_url}")
+    if queue_pending:
+        print(
+            f"pending:  {queue_pending} operator op"
+            f"{'s' if queue_pending != 1 else ''}"
+        )
     nxt = board.next_ready()
     if nxt:
         print(f"next:     {nxt.id} {nxt.title}")
@@ -186,8 +196,8 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
         "Backlog": "add_backlog",
         "Frozen": "add_frozen",
     }
-    action = section_map.get(section)
-    if not action:
+    op = section_map.get(section)
+    if not op:
         print(f"unknown section: {args.section}", file=sys.stderr)
         return 2
     briefing = None
@@ -201,10 +211,14 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     # through TASK_LINE_RE so the marker persists across daemon restarts.
     if getattr(args, "no_verify", False) and "#no-verify" not in tags:
         tags.append("#no-verify")
-    res = do_board_edit(
+    # TB-131: stage through the operator queue rather than mutate TASKS.md
+    # directly. The TB-N is pre-allocated synchronously (so we can print
+    # it immediately), the briefing file is pre-written, and only the
+    # TASKS.md insertion is deferred until the daemon's next tick.
+    res = tools.do_operator_queue_append(
         cfg,
         {
-            "action": action,
+            "op": op,
             "title": title,
             "tags": tags,
             "description": args.description or "",
@@ -215,7 +229,7 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
         print(res["content"][0]["text"], file=sys.stderr)
         return 1
     msg = json.loads(res["content"][0]["text"])
-    print(f"added {msg.get('task_id')} to {section}")
+    print(f"{msg.get('task_id')} (queued; will land at next tick)")
     return 0
 
 
@@ -276,39 +290,39 @@ def cmd_backlog(cfg: Config, args: argparse.Namespace) -> int:
     Replaces the older `cmd_skip` (TB-77) — same code path, name now matches
     the underlying `move_to_backlog` action instead of the historical
     "skip in queue" use case.
+
+    TB-131: routes through the operator queue. Snapshot validation runs at
+    queue-append time (rejects unknown TB-N immediately); the actual
+    move lands on the daemon's next tick.
     """
-    res = do_board_edit(cfg, {"action": "move_to_backlog", "task_id": args.task_id})
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "move_to_backlog", "task_id": args.task_id}
+    )
     if res.get("isError"):
         print(res["content"][0]["text"], file=sys.stderr)
         return 1
-    print(f"moved {args.task_id} to Backlog")
+    print(f"queued move {args.task_id} → Backlog (will land at next tick)")
     return 0
 
 
 def cmd_unfreeze(cfg: Config, args: argparse.Namespace) -> int:
     """Move a Frozen task back to Backlog and clear its retry counter.
 
-    Validation + move happen inside `locked_board()` so the section check is
-    atomic w.r.t. the daemon. Retry reset and event emission run after lock
-    release — they have their own fcntl-locked state files.
+    TB-131: routes through the operator queue. Snapshot validation runs at
+    queue-append time so an unfreeze on a non-Frozen task is rejected
+    immediately — exactly as before. The retry-counter reset + the
+    `task_unfrozen` event are emitted by the daemon's drain step.
     """
-    with locked_board(cfg.tasks_file) as board:
-        loc = board.find(args.task_id)
-        if loc is None:
-            print(f"{args.task_id} not on board", file=sys.stderr)
-            return 1
-        section, _ = loc
-        if section != "Frozen":
-            print(
-                f"{args.task_id} is in {section}, not Frozen — "
-                f"use `ap2 backlog {args.task_id}` for non-frozen moves",
-                file=sys.stderr,
-            )
-            return 1
-        board.move(args.task_id, "Backlog", check=None)
-    retry.reset_attempt(cfg.retry_state_file, args.task_id)
-    events.append(cfg.events_file, "task_unfrozen", task=args.task_id)
-    print(f"unfroze {args.task_id} → Backlog (retry counter reset)")
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "unfreeze", "task_id": args.task_id}
+    )
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print(
+        f"queued unfreeze {args.task_id} → Backlog "
+        f"(retry counter will reset on drain)"
+    )
     return 0
 
 
@@ -321,38 +335,25 @@ def cmd_delete(cfg: Config, args: argparse.Namespace) -> int:
     <TB-N>` first to move the task somewhere safe, OR pass `--force` if
     you really mean it.
 
-    Emits a `task_deleted` event with the task id + source section +
-    title for the audit trail. Briefing file under `.cc-autopilot/tasks/`
-    is NOT removed — git history preserves it if it was committed, and
-    the ghost file is harmless (board parses TASKS.md, not the dir).
+    TB-131: routes through the operator queue. The Active/Ready/Pipeline
+    Pending refusal happens at queue-append time so the operator gets
+    immediate feedback. The `task_deleted` event is emitted by the
+    daemon's drain step (after the briefing under `.cc-autopilot/tasks/`
+    is preserved on disk — git history preserves the briefing if it was
+    committed; the ghost file is harmless).
     """
-    with locked_board(cfg.tasks_file) as board:
-        loc = board.find(args.task_id)
-        if loc is None:
-            print(f"{args.task_id} not on board", file=sys.stderr)
-            return 1
-        section, _ = loc
-        if section in ("Active", "Ready", "Pipeline Pending") and not args.force:
-            print(
-                f"{args.task_id} is in {section} — refusing without --force.\n"
-                f"  Active tasks may be in-flight; Ready is next-to-dispatch;\n"
-                f"  Pipeline Pending tasks have running subprocesses gating\n"
-                f"  verification.  `ap2 backlog {args.task_id}` first, or\n"
-                f"  pass --force.",
-                file=sys.stderr,
-            )
-            return 1
-        task = board.get(args.task_id)
-        title = task.title if task else ""
-        board.remove(args.task_id)
-    events.append(
-        cfg.events_file,
-        "task_deleted",
-        task=args.task_id,
-        section=section,
-        title=title,
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "delete",
+            "task_id": args.task_id,
+            "force": bool(args.force),
+        },
     )
-    print(f"deleted {args.task_id} from {section}")
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print(f"queued delete {args.task_id} (will land at next tick)")
     return 0
 
 

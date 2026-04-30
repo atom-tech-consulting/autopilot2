@@ -1979,6 +1979,31 @@ async def _interruptible_sleep(total_s: int) -> None:
 
 
 async def _tick(cfg: Config, sdk, mcp_server) -> None:
+    # 0. Drain the operator queue (TB-131). Runs BEFORE every other
+    # stage so cron / pipeline-pending sweep / task dispatch / ideation
+    # all read an up-to-date board snapshot. Operator-side `ap2 add`,
+    # `ap2 backlog`, `ap2 unfreeze`, `ap2 delete` (and the MM-handler
+    # `operator_queue_append` MCP tool) append jsonl records here
+    # instead of mutating TASKS.md directly; the drain replays them
+    # under board_file_lock and commits the resulting state files in a
+    # single coherent commit. Idempotent via per-record uuid +
+    # operator_queue_state.json so a crash mid-drain resumes without
+    # double-applying.
+    try:
+        drain_res = tools.drain_operator_queue(cfg)
+        if drain_res.get("applied"):
+            _commit_state_files(
+                cfg,
+                f"state: drained {drain_res['applied']} operator op(s)",
+                paths=drain_res.get("touched_paths") or [],
+            )
+    except Exception as e:  # noqa: BLE001
+        events.append(
+            cfg.events_file,
+            "operator_queue_drain_error",
+            error=f"{type(e).__name__}: {e}",
+        )
+
     # 1. Cron (MM polling moved to _mm_loop — TB-122)
     try:
         jobs = load_jobs(cfg.cron_file)

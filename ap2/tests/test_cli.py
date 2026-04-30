@@ -2,6 +2,12 @@
 
 Lightweight unit tests that call cmd_* directly with an argparse.Namespace
 rather than spawning a subprocess.
+
+TB-131: cmd_backlog / cmd_unfreeze / cmd_delete / cmd_add now stage their
+work through `.cc-autopilot/operator_queue.jsonl` instead of mutating
+TASKS.md synchronously. Tests use `_drain` to apply the queue exactly as
+the daemon's `_tick` first stage would, so the post-state assertions
+that follow are unchanged.
 """
 from __future__ import annotations
 
@@ -11,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from ap2 import events, retry
+from ap2 import events, retry, tools
 from ap2.board import Board
 from ap2.cli import _require_oauth_token, cmd_backlog, cmd_delete, cmd_start, cmd_unfreeze
 from ap2.config import Config
@@ -25,6 +31,16 @@ def _project(tmp_path: Path) -> Config:
     return cfg
 
 
+def _drain(cfg: Config) -> dict:
+    """Apply pending operator-queue ops as the daemon's `_tick` would.
+
+    Tests that exercise cmd_backlog / cmd_unfreeze / cmd_delete / cmd_add
+    use this to advance from "queued" to "applied" state — the CLI
+    commands themselves are deferred (TB-131).
+    """
+    return tools.drain_operator_queue(cfg)
+
+
 def test_backlog_moves_from_frozen(tmp_path: Path):
     """Replaces what `cmd_skip` used to do: move-to-Backlog from any
     section, including Frozen."""
@@ -35,6 +51,7 @@ def test_backlog_moves_from_frozen(tmp_path: Path):
 
     rc = cmd_backlog(cfg, Namespace(task_id="TB-50"))
     assert rc == 0
+    _drain(cfg)
 
     board2 = Board.load(cfg.tasks_file)
     assert board2.find("TB-50")[0] == "Backlog"
@@ -49,6 +66,7 @@ def test_backlog_moves_from_active(tmp_path: Path):
 
     rc = cmd_backlog(cfg, Namespace(task_id="TB-51"))
     assert rc == 0
+    _drain(cfg)
     assert Board.load(cfg.tasks_file).find("TB-51")[0] == "Backlog"
 
 
@@ -68,6 +86,7 @@ def test_unfreeze_moves_from_frozen_to_backlog(tmp_path: Path):
 
     rc = cmd_unfreeze(cfg, Namespace(task_id="TB-60"))
     assert rc == 0
+    _drain(cfg)
 
     board2 = Board.load(cfg.tasks_file)
     assert board2.find("TB-60")[0] == "Backlog"
@@ -87,6 +106,7 @@ def test_unfreeze_clears_retry_state(tmp_path: Path):
     assert retry.attempt_count(cfg.retry_state_file, "TB-61") == 3
 
     cmd_unfreeze(cfg, Namespace(task_id="TB-61"))
+    _drain(cfg)
 
     assert retry.attempt_count(cfg.retry_state_file, "TB-61") == 0
 
@@ -98,6 +118,7 @@ def test_unfreeze_emits_audit_event(tmp_path: Path):
     board.save()
 
     cmd_unfreeze(cfg, Namespace(task_id="TB-62"))
+    _drain(cfg)
 
     evts = events.tail(cfg.events_file, 5)
     unfrozen = [e for e in evts if e["type"] == "task_unfrozen"]
@@ -189,6 +210,7 @@ def test_delete_removes_from_frozen(tmp_path: Path):
 
     rc = cmd_delete(cfg, Namespace(task_id="TB-91", force=False))
     assert rc == 0
+    _drain(cfg)
     # Task is gone from the board entirely.
     assert Board.load(cfg.tasks_file).find("TB-91") is None
 
@@ -201,6 +223,7 @@ def test_delete_removes_from_backlog(tmp_path: Path):
 
     rc = cmd_delete(cfg, Namespace(task_id="TB-80", force=False))
     assert rc == 0
+    _drain(cfg)
     assert Board.load(cfg.tasks_file).find("TB-80") is None
 
 
@@ -246,6 +269,7 @@ def test_delete_force_allows_active(tmp_path: Path):
 
     rc = cmd_delete(cfg, Namespace(task_id="TB-52", force=True))
     assert rc == 0
+    _drain(cfg)
     assert Board.load(cfg.tasks_file).find("TB-52") is None
 
 
@@ -256,6 +280,7 @@ def test_delete_emits_audit_event(tmp_path: Path):
     board.save()
 
     cmd_delete(cfg, Namespace(task_id="TB-92", force=False))
+    _drain(cfg)
 
     evts = events.tail(cfg.events_file, 5)
     deleted = [e for e in evts if e["type"] == "task_deleted"]

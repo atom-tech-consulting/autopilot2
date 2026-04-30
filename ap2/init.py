@@ -147,6 +147,12 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
         # `retry_state.json` was here pre-TB-112; it's now committed
         # as part of `_STATE_FILE_NAMES` so rollback restores per-task
         # retry budgets coherently.
+        # TB-131: operator-queue jsonl (CLI / MM-handler appends drained
+        # at the next tick) and its applied-uuid state file. Ephemeral
+        # runtime — the drained ops materialize as TASKS.md edits which
+        # ARE committed; the queue itself shouldn't ride along.
+        "operator_queue.jsonl",
+        "operator_queue_state.json",
     ]),
     ("Per-run prompt + stream dumps for failure diagnosis (kept only on failure)", [
         "debug/",

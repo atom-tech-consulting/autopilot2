@@ -10,6 +10,7 @@ agent having to know them.
 from __future__ import annotations
 
 import contextvars
+import datetime as _dt
 import json
 import os
 import ssl
@@ -17,10 +18,12 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import uuid as _uuid
+from pathlib import Path
 from typing import Any
 
-from . import events
-from .board import Board, locked_board
+from . import events, retry
+from .board import Board, board_file_lock, locked_board
 from .config import Config, bump_next_task_id
 from .cron import update_job
 from .init import render_briefing
@@ -459,6 +462,454 @@ def do_operator_log_append(cfg: Config, args: dict) -> dict:
     return _ok(f"appended to {log_path.name}", line=line.strip())
 
 
+# ---------------- operator queue (TB-131) ----------------
+#
+# Operator board mutations (`ap2 add`, `ap2 backlog`, `ap2 unfreeze`,
+# `ap2 delete`, plus the MM-handler counterpart) are appended to
+# `.cc-autopilot/operator_queue.jsonl` and applied by the daemon's
+# `_tick` first stage. This trades immediate write-through for
+# serializability against in-flight task / ideation runs:
+#   - `git reset --hard <pre_run_head>` rollback never wipes operator
+#     adds, because the add isn't in HEAD until the daemon drains the
+#     queue between runs.
+#   - Ideation reads a stable board snapshot for an entire SDK turn —
+#     a queued `ap2 add` arriving mid-thought lands BEFORE ideation's
+#     next read, not during it.
+#
+# ID pre-allocation is done at queue-append time (under the board
+# lock) so `ap2 add` can still print the new TB-N immediately. Only
+# the TASKS.md insertion is deferred.
+
+# Ops the operator-queue path knows how to drain. Shared between the
+# CLI (`do_operator_queue_append`) and the drain side
+# (`drain_operator_queue`).
+OPERATOR_QUEUE_OPS = (
+    "add_ready",
+    "add_backlog",
+    "add_frozen",
+    "move_to_backlog",
+    "unfreeze",
+    "delete",
+)
+
+
+def operator_queue_path(cfg: Config) -> Path:
+    return cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+
+
+def operator_queue_state_path(cfg: Config) -> Path:
+    return cfg.project_root / ".cc-autopilot" / "operator_queue_state.json"
+
+
+def do_operator_queue_append(cfg: Config, args: dict) -> dict:
+    """Append an operator board op to the daemon-drained queue (TB-131).
+
+    Two write paths share this handler, mirroring how
+    `do_operator_log_append` shares CLI + MCP today:
+      - operator-side: `ap2 add` / `ap2 backlog` / `ap2 unfreeze` /
+        `ap2 delete` route here instead of mutating TASKS.md directly.
+      - MM-handler-side: the `operator_queue_append` MCP tool — for
+        when @claude-bot is asked to add/move/unfreeze/delete a task
+        during an in-flight run, where direct `board_edit` exposes the
+        change to `git reset --hard <pre_run_head>` rollback.
+
+    For `add_*` ops, this briefly takes the board lock to (a) bump
+    CLAUDE.md `next_task_id`, (b) write the briefing file, (c) append
+    the queued op carrying the pre-allocated TB-N. So the operator
+    still gets the new ID printed immediately — only the TASKS.md
+    insertion is deferred.
+
+    For move/unfreeze/delete ops, validates the target task against
+    the current board snapshot under the lock so obvious operator
+    errors (typo'd TB-N, unfreeze-on-non-Frozen, delete-from-Active
+    without --force) are rejected immediately. The drain path runs
+    its own validation too (state may have shifted between queue and
+    drain) and emits `operator_queue_error` for any op it can't apply.
+    """
+    op = (args.get("op") or "").strip()
+    if op not in OPERATOR_QUEUE_OPS:
+        return _err(
+            f"unknown op {op!r}; valid: {list(OPERATOR_QUEUE_OPS)}"
+        )
+
+    rec_args: dict[str, Any] = {}
+    preallocated_task_id: str | None = None
+
+    add_map = {
+        "add_ready": "Ready",
+        "add_backlog": "Backlog",
+        "add_frozen": "Frozen",
+    }
+
+    if op in add_map:
+        title = (args.get("title") or "").strip()
+        if not title:
+            return _err("title is required for add ops")
+        tags = list(args.get("tags") or [])
+        description = (args.get("description") or "").strip()
+        blocked_on = (args.get("blocked_on") or "").strip()
+        briefing_content = args.get("briefing")
+
+        # Allocate ID + bump CLAUDE.md under the file lock so concurrent
+        # CLI invocations don't collide. board_file_lock (not
+        # locked_board) — _allocate_id reads max_id but doesn't mutate
+        # the board, so we don't want save-on-exit re-rendering TASKS.md.
+        with board_file_lock(cfg.tasks_file):
+            board = Board.load(cfg.tasks_file)
+            preallocated_task_id = _allocate_id(board, cfg)
+
+        # add_backlog with no caller-provided briefing: render the
+        # standard template so every queued task lands with a
+        # `## Verification` section (mirrors do_board_edit).
+        if op == "add_backlog" and not (briefing_content or "").strip():
+            briefing_content = render_briefing(
+                task_id=preallocated_task_id,
+                title=title,
+                description=description,
+            )
+
+        briefing_rel: str | None = None
+        if briefing_content:
+            slug = slugify(title)
+            brief_path = cfg.tasks_dir / f"{slug}.md"
+            n = 2
+            while brief_path.exists():
+                brief_path = cfg.tasks_dir / f"{slug}-{n}.md"
+                n += 1
+            brief_path.parent.mkdir(parents=True, exist_ok=True)
+            brief_path.write_text(briefing_content)
+            briefing_rel = str(brief_path.relative_to(cfg.project_root))
+
+        desc = description
+        if blocked_on:
+            desc = (desc + " " if desc else "") + f"(blocked on: {blocked_on})"
+
+        rec_args = {
+            "task_id": preallocated_task_id,
+            "title": title,
+            "tags": tags,
+            "description": desc,
+            "briefing_path": briefing_rel,
+        }
+    else:
+        task_id = (args.get("task_id") or "").strip()
+        if not task_id:
+            return _err(f"task_id is required for {op}")
+        # Snapshot validation under the board lock — the drain path
+        # re-validates too (state may shift) but rejecting obvious
+        # operator errors immediately keeps the UX honest.
+        with board_file_lock(cfg.tasks_file):
+            board = Board.load(cfg.tasks_file)
+            loc = board.find(task_id)
+        if loc is None:
+            return _err(f"{task_id} not on board")
+        section = loc[0]
+        if op == "unfreeze" and section != "Frozen":
+            return _err(
+                f"{task_id} is in {section}, not Frozen — "
+                f"use `ap2 backlog {task_id}` for non-frozen moves"
+            )
+        if op == "delete" and section in ("Active", "Ready", "Pipeline Pending") \
+                and not args.get("force"):
+            return _err(
+                f"{task_id} is in {section} — refusing without force. "
+                f"Use `ap2 backlog {task_id}` first, or pass --force."
+            )
+        rec_args = {"task_id": task_id}
+        if op == "delete":
+            rec_args["force"] = bool(args.get("force"))
+
+    rec: dict[str, Any] = {
+        "uuid": str(_uuid.uuid4()),
+        "op": op,
+        "args": rec_args,
+        "ts": _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+    }
+    if preallocated_task_id:
+        rec["preallocated_task_id"] = preallocated_task_id
+
+    queue_path = operator_queue_path(cfg)
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    with queue_path.open("a") as f:
+        f.write(json.dumps(rec) + "\n")
+    events.append(
+        cfg.events_file,
+        "operator_queue_append",
+        uuid=rec["uuid"],
+        op=op,
+        task=preallocated_task_id or rec_args.get("task_id", ""),
+    )
+    msg = f"queued {op}"
+    if preallocated_task_id:
+        msg += f" → {preallocated_task_id}"
+    return _ok(
+        msg,
+        uuid=rec["uuid"],
+        op=op,
+        task_id=preallocated_task_id or rec_args.get("task_id", ""),
+    )
+
+
+def operator_queue_pending_count(cfg: Config) -> int:
+    """Number of queued ops that haven't yet been drained.
+
+    Surfaced by `ap2 status` so operators can spot a stalled daemon
+    (queue depth > 0 with the daemon not running == ops stuck pending).
+    """
+    queue_path = operator_queue_path(cfg)
+    if not queue_path.exists():
+        return 0
+    applied = _load_operator_queue_applied(operator_queue_state_path(cfg))
+    count = 0
+    for line in queue_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("uuid") in applied:
+            continue
+        count += 1
+    return count
+
+
+def drain_operator_queue(cfg: Config) -> dict:
+    """Apply queued operator ops as the first stage of each daemon tick
+    (TB-131).
+
+    Holds `board_file_lock` for the duration of the drain so concurrent
+    CLI / MCP appends serialize against application. Each op:
+
+      1. Has its uuid checked against
+         `.cc-autopilot/operator_queue_state.json` — already-applied
+         uuids are skipped (idempotent across crash-restart).
+      2. Is dispatched through `_apply_operator_op` to the
+         appropriate primitive (board.add / board.move / board.remove
+         + retry-state reset for unfreeze + audit events).
+      3. Records its uuid into the state file BEFORE moving on (so a
+         crash mid-drain doesn't re-apply the op next tick).
+      4. Writes a one-line audit summary to operator_log.md.
+
+    Failures (op references a task that vanished, etc.) are recorded
+    with `operator_queue_error` events but the uuid is still marked
+    applied — silently failing forever is worse than letting the
+    operator see one error and move on.
+
+    Returns a dict with `applied` (count) and `touched_paths` (state
+    files dirtied) so the daemon-side caller can pass them to
+    `_commit_state_files` for a coherent state-file commit.
+    """
+    queue_path = operator_queue_path(cfg)
+    state_path = operator_queue_state_path(cfg)
+    if not queue_path.exists() or queue_path.stat().st_size == 0:
+        return {"applied": 0, "touched_paths": []}
+
+    applied = _load_operator_queue_applied(state_path)
+    pending: list[dict] = []
+    for line in queue_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if rec.get("uuid") in applied:
+            continue
+        pending.append(rec)
+
+    if not pending:
+        # No new ops; opportunistically compact in case the queue file
+        # has accumulated already-applied uuids.
+        _compact_operator_queue(queue_path, applied)
+        return {"applied": 0, "touched_paths": []}
+
+    applied_count = 0
+    touched: set[str] = set()
+    with board_file_lock(cfg.tasks_file):
+        for rec in pending:
+            try:
+                board = Board.load(cfg.tasks_file)
+                _apply_operator_op(cfg, board, rec)
+                board.save()
+                _append_operator_audit_line(cfg, rec)
+                applied_count += 1
+                touched.update(
+                    [
+                        "TASKS.md",
+                        "CLAUDE.md",
+                        ".cc-autopilot/retry_state.json",
+                        ".cc-autopilot/operator_log.md",
+                        ".cc-autopilot/tasks",
+                    ]
+                )
+            except Exception as e:  # noqa: BLE001
+                events.append(
+                    cfg.events_file,
+                    "operator_queue_error",
+                    uuid=rec.get("uuid", ""),
+                    op=rec.get("op", ""),
+                    error=f"{type(e).__name__}: {e}",
+                )
+            finally:
+                # Mark applied (or attempted) regardless of success —
+                # silently re-applying a broken op every tick is worse
+                # than recording the error once and moving on. Operator
+                # can inspect events.jsonl for the failure cause.
+                applied.add(rec["uuid"])
+                _save_operator_queue_applied(state_path, applied)
+        _compact_operator_queue(queue_path, applied)
+
+    if applied_count:
+        events.append(
+            cfg.events_file,
+            "operator_queue_drained",
+            applied=applied_count,
+        )
+    return {"applied": applied_count, "touched_paths": sorted(touched)}
+
+
+def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
+    op = rec.get("op", "")
+    args = rec.get("args") or {}
+    add_map = {
+        "add_ready": "Ready",
+        "add_backlog": "Backlog",
+        "add_frozen": "Frozen",
+    }
+    if op in add_map:
+        if not args.get("task_id") or not args.get("title"):
+            raise RuntimeError("add op missing task_id or title")
+        board.add(
+            add_map[op],
+            task_id=args["task_id"],
+            title=args["title"],
+            tags=list(args.get("tags") or []),
+            description=args.get("description") or "",
+            briefing=args.get("briefing_path"),
+        )
+        return
+    if op == "move_to_backlog":
+        try:
+            board.move(args["task_id"], "Backlog")
+        except KeyError:
+            raise RuntimeError(f"{args.get('task_id', '?')} not on board")
+        return
+    if op == "unfreeze":
+        loc = board.find(args.get("task_id", ""))
+        if loc is None:
+            raise RuntimeError(f"{args.get('task_id', '?')} not on board")
+        if loc[0] != "Frozen":
+            raise RuntimeError(
+                f"{args['task_id']} is in {loc[0]}, not Frozen"
+            )
+        board.move(args["task_id"], "Backlog")
+        retry.reset_attempt(cfg.retry_state_file, args["task_id"])
+        events.append(cfg.events_file, "task_unfrozen", task=args["task_id"])
+        return
+    if op == "delete":
+        loc = board.find(args.get("task_id", ""))
+        if loc is None:
+            raise RuntimeError(f"{args.get('task_id', '?')} not on board")
+        section = loc[0]
+        if section in ("Active", "Ready", "Pipeline Pending") and not args.get("force"):
+            raise RuntimeError(
+                f"{args['task_id']} is in {section}; refusing delete without force"
+            )
+        existing = board.get(args["task_id"])
+        title = existing.title if existing else ""
+        board.remove(args["task_id"])
+        events.append(
+            cfg.events_file,
+            "task_deleted",
+            task=args["task_id"],
+            section=section,
+            title=title,
+        )
+        return
+    raise RuntimeError(f"unknown op {op!r}")
+
+
+def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
+    """One-line audit entry to operator_log.md per TB-131 scope (5)."""
+    log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not log_path.exists():
+        log_path.write_text(
+            "# Operator log\n\n"
+            "_Operator decisions and action acknowledgements. Append-only.\n"
+            "Ideation reads this in Step 0; logged items are authoritative —\n"
+            "ideation won't re-propose decisions logged here._\n\n"
+        )
+    op = rec.get("op", "?")
+    args = rec.get("args") or {}
+    task = args.get("task_id", "")
+    ts = rec.get("ts") or _dt.datetime.now(_dt.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    arrow = f" → {task}" if task else ""
+    line = f"- {ts} — applied operator-queued {op}{arrow}\n"
+    with log_path.open("a") as f:
+        f.write(line)
+
+
+def _load_operator_queue_applied(state_path: Path) -> set[str]:
+    if not state_path.exists():
+        return set()
+    try:
+        data = json.loads(state_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    items = data.get("applied")
+    if not isinstance(items, list):
+        return set()
+    return {str(x) for x in items}
+
+
+def _save_operator_queue_applied(state_path: Path, applied: set[str]) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = state_path.with_suffix(state_path.suffix + ".tmp")
+    tmp.write_text(json.dumps({"applied": sorted(applied)}, indent=2))
+    tmp.replace(state_path)
+
+
+def _compact_operator_queue(queue_path: Path, applied: set[str]) -> None:
+    """Rewrite the queue file dropping fully-applied uuids, keeping any
+    un-applied lines (e.g. ones that arrived between two drains) intact.
+
+    Called after each successful drain so the file doesn't grow
+    unbounded. `applied` is the set of uuids known to have been applied
+    (or attempted-and-recorded); anything not in it is preserved.
+    """
+    if not queue_path.exists():
+        return
+    pending_lines: list[str] = []
+    for raw in queue_path.read_text().splitlines():
+        line = raw.rstrip("\n")
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            # Preserve unparseable lines so an operator can inspect
+            # them rather than silently losing the record.
+            pending_lines.append(line)
+            continue
+        if rec.get("uuid") in applied:
+            continue
+        pending_lines.append(line)
+    if pending_lines:
+        queue_path.write_text("\n".join(pending_lines) + "\n")
+    else:
+        queue_path.write_text("")
+
+
 def do_ideation_state_write(cfg: Config, args: dict) -> dict:
     """Overwrite `.cc-autopilot/ideation_state.md` with a fresh assessment (TB-90).
 
@@ -715,6 +1166,51 @@ def build_mcp_server(cfg: Config):
         return do_operator_log_append(cfg, args)
 
     @tool(
+        "operator_queue_append",
+        "Stage an operator board op for the daemon to apply at the next "
+        "tick (TB-131). Routes around the rollback / read-stale-board race "
+        "that direct `board_edit` exposes during in-flight task or ideation "
+        "runs: queued ops aren't in HEAD until between runs, so "
+        "`git reset --hard <pre_run_head>` rollback never wipes them and "
+        "long-running SDK turns can't read a board snapshot that shifts "
+        "underneath them. Use this — instead of `board_edit` — when "
+        "@claude-bot is asked to add/move/unfreeze/delete a task and a "
+        "task agent is currently active. For `add_*` ops, the TB-N ID is "
+        "pre-allocated synchronously (so you can mention it in your reply) "
+        "and the briefing file is pre-written; only the TASKS.md "
+        "insertion is deferred. Args: op (one of add_ready, add_backlog, "
+        "add_frozen, move_to_backlog, unfreeze, delete); task_id (TB-N for "
+        "non-add ops); title / tags (comma-separated string) / description "
+        "/ briefing / blocked_on (for add ops); force (true/false, for "
+        "delete from Active/Ready/Pipeline Pending).",
+        {
+            "op": str,
+            "task_id": str,
+            "title": str,
+            "tags": str,
+            "description": str,
+            "briefing": str,
+            "blocked_on": str,
+            "force": str,
+        },
+    )
+    async def operator_queue_append(args):
+        # Normalize string-shaped args to the dict shape do_operator_queue_append
+        # expects: tags is a comma-separated string here but a list inside.
+        normalized = dict(args)
+        raw_tags = normalized.get("tags") or ""
+        if isinstance(raw_tags, str) and raw_tags.strip():
+            normalized["tags"] = [
+                t.strip() for t in raw_tags.split(",") if t.strip()
+            ]
+        else:
+            normalized["tags"] = []
+        force = normalized.get("force")
+        if isinstance(force, str):
+            normalized["force"] = force.strip().lower() in ("1", "true", "yes")
+        return do_operator_queue_append(cfg, normalized)
+
+    @tool(
         "report_result",
         "Report task completion to the autopilot daemon. Call this ONCE at "
         "the end of your run instead of emitting a `RESULT:` text block. "
@@ -811,6 +1307,7 @@ def build_mcp_server(cfg: Config):
             ideation_state_write,
             git_log_grep,
             operator_log_append,
+            operator_queue_append,
             report_result,
             cron_propose,
             pipeline_task_start,
@@ -837,6 +1334,10 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__ideation_state_write",
     "mcp__autopilot__git_log_grep",
     "mcp__autopilot__operator_log_append",
+    # TB-131: queue-based board mutation. The MM handler should prefer
+    # this over `board_edit` when a task agent is in flight — see the
+    # tool docstring + MM_HANDLER_TOOLS_RESTRICTED below.
+    "mcp__autopilot__operator_queue_append",
 ]
 
 # TB-122: when a task agent is in flight, the Mattermost handler runs with a
@@ -920,4 +1421,9 @@ TASK_AGENT_FENCED_PATHS = (
     ".cc-autopilot/ideation_state.md",
     ".cc-autopilot/cron.yaml",
     ".cc-autopilot/operator_log.md",
+    # TB-131: the operator-queue jsonl is a daemon-drained surface for
+    # CLI / MM-handler board ops — task agents have no business
+    # touching it. Same fence pattern as the rest of this set.
+    ".cc-autopilot/operator_queue.jsonl",
+    ".cc-autopilot/operator_queue_state.json",
 )
