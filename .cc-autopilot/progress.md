@@ -35,3 +35,9 @@
 - **Summary:** Added /task-run/<run-id> live detail page (prompt + color-coded stream rows), JSON sub-endpoint /task-run/<run-id>/stream.json?since=N for 3s polling that auto-stops on terminal events, → live links on task_start rows in /events + home, and a Runs section on /task/<TB-N> sourced from disk; 21 new tests, full 525-test suite green.
 - **Files:** ap2/web.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-04-30] TB-130: Auto-start ap2 web as part of ap2 start; tie lifecycle to daemon
+- **Commit:** `0f0dedcd`
+- **Summary:** Bundled the read-only web UI into the daemon lifecycle: web.serve_async runs in a cancellable task spawned by main_loop, daemon emits web_start/web_stop/web_error events, AP2_WEB_PORT (default 8729) + AP2_WEB_DISABLED env knobs honor the briefing, ap2 status prints the URL, ap2 web stays available standalone (default 7820). 535/535 ap2 tests pass.
+- **Files:** ap2/web.py, ap2/daemon.py, ap2/cli.py, ap2/tests/test_web.py, ap2/tests/test_daemon_web.py, ap2/tests/test_cli.py, README.md, ap2/README.md
+- **Tests:** pass
