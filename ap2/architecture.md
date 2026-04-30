@@ -14,21 +14,33 @@ These three constraints drive every other decision in the codebase.
 
 ## The daemon loop
 
-`daemon.main_loop` is a plain `asyncio` loop. Each tick (default 30s, `AP2_TICK_S`):
+`daemon.main_loop` (TB-122) runs two concurrent asyncio coroutines via `asyncio.gather`:
+
+**`_main_tick_loop`** — scheduled work, default 30s (`AP2_TICK_S`):
 
 ```
 _tick(cfg, sdk, mcp_server):
-  1. Mattermost — check_new_messages → handle_message per @claude-bot mention
-  2. Cron       — load_jobs + due_jobs → run_cron per due job
-  3. Tasks      — board.next_ready, or auto-promote next_dispatchable("Backlog")
+  1. Cron       — load_jobs + due_jobs → run_cron per due job
+  2. Tasks      — board.next_ready, or auto-promote next_dispatchable("Backlog")
                   → run_task on the picked task
+  3. Pipeline   — _sweep_pipeline_pending (no-op unless Pipeline Pending tasks exist)
   4. Ideation   — _maybe_ideate (no-op unless board fully empty + cooldown)
   5. Watchdog   — _maybe_auto_diagnose (no-op unless idle threshold passed)
 ```
 
-Steps run sequentially. A failure in any step emits an event and continues to the next — one broken cron job doesn't block task dispatch. The whole tick is wrapped in try/except so the daemon never exits on an unhandled error.
+**`_mm_loop`** — Mattermost polling, default 10s (`AP2_MM_TICK_S`):
 
-The pause flag (`<root>/.cc-autopilot/paused`, presence-only) short-circuits the entire tick body except for `daemon_resume` event detection.
+```
+_mm_loop(cfg, sdk, mcp_server):
+  - check_new_messages → asyncio.create_task(handle_message(...)) per mention
+  - Each handler independently selects toolset based on board state:
+      idle board  → MM_HANDLER_TOOLS_FULL  (full CONTROL_AGENT_TOOLS)
+      Active task → MM_HANDLER_TOOLS_RESTRICTED  (drops cron_edit + ideation_state_write)
+```
+
+The two loops share the same `Config`, SDK handle, and MCP server. Board mutations go through `locked_board()` (fcntl.flock), which serializes concurrent access. The pause flag (`<root>/.cc-autopilot/paused`, presence-only) short-circuits both loops.
+
+Steps in `_tick` run sequentially. A failure in any step emits an event and continues to the next — one broken cron job doesn't block task dispatch. Each loop body is wrapped in try/except so the daemon never exits on an unhandled error.
 
 ## Agent kinds
 
@@ -38,7 +50,7 @@ There are four kinds of SDK queries, each with its own prompt builder, tool allo
 |---|---|---|---|---|
 | **Task** | `run_task` (step 3) | `prompts.build_task_prompt` | `TASK_AGENT_TOOLS` (Read/Edit/Write/Bash + `pipeline_task_start`) | `AP2_TASK_TIMEOUT_S` (1200s) |
 | **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/cron/mm/log_event/daemon_control/ideation_state_write) | `AP2_CONTROL_TIMEOUT_S` (300s) |
-| **Mattermost** | `handle_message` (step 1) | `prompts.build_mattermost_prompt` | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
+| **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS_FULL` (idle) or `MM_HANDLER_TOOLS_RESTRICTED` (task in flight) — TB-122 | `AP2_CONTROL_TIMEOUT_S` |
 | **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
 
 Task agents are the only kind that gets `Write`/`Edit`. They commit code; everything else mutates state through MCP tools.

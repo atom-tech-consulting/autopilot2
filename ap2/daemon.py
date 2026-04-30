@@ -1,9 +1,14 @@
 """Autopilot v2 daemon — the main loop.
 
-This is a Python scheduler (not a Claude session). Each tick it:
-  1. Pulls new mattermost messages → spawns a handler agent per message.
-  2. Runs any due cron jobs.
-  3. Picks the next Ready task off the board and runs it.
+This is a Python scheduler (not a Claude session). It runs two concurrent loops:
+
+  _main_tick_loop — scheduled work (cron, pipeline sweep, task dispatch,
+                    ideation, watchdog). Tick interval AP2_TICK_S (30s).
+  _mm_loop        — Mattermost polling (TB-122). Runs on AP2_MM_TICK_S (10s)
+                    so operator messages are handled promptly even while a
+                    task agent is running. Each new mention spawns an
+                    asyncio.create_task(handle_message(...)) so concurrent
+                    mentions don't serialize.
 
 Each unit of work is a fresh SDK `query()` call, so contexts never accumulate.
 """
@@ -34,6 +39,8 @@ from .mattermost import check_new_messages
 from .result import TaskResult
 from .tools import (
     CONTROL_AGENT_TOOLS,
+    MM_HANDLER_TOOLS_FULL,
+    MM_HANDLER_TOOLS_RESTRICTED,
     TASK_AGENT_FENCED_PATHS,
     TASK_AGENT_TOOLS,
     build_mcp_server,
@@ -633,7 +640,23 @@ def _recover_orphans(cfg: Config) -> None:
 
 
 async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
-    prompt = prompts.build_mattermost_prompt(cfg, msg)
+    """Run a Mattermost handler agent for one mention.
+
+    TB-122: toolset depends on whether a task agent is in flight.
+    `Board.iter_tasks("Active")` is the gate — daemon writes
+    `move_to_active` before starting the task SDK query, so a handler
+    spawned in the brief window between `move_to_active` and the SDK
+    query starting still sees Active and selects the restricted set.
+    """
+    task_in_flight = cfg.tasks_file.exists() and bool(
+        list(Board.load(cfg.tasks_file).iter_tasks("Active"))
+    )
+    toolset = (
+        MM_HANDLER_TOOLS_RESTRICTED if task_in_flight else MM_HANDLER_TOOLS_FULL
+    )
+    prompt = prompts.build_mattermost_prompt(
+        cfg, msg, task_in_flight=task_in_flight,
+    )
     events.append(
         cfg.events_file,
         "mattermost",
@@ -641,6 +664,9 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
         user=msg.get("user"),
         thread_id=msg.get("thread_id"),
         summary=(msg.get("text") or "")[:300],
+        # TB-122: log which toolset shape was used so concurrent-handler
+        # behavior is auditable from events.jsonl alone.
+        toolset="restricted" if task_in_flight else "full",
     )
 
     async def _consume() -> None:
@@ -649,7 +675,7 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
             options=sdk.ClaudeAgentOptions(
                 cwd=str(cfg.project_root),
                 mcp_servers={"autopilot": mcp_server},
-                allowed_tools=CONTROL_AGENT_TOOLS,
+                allowed_tools=toolset,
                 permission_mode="bypassPermissions",
                 max_turns=int(os.environ.get("AP2_CONTROL_MAX_TURNS", 15)),
                 setting_sources=["project"],
@@ -1577,6 +1603,26 @@ def _commit_state_files(cfg: Config, message: str) -> None:
 
 
 async def main_loop(cfg: Config) -> None:
+    """Start the daemon: bootstrap, then run the two concurrent loops until SIGTERM.
+
+    TB-122: splits the original single `while RUNNING: _tick()` loop into two
+    concurrent asyncio coroutines:
+    - `_main_tick_loop` — cron, pipeline-pending sweep, task dispatch,
+      ideation, watchdog. Tick interval `AP2_TICK_S` (30s default).
+    - `_mm_loop` — Mattermost polling only, on a faster `AP2_MM_TICK_S`
+      (10s default). Each new mention spawns an `asyncio.create_task` so
+      back-to-back mentions don't serialize, and so handler agents don't
+      block subsequent polls.
+
+    Both loops share the same `Config`, SDK handle, and MCP server. Board
+    mutations go through `locked_board()` (fcntl.flock), which already
+    serializes concurrent access. The pause flag is respected in both loops.
+
+    `asyncio.gather(...)` runs both loops concurrently; if either coroutine
+    raises (which neither should — every per-tick error is caught inside),
+    the surrounding `try/finally` still emits `daemon_stop` and cleans up
+    the pid file.
+    """
     cfg.ensure_dirs()
     if bootstrap_cron(cfg.cron_file):
         events.append(cfg.events_file, "cron_bootstrap", path=str(cfg.cron_file))
@@ -1589,18 +1635,23 @@ async def main_loop(cfg: Config) -> None:
     cfg.pid_file.parent.mkdir(parents=True, exist_ok=True)
     cfg.pid_file.write_text(str(os.getpid()))
 
+    # Track outstanding MM handler tasks so we can drain them on shutdown.
+    # `_mm_loop` adds; the set's discard-on-done keeps it bounded.
+    handler_tasks: set[asyncio.Task] = set()
+
     try:
-        while RUNNING:
-            if cfg.pause_flag.exists():
-                await asyncio.sleep(cfg.tick_interval_s)
-                continue
-            await _tick(cfg, sdk, mcp_server)
-            # Short sleep between ticks so we can shut down promptly.
-            slept = 0
-            while slept < cfg.tick_interval_s and RUNNING:
-                await asyncio.sleep(1)
-                slept += 1
+        await asyncio.gather(
+            _main_tick_loop(cfg, sdk, mcp_server),
+            _mm_loop(cfg, sdk, mcp_server, handler_tasks),
+        )
     finally:
+        # Best-effort drain of in-flight handlers. They have their own
+        # `cfg.control_timeout_s` cap so this is bounded even if a handler
+        # is mid-SDK-query.
+        if handler_tasks:
+            for t in handler_tasks:
+                t.cancel()
+            await asyncio.gather(*handler_tasks, return_exceptions=True)
         events.append(cfg.events_file, "daemon_stop")
         try:
             cfg.pid_file.unlink()
@@ -1608,15 +1659,81 @@ async def main_loop(cfg: Config) -> None:
             pass
 
 
-async def _tick(cfg: Config, sdk, mcp_server) -> None:
-    # 1. Mattermost
-    try:
-        for msg in check_new_messages(cfg):
-            await handle_message(cfg, sdk, mcp_server, msg)
-    except Exception as e:  # noqa: BLE001
-        events.append(cfg.events_file, "mm_poll_error", error=f"{type(e).__name__}: {e}")
+async def _main_tick_loop(cfg: Config, sdk, mcp_server) -> None:
+    """Main tick loop: cron, pipeline sweep, task dispatch, ideation, watchdog.
 
-    # 2. Cron
+    TB-122: Mattermost polling was moved to `_mm_loop` so it doesn't block
+    on long-running `run_task` calls. This loop now handles only scheduled
+    work — every step inside `_tick` already had its own try/except, so a
+    failure in any one step doesn't break the loop.
+    """
+    while RUNNING:
+        if cfg.pause_flag.exists():
+            await _interruptible_sleep(cfg.tick_interval_s)
+            continue
+        await _tick(cfg, sdk, mcp_server)
+        # Short 1s-granularity sleep so SIGTERM is noticed promptly.
+        await _interruptible_sleep(cfg.tick_interval_s)
+
+
+async def _mm_loop(
+    cfg: Config,
+    sdk,
+    mcp_server,
+    handler_tasks: set[asyncio.Task] | None = None,
+) -> None:
+    """Mattermost polling loop — runs independently of the main tick (TB-122).
+
+    Polls `check_new_messages` on `AP2_MM_TICK_S` (default 10s). For each
+    new mention, spawns an `asyncio.create_task(handle_message(...))` so:
+      - the next poll is not blocked on a slow handler agent
+      - back-to-back mentions don't serialize (each gets its own task)
+      - the main tick loop is never blocked by MM work
+
+    Each handler decides its own toolset (`MM_HANDLER_TOOLS_RESTRICTED`
+    when a task is in flight, `MM_HANDLER_TOOLS_FULL` when the board is
+    idle) — see `handle_message`.
+
+    The pause flag suppresses polling (same semantics as today's tick: the
+    operator can still send messages while paused, but they won't be seen
+    until the daemon resumes).
+
+    `handler_tasks` is the daemon-level set used by `main_loop` to drain
+    in-flight handlers on shutdown. Optional so unit tests can drive
+    `_mm_loop` directly without owning the bookkeeping.
+    """
+    while RUNNING:
+        if not cfg.pause_flag.exists():
+            try:
+                for msg in check_new_messages(cfg):
+                    task = asyncio.create_task(
+                        handle_message(cfg, sdk, mcp_server, msg)
+                    )
+                    if handler_tasks is not None:
+                        handler_tasks.add(task)
+                        task.add_done_callback(handler_tasks.discard)
+            except Exception as e:  # noqa: BLE001
+                events.append(
+                    cfg.events_file, "mm_poll_error",
+                    error=f"{type(e).__name__}: {e}",
+                )
+        await _interruptible_sleep(cfg.mm_tick_interval_s)
+
+
+async def _interruptible_sleep(total_s: int) -> None:
+    """Sleep up to `total_s` seconds, breaking promptly on SIGTERM/SIGINT.
+
+    Used by both `_main_tick_loop` and `_mm_loop` so a shutdown signal
+    doesn't stall behind the longer tick interval.
+    """
+    slept = 0
+    while slept < total_s and RUNNING:
+        await asyncio.sleep(1)
+        slept += 1
+
+
+async def _tick(cfg: Config, sdk, mcp_server) -> None:
+    # 1. Cron (MM polling moved to _mm_loop — TB-122)
     try:
         jobs = load_jobs(cfg.cron_file)
         state = load_state(cfg.cron_state_file)
@@ -1625,7 +1742,7 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "cron_error", error=f"{type(e).__name__}: {e}")
 
-    # 3. Pipeline Pending sweep (TB-114). Each task in `Pipeline Pending`
+    # 2. Pipeline Pending sweep (TB-114). Each task in `Pipeline Pending`
     # has one or more pids it dispatched via `pipeline_task_start`. When
     # ALL of those pids are dead, re-run verification against the now-
     # populated working tree and route to Complete or Backlog/Frozen.
@@ -1637,7 +1754,7 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             error=f"{type(e).__name__}: {e}",
         )
 
-    # 4. Next Ready task (auto-promote top-of-Backlog if Ready is empty)
+    # 3. Next Ready task (auto-promote top-of-Backlog if Ready is empty)
     try:
         board = Board.load(cfg.tasks_file)
         # Surface task-shaped lines that fail the parser. A common cause is a

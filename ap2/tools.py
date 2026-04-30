@@ -720,6 +720,34 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__operator_log_append",
 ]
 
+# TB-122: when a task agent is in flight, the Mattermost handler runs with a
+# narrower toolset. Cron schedule mutations (would change when the next
+# status-report / ideation tick fires, possibly mid-edit on the running
+# task's working tree) and ideation_state_writes (rewrites the per-cycle
+# assessment that ideation was acting on when the running task was queued)
+# are deferred until the daemon is idle. The keeps:
+#   - read tools (Read/Glob/Grep/git_log_grep) so the agent can answer
+#     questions and reason about state.
+#   - board_edit so the operator can pause queued work, add new tasks,
+#     delete unwanted ones, freeze problematic ones, and approve
+#     ideation-proposed tasks (TB-121's `approve` action) mid-flight.
+#   - mattermost_reply / log_event so the handler can finish its turn.
+#   - daemon_control so "@claude-bot pause" works while a task runs (the
+#     existing semantic: pause takes effect on the next tick boundary; the
+#     in-flight task continues to completion, then no further dispatch).
+#   - operator_log_append so "@claude-bot ack: …" still lands in the
+#     operator log (ideation reads it in Step 0 — the operator's veto
+#     channel must stay open even mid-task).
+# Idle handler runs (no Active tasks) keep the full CONTROL_AGENT_TOOLS set.
+MM_HANDLER_TOOLS_FULL = list(CONTROL_AGENT_TOOLS)
+MM_HANDLER_TOOLS_RESTRICTED = [
+    t for t in CONTROL_AGENT_TOOLS
+    if t not in (
+        "mcp__autopilot__cron_edit",
+        "mcp__autopilot__ideation_state_write",
+    )
+]
+
 # `pipeline_task_start` is the first MCP tool task agents can call directly
 # (TB-81). The privilege increase is narrow: one tool, atomic, well-scoped to
 # launching long-running work that the daemon can't host inside a single

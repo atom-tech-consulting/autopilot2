@@ -8,7 +8,7 @@ External Python daemon that drives a Claude Code project through a list of tasks
 - **Auto-promotes Backlog → Ready** when Ready is empty, skipping any task with unmet `(blocked on: TB-X)` dependencies.
 - **Fires ideation** when the working board (Active+Ready+Backlog) is fully empty. The ideation agent reads `goal.md` + `progress.md` + recent failures + the insights index, writes a per-cycle assessment, and proposes new Backlog tasks.
 - **Runs cron jobs** from `.cc-autopilot/cron.yaml` (currently just `status-report` by default).
-- **Polls Mattermost** for `@claude-bot` mentions and dispatches a handler agent per message.
+- **Polls Mattermost** for `@claude-bot` mentions and dispatches a handler agent per message. The MM loop (`_mm_loop`, `AP2_MM_TICK_S` = 10s) runs concurrently with the main tick loop so operator messages are handled even while a task agent is running. When a task is in flight the handler gets a restricted toolset (`MM_HANDLER_TOOLS_RESTRICTED`) that drops `cron_edit` and `ideation_state_write` but keeps all operator-facing actions (board_edit, daemon_control, mattermost_reply, operator_log_append).
 - **Catches drift** — orphan recovery on startup, retry counter with Frozen shelving after `AP2_MAX_RETRIES`, idle watchdog that posts auto-diagnose to Mattermost when the daemon goes quiet for >3h.
 
 ## Quickstart
@@ -113,7 +113,8 @@ All `AP2_*` variables can be set in shell, in `<project>/.cc-autopilot/env` (KEY
 
 | Variable | Default | Controls |
 |---|---|---|
-| `AP2_TICK_S` | `30` | Daemon tick interval (s). |
+| `AP2_TICK_S` | `30` | Main tick interval for scheduled work (cron, pipeline sweep, task dispatch, ideation). |
+| `AP2_MM_TICK_S` | `10` | Mattermost polling interval (s). Runs in a separate concurrent loop so operator messages are handled promptly even during long-running tasks. |
 | `AP2_TASK_TIMEOUT_S` | `1200` | Per-task SDK query timeout (s). |
 | `AP2_TASK_MAX_TURNS` | `50` | Max turns per task agent. |
 | `AP2_CONTROL_TIMEOUT_S` | `300` | Per-control-agent SDK query timeout (s). |
@@ -163,7 +164,9 @@ Events are JSONL lines in `.cc-autopilot/events.jsonl`. Every line has `ts` (UTC
 
 The daemon registers an `autopilot` MCP server with two pools of tools, partitioned by who can call them:
 
-**Control agents** (mattermost handler, cron jobs, ideation): `board_edit`, `cron_edit`, `mattermost_reply`, `log_event`, `daemon_control`, `ideation_state_write`. Broad reads, narrow writes — every mutation goes through a single-purpose MCP tool, no `Write`/`Edit` access.
+**Control agents** (mattermost handler, cron jobs, ideation): `board_edit`, `cron_edit`, `mattermost_reply`, `log_event`, `daemon_control`, `ideation_state_write`, `git_log_grep`, `operator_log_append`. Broad reads, narrow writes — every mutation goes through a single-purpose MCP tool, no `Write`/`Edit` access.
+
+The Mattermost handler has a second mode (TB-122): when a task agent is in flight, its toolset narrows to `MM_HANDLER_TOOLS_RESTRICTED` — same set minus `cron_edit` and `ideation_state_write`. This keeps the operator's pause / add / delete / approve / freeze / ack channel open mid-task while preventing cron-schedule and ideation-state mutations that would race the running task. The `mattermost` event in `events.jsonl` records `toolset: "restricted" | "full"` for each handler run.
 
 **Task agents**: `pipeline_task_start(name, command)` for long work (>~5 min wall-clock — data fetches, parameter sweeps, ML training). Launches `command` as a detached subprocess. The launching task moves to a `Pipeline Pending` board section (TB-115); the daemon's per-tick sweep re-runs the briefing's `## Verification` once every spawned pid dies and routes to Complete or Backlog/Frozen.
 

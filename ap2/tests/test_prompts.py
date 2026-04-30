@@ -134,3 +134,37 @@ def test_mattermost_prompt_pins_explicit_thread_id(tmp_path):
     msg_threaded = dict(msg, thread_id="root-xyz")
     p2 = build_mattermost_prompt(cfg, msg_threaded)
     assert 'thread_id: "root-xyz"' in p2
+
+
+def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
+    """TB-122: when a task is in flight, the prompt explicitly explains that
+    cron_edit + ideation_state_write are off-limits, and tells the agent to
+    reply via mattermost_reply instead of trying the disabled tools. The
+    same prompt must spell out the operator-still-available actions
+    (board_edit/approve, daemon_control, operator_log_append) so the
+    handler doesn't refuse work it CAN do."""
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "dev",
+        "user": "alice",
+        "text": "@claude-bot pause",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg, task_in_flight=True)
+    # Pinned: agent knows why the toolset is narrower.
+    assert "task agent is currently running" in p
+    assert "cron_edit" in p
+    assert "ideation_state_write" in p
+    # Pinned: agent knows pause takes effect on the next tick.
+    assert "next" in p.lower() and "tick" in p.lower()
+    # Pinned: TB-121 cross-ref — `approve` is a board_edit action and must
+    # be discoverable from the restricted prompt.
+    assert "approve" in p
+    # Pinned: operator_log_append remains available so "ack:" still works.
+    assert "operator_log_append" in p
+
+    # Idle prompt does NOT contain the concurrent-task header.
+    p_idle = build_mattermost_prompt(cfg, msg)
+    assert "task agent is currently running" not in p_idle

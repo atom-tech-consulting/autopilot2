@@ -11,8 +11,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import events
-from .board import Task
+from .board import Board, Task
 from .config import Config
+from .tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED
 
 
 _TASK_HEADER = """\
@@ -186,6 +187,25 @@ def _briefing_block(cfg: Config, task: Task) -> str:
     return f"## Briefing ({path})\n\n{full.read_text()}"
 
 
+def pick_mm_toolset(cfg: Config) -> list[str]:
+    """Return MM_HANDLER_TOOLS_FULL (idle) or MM_HANDLER_TOOLS_RESTRICTED (task in flight).
+
+    TB-122: while a task agent is running (any Active task on the board), the
+    Mattermost handler gets a narrower toolset — drops `cron_edit` and
+    `ideation_state_write` to avoid cron-schedule mutations and ideation-state
+    conflicts while another agent owns the working tree. Operator-facing tools
+    (board_edit, daemon_control, mattermost_reply, operator_log_append) are
+    kept regardless — the whole point of concurrent MM polling is that the
+    operator can pause, queue, approve, or ack mid-task.
+    """
+    if not cfg.tasks_file.exists():
+        return MM_HANDLER_TOOLS_FULL
+    board = Board.load(cfg.tasks_file)
+    if list(board.iter_tasks("Active")):
+        return MM_HANDLER_TOOLS_RESTRICTED
+    return MM_HANDLER_TOOLS_FULL
+
+
 def build_task_prompt(cfg: Config, task: Task) -> str:
     parts = [
         _TASK_HEADER,
@@ -200,20 +220,61 @@ def build_task_prompt(cfg: Config, task: Task) -> str:
     return "\n".join(parts)
 
 
-def build_mattermost_prompt(cfg: Config, msg: dict) -> str:
+def build_mattermost_prompt(
+    cfg: Config,
+    msg: dict,
+    *,
+    task_in_flight: bool = False,
+) -> str:
     """Prompt for a mattermost handler agent.
 
     `msg` is a dict like:
         {"id": "...", "channel_id": "...", "channel_name": "dev",
          "user": "sarah", "text": "start the pipeline", "thread_id": "..."}
+
+    `task_in_flight` (TB-122): set True when a task agent is running
+    concurrently. The prompt explains that `cron_edit` and
+    `ideation_state_write` are off-limits for this turn (the daemon's
+    `_main_tick_loop` will pick those up once the board is idle), and the
+    "your job" rubric is rewritten to drop those actions. The handler still
+    has board_edit (incl. `approve` from TB-121), daemon_control,
+    mattermost_reply, log_event, and operator_log_append — enough to pause,
+    add/delete/freeze/approve tasks, ack operator decisions, and reply.
     """
     channel_id = msg.get("channel_id", "")
     channel_name = msg.get("channel_name") or channel_id or "?"
     user = msg.get("user") or msg.get("user_id", "?")
     text = msg.get("text", "")
     thread = msg.get("thread_id") or msg.get("root_id") or ""
-    parts = [
-        _CONTROL_HEADER,
+    parts: list[str] = [_CONTROL_HEADER]
+
+    if task_in_flight:
+        # Pinned phrasing — `tests/test_prompts.py` asserts these phrases
+        # stay in the prompt so the restriction signal can't silently drift.
+        parts.append(
+            "\n## Note: restricted toolset (task currently in flight)\n"
+            "A task agent is currently running (the daemon's main loop and "
+            "this Mattermost handler are concurrent — TB-122). For this turn "
+            "your toolset is restricted: `cron_edit` and "
+            "`ideation_state_write` are off-limits because they would race "
+            "the running task's view of the schedule / ideation state. "
+            "They'll be available again once the daemon is idle.\n"
+            "\n"
+            "Still available: `board_edit` (add / delete / backlog / freeze / "
+            "approve tasks), `daemon_control` (pause / resume — pause takes "
+            "effect on the **next** tick; the running task continues to "
+            "completion, then no further dispatch), `operator_log_append` "
+            "(the operator's veto channel — \"@claude-bot ack: ...\" style "
+            "messages), `mattermost_reply`, `log_event`, plus all reads.\n"
+            "\n"
+            "If the user asked for cron / ideation-state changes, reply via "
+            "`mattermost_reply` explaining the restriction and that the "
+            "request will be handled once the daemon is idle. Do not try to "
+            "call the disabled tools — the SDK will reject them and the "
+            "rejection lands in events.jsonl as noise."
+        )
+
+    parts.extend([
         "\n## Incoming mattermost message",
         f"- channel: {channel_name}",
         f"- from: {user}",
@@ -225,10 +286,25 @@ def build_mattermost_prompt(cfg: Config, msg: dict) -> str:
         "",
         "## Your job",
         "Interpret this message in context (read board/events as needed), then take action via tools:",
-        "- If the user asks for work: add tasks via `board_edit`.",
-        "- If the user asks for monitoring: add a job via `cron_edit`.",
-        "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
-        "- Log anything noteworthy via `log_event`.",
+    ])
+    if task_in_flight:
+        parts.extend([
+            "- If the user asks to add / pause / approve / delete / freeze / backlog a task: use `board_edit`. **Approving an ideation-proposed task** (TB-121) is action `approve` on a Backlog task — strips the `(blocked on: review)` clause so it dispatches.",
+            "- If the user asks to pause/resume the daemon: use `daemon_control`.",
+            "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",
+            "- If the user asks for cron / ideation-state changes: do NOT call cron_edit / ideation_state_write — reply via `mattermost_reply` explaining they'll be handled once the daemon is idle.",
+            "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
+            "- Log anything noteworthy via `log_event`.",
+        ])
+    else:
+        parts.extend([
+            "- If the user asks for work: add tasks via `board_edit`. **Approving an ideation-proposed task** (TB-121) is action `approve` on a Backlog task — strips the `(blocked on: review)` clause so it dispatches.",
+            "- If the user asks for monitoring: add a job via `cron_edit`.",
+            "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
+            "- Log anything noteworthy via `log_event`.",
+        ])
+
+    parts.extend([
         "",
         "## Replying — exact arguments to use",
         "When you call `mattermost_reply`, pass these EXACT values (do NOT pull",
@@ -241,7 +317,7 @@ def build_mattermost_prompt(cfg: Config, msg: dict) -> str:
         "thread_id continues that specific thread. Match the user's context.",
         "",
         _events_block(cfg),
-    ]
+    ])
     return "\n".join(parts)
 
 

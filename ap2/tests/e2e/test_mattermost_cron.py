@@ -3,6 +3,10 @@
 mattermost message → control agent queues pipeline → pipeline runs →
 status-report cron observes completion → cron unfreezes Frozen follow-up →
 follow-up runs → all tick events in causal order.
+
+TB-122: MM polling is now in `_mm_loop`, not `_tick`. The test drives
+each tick by polling MM once + running `_tick` to mirror what the two
+concurrent loops do per cycle.
 """
 from __future__ import annotations
 
@@ -11,10 +15,24 @@ import json
 
 from ap2 import events
 from ap2.board import Board
-from ap2.daemon import _tick
+from ap2.daemon import _tick, handle_message
+from ap2.mattermost import check_new_messages
 from ap2.tools import do_board_edit
 
 from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg, text_respond, tool_call_respond
+
+
+async def _drain_mm(cfg, sdk, mcp_server) -> None:
+    """Run the MM-loop work for one tick: poll, dispatch handlers, await all.
+
+    Production `_mm_loop` spawns each handler as a fire-and-forget
+    `asyncio.create_task`; this helper awaits them so test assertions see
+    a settled state, mirroring the wait the daemon does on shutdown.
+    """
+    msgs = check_new_messages(cfg)
+    if not msgs:
+        return
+    await asyncio.gather(*(handle_message(cfg, sdk, mcp_server, m) for m in msgs))
 
 
 # ---------- responder factories ----------
@@ -158,7 +176,11 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
 
     # --- tick 1: mm → add Ready; cron fires but pipeline not yet done;
     #             step-3 picks the just-added pipeline and runs it. ---
-    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+    async def _run_tick():
+        await _drain_mm(cfg, sdk, mcp_server=None)
+        await _tick(cfg, sdk, mcp_server=None)
+
+    asyncio.run(_run_tick())
     board = Board.load(cfg.tasks_file)
     pipeline = next(t for t in board.iter_tasks() if "Pipeline" in t.title)
     assert pipeline.section == "Complete"
@@ -170,7 +192,7 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
     # A second mm poll will return the same canned payload, but the cursor
     # advanced to "p_msg" in tick 1 so the loop sees `last_id == order[0]`
     # and breaks immediately — no duplicate pipeline add.
-    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+    asyncio.run(_run_tick())
     board = Board.load(cfg.tasks_file)
     assert board.find("TB-6")[0] == "Complete"
 

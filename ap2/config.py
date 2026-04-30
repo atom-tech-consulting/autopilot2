@@ -27,6 +27,11 @@ AUTO_DIAGNOSE_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/auto_diagnose_state.json"
 ENV_FILE = f"{AUTOPILOT_DIR_NAME}/env"
 
 DEFAULT_TICK_INTERVAL_S = 30
+# TB-122: Mattermost polling runs in its own loop (`_mm_loop`) at a faster
+# tempo than the main tick. The handler is operator-facing — pause / add /
+# delete commands shouldn't sit behind a 30s tick when the cheap part of
+# the work is just an HTTP poll.
+DEFAULT_MM_TICK_INTERVAL_S = 10
 DEFAULT_EVENT_CONTEXT_SIZE = 50
 DEFAULT_TASK_TIMEOUT_S = 1200  # 20 min per SDK query
 DEFAULT_CONTROL_TIMEOUT_S = 300  # 5 min for mattermost/cron agents
@@ -54,6 +59,7 @@ class Config:
     auto_diagnose_state_file: Path
     next_task_id: int
     tick_interval_s: int
+    mm_tick_interval_s: int
     event_context_size: int
     task_timeout_s: int
     control_timeout_s: int
@@ -90,6 +96,9 @@ class Config:
             auto_diagnose_state_file=root / AUTO_DIAGNOSE_STATE_FILE,
             next_task_id=autopilot_section.get("next_task_id", 1),
             tick_interval_s=int(os.environ.get("AP2_TICK_S", DEFAULT_TICK_INTERVAL_S)),
+            mm_tick_interval_s=int(
+                os.environ.get("AP2_MM_TICK_S", DEFAULT_MM_TICK_INTERVAL_S)
+            ),
             event_context_size=int(
                 os.environ.get("AP2_EVENT_CONTEXT", DEFAULT_EVENT_CONTEXT_SIZE)
             ),
