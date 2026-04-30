@@ -238,3 +238,10 @@ concrete need for the full set.
 - **exit_code:** 1
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T232427Z-TB-122.prompt.md`, `stream: .cc-autopilot/debug/20260430T232427Z-TB-122.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T232427Z-TB-122.messages.jsonl`
+### 2026-04-30 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T233625Z-TB-122.prompt.md`, `stream: .cc-autopilot/debug/20260430T233625Z-TB-122.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T233625Z-TB-122.messages.jsonl`
