@@ -655,6 +655,17 @@ def test_operator_log_path_in_task_agent_fenced_paths():
     assert ".cc-autopilot/operator_log.md" in tools.TASK_AGENT_FENCED_PATHS
 
 
+def test_operator_queue_jsonl_in_task_agent_fenced_paths():
+    """TB-143: `operator_queue.jsonl` lives in TASK_AGENT_FENCED_PATHS
+    for defense in depth — prompt-header reminder + SDK rejects
+    `Edit`/`Write`. The TB-141 false-positive (operator `ap2 add`
+    mid-run tripping TB-110's snapshot check) is now solved by
+    `rollback._VIOLATION_CHECK_EXCLUDED_PATHS`, which exempts the
+    path from the post-hoc snapshot diff while keeping it in the
+    fence list."""
+    assert ".cc-autopilot/operator_queue.jsonl" in tools.TASK_AGENT_FENCED_PATHS
+
+
 def test_task_complete_in_task_agent_tools_list():
     """Pin: the tool is in TASK_AGENT_TOOLS, not CONTROL_AGENT_TOOLS — task
     agents call it; control/cron/ideation agents don't have a use for it.

@@ -48,10 +48,29 @@ def _parse_iso(s: str) -> dt.datetime | None:
     return d.astimezone(dt.timezone.utc)
 
 
-# Fenced paths checked by TB-110 — TASK_AGENT_FENCED_PATHS minus events.jsonl
-# (gitignored, append-only audit trail; different threat model).
+# TB-143: paths that live in TASK_AGENT_FENCED_PATHS (so the prompt
+# header reminds agents not to touch them and the SDK rejects
+# `Edit`/`Write`) but are explicitly EXEMPT from TB-110's post-hoc
+# snapshot check. The shared property: the daemon / operator
+# legitimately appends to these files during in-flight task runs, so
+# a hash-snapshot diff would false-positive and roll back legitimate
+# work.
+#   - `events.jsonl` — append-only audit trail; the daemon writes
+#     every event here, including events emitted on behalf of the
+#     running task itself.
+#   - `operator_queue.jsonl` — operator-staged board ops (TB-131);
+#     `ap2 add` / unfreeze / delete / approve issued while a task is
+#     active write here synchronously. TB-141 fixed an instance of
+#     this false-positive by dropping the path from the fence
+#     entirely; TB-143 re-fences it and moves it here so defense
+#     layers (prompt header + SDK reject) still apply.
+_VIOLATION_CHECK_EXCLUDED_PATHS: tuple[str, ...] = (
+    ".cc-autopilot/events.jsonl",
+    ".cc-autopilot/operator_queue.jsonl",
+)
+
 FENCED_PATHS_FOR_VIOLATION_CHECK: tuple[str, ...] = tuple(
-    p for p in TASK_AGENT_FENCED_PATHS if p != ".cc-autopilot/events.jsonl"
+    p for p in TASK_AGENT_FENCED_PATHS if p not in _VIOLATION_CHECK_EXCLUDED_PATHS
 )
 
 

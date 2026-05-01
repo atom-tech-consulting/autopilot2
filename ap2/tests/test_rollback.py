@@ -102,6 +102,57 @@ def test_snapshot_omits_events_jsonl_even_if_present(tmp_path):
     assert ".cc-autopilot/events.jsonl" not in snap
 
 
+def test_violation_check_excludes_operator_queue_jsonl(tmp_path):
+    """TB-143: `operator_queue.jsonl` is in `TASK_AGENT_FENCED_PATHS` (so the
+    prompt fence + SDK Edit/Write rejects still apply) but explicitly
+    excluded from the post-hoc snapshot check, alongside `events.jsonl`.
+    Pre-TB-141 the path was in the violation-check set, which made any
+    operator `ap2 add` issued during a task run roll back legitimate work
+    (TB-139). TB-141 dropped the path from the fence entirely; TB-143
+    restores defense-in-depth by re-fencing while keeping the
+    snapshot-check exemption.
+    """
+    assert ".cc-autopilot/operator_queue.jsonl" not in rollback.FENCED_PATHS_FOR_VIOLATION_CHECK
+    # Sanity: the events.jsonl exemption survives the generalization.
+    assert ".cc-autopilot/events.jsonl" not in rollback.FENCED_PATHS_FOR_VIOLATION_CHECK
+    # Both exempt paths still live in the upstream fence list — defense
+    # layers (prompt header + SDK reject) apply even though the
+    # snapshot-check is exempt.
+    from ap2.tools import TASK_AGENT_FENCED_PATHS
+
+    assert ".cc-autopilot/operator_queue.jsonl" in TASK_AGENT_FENCED_PATHS
+    assert ".cc-autopilot/events.jsonl" in TASK_AGENT_FENCED_PATHS
+
+
+def test_detect_violations_ignores_operator_queue_append_between_snapshots(tmp_path):
+    """TB-143 (regression — TB-139 scenario): an operator's `ap2 add`
+    issued mid-run appends a record to `operator_queue.jsonl`. The
+    daemon's pre-run snapshot was taken before that append; the post-run
+    snapshot sees the new record. The post-hoc violation check must NOT
+    flag this as an agent fence violation, because the daemon / operator
+    legitimately writes here while a task is in flight.
+    """
+    from ap2 import tools
+
+    cfg = _make_cfg(tmp_path)
+    pre = rollback.snapshot_fenced_files(cfg)
+    # Operator types `ap2 add` mid-run — the synchronous queue append.
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "queued mid-run",
+            "briefing": (
+                "# brief\n\n## Verification\n"
+                "- `uv run pytest -q` — gates pass\n"
+            ),
+        },
+    )
+    assert not res.get("isError")
+    # Post-snapshot diff: the queue path was modified, but it's exempt.
+    assert rollback.detect_fenced_violations(cfg, pre) == []
+
+
 def test_detect_violations_clean_run(tmp_path):
     cfg = _make_cfg(tmp_path)
     pre = rollback.snapshot_fenced_files(cfg)

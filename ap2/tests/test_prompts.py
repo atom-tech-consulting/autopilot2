@@ -114,6 +114,22 @@ def test_task_fenced_paths_includes_goal_md():
     assert "goal.md" in TASK_AGENT_FENCED_PATHS
 
 
+def test_task_prompt_fenced_reminder_mentions_operator_queue_jsonl(tmp_path):
+    """TB-143: the rendered task-agent prompt's fenced-files reminder must
+    mention `operator_queue.jsonl` so the agent sees a literal "don't
+    touch" cue alongside the other fenced paths. The previous TB-141
+    prose said the file was intentionally NOT fenced — that note has
+    been replaced now that the path is back in the defense list (the
+    snapshot-check exemption lives in rollback.py instead).
+    """
+    cfg = _cfg(tmp_path)
+    t = Task(id="TB-99", title="x", section="Active")
+    p = build_task_prompt(cfg, t)
+    assert "operator_queue.jsonl" in p
+    # Anti-regression on the obsolete TB-141 prose.
+    assert "intentionally NOT fenced" not in p
+
+
 def test_prompt_advertises_cron_propose_for_recurring_proposals(tmp_path):
     """TB-123: the `cron=` arg was lifted off `report_result` and into a
     dedicated `cron_propose` MCP tool. The prompt footer must surface the

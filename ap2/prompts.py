@@ -193,16 +193,17 @@ will reject `Edit`/`Write` on them — they're listed in `disallowed_tools`.
 - `.cc-autopilot/ideation_state.md` — ideation's per-cycle assessment, written only by the ideation agent.
 - `.cc-autopilot/cron.yaml` — control agents edit via the `cron_edit` MCP tool.
 - `.cc-autopilot/operator_log.md` — operator decision log; the operator owns it (`ap2 ack`) and the mattermost handler appends to it via the `operator_log_append` MCP tool.
+- `.cc-autopilot/operator_queue.jsonl` — operator-staged board ops (TB-131); the CLI / MM-handler write path appends to it and the daemon drains.
 - `.cc-autopilot/operator_queue_state.json` — applied-uuid bookkeeping for the operator queue; the daemon owns it.
 
-(`.cc-autopilot/operator_queue.jsonl` is intentionally NOT fenced as
-of TB-141. The CLI `ap2 add` and the operator-queue MCP write path
-both append to it during in-flight task runs; treating those as
-agent violations rolled back legitimate work. Agents still have no
-path to mutate it — there's no `Edit`/`Write` permission and no
-matching MCP tool — and the daemon's drain only applies records
-whose uuid round-trips through `operator_queue_state.json`, so a
-forged record can't influence the board.)
+(TB-143: `events.jsonl` and `operator_queue.jsonl` are listed
+above for defense in depth — the SDK still rejects `Edit`/`Write`
+on them — but the daemon's post-hoc snapshot check (TB-110) is
+exempt for both, because the daemon / operator legitimately appends
+to them during in-flight task runs and a hash diff would
+false-positive. Don't take that exemption as license to mutate
+either file — both are explicitly listed as off-limits and the
+prompt-level fence still applies.)
 
 Do not `Edit` or `Write` to any of the above. Bash workarounds (`echo > path`, `sed -i`, etc.) bypass the SDK guard but break the daemon's invariants — also forbidden. Commit your code changes and emit the RESULT block; the daemon records everything from there.
 """

@@ -1793,16 +1793,19 @@ TASK_AGENT_FENCED_PATHS = (
     ".cc-autopilot/ideation_state.md",
     ".cc-autopilot/cron.yaml",
     ".cc-autopilot/operator_log.md",
-    # TB-141: `operator_queue.jsonl` is intentionally NOT fenced.
-    # Pre-TB-141 it was — but any operator `ap2 add` (or unfreeze /
-    # delete / backlog) issued during a task run wrote to it
-    # synchronously, which made TB-110's post-hoc snapshot check
-    # mis-attribute the operator's mutation as an agent fence
-    # violation and roll back legitimate work (TB-139 hit this on
-    # 2026-05-01). The fence had zero security value here: agents
-    # have no MCP path that mutates the queue, no `Edit`/`Write`
-    # access, and even a `Bash`-shell write wouldn't drain because
-    # the daemon's `drain_operator_queue` only applies records whose
-    # uuid round-trips through `operator_queue_state.json`.
+    # TB-143: `operator_queue.jsonl` lives in the defense-layers list
+    # (prompt-header reminder + SDK `Edit`/`Write` reject) but is
+    # explicitly excluded from TB-110's post-hoc snapshot check via
+    # `rollback._VIOLATION_CHECK_EXCLUDED_PATHS`. Same shape as
+    # `events.jsonl`: the daemon / operator legitimately append to it
+    # during in-flight task runs (every `ap2 add`, `unfreeze`,
+    # `delete`, `move_to_backlog`, `approve` issued while a task is
+    # active writes a record), so a hash-snapshot diff would
+    # false-positive and roll back legitimate work — TB-141 narrowly
+    # fixed that by dropping the path from the fence entirely, but
+    # that conflated the two distinct purposes the fence list
+    # serves. Re-listing here restores defense-in-depth without
+    # re-introducing the false-positive.
+    ".cc-autopilot/operator_queue.jsonl",
     ".cc-autopilot/operator_queue_state.json",
 )

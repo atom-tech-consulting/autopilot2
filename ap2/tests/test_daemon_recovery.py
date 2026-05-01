@@ -593,3 +593,24 @@ def test_incomplete_status_appends_attempts(cfg, tmp_path):
     assert "incomplete" in text
     assert "did half the scope" in text
     assert "Debug dumps" in text
+
+
+def test_task_disallowed_tools_blocks_operator_queue_jsonl_writes():
+    """TB-143: the task-agent SDK's `disallowed_tools` must reject both
+    `Edit(.cc-autopilot/operator_queue.jsonl)` and
+    `Write(.cc-autopilot/operator_queue.jsonl)`. This is the SDK-level
+    defense layer behind the prompt-header fence — agents have no
+    legitimate path to mutate the operator queue, so any attempt should
+    be denied at the tool boundary. The file is excluded only from
+    TB-110's post-hoc snapshot check (operator/daemon writes are
+    expected during in-flight runs); the SDK reject still applies.
+    """
+    from ap2.daemon import _TASK_DISALLOWED_TOOLS, _task_disallowed_tools
+
+    blocks = _task_disallowed_tools()
+    assert "Edit(.cc-autopilot/operator_queue.jsonl)" in blocks
+    assert "Write(.cc-autopilot/operator_queue.jsonl)" in blocks
+    # The module-level constant baked at import time agrees with the
+    # helper — this is what `run_task` actually passes to the SDK.
+    assert "Edit(.cc-autopilot/operator_queue.jsonl)" in _TASK_DISALLOWED_TOOLS
+    assert "Write(.cc-autopilot/operator_queue.jsonl)" in _TASK_DISALLOWED_TOOLS
