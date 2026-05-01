@@ -14,6 +14,7 @@
 - [ ] **TB-146** **Hide cron_edit from agent toolsets until a clear use case lands** `#autopilot` `#cron` `#agent-tools` `#simplify` [→ brief](.cc-autopilot/tasks/hide-cron-edit-from-agent-toolsets-until.md)
 - [ ] **TB-143** **Re-fence operator_queue.jsonl; exclude from violation check** `#autopilot` `#fence` `#operator-queue` [→ brief](.cc-autopilot/tasks/re-fence-operator-queue-jsonl-exclude-fr.md)
 - [ ] **TB-144** **Hoist status-report into shared routine; expose as MCP tool** `#autopilot` `#status-report` `#mattermost` `#cron` `#refactor` [→ brief](.cc-autopilot/tasks/hoist-status-report-into-shared-routine.md)
+- [ ] **TB-147** **Verifier: run shell bullets via /bin/bash, not /bin/sh** `#autopilot` `#verify` `#shell` [→ brief](.cc-autopilot/tasks/verifier-run-shell-bullets-via-bin-bash.md)
 
 ## Pipeline Pending
 
