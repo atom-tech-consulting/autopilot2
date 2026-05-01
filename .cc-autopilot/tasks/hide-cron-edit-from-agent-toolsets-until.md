@@ -2,7 +2,7 @@
 
 ## Goal
 
-Remove `mcp__autopilot__cron_edit` from `CONTROL_AGENT_TOOLS` (and downstream `MM_HANDLER_TOOLS_FULL`) so it stops being available to cron jobs, ideation, and the MM handler. Cron schedule changes become operator-CLI-only (`ap2 cron edit`) until a workflow that actually needs programmatic cron mutation is designed.
+Remove `mcp__autopilot__cron_edit` from `CONTROL_AGENT_TOOLS` (and the downstream `MM_HANDLER_TOOLS` set, which TB-145 collapsed from the prior FULL/RESTRICTED variants) so it stops being available to cron jobs, ideation, and the MM handler. Cron schedule changes become operator-CLI-only (`ap2 cron edit`) until a workflow that actually needs programmatic cron mutation is designed.
 
 ## Why
 
@@ -25,8 +25,8 @@ If a future workflow legitimately needs programmatic cron mutation (e.g., ideati
 
 ## Scope
 
-(1) Remove `mcp__autopilot__cron_edit` from `CONTROL_AGENT_TOOLS` (`tools.py:1416`). Cascades into `MM_HANDLER_TOOLS_FULL` (which already removed it from RESTRICTED via TB-122).
-(2) Update the `cron_edit` MCP tool's docstring to say "operator-CLI use via `ap2 cron edit`; not exposed to control agents (post-TB-X). Use `cron_propose` for agent-side proposals."
+(1) Remove `mcp__autopilot__cron_edit` from `CONTROL_AGENT_TOOLS` (in `ap2/tools.py`). The downstream `MM_HANDLER_TOOLS` set already filtered it out post-TB-145, so the cascade is a defensive no-op there; the load-bearing change is dropping it from `CONTROL_AGENT_TOOLS` itself.
+(2) Update the `cron_edit` MCP tool's docstring to say "operator-CLI use via `ap2 cron edit`; not exposed to control agents (post-TB-146). Use `cron_propose` for agent-side proposals."
 (3) Update the ideation prompt (`ap2/ideation.default.md`) to drop any instructions that reference adopting `cron_proposed` events via `cron_edit`. Replace with: "Surface unadopted cron proposals in your per-cycle assessment so the operator sees what's pending; do not adopt them yourself."
 (4) Update `prompts.py` control-agent prompt header text that lists available tools — drop `cron_edit` from the explainer.
 (5) Document the change in the architecture / readme so future contributors don't try to use it from agents.
@@ -34,7 +34,7 @@ If a future workflow legitimately needs programmatic cron mutation (e.g., ideati
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
-- `python3 -c "from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED; assert 'mcp__autopilot__cron_edit' not in CONTROL_AGENT_TOOLS + MM_HANDLER_TOOLS_FULL + MM_HANDLER_TOOLS_RESTRICTED"` — `cron_edit` is absent from all three agent toolsets.
+- `python3 -c "from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS, TASK_AGENT_TOOLS; assert 'mcp__autopilot__cron_edit' not in CONTROL_AGENT_TOOLS + MM_HANDLER_TOOLS + TASK_AGENT_TOOLS"` — `cron_edit` is absent from every agent toolset. (TB-145 retired `MM_HANDLER_TOOLS_FULL`/`MM_HANDLER_TOOLS_RESTRICTED`; the canonical singular set is `MM_HANDLER_TOOLS`.)
 - New unit test in `test_tools.py`: `CONTROL_AGENT_TOOLS` does NOT contain `mcp__autopilot__cron_edit`.
 - New unit test in `test_ideation_defaults.py`: the ideation prompt does NOT instruct the agent to call `cron_edit`. Pin via grep that the rendered prompt mentions `cron_propose` events should be SURFACED (not adopted) in assessments.
 - Existing `test_tools.py`: the `cron_edit` MCP tool's wiring stays intact (CLI still uses it via `cmd_cron_edit` if such a command exists; otherwise it stays callable from Python). Verify by direct call test.

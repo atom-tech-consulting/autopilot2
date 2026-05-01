@@ -769,10 +769,11 @@ def test_cron_propose_uses_contextvar_for_proposed_by_task(cfg):
 
 
 def test_cron_propose_in_task_agent_tools_only():
-    """Pin: cron_propose is task-agent only — control agents have
-    `cron_edit` (direct mutation) and don't need the proposal layer.
-    Symmetric privilege split: task agents propose, control agents
-    promote (or operator promotes via review)."""
+    """Pin: cron_propose is task-agent only — control agents (cron /
+    ideation / MM handler) don't need the proposal layer because they
+    don't fire cron-related work themselves. Pre-TB-146 control agents
+    had `cron_edit` (direct mutation); TB-146 retired that path entirely
+    so the operator (via `ap2 cron edit`) is the only adopter."""
     assert "mcp__autopilot__cron_propose" in tools.TASK_AGENT_TOOLS
     assert "mcp__autopilot__cron_propose" not in tools.CONTROL_AGENT_TOOLS
 
@@ -1471,3 +1472,55 @@ def test_mm_handler_tools_constant_is_singular():
     assert not hasattr(tools, legacy_restricted), (
         f"TB-145: {legacy_restricted} was renamed to MM_HANDLER_TOOLS."
     )
+
+
+# ---------------------------------------------------------------------------
+# TB-146: `cron_edit` is hidden from every agent toolset (control + MM
+# handler + task). Cron schedule mutation is operator-CLI-only via
+# `ap2 cron edit`. The MCP handler and Python entry point (`do_cron_edit`)
+# stay reachable so the CLI and unit tests can still drive it.
+
+
+def test_cron_edit_not_in_control_agent_tools():
+    """TB-146: `cron_edit` must NOT be in `CONTROL_AGENT_TOOLS`. Pre-TB-146
+    it was the cron / ideation / MM-handler write path for cron.yaml. The
+    only in-workflow programmatic use was ideation auto-adopting
+    `cron_proposed` events from task agents — that bypassed the operator-
+    in-the-loop pattern TB-121 establishes for ideation-proposed *tasks*.
+    Operator now adopts via `ap2 cron edit`."""
+    assert "mcp__autopilot__cron_edit" not in tools.CONTROL_AGENT_TOOLS
+
+
+def test_cron_edit_absent_from_every_agent_toolset():
+    """TB-146 (load-bearing): `cron_edit` must be absent from every
+    agent-facing toolset — control, MM handler, and task. No agent path
+    can mutate cron.yaml; the operator CLI (`ap2 cron edit`) is the
+    exclusive mutation surface."""
+    name = "mcp__autopilot__cron_edit"
+    assert name not in tools.CONTROL_AGENT_TOOLS
+    assert name not in tools.MM_HANDLER_TOOLS
+    assert name not in tools.TASK_AGENT_TOOLS
+
+
+def test_cron_edit_handler_still_callable_from_python(cfg):
+    """TB-146: removing `cron_edit` from agent toolsets must NOT remove
+    the underlying `do_cron_edit` handler — the operator CLI and unit
+    tests still use it directly. Verify by direct call: add a job, see
+    it in the loaded cron list."""
+    from ap2.cron import load_jobs
+
+    res = tools.do_cron_edit(
+        cfg,
+        {
+            "action": "add",
+            "name": "tb146-direct-call",
+            "interval": "1d",
+            "prompt": "noop",
+        },
+    )
+    assert not res.get("isError"), res
+    jobs = [j.name for j in load_jobs(cfg.cron_file)]
+    assert "tb146-direct-call" in jobs
+
+    # And the symbol stays importable for the CLI to wire up.
+    assert callable(tools.do_cron_edit)

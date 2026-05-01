@@ -212,7 +212,6 @@ by allowlist:
 mutate via narrow MCP tools. **No Bash** (TB-109 — closed the
 shell-redirect-into-fenced-file corruption surface).
 - `board_edit(action, task_id, title, tags, briefing, description, blocked_on)` — add/move/remove tasks
-- `cron_edit(action, name, interval, prompt, active_when, max_turns)` — manage scheduled jobs
 - `mattermost_reply(channel, text, thread_id)` — post to MM
 - `log_event(type, summary)` — append a custom event (this is how
   cron emits `cron_complete` summaries and ideation emits
@@ -225,6 +224,14 @@ shell-redirect-into-fenced-file corruption surface).
 - `operator_log_append(note, task_id)` — append to
   `.cc-autopilot/operator_log.md` (mattermost handler uses this on
   `@claude-bot done: ...` messages)
+
+Operator-only (NOT in any agent toolset, TB-146):
+- `cron_edit(action, name, interval, prompt, active_when, max_turns)` —
+  manage scheduled jobs. The `do_cron_edit` handler is invoked by the
+  operator CLI (`ap2 cron edit ...`) and unit tests, never by an agent.
+  Task agents emit `cron_proposed` events via `cron_propose` for
+  operator review; ideation surfaces unadopted proposals in its
+  per-cycle assessment but cannot adopt them itself.
 
 ## Event schema (the canonical timeline)
 

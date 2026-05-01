@@ -10,7 +10,7 @@ These three constraints drive every other decision in the codebase.
 
 **2. Shared awareness lives in files, not in any agent's context.** `TASKS.md`, `events.jsonl`, `progress.md`, `cron_state.json`, the briefings, and `ideation_state.md` are all on disk. Each spawned agent gets the relevant files inlined into its prompt — typically a briefing + a tail of `events.jsonl`. No state crosses query boundaries via memory.
 
-**3. Mutations go through narrow tools.** Control agents can write to the board, but only via the `board_edit` MCP tool — no `Write`/`Edit` access to `TASKS.md`. Same pattern for `cron_edit`, `ideation_state_write`, `pipeline_task_start`. Broad reads, narrow writes. This keeps mutation paths auditable (each emits a structured event) and makes accidental clobbering impossible without going out of band.
+**3. Mutations go through narrow tools.** Control agents can write to the board, but only via the `board_edit` MCP tool — no `Write`/`Edit` access to `TASKS.md`. Same pattern for `ideation_state_write`, `pipeline_task_start`. Cron schedule mutation has no agent-facing tool at all (TB-146): the `cron_edit` MCP handler exists for the operator CLI's use only and is not exposed in any agent toolset. Broad reads, narrow writes. This keeps mutation paths auditable (each emits a structured event) and makes accidental clobbering impossible without going out of band.
 
 ## The daemon loop
 
@@ -34,8 +34,11 @@ _tick(cfg, sdk, mcp_server):
 _mm_loop(cfg, sdk, mcp_server):
   - check_new_messages → asyncio.create_task(handle_message(...)) per mention
   - Every handler runs with the SAME fixed toolset (TB-145):
-      MM_HANDLER_TOOLS  (CONTROL_AGENT_TOOLS minus cron_edit,
+      MM_HANDLER_TOOLS  (CONTROL_AGENT_TOOLS minus
                          ideation_state_write, board_edit)
+    Note: `cron_edit` is no longer in CONTROL_AGENT_TOOLS at all
+    (TB-146 — operator-CLI-only via `ap2 cron edit`); the explicit
+    filter in MM_HANDLER_TOOLS is kept as a defense-in-depth no-op.
     No board snapshot is taken at handler-spawn time — the previous
     TB-122 FULL/RESTRICTED toggle was a TOCTOU race against the
     main tick loop and was retired in TB-145.
@@ -52,8 +55,8 @@ There are four kinds of SDK queries, each with its own prompt builder, tool allo
 | Kind | Trigger | Prompt builder | Tools | Timeout |
 |---|---|---|---|---|
 | **Task** | `run_task` (step 3) | `prompts.build_task_prompt` | `TASK_AGENT_TOOLS` (Read/Edit/Write/Bash + `pipeline_task_start`) | `AP2_TASK_TIMEOUT_S` (1200s) |
-| **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/cron/mm/log_event/daemon_control/ideation_state_write) | `AP2_CONTROL_TIMEOUT_S` (300s) |
-| **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS` (CONTROL_AGENT_TOOLS minus cron_edit/ideation_state_write/board_edit — TB-145, was TB-122's RESTRICTED) | `AP2_CONTROL_TIMEOUT_S` |
+| **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/mm/log_event/daemon_control/ideation_state_write — `cron_edit` dropped TB-146) | `AP2_CONTROL_TIMEOUT_S` (300s) |
+| **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS` (CONTROL_AGENT_TOOLS minus ideation_state_write/board_edit — TB-145, was TB-122's RESTRICTED; `cron_edit` separately dropped from CONTROL_AGENT_TOOLS in TB-146) | `AP2_CONTROL_TIMEOUT_S` |
 | **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
 
 Task agents are the only kind that gets `Write`/`Edit`. They commit code; everything else mutates state through MCP tools.
@@ -106,7 +109,7 @@ Failure paths (`task_timeout`, `task_error`) try `_infer_result_from_head` first
 | `TASKS.md` | daemon (via `do_board_edit`) | `fcntl.flock` per-board mutation | yes (state-file commits) |
 | `.cc-autopilot/events.jsonl` | daemon + tools (append-only) | none (line-atomic write) | no (gitignored) |
 | `.cc-autopilot/progress.md` | daemon (`_append_progress`) | none (single-writer) | yes |
-| `.cc-autopilot/cron.yaml` | daemon (via `do_cron_edit`) + operator | none (single-writer) | yes |
+| `.cc-autopilot/cron.yaml` | operator (via `ap2 cron edit` → `do_cron_edit`); no agent toolset has `cron_edit` (TB-146) | none (single-writer) | yes |
 | `.cc-autopilot/cron_state.json` | daemon (`mark_run`) | `fcntl.flock` | no (gitignored) |
 | `.cc-autopilot/retry_state.json` | daemon | `fcntl.flock` | no |
 | `.cc-autopilot/mm_state.json` | daemon | none (single-writer) | no |
@@ -140,7 +143,7 @@ ap2/
 ├── verify.py         # parse_verification_section, verify_task (per-task gate)
 ├── diagnose.py       # build_report, render_markdown (watchdog informant — pure)
 ├── retry.py          # retry counter (fcntl-locked .json)
-├── tools.py          # MCP server: do_board_edit, do_cron_edit, do_mattermost_reply,
+├── tools.py          # MCP server: do_board_edit, do_cron_edit (operator CLI only — TB-146), do_mattermost_reply,
 │                     # do_log_event, do_daemon_control, do_ideation_state_write,
 │                     # do_pipeline_task_start
 ├── rollback.py       # linear_rollback_to + helpers (TB-110 + TB-111 + TB-115)
@@ -171,10 +174,13 @@ The daemon registers an MCP server with `claude_agent_sdk.create_sdk_mcp_server`
 ```python
 CONTROL_AGENT_TOOLS = [
     # Filesystem (broad reads)
-    "Read", "Glob", "Grep", "Bash",
+    "Read", "Glob", "Grep",
     # Custom MCP (narrow writes)
     "mcp__autopilot__board_edit",
-    "mcp__autopilot__cron_edit",
+    # Note: `cron_edit` is intentionally absent (TB-146). Cron schedule
+    # mutation is operator-CLI-only via `ap2 cron edit`; task agents
+    # emit `cron_proposed` events via `cron_propose` for operator
+    # review.
     "mcp__autopilot__mattermost_reply",
     "mcp__autopilot__log_event",
     "mcp__autopilot__daemon_control",

@@ -224,6 +224,61 @@ def test_ideation_prompt_requires_auto_verifiable_bullets_only():
     assert "Manual checklist" not in prompt or "Do not invent" in prompt or "do not invent" in lower
 
 
+def test_ideation_prompt_surfaces_cron_proposals_does_not_adopt():
+    """TB-146: ideation MUST NOT adopt `cron_proposed` events via
+    `cron_edit` — that tool is no longer in any agent toolset (operator
+    promotes via `ap2 cron edit`). The prompt should instead instruct
+    ideation to SURFACE unadopted proposals (e.g. in its per-cycle
+    assessment) so the operator sees what's pending. Pin both:
+      (a) the prompt does NOT instruct calling `cron_edit`,
+      (b) the prompt mentions `cron_proposed` events in a SURFACE-not-
+          adopt framing that names `cron_propose` and `ap2 cron edit`.
+    """
+    prompt = _default_prompt()
+    flat = " ".join(prompt.split())
+    lower = flat.lower()
+    # (a) No instruction to invoke `cron_edit` (the retired direct-mutation
+    # path). The token may appear in cross-references, but never as an
+    # instruction like "call cron_edit" / "via cron_edit" / "use
+    # cron_edit". Tolerate the `ap2 cron edit` CLI form (operator-side).
+    for forbidden in (
+        "call `cron_edit`",
+        "call cron_edit",
+        "via `cron_edit`",
+        "via cron_edit",
+        "use `cron_edit`",
+        "use cron_edit",
+        "adopt via cron_edit",
+        "adopt via `cron_edit`",
+    ):
+        assert forbidden.lower() not in lower, (
+            f"ideation prompt instructs `cron_edit` use ({forbidden!r}); "
+            f"TB-146 removed that path — surface proposals instead"
+        )
+    # (b) The prompt acknowledges `cron_proposed` events and names the
+    # surface-not-adopt framing.
+    assert "cron_proposed" in prompt
+    assert "cron_propose" in prompt
+    assert "ap2 cron edit" in prompt
+    assert "surface" in lower or "SURFACE" in prompt
+    # Pin the explicit "do not adopt" instruction so a paraphrase that
+    # only mentions surfacing without forbidding adoption regresses here.
+    assert "do not adopt" in lower or "cannot adopt" in lower or "Do NOT" in prompt
+
+
+def test_ideation_prompt_pins_tb146_section_header():
+    """TB-146: the cron-proposal handling note must live as a discoverable
+    section in the ideation prompt so a contributor scrolling the file
+    can find it without grepping for arbitrary phrases. Pin the section
+    title + the TB-146 cross-ref."""
+    prompt = _default_prompt()
+    assert "TB-146" in prompt
+    # Some heading or block-level mention; the exact wording is flexible
+    # but `cron proposals` should appear as a topical anchor.
+    lower = prompt.lower()
+    assert "cron proposals from task agents" in lower or "cron proposals" in lower
+
+
 def test_ideation_prompt_does_not_contain_a_manual_bullet():
     """Self-consistency: the ideation prompt itself MUST NOT use a
     `- Manual: ...` bullet anywhere. Catches accidental regression where

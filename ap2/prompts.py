@@ -191,7 +191,7 @@ will reject `Edit`/`Write` on them — they're listed in `disallowed_tools`.
 - `.cc-autopilot/progress.md` — the daemon appends a section for your task on completion using RESULT fields.
 - `.cc-autopilot/events.jsonl` — append-only daemon log.
 - `.cc-autopilot/ideation_state.md` — ideation's per-cycle assessment, written only by the ideation agent.
-- `.cc-autopilot/cron.yaml` — control agents edit via the `cron_edit` MCP tool.
+- `.cc-autopilot/cron.yaml` — operator-owned; mutated only via the operator CLI (`ap2 cron edit`). No agent has `cron_edit` in its toolset (TB-146); task agents emit `cron_proposed` events via `cron_propose` for operator review.
 - `.cc-autopilot/operator_log.md` — operator decision log; the operator owns it (`ap2 ack`) and the mattermost handler appends to it via the `operator_log_append` MCP tool.
 - `.cc-autopilot/operator_queue.jsonl` — operator-staged board ops (TB-131); the CLI / MM-handler write path appends to it and the daemon drains.
 - `.cc-autopilot/operator_queue_state.json` — applied-uuid bookkeeping for the operator queue; the daemon owns it.
@@ -262,9 +262,17 @@ tool call is the cheap, explicit signal.
 
 _CONTROL_HEADER = """\
 You are an autopilot v2 control agent. You act DIRECTLY via custom tools
-(board_edit, cron_edit, mattermost_reply, log_event, daemon_control) — do NOT
+(board_edit, mattermost_reply, log_event, daemon_control) — do NOT
 describe what should happen, just call the tools. Each tool call takes effect
 immediately with file locking. Keep reasoning brief.
+
+Cron schedule mutation is NOT in your toolset (TB-146): there is no
+`cron_edit` tool available to control agents. If you see unadopted
+`cron_proposed` events from task agents and think one should fire on
+a schedule, SURFACE the proposal (e.g. via `ideation_state_write`'s
+"Open questions for operator" section, or `mattermost_reply` /
+`operator_log_append` for non-ideation control runs) — the operator
+adopts via `ap2 cron edit`.
 """
 
 
@@ -339,8 +347,10 @@ def build_mattermost_prompt(
         "\n## Note: restricted toolset (always)\n"
         "Your toolset is fixed and narrowed (TB-145, formerly the in-flight "
         "branch of TB-122): `cron_edit`, `ideation_state_write`, and "
-        "`board_edit` are off-limits — `cron_edit` and `ideation_state_write` "
-        "would race the daemon's tick / ideation cycle, and direct `board_edit` "
+        "`board_edit` are off-limits — `cron_edit` is hidden from every "
+        "agent toolset entirely (TB-146; cron schedule mutation is "
+        "operator-CLI-only via `ap2 cron edit`), `ideation_state_write` "
+        "would race the daemon's ideation cycle, and direct `board_edit` "
         "mutations could land inside a task agent's snapshot window and trip "
         "TB-110's state-violation check (TB-142). These tools are unreachable "
         "from chat; operator changes them via the CLI (`ap2 cron list/edit`, "

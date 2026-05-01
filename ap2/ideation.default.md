@@ -84,6 +84,19 @@ Citation rule: every "Progress so far" / "Gaps" bullet MUST cite
 at least one TB-N (`TB-79`, `TB-85`). Vague claims without TB-N
 citations are forbidden — they hide hallucination.
 
+## Cron proposals from task agents (TB-146)
+Task agents emit `cron_proposed` events via the `cron_propose` MCP
+tool when they spot work that should fire on a schedule. Per TB-146,
+no agent — including ideation — has `cron_edit` and so cannot adopt
+those proposals: cron schedule mutation is operator-CLI-only via
+`ap2 cron edit ...`. If you see one or more unadopted
+`cron_proposed` events in the recent-events block, SURFACE them
+in your per-cycle assessment (e.g. an "Open questions for
+operator" entry naming the proposal + rationale) so the operator
+can review and adopt manually. Do NOT propose a task whose only
+purpose is to adopt a `cron_proposed` event — the operator owns
+that promotion path.
+
 Length cap: keep the file under ~200 lines. If you can't, the
 assessment is too verbose; trim to the highest-signal items.
 

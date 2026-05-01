@@ -113,15 +113,20 @@ def test_mm_handler_tools_keeps_git_log_grep():
 
 def test_mm_handler_tools_is_strict_subset_of_control_agent_tools():
     """MM_HANDLER_TOOLS ⊂ CONTROL_AGENT_TOOLS — nothing new is added,
-    just three are dropped (cron_edit, ideation_state_write, board_edit)."""
+    and post-TB-146 the only tools dropped from CONTROL_AGENT_TOOLS by
+    the handler filter are `ideation_state_write` and `board_edit`.
+    (`cron_edit` is filtered defensively but TB-146 already removed it
+    from `CONTROL_AGENT_TOOLS`, so it doesn't show up in this diff.)"""
     full_set = set(CONTROL_AGENT_TOOLS)
     mm_set = set(MM_HANDLER_TOOLS)
     assert mm_set < full_set, "MM_HANDLER_TOOLS must be a strict subset of CONTROL_AGENT_TOOLS"
     assert full_set - mm_set == {
-        "mcp__autopilot__cron_edit",
         "mcp__autopilot__ideation_state_write",
         "mcp__autopilot__board_edit",
     }
+    # TB-146: `cron_edit` is absent from BOTH sets — operator-CLI-only.
+    assert "mcp__autopilot__cron_edit" not in full_set
+    assert "mcp__autopilot__cron_edit" not in mm_set
 
 
 # ── build_mattermost_prompt ───────────────────────────────────────────────────

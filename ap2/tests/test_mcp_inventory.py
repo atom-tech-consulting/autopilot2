@@ -36,10 +36,25 @@ async def _list_advertised_tool_names(srv: dict) -> list[str]:
     return [t.name for t in result.root.tools]
 
 
+# TB-146: tools the MCP server advertises that are intentionally NOT in any
+# agent allowlist. The operator CLI invokes them via `do_<name>` directly;
+# the @tool decorator stays so the server exposes a uniform schema surface
+# (tested below in `test_each_advertised_tool_has_a_string_schema`) and so
+# the registration shape stays uniform with future re-introductions.
+_OPERATOR_ONLY_ADVERTISED_TOOLS = frozenset({
+    # `cron_edit` — TB-146 retired from every agent toolset. Cron schedule
+    # mutation is operator-CLI-only via `ap2 cron edit`. Re-listing here
+    # acts as a one-place audit trail: a future contributor adding it back
+    # to an allowlist must consciously remove this entry.
+    "mcp__autopilot__cron_edit",
+})
+
+
 def test_advertised_tools_match_agent_allowlists():
     """Every tool the MCP server advertises must show up in either
     TASK_AGENT_TOOLS or CONTROL_AGENT_TOOLS (with the `mcp__autopilot__`
-    prefix Claude Code applies). The reverse direction also holds: every
+    prefix Claude Code applies) — UNLESS it's in the explicit
+    operator-only set (TB-146). The reverse direction also holds: every
     `mcp__autopilot__<tool>` entry in the allowlists must be backed by a
     real advertised tool — that's the load-bearing check that catches the
     "decorated but not registered" bug.
@@ -53,11 +68,25 @@ def test_advertised_tools_match_agent_allowlists():
     union_allowlists = set(TASK_AGENT_TOOLS) | set(CONTROL_AGENT_TOOLS)
     mcp_in_allowlists = {t for t in union_allowlists if t.startswith("mcp__autopilot__")}
 
-    # Forward direction: every advertised tool is in some allowlist.
-    missing_from_allowlists = advertised_prefixed - union_allowlists
+    # Forward direction: every advertised tool is in some allowlist OR
+    # explicitly listed as operator-only. The exclusion list is
+    # intentionally short — most tools belong to an agent.
+    missing_from_allowlists = (
+        advertised_prefixed - union_allowlists - _OPERATOR_ONLY_ADVERTISED_TOOLS
+    )
     assert not missing_from_allowlists, (
-        f"MCP server advertises tools that no agent can call: "
+        f"MCP server advertises tools that no agent can call AND that are "
+        f"not on the operator-only exception list: "
         f"{sorted(missing_from_allowlists)}"
+    )
+    # The operator-only set must be a subset of what the server actually
+    # advertises — so a stale entry (tool retired from the server but
+    # still listed here) trips this test instead of silently masking a
+    # real regression elsewhere.
+    stale_operator_only = _OPERATOR_ONLY_ADVERTISED_TOOLS - advertised_prefixed
+    assert not stale_operator_only, (
+        f"_OPERATOR_ONLY_ADVERTISED_TOOLS lists tools the MCP server no "
+        f"longer advertises: {sorted(stale_operator_only)}"
     )
     # Reverse direction (the load-bearing one): every allowlisted tool is
     # actually advertised. Catches the 737d2ce bug — agent allowlist names

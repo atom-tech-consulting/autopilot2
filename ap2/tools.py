@@ -525,9 +525,11 @@ def do_cron_propose(cfg: Config, args: dict) -> dict:
       - failure isolation: a malformed call doesn't take down the
         result-reporting path.
 
-    Symmetric with control agents' `cron_edit` (direct mutation, only
-    for cron + ideation control agents — TB-101's privilege split). Task
-    agents get the proposal layer; operator promotes via review.
+    Pre-TB-146, control agents (cron / ideation) had `cron_edit` for
+    direct mutation; that surface was retired (no agent has `cron_edit`
+    anymore — operator-CLI-only via `ap2 cron edit`). Task agents
+    continue to use this proposal layer; the operator promotes via
+    review.
 
     Args:
       name: short stable identifier, e.g. "weekly-perf-snapshot"
@@ -1530,7 +1532,10 @@ def build_mcp_server(cfg: Config):
 
     @tool(
         "cron_edit",
-        "Add, remove, or update a scheduled cron job.",
+        "Add, remove, or update a scheduled cron job. Operator-CLI use "
+        "via `ap2 cron edit`; not exposed to control agents (TB-146). "
+        "Use `cron_propose` for agent-side proposals — task agents emit "
+        "`cron_proposed` events; operator promotes via review.",
         {
             "action": str,
             "name": str,
@@ -1695,8 +1700,9 @@ def build_mcp_server(cfg: Config):
         "when, while working on a task, you notice that some operation should "
         "fire on a schedule (e.g. a weekly perf snapshot, an hourly health "
         "check). The proposal is queued for operator review — it does NOT "
-        "mutate cron.yaml directly. Symmetric with control agents' "
-        "`cron_edit` (which DOES mutate, but is unavailable to task agents). "
+        "mutate cron.yaml directly. `cron_edit` (the direct-mutation tool) "
+        "is operator-CLI-only post-TB-146; no agent — cron, ideation, MM "
+        "handler, or task — can adopt a proposal automatically. "
         "Each call emits a `cron_proposed` event with the calling task's "
         "TB-id, so you can call it multiple times in one task — each "
         "proposal is independent. Args: name (short stable identifier, "
@@ -1799,7 +1805,17 @@ CONTROL_AGENT_TOOLS = [
     "Glob",
     "Grep",
     "mcp__autopilot__board_edit",
-    "mcp__autopilot__cron_edit",
+    # TB-146: `cron_edit` is NOT exposed to control agents. The only
+    # in-workflow programmatic use was ideation auto-adopting
+    # `cron_proposed` events from task agents — that bypassed the
+    # operator-in-the-loop pattern TB-121 establishes for ideation-
+    # proposed *tasks* (which require `ap2 approve` to dispatch). With
+    # `cron_edit` hidden from agents, cron schedule mutation is
+    # operator-CLI-only (`ap2 cron edit ...`); ideation may still
+    # SURFACE unadopted `cron_proposed` events in its per-cycle
+    # assessment but cannot adopt them. Task agents continue to use
+    # `cron_propose` to emit proposals (no change). Re-add here only
+    # alongside an explicit justification + a review gate.
     "mcp__autopilot__mattermost_reply",
     "mcp__autopilot__log_event",
     "mcp__autopilot__daemon_control",
@@ -1854,18 +1870,22 @@ CONTROL_AGENT_TOOLS = [
 #   - `status_report_run` (TB-144) so chat-triggered status reports use the
 #     same routine as the cron job.
 # What's dropped (relative to CONTROL_AGENT_TOOLS):
-#   - `cron_edit` — schedule mutations could race a status-report / ideation
-#     tick fire window. CLI alternative: `ap2 cron list/edit`.
 #   - `ideation_state_write` — would rewrite the per-cycle assessment
 #     ideation was acting on. CLI alternative: edit `ideation_state.md`
 #     directly while the daemon is idle.
 #   - `board_edit` — direct TASKS.md mutation during an in-flight run trips
 #     TB-110's state-violation check. Route via `operator_queue_append`
 #     instead.
+# `cron_edit` is NOT listed here because TB-146 removed it from
+# CONTROL_AGENT_TOOLS entirely (no agent — cron, ideation, or MM handler —
+# can mutate cron.yaml; it's operator-CLI-only via `ap2 cron edit`). The
+# explicit filter is kept as a defense-in-depth no-op so a future
+# re-introduction into CONTROL_AGENT_TOOLS doesn't silently leak the tool
+# back into the MM handler without re-evaluating the race surface.
 MM_HANDLER_TOOLS = [
     t for t in CONTROL_AGENT_TOOLS
     if t not in (
-        "mcp__autopilot__cron_edit",
+        "mcp__autopilot__cron_edit",  # defensive (already absent post-TB-146)
         "mcp__autopilot__ideation_state_write",
         "mcp__autopilot__board_edit",
     )
@@ -1909,7 +1929,8 @@ TASK_AGENT_TOOLS = [
 # Categories:
 #   - Daemon-owned state: TASKS.md, progress.md, events.jsonl,
 #     ideation_state.md, CLAUDE.md (the daemon bumps Next task ID).
-#   - Daemon-owned config: cron.yaml (control agents edit via cron_edit).
+#   - Daemon-owned config: cron.yaml (operator edits via `ap2 cron edit`
+#     → `do_cron_edit`; no agent toolset has `cron_edit` post-TB-146).
 #   - Operator-curated: goal.md — the project mission. Ideation reads it
 #     for grounding; if a task could rewrite it, ideation would
 #     effectively rewrite its own constraints. Tasks that *want* to update

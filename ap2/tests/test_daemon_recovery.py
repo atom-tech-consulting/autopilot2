@@ -293,8 +293,9 @@ def test_run_task_cron_propose_emits_event_with_proposed_by_task(cfg):
     the daemon called `do_cron_edit` directly to mutate the registry.
     Splitting the proposal off into its own MCP tool gives each proposal
     its own event with rationale, decouples failure isolation, and
-    clarifies the privilege boundary (control agents mutate via
-    `cron_edit`; task agents propose via `cron_propose`).
+    clarifies the privilege boundary. Post-TB-146, no agent has
+    `cron_edit` at all — task agents propose via `cron_propose`, the
+    operator adopts via `ap2 cron edit`.
     """
     from ap2.cron import load_jobs
     from types import SimpleNamespace
