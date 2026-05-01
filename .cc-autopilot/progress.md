@@ -101,3 +101,9 @@
 - **Summary:** Added ap2.get_version() (base + PEP 440 local-version `+<short-sha>.<commit-ts>` from git log -1 on the package's own checkout, empty suffix when no .git/), wired through ap2 --version, ap2 status (text + JSON), and the daemon's daemon_start event (extracted to _emit_daemon_start for testability); 7 new unit tests cover both git-repo and non-git fallback paths plus parity between CLI/status/daemon-event strings; full regression gate `uv run pytest -q ap2/tests/` passes (646 passed in 71.86s).
 - **Files:** ap2/__init__.py, ap2/cli.py, ap2/daemon.py, ap2/tests/test_cli.py
 - **Tests:** pass
+
+## [2026-05-01] TB-140: Refresh /ap2 + /ap2-task skills; add deploy script to ~/.claude
+- **Commit:** `1a49343`
+- **Summary:** Refreshed skills/ap2/SKILL.md for the post-TB-130/TB-131 status surface (pending operator-ops line, web URL, 5-section board, queue-routed unfreeze/backlog/delete); skills/ap2-task/SKILL.md already covered TB-131/132/134/135/138. Added scripts/deploy-skills.sh (rsync-based, dry-run default, --apply for the per-skill --delete mirror, preserves unrelated siblings like taskboard) plus an ap2 sandbox sync-skills CLI wrapper. New ap2/tests/test_deploy_skills.py (15 tests, all passing); full regression gate uv run pytest -q ap2/tests/ → 661 passed.
+- **Files:** skills/ap2/SKILL.md, scripts/deploy-skills.sh, ap2/cli.py, ap2/sandbox.py, ap2/tests/test_deploy_skills.py
+- **Tests:** pass
