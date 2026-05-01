@@ -108,7 +108,7 @@ Failure paths (`task_timeout`, `task_error`) try `_infer_result_from_head` first
 | `.cc-autopilot/retry_state.json` | daemon | `fcntl.flock` | no |
 | `.cc-autopilot/mm_state.json` | daemon | none (single-writer) | no |
 | `.cc-autopilot/auto_diagnose_state.json` | daemon | none | no |
-| `.cc-autopilot/operator_queue.jsonl` | CLI / MM-handler (via `do_operator_queue_append`) | `board_file_lock` for ID alloc; append is line-atomic | no (gitignored) |
+| `.cc-autopilot/operator_queue.jsonl` | CLI / MM-handler (via `do_operator_queue_append`); not fenced from task agents (TB-141) | `board_file_lock` covers _allocate_id + queue append for add ops | no (gitignored) |
 | `.cc-autopilot/operator_queue_state.json` | daemon (drain bookkeeping; applied uuids) | none (single-writer) | no (gitignored) |
 | `.cc-autopilot/ideation_state.md` | ideation agent (via `ideation_state_write`) | atomic write (tmpfile + rename) | yes |
 | `.cc-autopilot/tasks/<TB-N>.md` | operator + ideation + `do_board_edit` | none | yes |
@@ -116,7 +116,7 @@ Failure paths (`task_timeout`, `task_error`) try `_infer_result_from_head` first
 | `.cc-autopilot/insights/_index.md` | daemon (`maybe_regenerate_index`) | none | yes |
 | `.cc-autopilot/pipelines/<name>-<pid>.log` | detached pipeline subprocess | none | gitignored |
 | `.cc-autopilot/debug/<ts>-<label>.{prompt,stream,messages}` | daemon (`_prep_debug_dumps`) | none | gitignored |
-| `CLAUDE.md` | operator (Next task ID auto-bumped by daemon) | none | yes |
+| `CLAUDE.md` | operator (Next task ID auto-bumped by daemon at drain time — TB-141 deferred from per-add to once per drain pass) | none | yes |
 
 State-file commits land with subject `state: TB-N → Complete` (per task) or `state: cron <name>` / `state: ideation` (per cron/ideation run). They ride alongside the task agent's source commit so `git log` tracks board evolution next to code evolution.
 

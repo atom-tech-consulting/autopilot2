@@ -367,11 +367,25 @@ def test_pending_count_reflects_queue_depth(cfg: Config):
 # Privilege pinning — fences + tool wiring
 
 
-def test_operator_queue_paths_are_fenced_from_task_agents():
-    """Task agents must not write directly to the queue or its state
-    file — they're operator-mediated daemon-drained surfaces."""
-    assert ".cc-autopilot/operator_queue.jsonl" in tools.TASK_AGENT_FENCED_PATHS
+def test_operator_queue_state_is_fenced_from_task_agents():
+    """The applied-uuid state file remains fenced — agents must not
+    rewrite the daemon's drain bookkeeping. The queue jsonl itself
+    was REMOVED from the fence in TB-141 (the operator's `ap2 add`
+    issued during an in-flight task was being mis-attributed as an
+    agent fence violation; agents still have no MCP / write path
+    that lets them mutate the queue, so the fence had zero security
+    value at that file)."""
     assert ".cc-autopilot/operator_queue_state.json" in tools.TASK_AGENT_FENCED_PATHS
+
+
+def test_operator_queue_jsonl_is_not_fenced_from_task_agents():
+    """TB-141 regression pin. Pre-TB-141 this file was in
+    TASK_AGENT_FENCED_PATHS; the synchronous `do_operator_queue_append`
+    write that an operator's `ap2 add` triggered during a task run
+    therefore tripped TB-110's post-hoc snapshot check and rolled
+    back legitimate work (TB-139, 2026-05-01). The fix narrows the
+    fence: operator_queue.jsonl is no longer listed."""
+    assert ".cc-autopilot/operator_queue.jsonl" not in tools.TASK_AGENT_FENCED_PATHS
 
 
 def test_operator_queue_append_is_in_control_agent_tools_only():

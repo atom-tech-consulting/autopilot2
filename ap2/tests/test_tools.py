@@ -991,3 +991,140 @@ def test_operator_queue_append_add_with_briefing_text_succeeds(cfg, tmp_path):
         if p.suffix == ".md"
     )
     assert any(p.read_text() == body for p in slug_files)
+
+
+# ---------------------------------------------------------------------------
+# TB-141: _allocate_id is now pure — no CLAUDE.md write. The bump is
+# deferred to drain_operator_queue (for the queue path) or done by the
+# caller (for the do_board_edit path). These tests pin the new contract:
+# operator_queue_append doesn't touch CLAUDE.md, and back-to-back appends
+# allocate sequential TB-N's via the queue file's preallocated_task_id.
+
+
+def test_allocate_id_does_not_write_claude_md(cfg, tmp_path):
+    """TB-141: `_allocate_id` is pure. Pre-TB-141 it bumped CLAUDE.md
+    in-place; that synchronous mutation triggered TB-110 fenced-file
+    violations on whichever task was in flight when an operator ran
+    `ap2 add`. Now the bump is deferred to drain (queue path) or done
+    explicitly by the caller (do_board_edit path).
+    """
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+    pre_mtime = claude_md.stat().st_mtime_ns
+
+    from ap2.board import Board as _Board
+    board = _Board.load(cfg.tasks_file)
+    new_id = tools._allocate_id(board, cfg)
+
+    # ID looks right.
+    assert new_id.startswith("TB-")
+    # CLAUDE.md is byte-identical and the mtime didn't budge.
+    assert claude_md.read_text() == pre_text
+    assert claude_md.stat().st_mtime_ns == pre_mtime
+
+
+def test_operator_queue_append_does_not_write_claude_md(cfg, tmp_path):
+    """TB-141 regression pin at the public API layer. The whole point
+    of moving the bump to drain is that an `ap2 add` issued during a
+    task run no longer mutates a fenced file. CLAUDE.md must be
+    byte-identical after a successful append."""
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+    pre_mtime = claude_md.stat().st_mtime_ns
+
+    body = (
+        "# briefing\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "deferred", "briefing": body},
+    )
+    out = _unwrap(res)
+    # ID was allocated and the queue gained a record …
+    assert out["task_id"].startswith("TB-")
+    # … but CLAUDE.md is untouched.
+    assert claude_md.read_text() == pre_text
+    assert claude_md.stat().st_mtime_ns == pre_mtime
+
+
+def test_two_back_to_back_queue_appends_allocate_sequential_ids(cfg, tmp_path):
+    """TB-141: with `_allocate_id` pure, sequential allocations rely on
+    the queue file as the cross-call source of truth (CLAUDE.md is no
+    longer bumped synchronously to disambiguate). The second append
+    must read the first's `preallocated_task_id` from the queue and
+    return id + 1 — without touching CLAUDE.md.
+    """
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+
+    body = (
+        "# briefing\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
+    r1 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "first", "briefing": body},
+    ))
+    r2 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "second", "briefing": body},
+    ))
+    n1 = int(r1["task_id"][3:])
+    n2 = int(r2["task_id"][3:])
+    assert n2 == n1 + 1, (r1, r2)
+    # Neither call wrote CLAUDE.md (deferred to drain).
+    assert claude_md.read_text() == pre_text
+
+
+def test_drain_bumps_claude_md_once_to_highest_allocated_plus_one(cfg, tmp_path):
+    """TB-141: drain writes CLAUDE.md exactly once at end-of-pass,
+    setting `Next task ID` to highest_allocated + 1. Pre-TB-141 the
+    bump happened per-add inside `_allocate_id`; the consolidated
+    drain-time write is the corollary that keeps CLAUDE.md in sync
+    without the in-flight fence collision.
+    """
+    body = (
+        "# briefing\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n"
+    )
+    r1 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "drain-1", "briefing": body},
+    ))
+    r2 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "drain-2", "briefing": body},
+    ))
+    highest = max(int(r1["task_id"][3:]), int(r2["task_id"][3:]))
+
+    # Before drain, CLAUDE.md still has the pre-add value.
+    pre_drain = (tmp_path / "CLAUDE.md").read_text()
+    assert f"TB-{highest}" not in pre_drain  # not yet bumped past it
+
+    summary = tools.drain_operator_queue(cfg)
+    assert summary["applied"] == 2
+
+    # After drain, CLAUDE.md's Next task ID is highest + 1 — single
+    # write covering all add ops applied this drain pass.
+    post_drain = (tmp_path / "CLAUDE.md").read_text()
+    assert f"- Next task ID: TB-{highest + 1}" in post_drain
+
+
+def test_drain_with_no_add_ops_leaves_claude_md_untouched(cfg, tmp_path):
+    """The end-of-drain CLAUDE.md write only fires when the drain
+    actually preallocated a TB-N. A drain that only applied
+    move/unfreeze/delete ops shouldn't touch CLAUDE.md."""
+    from ap2.board import Board
+    board = Board.load(cfg.tasks_file)
+    board.add("Frozen", task_id="TB-77", title="frozen one")
+    board.save()
+
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+    pre_mtime = claude_md.stat().st_mtime_ns
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "unfreeze", "task_id": "TB-77"},
+    )
+    summary = tools.drain_operator_queue(cfg)
+    assert summary["applied"] == 1
+
+    assert claude_md.read_text() == pre_text
+    assert claude_md.stat().st_mtime_ns == pre_mtime

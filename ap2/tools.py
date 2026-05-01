@@ -99,13 +99,68 @@ def _validate_single_line(field: str, value: str | None) -> str | None:
 
 
 def _allocate_id(board: Board, cfg: Config) -> str:
-    """Pick the next TB-N, using max(board max + 1, CLAUDE.md next_task_id)."""
-    candidate = max(board.max_id() + 1, cfg.next_task_id)
+    """Pure: pick the next TB-N from the existing high-water marks.
+
+    The candidate is `max(board_max + 1, CLAUDE.md next_task_id,
+    queue_preallocated_max + 1)` — the third term covers TB-N's that an
+    earlier `do_operator_queue_append` reserved on this same tick but
+    hasn't yet drained onto the board (so back-to-back `ap2 add` calls
+    issue sequential IDs without any of them touching CLAUDE.md).
+
+    TB-141 made this side-effect-free: previously this also wrote
+    `cfg.next_task_id` back to CLAUDE.md, which fired
+    `task_state_violation` on whichever task was in flight when an
+    operator ran `ap2 add` (CLAUDE.md is a fenced path). Persisting the
+    new high-water mark is now the caller's responsibility:
+      - `do_board_edit` writes synchronously (used by ideation /
+        control agents — no in-flight task fence applies).
+      - `do_operator_queue_append` does NOT write; the bump is deferred
+        to `drain_operator_queue`, which runs as the daemon's first
+        tick stage between task agent runs.
+    """
+    queue_max = _max_preallocated_id_in_queue(cfg)
+    candidate = max(board.max_id() + 1, cfg.next_task_id, queue_max + 1)
+    # In-memory bookkeeping so a second _allocate_id in the same Config
+    # instance doesn't alias the just-issued ID — the disk-side bump
+    # happens out of band (caller / drain).
     cfg.next_task_id = candidate + 1
-    claude_md = cfg.project_root / "CLAUDE.md"
-    if claude_md.exists():
-        bump_next_task_id(claude_md, cfg.next_task_id)
     return f"TB-{candidate}"
+
+
+def _max_preallocated_id_in_queue(cfg: Config) -> int:
+    """Highest `preallocated_task_id` numeric suffix across queue records.
+
+    Returns 0 if the queue is missing / empty / has no preallocated IDs.
+    Reads both pending and already-applied records — the operator queue
+    is compacted at drain time, so a not-yet-compacted applied record
+    still holds a real reservation we mustn't reissue.
+    """
+    queue_path = operator_queue_path(cfg)
+    if not queue_path.exists():
+        return 0
+    best = 0
+    try:
+        text = queue_path.read_text()
+    except OSError:
+        return 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        tid = rec.get("preallocated_task_id") or ""
+        if not isinstance(tid, str) or not tid.startswith("TB-"):
+            continue
+        try:
+            n = int(tid[3:])
+        except ValueError:
+            continue
+        if n > best:
+            best = n
+    return best
 
 
 def do_board_edit(cfg: Config, args: dict) -> dict:
@@ -202,6 +257,18 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     description=description,
                     briefing=briefing_rel,
                 )
+                # TB-141: persist the new high-water mark to CLAUDE.md
+                # synchronously here. `_allocate_id` no longer writes —
+                # this path (ideation / control agents calling the
+                # `board_edit` MCP tool) is never invoked while a task
+                # agent is in flight, so the synchronous CLAUDE.md
+                # mutation doesn't trip the fenced-file violation
+                # check. The deferred-bump pattern only applies to the
+                # operator-queue path (`do_operator_queue_append` →
+                # `drain_operator_queue`).
+                claude_md = cfg.project_root / "CLAUDE.md"
+                if claude_md.exists():
+                    bump_next_task_id(claude_md, cfg.next_task_id)
                 return _ok(
                     f"{action} {new_id} {title!r}",
                     task_id=new_id,
@@ -542,6 +609,17 @@ def do_operator_log_append(cfg: Config, args: dict) -> dict:
 # ID pre-allocation is done at queue-append time (under the board
 # lock) so `ap2 add` can still print the new TB-N immediately. Only
 # the TASKS.md insertion is deferred.
+#
+# TB-141: the queue file itself is intentionally NOT in
+# TASK_AGENT_FENCED_PATHS — appends made by the operator while a task
+# is in flight used to mis-trip the post-hoc fenced-file snapshot
+# check (TB-110), rolling back legitimate task work. Agents have no
+# write path to the queue: no Edit/Write permission, no MCP tool that
+# emits records under their authority, and the drain-side uuid +
+# applied-state bookkeeping ignores any forged record they could
+# Bash-shell into the file. The matching CLAUDE.md `Next task ID`
+# bump is also deferred — `_allocate_id` is now pure, and
+# `drain_operator_queue` writes CLAUDE.md once at end-of-pass.
 
 # Ops the operator-queue path knows how to drain. Shared between the
 # CLI (`do_operator_queue_append`) and the drain side
@@ -576,11 +654,15 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         during an in-flight run, where direct `board_edit` exposes the
         change to `git reset --hard <pre_run_head>` rollback.
 
-    For `add_*` ops, this briefly takes the board lock to (a) bump
-    CLAUDE.md `next_task_id`, (b) write the briefing file, (c) append
-    the queued op carrying the pre-allocated TB-N. So the operator
-    still gets the new ID printed immediately — only the TASKS.md
-    insertion is deferred.
+    For `add_*` ops, this briefly takes the board lock to (a) write
+    the briefing file, (b) pre-allocate a TB-N via `_allocate_id`
+    (pure read, no CLAUDE.md write — TB-141), (c) append the queued
+    op carrying the pre-allocated TB-N. The operator still gets the
+    new ID printed immediately — both the TASKS.md insertion AND the
+    CLAUDE.md `next_task_id` bump are deferred to drain. Pre-TB-141
+    the bump happened synchronously here, but that mutated a fenced
+    path during in-flight task runs and was mis-attributed by TB-110
+    as an agent violation (TB-139, 2026-05-01).
 
     For move/unfreeze/delete ops, validates the target task against
     the current board snapshot under the lock so obvious operator
@@ -642,14 +724,17 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                 "section and pass it as the `briefing` arg."
             )
 
-        # Allocate ID + bump CLAUDE.md under the file lock so concurrent
-        # CLI invocations don't collide. board_file_lock (not
-        # locked_board) — _allocate_id reads max_id but doesn't mutate
-        # the board, so we don't want save-on-exit re-rendering TASKS.md.
-        with board_file_lock(cfg.tasks_file):
-            board = Board.load(cfg.tasks_file)
-            preallocated_task_id = _allocate_id(board, cfg)
+        # TB-132: blocked_on rides on the task line as a `@blocked:<csv>`
+        # codespan, not as `(blocked on: ...)` in the description. The
+        # drain side reads `meta` from the queue record and passes it to
+        # `board.add(..., meta=...)`.
+        meta: dict[str, str] = {}
+        if blocked_on:
+            meta["blocked"] = blocked_on
 
+        # The briefing file isn't under the lock — slug collision
+        # avoidance just walks `<slug>-N.md` until it finds a free
+        # path; it doesn't depend on TB-N allocation order.
         briefing_rel: str | None = None
         if briefing_content:
             slug = slugify(title)
@@ -662,22 +747,58 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             brief_path.write_text(briefing_content)
             briefing_rel = str(brief_path.relative_to(cfg.project_root))
 
-        # TB-132: blocked_on rides on the task line as a `@blocked:<csv>`
-        # codespan, not as `(blocked on: ...)` in the description. The
-        # drain side reads `meta` from the queue record and passes it to
-        # `board.add(..., meta=...)`.
-        meta: dict[str, str] = {}
-        if blocked_on:
-            meta["blocked"] = blocked_on
-
-        rec_args = {
-            "task_id": preallocated_task_id,
-            "title": title,
-            "tags": tags,
-            "description": description,
-            "meta": meta,
-            "briefing_path": briefing_rel,
-        }
+        # Allocation + queue append happen under a single
+        # `board_file_lock` block (TB-141) so concurrent CLI invocations
+        # see each other's preallocations through the queue file:
+        # process B's `_allocate_id` reads the queue and finds process
+        # A's just-written `preallocated_task_id`, so it allocates
+        # process A's id + 1.
+        #
+        # Pre-TB-141 this serialized implicitly through the synchronous
+        # CLAUDE.md bump inside `_allocate_id`; that bump is now
+        # deferred to drain (so an `ap2 add` issued during a task run
+        # doesn't trip the fenced-file violation check), which removed
+        # CLAUDE.md as the cross-process source of truth and pushed the
+        # responsibility to the queue file itself.
+        rec_uuid = str(_uuid.uuid4())
+        rec_ts = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        queue_path = operator_queue_path(cfg)
+        queue_path.parent.mkdir(parents=True, exist_ok=True)
+        with board_file_lock(cfg.tasks_file):
+            board = Board.load(cfg.tasks_file)
+            preallocated_task_id = _allocate_id(board, cfg)
+            rec_args = {
+                "task_id": preallocated_task_id,
+                "title": title,
+                "tags": tags,
+                "description": description,
+                "meta": meta,
+                "briefing_path": briefing_rel,
+            }
+            rec: dict[str, Any] = {
+                "uuid": rec_uuid,
+                "op": op,
+                "args": rec_args,
+                "ts": rec_ts,
+                "preallocated_task_id": preallocated_task_id,
+            }
+            with queue_path.open("a") as f:
+                f.write(json.dumps(rec) + "\n")
+        events.append(
+            cfg.events_file,
+            "operator_queue_append",
+            uuid=rec["uuid"],
+            op=op,
+            task=preallocated_task_id,
+        )
+        return _ok(
+            f"queued {op} → {preallocated_task_id}",
+            uuid=rec["uuid"],
+            op=op,
+            task_id=preallocated_task_id,
+        )
     else:
         task_id = (args.get("task_id") or "").strip()
         if not task_id:
@@ -706,6 +827,8 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         if op == "delete":
             rec_args["force"] = bool(args.get("force"))
 
+    # Non-add ops: no preallocation, no lock needed for the queue write
+    # (the record is opaque to `_allocate_id`'s queue-max scan).
     rec: dict[str, Any] = {
         "uuid": str(_uuid.uuid4()),
         "op": op,
@@ -714,9 +837,6 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             "%Y-%m-%dT%H:%M:%SZ"
         ),
     }
-    if preallocated_task_id:
-        rec["preallocated_task_id"] = preallocated_task_id
-
     queue_path = operator_queue_path(cfg)
     queue_path.parent.mkdir(parents=True, exist_ok=True)
     with queue_path.open("a") as f:
@@ -726,16 +846,13 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         "operator_queue_append",
         uuid=rec["uuid"],
         op=op,
-        task=preallocated_task_id or rec_args.get("task_id", ""),
+        task=rec_args.get("task_id", ""),
     )
-    msg = f"queued {op}"
-    if preallocated_task_id:
-        msg += f" → {preallocated_task_id}"
     return _ok(
-        msg,
+        f"queued {op}",
         uuid=rec["uuid"],
         op=op,
-        task_id=preallocated_task_id or rec_args.get("task_id", ""),
+        task_id=rec_args.get("task_id", ""),
     )
 
 
@@ -786,6 +903,15 @@ def drain_operator_queue(cfg: Config) -> dict:
     applied — silently failing forever is worse than letting the
     operator see one error and move on.
 
+    TB-141: at end-of-drain, also bumps CLAUDE.md's `Next task ID` to
+    `max(highest preallocated TB-N this pass + 1, current next_id)`.
+    The synchronous bump that used to live in `_allocate_id` was
+    retired so an `ap2 add` issued during a task run doesn't trip the
+    fenced-file violation check; this is the corollary that keeps
+    CLAUDE.md current. One write per drain pass instead of one per
+    add. Drains that applied only move/unfreeze/delete ops leave
+    CLAUDE.md untouched.
+
     Returns a dict with `applied` (count) and `touched_paths` (state
     files dirtied) so the daemon-side caller can pass them to
     `_commit_state_files` for a coherent state-file commit.
@@ -817,6 +943,7 @@ def drain_operator_queue(cfg: Config) -> dict:
 
     applied_count = 0
     touched: set[str] = set()
+    highest_alloc = 0
     with board_file_lock(cfg.tasks_file):
         for rec in pending:
             try:
@@ -834,6 +961,18 @@ def drain_operator_queue(cfg: Config) -> dict:
                         ".cc-autopilot/tasks",
                     ]
                 )
+                # TB-141: track the highest preallocated TB-N across the
+                # drain so we can bump CLAUDE.md once at the end (instead
+                # of once per `_allocate_id` call inside
+                # `do_operator_queue_append`).
+                tid = rec.get("preallocated_task_id") or ""
+                if isinstance(tid, str) and tid.startswith("TB-"):
+                    try:
+                        n = int(tid[3:])
+                    except ValueError:
+                        n = 0
+                    if n > highest_alloc:
+                        highest_alloc = n
             except Exception as e:  # noqa: BLE001
                 events.append(
                     cfg.events_file,
@@ -850,6 +989,23 @@ def drain_operator_queue(cfg: Config) -> dict:
                 applied.add(rec["uuid"])
                 _save_operator_queue_applied(state_path, applied)
         _compact_operator_queue(queue_path, applied)
+
+        # TB-141: end-of-drain CLAUDE.md bump. The synchronous bump
+        # inside `_allocate_id` was retired so an `ap2 add` issued
+        # while a task agent is in flight doesn't trip TB-110's
+        # fenced-file violation check (CLAUDE.md is fenced; the
+        # mid-flight mutation looks identical to an agent forging the
+        # file). The drain runs as the daemon's first tick stage —
+        # between agent runs — so the bump here is safe. We bump once
+        # to the highest TB-N seen across this drain pass; sequential
+        # drains compound naturally because each reads CLAUDE.md fresh
+        # via `cfg.next_task_id`.
+        if highest_alloc and applied_count:
+            new_next = max(highest_alloc + 1, cfg.next_task_id)
+            claude_md = cfg.project_root / "CLAUDE.md"
+            if claude_md.exists():
+                bump_next_task_id(claude_md, new_next)
+            cfg.next_task_id = new_next
 
     if applied_count:
         events.append(
@@ -1512,9 +1668,16 @@ TASK_AGENT_FENCED_PATHS = (
     ".cc-autopilot/ideation_state.md",
     ".cc-autopilot/cron.yaml",
     ".cc-autopilot/operator_log.md",
-    # TB-131: the operator-queue jsonl is a daemon-drained surface for
-    # CLI / MM-handler board ops — task agents have no business
-    # touching it. Same fence pattern as the rest of this set.
-    ".cc-autopilot/operator_queue.jsonl",
+    # TB-141: `operator_queue.jsonl` is intentionally NOT fenced.
+    # Pre-TB-141 it was — but any operator `ap2 add` (or unfreeze /
+    # delete / backlog) issued during a task run wrote to it
+    # synchronously, which made TB-110's post-hoc snapshot check
+    # mis-attribute the operator's mutation as an agent fence
+    # violation and roll back legitimate work (TB-139 hit this on
+    # 2026-05-01). The fence had zero security value here: agents
+    # have no MCP path that mutates the queue, no `Edit`/`Write`
+    # access, and even a `Bash`-shell write wouldn't drain because
+    # the daemon's `drain_operator_queue` only applies records whose
+    # uuid round-trips through `operator_queue_state.json`.
     ".cc-autopilot/operator_queue_state.json",
 )
