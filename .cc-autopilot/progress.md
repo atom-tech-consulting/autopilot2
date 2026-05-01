@@ -155,3 +155,9 @@
 - **Summary:** _row_class now reads the full event dict and tints task_complete rows by status (complete=lifecycle/green, verification_failed=warning/orange, state_violation/error/timeout/incomplete/blocked/failed=failure/red, retry_exhausted=new frozen/dark-red, unknown=new neutral/gray); home + events pages reuse the renderer; added a collapsed legend on /events; full ap2/tests/ pass (725).
 - **Files:** ap2/web.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-01] TB-121: Gate ideation-proposed tasks behind human review before dispatch
+- **Commit:** `44ebabc`
+- **Summary:** Closed TB-121's lone failing verification bullet (verifier flagged the seeded e2e for not actually firing ideation): added test_ideation_cron_proposals_are_all_review_gated to ap2/tests/e2e/test_review_gate.py, which runs _tick with an empty board, ideation enabled, cooldown elapsed, no prompt override (real ap2/ideation.default.md), and a FakeSDK stand-in that mimics the prompt's TB-121 'Human-review gate' section by routing 3 add_backlog calls through tools.do_board_edit with blocked_on='review'; asserts ideation_empty_board fired, 3 Backlog tasks landed, every task has Task.blocked_on==['review'], TASKS.md renders 3x `@blocked:review` codespans, next_dispatchable('Backlog') is None, and the dumped ideation prompt the daemon sent the SDK contains 'blocked on: review' (proves the prompt-change reached the agent, not just that the fake agent was well-behaved). 752 tests pass (was 751; +1). Pairs with the existing test_ideation_prompt_pins_review_gate_clause prompt-pin so the directive + infrastructure carry through together.
+- **Files:** ap2/tests/e2e/test_review_gate.py
+- **Tests:** pass
