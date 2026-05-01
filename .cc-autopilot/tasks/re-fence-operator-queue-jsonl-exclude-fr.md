@@ -41,3 +41,10 @@ Refine TB-141. TB-141 dropped `.cc-autopilot/operator_queue.jsonl` from `TASK_AG
 - Any change to the existing TB-141 fix for CLAUDE.md (deferred bump still applies — that's a separate problem from defense layering).
 - TB-120's kernel-level fence (still frozen; this is application-layer refinement only).
 - Adding more files to the violation-check exclusion list speculatively — only events.jsonl and operator_queue.jsonl have the "expected to grow during runs" property today.
+## Attempts
+
+### 2026-05-01 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -qE '"\\.cc-autopilot/operator_queue\\.jsonl"' ap2/tools.py` — operator_queue.jsonl back in `TASK_AGENT_FENCED_PAT; [fail] `grep -qE 'operator_queue\\.jsonl' ap2/rollback.py` — explicitly named in the violation-check exclusion list (alongside 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T040058Z-TB-143.prompt.md`, `stream: .cc-autopilot/debug/20260501T040058Z-TB-143.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T040058Z-TB-143.messages.jsonl`
