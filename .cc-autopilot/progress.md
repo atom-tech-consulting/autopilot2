@@ -83,3 +83,9 @@
 - **Summary:** TB-123 implementation landed in a2e3d6a (cron_propose MCP tool + dropped report_result.cron + contextvar plumb for proposed_by_task + unit/e2e/real-SDK smoke tests); previous attempt blocked only on the 'smokes still green' bullet because of a pre-existing TB-136 fallout in test_prose_judge_real_sdk.py — fixed in ee59130 by materializing the asserted file into project_root so the working-tree-authoritative judge can verify it. Full regression now 631 passed, both prose-judge smokes pass.
 - **Files:** ap2/tests/smoke/test_prose_judge_real_sdk.py
 - **Tests:** pass
+
+## [2026-05-01] TB-138: Briefing prompts must require auto-verifiable Verification bullets only
+- **Commit:** `13a7e99`
+- **Summary:** Added the "auto-verifiable bullets only — no `Manual:` steps" rule at every briefing-authoring layer (ap2/ideation.default.md, skills/ap2-task/SKILL.md, skills/migrate-to-ap2/SKILL.md, ap2/init.py:BRIEFING_TEMPLATE), citing TB-122 as the canonical Manual→stubbed-e2e conversion example; added non-fatal `ap2 check` warning for `Manual:`/`[manual]` bullets inside `## Verification` (already surfaces a real hit in TB-121's briefing); pinned the prompt rule + template + lint behavior with 7 new unit tests across test_ideation_defaults.py and test_check.py; full regression gate `uv run pytest -q ap2/tests/` passes (638 tests, was 631); all 5 prose-grep verification bullets satisfied.
+- **Files:** ap2/check.py, ap2/ideation.default.md, ap2/init.py, ap2/tests/test_check.py, ap2/tests/test_ideation_defaults.py, skills/ap2-task/SKILL.md, skills/migrate-to-ap2/SKILL.md
+- **Tests:** pass
