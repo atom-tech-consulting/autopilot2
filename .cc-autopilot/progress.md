@@ -149,3 +149,9 @@
 - **Summary:** Pinned verify._run_shell_bullet to /bin/bash via subprocess.run(executable="/bin/bash"), with a TB-147 rationale comment at the call site so it doesn't get reverted to "more portable sh"; sole shell=True site in the verification path (verified by grep). Added 4 tests in test_verify_retry_diff.py (process substitution, [[ ]] conditional, genuine non-zero exit still fails, source-level pin via inspect.getsource). Full ap2 suite passes 720/720 (+4).
 - **Files:** ap2/verify.py, ap2/tests/test_verify_retry_diff.py
 - **Tests:** pass
+
+## [2026-05-01] TB-148: Web UI: tint task_complete rows by status, not uniform green
+- **Commit:** `d7f3d3b`
+- **Summary:** _row_class now reads the full event dict and tints task_complete rows by status (complete=lifecycle/green, verification_failed=warning/orange, state_violation/error/timeout/incomplete/blocked/failed=failure/red, retry_exhausted=new frozen/dark-red, unknown=new neutral/gray); home + events pages reuse the renderer; added a collapsed legend on /events; full ap2/tests/ pass (725).
+- **Files:** ap2/web.py, ap2/tests/test_web.py
+- **Tests:** pass
