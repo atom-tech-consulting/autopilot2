@@ -63,9 +63,22 @@ def test_restricted_drops_ideation_state_write():
     assert "mcp__autopilot__ideation_state_write" not in MM_HANDLER_TOOLS_RESTRICTED
 
 
-def test_restricted_keeps_board_edit():
-    """Operator board manipulation must survive restriction."""
-    assert "mcp__autopilot__board_edit" in MM_HANDLER_TOOLS_RESTRICTED
+def test_restricted_drops_board_edit():
+    """TB-142: direct `board_edit` is the second false-positive surface for
+    TB-110's state-violation check. Operator chat commands that previously
+    routed through `board_edit` (`@claude-bot freeze/approve/...`) now go
+    through `operator_queue_append`; the daemon drains queued ops between
+    tick stages, so the in-flight task's snapshot window is never racing a
+    direct TASKS.md mutation. RESTRICTED must NOT contain `board_edit`.
+    """
+    assert "mcp__autopilot__board_edit" not in MM_HANDLER_TOOLS_RESTRICTED
+
+
+def test_full_keeps_board_edit():
+    """Idle handler runs (no Active tasks) keep direct `board_edit` — there's
+    no in-flight task to violate against, so the queue-routing dance isn't
+    needed. TB-142: only the RESTRICTED set drops `board_edit`."""
+    assert "mcp__autopilot__board_edit" in MM_HANDLER_TOOLS_FULL
 
 
 def test_restricted_keeps_daemon_control():
@@ -136,11 +149,17 @@ def test_prompt_no_restriction_note_when_idle(tmp_path):
     assert "restricted toolset" not in p and "Restricted toolset" not in p
 
 
-def test_prompt_restriction_note_mentions_board_edit_and_daemon_control(tmp_path):
-    """The note must reassure the operator that key tools are still available."""
+def test_prompt_restriction_note_mentions_queue_routing_and_daemon_control(tmp_path):
+    """TB-142: the restriction note must (a) name `board_edit` as off-limits
+    so the agent doesn't try it, (b) point to `operator_queue_append` as
+    the queue-routed equivalent, and (c) keep `daemon_control` advertised
+    so pause/resume mid-task still works.
+    """
     cfg = _cfg(tmp_path)
     p = build_mattermost_prompt(cfg, _base_msg(), task_in_flight=True)
+    # board_edit is mentioned (as disabled), and queue-routing is named.
     assert "board_edit" in p
+    assert "operator_queue_append" in p
     assert "daemon_control" in p
 
 

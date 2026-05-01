@@ -469,3 +469,153 @@ def test_cmd_status_json_includes_operator_queue_pending(cfg: Config, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["operator_queue_pending"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TB-142: `approve` is a queueable op so the MM handler RESTRICTED toolset
+# (which drops `board_edit`) can still strip the `@blocked:review` blocker
+# from an ideation-proposed task without racing the in-flight task agent's
+# state-violation snapshot window.
+
+
+def test_operator_queue_ops_includes_approve():
+    """TB-142 anchor: `approve` must be in OPERATOR_QUEUE_OPS so the
+    snapshot-validation gate in `do_operator_queue_append` accepts it.
+    Pinning the constant directly so a refactor can't silently drop it."""
+    assert "approve" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_queue_append_approve_queues_record(cfg: Config):
+    """`do_operator_queue_append({"op":"approve","task_id":"TB-X"})`
+    queues a record with op="approve" and the target task_id. The TASKS.md
+    file is unchanged — the strip happens at drain time."""
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id="TB-300",
+        title="proposed by ideation",
+        meta={"blocked": "review"},
+    )
+    board.save()
+    pre_render = cfg.tasks_file.read_text()
+
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "approve", "task_id": "TB-300"}
+    )
+    body = _unwrap(res)
+    assert body["op"] == "approve"
+    assert body["task_id"] == "TB-300"
+
+    # TASKS.md unchanged — drain is what mutates the line.
+    assert cfg.tasks_file.read_text() == pre_render
+
+    # Queue file has exactly one record with op="approve".
+    queue_path = tools.operator_queue_path(cfg)
+    lines = [
+        json.loads(ln)
+        for ln in queue_path.read_text().splitlines()
+        if ln.strip()
+    ]
+    assert len(lines) == 1
+    assert lines[0]["op"] == "approve"
+    assert lines[0]["args"]["task_id"] == "TB-300"
+
+
+def test_queue_append_approve_rejects_unknown_task(cfg: Config):
+    """Snapshot validation rejects `approve` against a non-existent
+    task_id — same UX as other non-add queue ops."""
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "approve", "task_id": "TB-99999"}
+    )
+    assert res.get("isError")
+    assert "not on board" in res["content"][0]["text"]
+
+
+def test_queue_append_approve_requires_task_id(cfg: Config):
+    res = tools.do_operator_queue_append(cfg, {"op": "approve"})
+    assert res.get("isError")
+    assert "task_id" in res["content"][0]["text"]
+
+
+def test_drain_approve_strips_review_codespan(cfg: Config):
+    """Drain replays approve via the shared `_approve_review_token`
+    helper: the `@blocked:review` codespan disappears, so the task
+    becomes dispatchable on the next ready-promotion sweep."""
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id="TB-310",
+        title="ideation proposed",
+        meta={"blocked": "review"},
+    )
+    board.save()
+    # Sanity: pre-drain the codespan is present in the rendered line.
+    raw_pre = cfg.tasks_file.read_text()
+    assert "`@blocked:review`" in raw_pre
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "approve", "task_id": "TB-310"}
+    )
+    summary = tools.drain_operator_queue(cfg)
+    assert summary["applied"] == 1
+
+    # Codespan is gone; task is no longer structurally blocked.
+    raw_post = cfg.tasks_file.read_text()
+    assert "`@blocked:review`" not in raw_post
+    board2 = Board.load(cfg.tasks_file)
+    t = board2.get("TB-310")
+    assert t is not None
+    assert "blocked" not in t.meta
+    assert t.blocked_on == []  # dispatchable
+
+    # ideation_approved audit event landed.
+    evts = events.tail(cfg.events_file, 20)
+    approved = [e for e in evts if e["type"] == "ideation_approved"]
+    assert len(approved) == 1
+    assert approved[0]["task"] == "TB-310"
+
+
+def test_drain_approve_preserves_other_blockers(cfg: Config):
+    """Approve only strips the `review` token. Other tokens in the same
+    `@blocked:` codespan (TB-N task ids, scheme:value blockers) survive
+    so the dependency check still gates dispatch on them."""
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id="TB-320",
+        title="multi-blocker",
+        meta={"blocked": "TB-5,review,TB-7"},
+    )
+    board.save()
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "approve", "task_id": "TB-320"}
+    )
+    tools.drain_operator_queue(cfg)
+
+    t = Board.load(cfg.tasks_file).get("TB-320")
+    assert t is not None
+    # `review` gone, TB-5 + TB-7 preserved.
+    assert "review" not in t.meta.get("blocked", "")
+    assert "TB-5" in t.meta["blocked"]
+    assert "TB-7" in t.meta["blocked"]
+
+
+def test_drain_approve_idempotent_on_unblocked_task(cfg: Config):
+    """A queued approve against a task that has no `review` blocker is a
+    no-op (modulo line re-render). Useful so an operator double-queueing
+    `approve` doesn't corrupt the board."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Backlog", task_id="TB-330", title="not gated")
+    board.save()
+    pre = Board.load(cfg.tasks_file).get("TB-330")
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "approve", "task_id": "TB-330"}
+    )
+    tools.drain_operator_queue(cfg)
+
+    post = Board.load(cfg.tasks_file).get("TB-330")
+    assert post is not None
+    assert post.meta == pre.meta
+    assert post.blocked_on == []

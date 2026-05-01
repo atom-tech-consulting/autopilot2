@@ -330,13 +330,17 @@ def build_mattermost_prompt(
          "user": "sarah", "text": "start the pipeline", "thread_id": "..."}
 
     `task_in_flight` (TB-122): set True when a task agent is running
-    concurrently. The prompt explains that `cron_edit` and
-    `ideation_state_write` are off-limits for this turn (the daemon's
-    `_main_tick_loop` will pick those up once the board is idle), and the
-    "your job" rubric is rewritten to drop those actions. The handler still
-    has board_edit (incl. `approve` from TB-121), daemon_control,
-    mattermost_reply, log_event, and operator_log_append — enough to pause,
-    add/delete/freeze/approve tasks, ack operator decisions, and reply.
+    concurrently. The prompt explains that `cron_edit`,
+    `ideation_state_write`, and (TB-142) `board_edit` are off-limits for
+    this turn (the daemon's `_main_tick_loop` will pick those up once the
+    board is idle, and queued board ops drain between tick stages so they
+    never overlap with the running task's snapshot window), and the "your
+    job" rubric is rewritten to route mutations through
+    `operator_queue_append` instead of `board_edit`. The handler still has
+    `operator_queue_append` (covers add / move_to_backlog / unfreeze /
+    delete / approve — TB-142), `daemon_control`, `mattermost_reply`,
+    `log_event`, and `operator_log_append` — enough to pause, queue
+    add/delete/approve mutations, ack operator decisions, and reply.
     """
     channel_id = msg.get("channel_id", "")
     channel_name = msg.get("channel_name") or channel_id or "?"
@@ -352,23 +356,38 @@ def build_mattermost_prompt(
             "\n## Note: restricted toolset (task currently in flight)\n"
             "A task agent is currently running (the daemon's main loop and "
             "this Mattermost handler are concurrent — TB-122). For this turn "
-            "your toolset is restricted: `cron_edit` and "
-            "`ideation_state_write` are off-limits because they would race "
-            "the running task's view of the schedule / ideation state. "
-            "They'll be available again once the daemon is idle.\n"
+            "your toolset is restricted: `cron_edit`, `ideation_state_write`, "
+            "and `board_edit` are off-limits because they would race the "
+            "running task's view of the schedule / ideation state / TASKS.md "
+            "snapshot (TB-142 — direct `board_edit` mutations during the "
+            "in-flight window trip TB-110's state-violation check and roll "
+            "back the running task). They'll be available again once the "
+            "daemon is idle.\n"
             "\n"
-            "Still available: `board_edit` (add / delete / backlog / freeze / "
-            "approve tasks), `daemon_control` (pause / resume — pause takes "
-            "effect on the **next** tick; the running task continues to "
-            "completion, then no further dispatch), `operator_log_append` "
-            "(the operator's veto channel — \"@claude-bot ack: ...\" style "
-            "messages), `mattermost_reply`, `log_event`, plus all reads.\n"
+            "Use `operator_queue_append` for ALL board mutations this turn — "
+            "it's the queue-routed equivalent of `board_edit`. The daemon "
+            "drains queued ops between tick stages, so the running task's "
+            "snapshot window never sees the mutation. Supported ops: "
+            "`add_ready` / `add_backlog` / `add_frozen` / `move_to_backlog` "
+            "/ `unfreeze` / `delete` / `approve` (TB-142 — strips "
+            "`@blocked:review` from an ideation-proposed task so it "
+            "dispatches). For `add_*` ops the TB-N is allocated synchronously "
+            "and you can mention it in your reply.\n"
             "\n"
-            "If the user asked for cron / ideation-state changes, reply via "
-            "`mattermost_reply` explaining the restriction and that the "
-            "request will be handled once the daemon is idle. Do not try to "
-            "call the disabled tools — the SDK will reject them and the "
-            "rejection lands in events.jsonl as noise."
+            "Still available directly: `daemon_control` (pause / resume — "
+            "pause takes effect on the **next** tick; the running task "
+            "continues to completion, then no further dispatch), "
+            "`operator_log_append` (the operator's veto channel — "
+            "\"@claude-bot ack: ...\" style messages), `mattermost_reply`, "
+            "`log_event`, plus all reads.\n"
+            "\n"
+            "If the user asked for cron / ideation-state changes or for a "
+            "board op the queue doesn't cover (e.g. `move_to_frozen` / "
+            "`move_to_complete`), reply via `mattermost_reply` explaining "
+            "the restriction and that the request will be handled once the "
+            "daemon is idle. Do not try to call the disabled tools — the "
+            "SDK will reject them and the rejection lands in events.jsonl "
+            "as noise."
         )
 
     parts.extend([
@@ -386,7 +405,8 @@ def build_mattermost_prompt(
     ])
     if task_in_flight:
         parts.extend([
-            "- If the user asks to add / pause / approve / delete / freeze / backlog a task: use `board_edit`. **Approving an ideation-proposed task** (TB-121) is action `approve` on a Backlog task — strips the `(blocked on: review)` clause so it dispatches.",
+            "- If the user asks to add / approve / delete / backlog / unfreeze a task: use `operator_queue_append` (NOT `board_edit` — it's disabled this turn, TB-142). The daemon drains the queue between tick stages, so your op lands at the next tick boundary without racing the running task's snapshot window. **Approving an ideation-proposed task** (TB-121) is `op=\"approve\"` with `task_id=TB-N` — the drain-side handler strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so the task dispatches at the next tick.",
+            "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining they'll be handled once the daemon is idle.",
             "- If the user asks to pause/resume the daemon: use `daemon_control`.",
             "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",
             "- If the user asks for cron / ideation-state changes: do NOT call cron_edit / ideation_state_write — reply via `mattermost_reply` explaining they'll be handled once the daemon is idle.",
@@ -395,7 +415,7 @@ def build_mattermost_prompt(
         ])
     else:
         parts.extend([
-            "- If the user asks for work: add tasks via `board_edit`. **Approving an ideation-proposed task** (TB-121) is action `approve` on a Backlog task — strips the `(blocked on: review)` clause so it dispatches.",
+            "- If the user asks for work: add tasks via `board_edit`. **Approving an ideation-proposed task** (TB-121) is action `approve` on a Backlog task — strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so it dispatches.",
             "- If the user asks for monitoring: add a job via `cron_edit`.",
             "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
             "- Log anything noteworthy via `log_event`.",

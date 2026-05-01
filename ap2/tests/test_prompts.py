@@ -161,12 +161,13 @@ def test_mattermost_prompt_pins_explicit_thread_id(tmp_path):
 
 
 def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
-    """TB-122: when a task is in flight, the prompt explicitly explains that
-    cron_edit + ideation_state_write are off-limits, and tells the agent to
-    reply via mattermost_reply instead of trying the disabled tools. The
-    same prompt must spell out the operator-still-available actions
-    (board_edit/approve, daemon_control, operator_log_append) so the
-    handler doesn't refuse work it CAN do."""
+    """TB-122 + TB-142: when a task is in flight, the prompt explicitly
+    explains that cron_edit, ideation_state_write, and (TB-142) board_edit
+    are off-limits, and tells the agent to route board mutations through
+    `operator_queue_append` instead. The same prompt must spell out the
+    operator-still-available actions (queue add/approve/delete/backlog/
+    unfreeze, daemon_control, operator_log_append) so the handler doesn't
+    refuse work it CAN do."""
     cfg = _cfg(tmp_path)
     msg = {
         "id": "post-1",
@@ -181,10 +182,14 @@ def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
     assert "task agent is currently running" in p
     assert "cron_edit" in p
     assert "ideation_state_write" in p
+    # Pinned (TB-142): board_edit is named as off-limits, and the
+    # queue-routing equivalent is named so the handler can still mutate.
+    assert "board_edit" in p
+    assert "operator_queue_append" in p
     # Pinned: agent knows pause takes effect on the next tick.
     assert "next" in p.lower() and "tick" in p.lower()
-    # Pinned: TB-121 cross-ref — `approve` is a board_edit action and must
-    # be discoverable from the restricted prompt.
+    # Pinned: TB-121 cross-ref — `approve` must remain discoverable from
+    # the restricted prompt (it's now a queue op, not a board_edit action).
     assert "approve" in p
     # Pinned: operator_log_append remains available so "ack:" still works.
     assert "operator_log_append" in p
@@ -192,6 +197,40 @@ def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
     # Idle prompt does NOT contain the concurrent-task header.
     p_idle = build_mattermost_prompt(cfg, msg)
     assert "task agent is currently running" not in p_idle
+
+
+def test_mattermost_prompt_restricted_routes_board_ops_through_queue(tmp_path):
+    """TB-142 (load-bearing): the restricted-mode "Your job" rubric must
+    direct the agent at `operator_queue_append` for board mutations and
+    explicitly steer it AWAY from `board_edit` (which is filtered out of
+    MM_HANDLER_TOOLS_RESTRICTED). Pin both the routing instruction and
+    the rationale (drain happens between tick stages, so the running
+    task's snapshot window never sees the mutation).
+    """
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "dev",
+        "user": "alice",
+        "text": "@claude-bot approve TB-9",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg, task_in_flight=True)
+    # The "Your job" rubric routes board mutations through the queue.
+    assert "operator_queue_append" in p
+    # Explicit "NOT board_edit" guidance (so the agent doesn't fall back
+    # to `board_edit` if it remembers seeing it elsewhere).
+    assert "NOT `board_edit`" in p or "not `board_edit`" in p.lower()
+    # The TB-142 rationale ties the routing to the in-flight snapshot
+    # window — agents who understand WHY are less likely to drift.
+    assert "snapshot" in p.lower() or "TB-110" in p
+
+    # Idle prompt routes through `board_edit` directly (FULL toolset still
+    # has it; queue-routing is only required when restricted).
+    p_idle = build_mattermost_prompt(cfg, msg)
+    assert "board_edit" in p_idle
+    assert "approve" in p_idle
 
 
 # ---------------------------------------------------------------------------

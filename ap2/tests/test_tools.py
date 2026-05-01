@@ -146,6 +146,123 @@ def test_board_edit_add_frozen_still_honors_blocked_on(cfg):
     assert "blocked on" not in t.description.lower()
 
 
+# ---------------------------------------------------------------------------
+# TB-142 (TB-121 cross-ref): `approve` action on do_board_edit. The idle-path
+# entry shared with the queue-routed `_apply_operator_op` for `op="approve"`.
+
+
+def test_board_edit_approve_strips_review_codespan(cfg):
+    """`do_board_edit({"action":"approve",...})` strips the `@blocked:review`
+    codespan from a Backlog task so the task is dispatchable."""
+    b = Board.load(cfg.tasks_file)
+    b.add(
+        "Backlog",
+        task_id="TB-400",
+        title="ideation gated",
+        meta={"blocked": "review"},
+    )
+    b.save()
+
+    res = tools.do_board_edit(
+        cfg, {"action": "approve", "task_id": "TB-400"}
+    )
+    body = _unwrap(res)
+    assert body["task_id"] == "TB-400"
+    assert body["section"] == "Backlog"
+
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert "blocked" not in t.meta
+    assert t.blocked_on == []
+
+
+def test_board_edit_approve_emits_ideation_approved_event(cfg):
+    from ap2 import events
+
+    b = Board.load(cfg.tasks_file)
+    b.add(
+        "Backlog",
+        task_id="TB-401",
+        title="audit me",
+        meta={"blocked": "review"},
+    )
+    b.save()
+
+    tools.do_board_edit(cfg, {"action": "approve", "task_id": "TB-401"})
+    evts = events.tail(cfg.events_file, 5)
+    approved = [e for e in evts if e["type"] == "ideation_approved"]
+    assert len(approved) == 1
+    assert approved[0]["task"] == "TB-401"
+
+
+def test_board_edit_approve_preserves_other_blockers(cfg):
+    """Only the `review` token is stripped — sibling TB-N blockers stay."""
+    b = Board.load(cfg.tasks_file)
+    b.add(
+        "Backlog",
+        task_id="TB-402",
+        title="multi",
+        meta={"blocked": "TB-5,review"},
+    )
+    b.save()
+
+    tools.do_board_edit(cfg, {"action": "approve", "task_id": "TB-402"})
+    t = Board.load(cfg.tasks_file).get("TB-402")
+    assert t is not None
+    assert t.meta.get("blocked") == "TB-5"
+    assert t.blocked_on == ["TB-5"]
+
+
+def test_board_edit_approve_strips_legacy_description_prose(cfg):
+    """Pre-TB-132 transition: tasks authored before the codespan format
+    landed may still carry `(blocked on: review)` as description prose.
+    Approve scrubs it so the rendered line stays tidy."""
+    b = Board.load(cfg.tasks_file)
+    b.add(
+        "Backlog",
+        task_id="TB-403",
+        title="legacy",
+        description="legacy ideation task (blocked on: review)",
+    )
+    b.save()
+
+    tools.do_board_edit(cfg, {"action": "approve", "task_id": "TB-403"})
+    t = Board.load(cfg.tasks_file).get("TB-403")
+    assert t is not None
+    assert "blocked on: review" not in t.description.lower()
+
+
+def test_board_edit_approve_requires_task_id(cfg):
+    res = tools.do_board_edit(cfg, {"action": "approve"})
+    assert res.get("isError")
+    assert "task_id" in res["content"][0]["text"]
+
+
+def test_board_edit_approve_rejects_unknown_task(cfg):
+    res = tools.do_board_edit(
+        cfg, {"action": "approve", "task_id": "TB-99999"}
+    )
+    assert res.get("isError")
+    assert "not on board" in res["content"][0]["text"]
+
+
+def test_board_edit_approve_idempotent_on_unblocked_task(cfg):
+    """Already-approved task: approve is a no-op (modulo render). Useful
+    so a second `ap2 approve TB-N` doesn't corrupt the line."""
+    b = Board.load(cfg.tasks_file)
+    b.add("Backlog", task_id="TB-404", title="not gated")
+    b.save()
+
+    res = tools.do_board_edit(
+        cfg, {"action": "approve", "task_id": "TB-404"}
+    )
+    body = _unwrap(res)
+    assert body["task_id"] == "TB-404"
+    t = Board.load(cfg.tasks_file).get("TB-404")
+    assert t is not None
+    assert t.blocked_on == []
+
+
 def test_cron_edit_add_and_remove(cfg):
     res = tools.do_cron_edit(
         cfg,

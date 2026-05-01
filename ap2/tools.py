@@ -13,6 +13,7 @@ import contextvars
 import datetime as _dt
 import json
 import os
+import re
 import ssl
 import subprocess
 import time
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from . import events, retry
-from .board import Board, board_file_lock, locked_board
+from .board import Board, board_file_lock, locked_board, parse_task_line
 from .config import Config, bump_next_task_id
 from .cron import update_job
 
@@ -163,6 +164,72 @@ def _max_preallocated_id_in_queue(cfg: Config) -> int:
     return best
 
 
+# TB-142 (TB-121 cross-ref): the `approve` semantic strips the `review`
+# blocker token from a task — both the structural `@blocked:review`
+# codespan (TB-132's metadata surface) and any legacy `(blocked on:
+# review)` description prose authored before TB-132 landed. Idempotent
+# re-render: a task already free of the review token rewrites identically
+# (modulo the legacy-description scrub). Shared by:
+#   - `do_board_edit({"action":"approve",...})` — the idle-path entry,
+#     used by the MM handler's FULL toolset and by direct CLI/control
+#     callers.
+#   - `_apply_operator_op` for queued `op="approve"` records — the
+#     in-flight-task path, where the MM handler RESTRICTED toolset routes
+#     through `operator_queue_append` to side-step TB-110's snapshot
+#     check (drains run between agent runs, never during).
+_APPROVE_LEGACY_REVIEW_RE = re.compile(
+    r"\s*\(blocked on:\s*review\s*\)\s*", re.IGNORECASE,
+)
+
+
+def _approve_review_token(board: Board, task_id: str) -> "Task":  # type: ignore[name-defined]
+    """Strip the `review` blocker from a task's `@blocked:` codespan AND
+    any legacy `(blocked on: review)` description prose. Mutates `board`
+    in place. Idempotent — a task without the review token rewrites to
+    its current state minus the legacy description clause (cosmetic).
+
+    Raises RuntimeError if the task is not on the board, or if the line
+    fails to parse (malformed_lines case — should never happen for tasks
+    Board.find returns).
+    """
+    loc = board.find(task_id)
+    if loc is None:
+        raise RuntimeError(f"{task_id} not on board")
+    section, idx = loc
+    line = board.sections[section][idx]
+    t = parse_task_line(line, section)
+    if t is None:
+        raise RuntimeError(f"{task_id}: malformed task line")
+
+    # Codespan: drop the `review` token (case-insensitive). If it was the
+    # only token, drop the `@blocked:` codespan entirely so Task.render
+    # emits a clean line with no leftover empty span.
+    blocked = t.meta.get("blocked", "")
+    if blocked:
+        kept = [
+            tok.strip()
+            for tok in blocked.split(",")
+            if tok.strip() and tok.strip().lower() != "review"
+        ]
+        if kept:
+            t.meta["blocked"] = ",".join(kept)
+        else:
+            t.meta.pop("blocked", None)
+
+    # Legacy `(blocked on: review)` description prose — TB-132 moved
+    # blockers off description-regex onto codespans, but pre-TB-132 tasks
+    # still in flight may carry the prose form. Stripping it keeps the
+    # rendered description tidy; structurally it's already a no-op since
+    # TB-132 (the legacy fallback only fires when no codespan is set).
+    new_desc = _APPROVE_LEGACY_REVIEW_RE.sub(" ", t.description).strip()
+    # Normalize whitespace runs that the substitution left behind.
+    new_desc = re.sub(r"\s{2,}", " ", new_desc).strip()
+    t.description = new_desc
+
+    board.sections[section][idx] = t.render()
+    return t
+
+
 def do_board_edit(cfg: Config, args: dict) -> dict:
     action = args.get("action", "")
     task_id = args.get("task_id")
@@ -293,6 +360,28 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 if removed is None:
                     return _err(f"{task_id} not on board")
                 return _ok(f"removed {removed.id}", task_id=removed.id)
+
+            if action == "approve":
+                # TB-142 (TB-121): strip the `review` blocker so an
+                # ideation-proposed Backlog task becomes dispatchable.
+                # `_approve_review_token` does the work; we wrap with the
+                # `ideation_approved` audit event so the operator-review
+                # surface (`ap2 status`, ideation Step 0) can spot the
+                # promotion. Restricted-toolset MM handler routes via
+                # `operator_queue_append({"op":"approve",...})` instead
+                # — same helper, drain-side, post-task-window.
+                if not task_id:
+                    return _err("task_id is required for approve")
+                try:
+                    t = _approve_review_token(board, task_id)
+                except RuntimeError as e:
+                    return _err(str(e))
+                events.append(
+                    cfg.events_file, "ideation_approved", task=t.id,
+                )
+                return _ok(
+                    f"approve {t.id}", task_id=t.id, section=t.section,
+                )
 
             return _err(f"unknown action {action!r}")
     except Exception as e:  # noqa: BLE001
@@ -631,6 +720,15 @@ OPERATOR_QUEUE_OPS = (
     "move_to_backlog",
     "unfreeze",
     "delete",
+    # TB-142: approving an ideation-proposed task (strip `@blocked:review`)
+    # is the second mutation surface the MM handler exposes via chat
+    # commands (`@claude-bot approve TB-N`). Routing it through the queue
+    # closes the second instance of the false-positive
+    # `task_state_violation` class — TB-141 closed the operator-side `ap2
+    # add` instance; this closes the chat-driven `board_edit({"action":
+    # "approve",...})` instance. Drain-side handler shares the
+    # `_approve_review_token` helper with `do_board_edit`.
+    "approve",
 )
 
 
@@ -1078,6 +1176,18 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             title=title,
         )
         return
+    if op == "approve":
+        # TB-142: drain-side approve. Shares `_approve_review_token` with
+        # `do_board_edit({"action":"approve",...})` (the idle-path entry)
+        # so both routes leave the task in the same state — codespan
+        # `@blocked:review` stripped, legacy `(blocked on: review)` prose
+        # scrubbed. Audit event mirrors the direct-call path.
+        tid = args.get("task_id", "")
+        if not tid:
+            raise RuntimeError("approve op missing task_id")
+        _approve_review_token(board, tid)
+        events.append(cfg.events_file, "ideation_approved", task=tid)
+        return
     raise RuntimeError(f"unknown op {op!r}")
 
 
@@ -1421,15 +1531,18 @@ def build_mcp_server(cfg: Config):
         "`git reset --hard <pre_run_head>` rollback never wipes them and "
         "long-running SDK turns can't read a board snapshot that shifts "
         "underneath them. Use this — instead of `board_edit` — when "
-        "@claude-bot is asked to add/move/unfreeze/delete a task and a "
-        "task agent is currently active. For `add_*` ops, the TB-N ID is "
-        "pre-allocated synchronously (so you can mention it in your reply) "
-        "and the briefing file is pre-written; only the TASKS.md "
-        "insertion is deferred. Args: op (one of add_ready, add_backlog, "
-        "add_frozen, move_to_backlog, unfreeze, delete); task_id (TB-N for "
-        "non-add ops); title / tags (comma-separated string) / description "
-        "/ briefing / blocked_on (for add ops); force (true/false, for "
-        "delete from Active/Ready/Pipeline Pending).",
+        "@claude-bot is asked to add/move/unfreeze/delete/approve a task "
+        "and a task agent is currently active. (TB-142: `board_edit` is "
+        "removed from the MM handler's RESTRICTED toolset, so this is "
+        "the ONLY board-mutation surface mid-task.) For `add_*` ops, the "
+        "TB-N ID is pre-allocated synchronously (so you can mention it "
+        "in your reply) and the briefing file is pre-written; only the "
+        "TASKS.md insertion is deferred. Args: op (one of add_ready, "
+        "add_backlog, add_frozen, move_to_backlog, unfreeze, delete, "
+        "approve); task_id (TB-N for non-add ops); title / tags "
+        "(comma-separated string) / description / briefing / blocked_on "
+        "(for add ops); force (true/false, for delete from Active/Ready/"
+        "Pipeline Pending).",
         {
             "op": str,
             "task_id": str,
@@ -1588,30 +1701,42 @@ CONTROL_AGENT_TOOLS = [
 ]
 
 # TB-122: when a task agent is in flight, the Mattermost handler runs with a
-# narrower toolset. Cron schedule mutations (would change when the next
-# status-report / ideation tick fires, possibly mid-edit on the running
-# task's working tree) and ideation_state_writes (rewrites the per-cycle
-# assessment that ideation was acting on when the running task was queued)
-# are deferred until the daemon is idle. The keeps:
+# narrower toolset. Mutations that would race the running task agent's view of
+# the working tree are deferred until the daemon is idle:
+#   - `cron_edit` would change when the next status-report / ideation tick
+#     fires (possibly mid-edit on the running task's tree).
+#   - `ideation_state_write` rewrites the per-cycle assessment ideation was
+#     acting on when the running task was queued.
+#   - `board_edit` (TB-142) is the second false-positive surface for TB-110's
+#     state-violation check — every operator chat command that triggers
+#     `board_edit` (e.g. `@claude-bot freeze TB-X`, `@claude-bot approve
+#     TB-Y`) directly mutates TASKS.md during the running task's snapshot
+#     window and rolls back its work. Routed through `operator_queue_append`
+#     instead, where the daemon drains queued ops between tick stages.
+# What stays:
 #   - read tools (Read/Glob/Grep/git_log_grep) so the agent can answer
 #     questions and reason about state.
-#   - board_edit so the operator can pause queued work, add new tasks,
-#     delete unwanted ones, freeze problematic ones, and approve
-#     ideation-proposed tasks (TB-121's `approve` action) mid-flight.
-#   - mattermost_reply / log_event so the handler can finish its turn.
-#   - daemon_control so "@claude-bot pause" works while a task runs (the
-#     existing semantic: pause takes effect on the next tick boundary; the
-#     in-flight task continues to completion, then no further dispatch).
-#   - operator_log_append so "@claude-bot ack: …" still lands in the
+#   - `operator_queue_append` so the operator can still queue add / move /
+#     unfreeze / delete / approve ops; the daemon drains them at the next
+#     tick boundary, so the running task's window never sees the mutation.
+#   - `mattermost_reply` / `log_event` so the handler can finish its turn.
+#   - `daemon_control` so "@claude-bot pause" works mid-task (pause takes
+#     effect on the next tick; the running task completes normally).
+#   - `operator_log_append` so "@claude-bot ack: …" still lands in the
 #     operator log (ideation reads it in Step 0 — the operator's veto
 #     channel must stay open even mid-task).
-# Idle handler runs (no Active tasks) keep the full CONTROL_AGENT_TOOLS set.
+# Idle handler runs (no Active tasks) keep the full CONTROL_AGENT_TOOLS set —
+# direct `board_edit` is fine when there's no running task to violate against.
 MM_HANDLER_TOOLS_FULL = list(CONTROL_AGENT_TOOLS)
 MM_HANDLER_TOOLS_RESTRICTED = [
     t for t in CONTROL_AGENT_TOOLS
     if t not in (
         "mcp__autopilot__cron_edit",
         "mcp__autopilot__ideation_state_write",
+        # TB-142: dropped — board mutations during in-flight runs trip
+        # TB-110's snapshot check. Route via `operator_queue_append`
+        # instead. Idle runs (FULL toolset) still get direct `board_edit`.
+        "mcp__autopilot__board_edit",
     )
 ]
 
