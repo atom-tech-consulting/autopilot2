@@ -157,3 +157,10 @@ asleep. Re-firing resumes once the queue drains (approved/deleted).
   blocker-clause primitive rather than adding a new board section or
   overloading `#proposed`. Watchdog behavior change is part of the
   scope so the gate doesn't trigger spurious "daemon broken" alerts.
+## Attempts
+
+### 2026-05-01 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] New e2e test: ideation cron fires against an empty board → producesN proposed tasks, ALL with `(blocked on: review)` cla
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T064456Z-TB-121.prompt.md`, `stream: .cc-autopilot/debug/20260501T064456Z-TB-121.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T064456Z-TB-121.messages.jsonl`
