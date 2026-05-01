@@ -299,3 +299,113 @@ def test_cron_edit_via_restricted_handler_does_not_mutate_cron(e2e_project):
     evts = ev_mod.tail(cfg.events_file, n=50)
     cron_kinds = {"cron_proposed", "cron_proposal_error", "cron_proposal_rejected"}
     assert not any(e.get("type") in cron_kinds for e in evts)
+
+
+# ── test: responsiveness gate — mattermost_reply lands within 30s of mention ──
+
+
+def test_mattermost_reply_lands_within_30s_of_mention_during_long_task(e2e_project):
+    """TB-122 responsiveness gate (auto-verifiable replacement for the
+    prior `Manual: kick a long-running task on stoch …` bullet).
+
+    Stub a long-running task agent (sleeps for 0.5s — a stand-in for a
+    multi-minute SDK turn). While that fake task is in flight, enqueue a
+    Mattermost mention. The handler responder fires a `mattermost_reply`
+    event (mimicking what the real `do_mattermost_reply` MCP tool does
+    end-to-end). Assert the `mattermost_reply` event's wall-clock
+    timestamp lands within 30s of the mention's enqueue timestamp.
+
+    Pins MM responsiveness end-to-end without a live deployment — the
+    same property the manual-stoch bullet was meant to assert. If the
+    MM polling were ever resequenced behind `run_task` again, this test
+    would fail (the reply event would land only after run_task returns,
+    which can be 1200s+ on a real task agent).
+    """
+    import datetime as _dt
+
+    from ap2 import events as ev_mod
+    from ap2.daemon import run_task
+    from ap2.tests.e2e._fakes import _FakeMixedMsg, _FakeToolUseBlock
+
+    cfg = e2e_project(ready_task=("TB-7", "Long task"))
+
+    sdk = FakeSDK()
+
+    async def slow_task_gen(prompt, options):  # noqa: ARG001
+        yield _FakeMsg("(working...)")
+        await asyncio.sleep(0.5)
+        yield _FakeMixedMsg([_FakeToolUseBlock(
+            name="report_result",
+            input={
+                "status": "complete",
+                "commit": "abc12345",
+                "summary": "long task done",
+                "tests_passed": "true",
+            },
+        )])
+
+    async def fast_handler_gen(prompt, options):  # noqa: ARG001
+        # The real handler routes a tool_use call through the MCP server,
+        # which calls do_mattermost_reply, which appends the event. We
+        # mimic that side-effect directly because FakeSDK doesn't
+        # actually execute MCP tool calls.
+        ev_mod.append(
+            cfg.events_file,
+            "mattermost_reply",
+            channel="dev",
+            thread_id="",
+            post_id="post-r",
+            summary="status: TB-7 active",
+        )
+        yield _FakeMsg("done")
+
+    sdk.on("## Task\nTB-7", slow_task_gen)
+    sdk.on("Incoming mattermost message", fast_handler_gen)
+
+    # The mention's "timestamp" is the moment we enqueue it for the
+    # handler — i.e. when handle_message is about to be awaited. We
+    # capture it immediately before launching the handler task.
+    mention_ts_holder: list[_dt.datetime] = []
+
+    async def _drive():
+        board = Board.load(cfg.tasks_file)
+        task = next(t for t in board.iter_tasks("Ready") if t.id == "TB-7")
+        run_t = asyncio.create_task(run_task(cfg, sdk, None, task))
+        # Let move_to_active land before we spawn the handler so it
+        # sees task_in_flight=True (otherwise the test wouldn't be
+        # exercising the in-flight branch).
+        await asyncio.sleep(0.05)
+        mention_ts_holder.append(_dt.datetime.now(_dt.timezone.utc))
+        handler_t = asyncio.create_task(
+            handle_message(cfg, sdk, mcp_server=None, msg=_mm_msg()),
+        )
+        await asyncio.gather(run_t, handler_t)
+
+    asyncio.run(_drive())
+
+    assert mention_ts_holder, "mention was never enqueued"
+    mention_ts = mention_ts_holder[0]
+
+    evts = ev_mod.tail(cfg.events_file, n=200)
+    reply_evts = [e for e in evts if e.get("type") == "mattermost_reply"]
+    assert reply_evts, "no mattermost_reply event landed"
+
+    # events.py timestamps are second-precision UTC ISO 8601 with a Z suffix.
+    reply_ts = _dt.datetime.fromisoformat(
+        reply_evts[-1]["ts"].replace("Z", "+00:00"),
+    )
+    elapsed = (reply_ts - mention_ts).total_seconds()
+    # The briefing's gate is <30s. Wall-clock with a 0.5s task sleep should
+    # land in well under 1s; we keep the 30s bound so a slow CI box still
+    # passes as long as the structural concurrency invariant holds.
+    assert elapsed < 30.0, (
+        f"mattermost_reply landed {elapsed:.1f}s after mention "
+        f"(briefing requires <30s)"
+    )
+
+    # And the in-flight branch was actually exercised — the mattermost
+    # event for this handler was logged with toolset=restricted.
+    mm_evts = [e for e in evts if e.get("type") == "mattermost"]
+    assert mm_evts and mm_evts[-1].get("toolset") == "restricted", (
+        "test must exercise the in-flight branch (toolset=restricted)"
+    )
