@@ -125,6 +125,15 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # operator can spot a stalled queue (depth > 0 with the daemon down
     # ⇒ ops will sit until the daemon comes back up).
     queue_pending = tools.operator_queue_pending_count(cfg)
+    # TB-121: count Backlog tasks gated on the human-review clause so
+    # `ap2 status` distinguishes "Backlog has 5 workable items" from
+    # "Backlog has 5 ideation proposals waiting for an operator nod."
+    # Cheap inline scan (the same board we already loaded above); avoids
+    # importing diagnose.py for one number.
+    pending_review = sum(
+        1 for t in board.iter_tasks("Backlog")
+        if t.blocked_on and all(b.lower() == "review" for b in t.blocked_on)
+    )
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -151,6 +160,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             "events_file": str(cfg.events_file),
             "web_url": web_url,
             "operator_queue_pending": queue_pending,
+            "pending_review": pending_review,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -172,6 +182,15 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(
             f"pending:  {queue_pending} operator op"
             f"{'s' if queue_pending != 1 else ''}"
+        )
+    if pending_review:
+        # TB-121: shown only when N>0 so a clean board doesn't grow a
+        # zero-line. Mention `ap2 approve` so the action is one
+        # readable nudge away.
+        print(
+            f"review:   {pending_review} ideation proposal"
+            f"{'s' if pending_review != 1 else ''} pending "
+            f"(`ap2 approve TB-N` to dispatch)"
         )
     nxt = board.next_ready()
     if nxt:
@@ -571,6 +590,35 @@ def cmd_delete(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_approve(cfg: Config, args: argparse.Namespace) -> int:
+    """Strip the `(blocked on: review)` review-gate clause from a task
+    (TB-121).
+
+    Operator surface for promoting an ideation-proposed task out of its
+    `@blocked:review` codespan so it auto-dispatches on the next tick.
+    Routes through the operator queue so the mutation (a) lands at a
+    tick boundary instead of mid-task-run (TB-142 anti-race), and (b)
+    shares the drain-side `_approve_review_token` helper with both the
+    Mattermost handler's `operator_queue_append({"op":"approve",...})`
+    chat surface and `do_board_edit({"action":"approve",...})`.
+
+    Snapshot validation runs at queue-append time — an unknown TB-N is
+    rejected immediately. The actual codespan strip + `ideation_approved`
+    audit event happen on the daemon's next tick.
+    """
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "approve", "task_id": args.task_id}
+    )
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print(
+        f"queued approve {args.task_id} "
+        f"(review gate strip will land at next tick)"
+    )
+    return 0
+
+
 def cmd_rollback(cfg: Config, args: argparse.Namespace) -> int:
     """Linear rollback (TB-111).
 
@@ -910,6 +958,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-f", "--force", action="store_true",
                    help="allow deletion from Active or Ready (use with care)")
     s.set_defaults(func=cmd_delete)
+
+    s = sub.add_parser(
+        "approve",
+        help="approve an ideation-proposed task (TB-121): strips the "
+             "`@blocked:review` codespan so the task auto-promotes out "
+             "of Backlog on the next tick. Refuses if the task isn't on "
+             "the board.",
+    )
+    s.add_argument("task_id")
+    s.set_defaults(func=cmd_approve)
 
     s = sub.add_parser(
         "rollback",

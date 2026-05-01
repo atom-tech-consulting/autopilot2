@@ -279,6 +279,49 @@ def test_ideation_prompt_pins_tb146_section_header():
     assert "cron proposals from task agents" in lower or "cron proposals" in lower
 
 
+def test_ideation_prompt_pins_review_gate_clause():
+    """TB-121: every task ideation proposes MUST be gated behind operator
+    review before dispatch. Pin both the directive (pass `blocked_on:
+    "review"` to every `add_backlog` call) and the briefing's grep
+    anchor (`blocked on: review` literal phrase). Without this, a
+    hallucinated proposal pipelines straight into the daemon's
+    autonomous dispatch loop with no human in the loop — the failure
+    mode the gate prevents.
+    """
+    prompt = _default_prompt()
+    flat = " ".join(prompt.split())
+    lower = flat.lower()
+    # Verification grep anchor — the briefing's `## Verification` runs
+    # `grep -q 'blocked on: review' ap2/ideation.default.md`.
+    assert "blocked on: review" in lower
+    # The directive instructs ideation to attach the gate to every
+    # `board_edit({"action": "add_backlog", ...})` it emits.
+    assert "blocked_on" in prompt
+    assert "review" in lower
+    assert "add_backlog" in prompt
+    # CLI surface mentioned so ideation's audit (and the operator
+    # reading the prompt) sees the canonical promotion path.
+    assert "ap2 approve" in prompt
+    # TB-121 cross-ref so future trims preserve the lineage.
+    assert "TB-121" in prompt
+
+
+def test_ideation_prompt_explains_why_gate_is_uniform():
+    """The gate applies to every proposal, not just "non-trivial" ones —
+    the operator decides what's trivial. Pin the explicit "do not skip"
+    instruction so a paraphrase that drops the universality reverses
+    the policy."""
+    prompt = _default_prompt()
+    flat = " ".join(prompt.split())
+    lower = flat.lower()
+    # "Do NOT skip" / "uniform" — tolerate either phrasing.
+    assert (
+        "do not skip" in lower
+        or "uniform" in lower
+        or "every proposal" in lower
+    )
+
+
 def test_ideation_prompt_does_not_contain_a_manual_bullet():
     """Self-consistency: the ideation prompt itself MUST NOT use a
     `- Manual: ...` bullet anywhere. Catches accidental regression where

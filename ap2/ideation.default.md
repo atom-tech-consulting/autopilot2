@@ -237,8 +237,34 @@ Rank candidates by:
     to last month's)
 
 Propose the top 3 via board_edit (action: add_backlog) with a
-structured briefing. The daemon will pick them up automatically on the
-next tick — no human review gate. Do not add duplicates.
+structured briefing. Do not add duplicates.
+
+## Human-review gate (TB-121 — load-bearing)
+Every task you propose MUST be gated behind operator review before it
+dispatches. Pass `blocked_on: "review"` to every `board_edit({"action":
+"add_backlog", ...})` call you make this cycle — that lands the task
+with a `@blocked:review` codespan on its TASKS.md line (rendered shape:
+the literal phrase `blocked on: review` in the codespan). The board's
+`_is_blocker_satisfied("review")` returns False, so auto-promotion
+skips these tasks indefinitely until the operator runs `ap2 approve
+TB-N` (CLI) or asks the Mattermost handler to `approve TB-N` (chat).
+Both routes call the shared `_approve_review_token` helper, which
+strips the `review` token from the codespan; on the next tick the
+task auto-promotes through the normal Backlog → Ready dispatch path.
+
+This is the ONLY pipeline that creates work without a human at the
+keyboard (`ap2 add` is operator-driven; the MM handler is chat-driven;
+`migrate-to-ap2` runs once with operator intent). Without the gate, an
+ideation hallucination is one tick away from the daemon spending an
+hour committing code the operator never asked for. Verification gates
+don't catch this on their own — the task agent's verification bullets
+are your invention, so it'll satisfy them by definition.
+
+Do NOT skip the clause for "obvious" or "trivial" tasks. The operator
+decides what's trivial; ideation does not. The clause is uniform
+across every proposal you emit. List the tasks awaiting review in
+your `ideation_state.md` "Open questions for operator" section so the
+operator can find them quickly.
 
 ## Briefing requirements (load-bearing — TB-69 verifier reads these)
 Every briefing you write MUST include a `## Verification` section with

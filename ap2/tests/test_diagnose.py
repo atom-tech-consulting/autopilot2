@@ -178,6 +178,143 @@ def test_cron_status_overdue_detection(tmp_path: Path):
     assert by_name["status-report"]["overdue"] is True  # 5h > 4h (2 * 2h)
 
 
+# ---------------------------------------------------------------------------
+# TB-121: pending-review distinction. The board health check separates
+# `pending_review` (operator-approval gate; soft state) from
+# `unsatisfiable_blocks` (structural dead-end; hard state). Watchdog
+# uses `is_wholly_pending_review` to suppress auto-diagnose when every
+# Backlog task is review-gated and nothing else is in flight.
+
+def test_pending_review_distinct_from_unsatisfiable(tmp_path: Path):
+    """A Backlog task gated on `@blocked:review` lands in
+    `pending_review`, NOT `unsatisfiable_blocks`. A separate task
+    gated on a Frozen TB-N still lands in `unsatisfiable_blocks`."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    # Pending operator approval — soft state.
+    board.add(
+        "Backlog",
+        task_id="TB-200",
+        title="ideation proposal",
+        meta={"blocked": "review"},
+    )
+    # Hard state — gated on a Frozen TB-N that won't progress.
+    board.add("Frozen", task_id="TB-201", title="frozen blocker")
+    board.add(
+        "Backlog",
+        task_id="TB-202",
+        title="depends on frozen",
+        meta={"blocked": "TB-201"},
+    )
+    board.save()
+
+    report = diagnose.build_report(cfg)
+    assert report.board_health["pending_review"] == ["TB-200"]
+    assert report.board_health["unsatisfiable_blocks"] == ["TB-202"]
+
+
+def test_pending_review_mixed_blockers_count_as_unsatisfiable_when_other_dead(tmp_path: Path):
+    """A task with `review` AND a Frozen-TB-N blocker is still gated on
+    the structural deadlock, so the watchdog should flag it as
+    unsatisfiable rather than letting the soft-state bucket hide it."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Frozen", task_id="TB-301", title="frozen blocker")
+    board.add(
+        "Backlog",
+        task_id="TB-302",
+        title="mixed",
+        meta={"blocked": "review,TB-301"},
+    )
+    board.save()
+
+    report = diagnose.build_report(cfg)
+    # Not in pending_review (mixed blockers).
+    assert "TB-302" not in report.board_health["pending_review"]
+    # The TB-301 part of the mix triggers the unsatisfiable flag.
+    assert "TB-302" in report.board_health["unsatisfiable_blocks"]
+
+
+def test_is_wholly_pending_review_true_when_only_review_in_backlog(tmp_path: Path):
+    """Active=0, Ready=0, every Backlog task is review-only → True.
+    Drives the watchdog to suppress auto-diagnose."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog", task_id="TB-400", title="prop a",
+        meta={"blocked": "review"},
+    )
+    board.add(
+        "Backlog", task_id="TB-401", title="prop b",
+        meta={"blocked": "review"},
+    )
+    board.save()
+
+    report = diagnose.build_report(cfg)
+    assert diagnose.is_wholly_pending_review(report) is True
+
+
+def test_is_wholly_pending_review_false_when_active_has_work(tmp_path: Path):
+    """Even with all Backlog tasks review-gated, an Active task means
+    the daemon is doing work — not "operator AFK"."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-500", title="in flight")
+    board.add(
+        "Backlog", task_id="TB-501", title="prop",
+        meta={"blocked": "review"},
+    )
+    board.save()
+
+    report = diagnose.build_report(cfg)
+    assert diagnose.is_wholly_pending_review(report) is False
+
+
+def test_is_wholly_pending_review_false_when_unblocked_backlog_present(tmp_path: Path):
+    """A Backlog task with no blockers at all is auto-promotable, so
+    the gate is NOT the only thing holding the daemon back."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog", task_id="TB-600", title="prop",
+        meta={"blocked": "review"},
+    )
+    board.add("Backlog", task_id="TB-601", title="ungated")
+    board.save()
+
+    report = diagnose.build_report(cfg)
+    # TB-601 mixes into Backlog without a review token, so the
+    # "wholly pending review" classification doesn't fit.
+    assert diagnose.is_wholly_pending_review(report) is False
+
+
+def test_is_wholly_pending_review_false_for_empty_board(tmp_path: Path):
+    """Empty Backlog → no proposals → not pending review (it's just
+    idle). The watchdog falls through to its normal threshold check."""
+    cfg = _project(tmp_path)
+    report = diagnose.build_report(cfg)
+    assert diagnose.is_wholly_pending_review(report) is False
+
+
+def test_render_markdown_surfaces_pending_review_count(tmp_path: Path):
+    """The diagnose markdown surface lists pending-review count + the
+    `ap2 approve TB-N` suggestion so an operator skimming a watchdog
+    post can act without scrolling."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog", task_id="TB-700", title="prop",
+        meta={"blocked": "review"},
+    )
+    board.save()
+
+    report = diagnose.build_report(cfg)
+    text = diagnose.render_markdown(report)
+    assert "pending operator review" in text or "pending review" in text.lower()
+    assert "TB-700" in text
+    assert "ap2 approve" in text
+
+
 def test_meaningful_event_set_includes_resume_class():
     """Pin the resume-class events explicitly so a future trim doesn't drop
     the backward-compat guarantee for stoch."""

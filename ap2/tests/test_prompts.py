@@ -394,6 +394,33 @@ def test_mattermost_prompt_status_routing_steers_away_from_freeform_reply(tmp_pa
     assert "instead of composing your own reply" in p
 
 
+def test_mattermost_prompt_pins_approve_tb_n_recognition(tmp_path):
+    """TB-121: the MM handler agent must recognize "approve TB-N" as an
+    operator command and route it through `operator_queue_append` with
+    `op="approve"`. Pin the cross-reference, the recognized phrasing,
+    and the queue-routing instruction so a future prompt rewrite can't
+    silently drop the surface (which would force operators back to the
+    CLI for a chat-natural action)."""
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot approve TB-9",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Cross-ref and the queue routing.
+    assert "TB-121" in p
+    assert "approve" in p
+    assert "operator_queue_append" in p
+    # The op name + the codespan it strips are both named so the agent
+    # has the full mental model.
+    assert '"approve"' in p or "op=\"approve\"" in p
+    assert "@blocked:review" in p
+
+
 def test_status_report_run_in_mm_handler_toolset():
     """TB-144 + TB-145: the MCP tool must be available to the MM
     handler — operators ask for status whether a task is running or not.

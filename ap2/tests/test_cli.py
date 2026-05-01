@@ -304,6 +304,60 @@ def test_delete_unknown_task_returns_error(tmp_path: Path, capsys):
     assert "not on board" in capsys.readouterr().err
 
 
+# ---------------------------------------------------------------------------
+# TB-121: `ap2 status` shows the pending-review queue depth so an
+# operator can spot ideation proposals waiting on `ap2 approve` without
+# having to load /tasks?filter=pending-review.
+
+def test_status_shows_pending_review_count(tmp_path: Path, capsys):
+    """When N>0 pending-review tasks exist, status emits a `review:` line
+    naming the count and the action (`ap2 approve TB-N`)."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog", task_id="TB-700", title="prop a",
+        meta={"blocked": "review"},
+    )
+    board.add(
+        "Backlog", task_id="TB-701", title="prop b",
+        meta={"blocked": "review"},
+    )
+    board.save()
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "review:" in out
+    assert "2 ideation proposal" in out
+    assert "ap2 approve" in out
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["pending_review"] == 2
+
+
+def test_status_omits_pending_review_when_zero(tmp_path: Path, capsys):
+    """A clean board doesn't grow a `review: 0 pending` noise line. The
+    json output still carries `pending_review`: 0 for machine-parseability."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "review:" not in out
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["pending_review"] == 0
+
+
 # --------- TB-130: `ap2 status` reports the bundled web URL ---------
 
 

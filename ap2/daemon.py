@@ -2095,6 +2095,48 @@ def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
     if now - state.get("last_fired", 0.0) < cfg.auto_diagnose_cooldown_s:
         return
 
+    # TB-121: when every Backlog task is review-gated and nothing else is
+    # in flight, the daemon is correctly idle — operator approval is the
+    # only thing that can move work forward, so a "daemon idle, here's
+    # the diagnose dump" alert misdescribes the state. Post a softer
+    # one-liner reminder instead and reuse the diagnose cooldown so the
+    # operator isn't spammed.
+    if diagnose.is_wholly_pending_review(report):
+        channel = _first_mm_channel()
+        pending = report.board_health.get("pending_review") or []
+        ids_str = ", ".join(pending[:10])
+        reminder = (
+            f"**ap2 pending review** — `{cfg.project_root.name}` has "
+            f"{len(pending)} ideation proposal"
+            f"{'s' if len(pending) != 1 else ''} awaiting operator "
+            f"approval ({ids_str}). Run `ap2 approve TB-N` to dispatch, "
+            f"or `ap2 delete TB-N --force` to discard."
+        )
+        post_id: str | None = None
+        if channel:
+            try:
+                post_id = tools._mm_post(channel, reminder)
+            except Exception as e:  # noqa: BLE001
+                events.append(
+                    cfg.events_file,
+                    "auto_diagnose_post_error",
+                    channel=channel,
+                    error=f"{type(e).__name__}: {e}",
+                )
+                return
+        events.append(
+            cfg.events_file,
+            "pending_review_reminder",
+            channel=channel,
+            post_id=post_id,
+            pending=pending,
+            idle_s=report.since_last_activity_s,
+        )
+        state["last_fired"] = now
+        state["warned_no_destination"] = False
+        _save_diagnose_state(cfg, state)
+        return
+
     channel = _first_mm_channel()
     if not channel:
         # Without a destination there's nowhere to post. Warn ONCE per run

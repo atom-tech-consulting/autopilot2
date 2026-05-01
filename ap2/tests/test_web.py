@@ -35,6 +35,90 @@ def project(tmp_path: Path) -> Config:
     return cfg
 
 
+# --------- TB-121: pending-review pill + filter ---------
+
+
+def _project_with_review_gate(tmp_path: Path) -> Config:
+    """Synthetic project where Backlog has a `@blocked:review` task and
+    a plain task — exercises both the pill and the filter."""
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "- [ ] **TB-50** **proposal** `@blocked:review` — needs approval\n"
+        "- [ ] **TB-51** **regular** — no blockers\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+    return cfg
+
+
+def test_tasks_page_shows_pending_review_pill(tmp_path: Path):
+    """TB-121: a Backlog task with `@blocked:review` renders a `pending
+    review` pill so operators can spot the gate without reading the
+    raw codespan column."""
+    cfg = _project_with_review_gate(tmp_path)
+    html = web._render_tasks(cfg)
+    assert "pending review" in html
+    # The pill is on TB-50 (gated), NOT TB-51 (ungated). We crudely
+    # check that the pill text is in the same vicinity as TB-50 by
+    # asserting that TB-51's `<li>` doesn't carry the pill class.
+    assert "TB-50" in html
+    assert "TB-51" in html
+    # Two-step: split out the TB-51 list-item, ensure no pill.
+    li_tb51 = next(
+        chunk for chunk in html.split("<li>") if "TB-51" in chunk
+    )
+    assert "pending-review" not in li_tb51
+    li_tb50 = next(
+        chunk for chunk in html.split("<li>") if "TB-50" in chunk
+    )
+    assert "pending-review" in li_tb50
+
+
+def test_tasks_page_filter_pending_review_narrows(tmp_path: Path):
+    """`?filter=pending-review` restricts the page to review-gated
+    tasks. TB-50 must appear; TB-51 must not."""
+    cfg = _project_with_review_gate(tmp_path)
+    html = web._render_tasks(cfg, filter_kind="pending-review")
+    assert "TB-50" in html
+    assert "TB-51" not in html
+    # The filter chip is highlighted on the active filter.
+    assert 'href="/tasks?filter=pending-review"' in html
+
+
+def test_tasks_page_filter_bar_shown_unfiltered(tmp_path: Path):
+    """The filter bar is always rendered on `/tasks` so an operator can
+    jump straight to the review queue without typing the URL."""
+    cfg = _project_with_review_gate(tmp_path)
+    html = web._render_tasks(cfg)
+    assert 'href="/tasks?filter=pending-review"' in html
+    assert "pending review" in html
+
+
+def test_tasks_page_filter_empty_state(tmp_path: Path):
+    """When no tasks are pending review, the filter view says so
+    (instead of rendering an empty page that looks like a bug)."""
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "- [ ] **TB-1** **regular** — no blockers\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+    html = web._render_tasks(cfg, filter_kind="pending-review")
+    assert "no tasks pending review" in html.lower()
+
+
 def test_home_renders(project: Config):
     html = web._render_home(project)
     assert "<!DOCTYPE html>" in html

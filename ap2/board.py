@@ -277,6 +277,16 @@ class Board:
         """Per-scheme dispatch.
 
         - `TB-N` blockers are satisfied iff the id is in Complete.
+        - The `review` scheme (TB-121) is the human-review gate ideation
+          stamps onto every proposed task. It is NEVER satisfied while
+          present — the operator removes it via `ap2 approve TB-N`
+          (which routes through `_approve_review_token`), at which
+          point the task has no more `review` token in its `@blocked`
+          codespan and `Task.blocked_on` simply doesn't return it. So
+          this branch only fires while the gate is still active, and
+          always returns False. `diagnose._board_health` distinguishes
+          this case from `unsatisfiable_blocks` so the watchdog doesn't
+          conflate "operator AFK" with "daemon broken."
         - Unknown schemes fail-safe to "not satisfied" — silently dispatching
           on a typo would be worse than stranding the task until an operator
           fixes it. Includes the retired `pid:<N>@<TS>` scheme (TB-81 →
@@ -286,6 +296,8 @@ class Board:
         """
         if blocker.startswith("TB-"):
             return blocker in completed
+        if blocker.lower() == "review":
+            return False
         return False
 
     def _is_dispatchable(self, t: Task, completed: set[str]) -> bool:

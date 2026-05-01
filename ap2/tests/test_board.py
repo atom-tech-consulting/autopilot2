@@ -538,6 +538,109 @@ def test_codespan_blocker_dispatches_when_target_completes(tmp_path):
     assert t.id == "TB-3"
 
 
+# ---------------------------------------------------------------------------
+# TB-121: `review` blocker scheme — human-review gate on ideation proposals.
+
+def test_is_blocker_satisfied_review_returns_false(tmp_path):
+    """TB-121: the `review` scheme is the human-review gate. While the
+    token is on the codespan, `_is_blocker_satisfied` must return False
+    so auto-promotion skips the task. The operator strips the token via
+    `ap2 approve TB-N`; after that, `Task.blocked_on` no longer surfaces
+    `review`, so this branch isn't even reached for an approved task."""
+    path = _write_board(tmp_path, SAMPLE)
+    b = Board.load(path)
+    # Plain `review` token never satisfies — even with TB-9 in Complete.
+    assert b._is_blocker_satisfied("review", {"TB-9"}) is False
+    # Case-insensitive for paranoid producers.
+    assert b._is_blocker_satisfied("Review", set()) is False
+    assert b._is_blocker_satisfied("REVIEW", set()) is False
+
+
+def test_review_token_blocks_dispatch_in_ready(tmp_path):
+    """End-to-end: `@blocked:review` on a Ready task gates dispatch the
+    same way a TB-N blocker does. `next_ready` skips it."""
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        - [ ] **TB-3** **proposal** `@blocked:review` — ideation said so
+        - [ ] **TB-4** **standalone** — no blockers
+
+        ## Backlog
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    t = b.next_ready()
+    assert t is not None
+    # TB-3 is review-blocked → skipped; TB-4 dispatches.
+    assert t.id == "TB-4"
+
+
+def test_review_token_blocks_dispatch_in_backlog(tmp_path):
+    """A Backlog task whose only blocker is `review` is not auto-
+    promotable — `next_dispatchable("Backlog")` returns None when every
+    Backlog task has the review gate."""
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        ## Backlog
+
+        - [ ] **TB-5** **prop a** `@blocked:review` — ideation
+        - [ ] **TB-6** **prop b** `@blocked:review` — ideation
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    assert b.next_dispatchable("Backlog") is None
+
+
+def test_review_token_combined_with_tb_blocker(tmp_path):
+    """A task gated on BOTH `review` AND a `TB-N` is gated on both —
+    each token is individually checked. The review check is False until
+    stripped; the TB-N check is False until that id is in Complete."""
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        ## Backlog
+
+        - [ ] **TB-7** **mixed** `@blocked:review,TB-1` — ideation + dep
+
+        ## Complete
+
+        - [x] **TB-1** **dep** — done
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    # TB-1 is satisfied but `review` isn't, so the task stays put.
+    assert b.next_dispatchable("Backlog") is None
+
+
 def test_next_dispatchable_pid_blocker_strands_task(tmp_path):
     """TB-117: the retired `pid:N@TS` scheme always evaluates to "not
     satisfied" — any pre-TB-115 task whose Backlog line still carries

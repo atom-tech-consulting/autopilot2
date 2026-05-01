@@ -347,6 +347,8 @@ _CSS = """<style>
   .id { font-family: ui-monospace, monospace; color: #06c; font-weight: 500 }
   .tag { background: #eef; color: #338; padding: 0 0.3rem; border-radius: 3px;
          font-size: 11px; font-family: ui-monospace, monospace; margin-left: 0.3rem }
+  /* TB-121: amber pill for ideation proposals waiting on `ap2 approve`. */
+  .tag.pending-review { background: #fff1d6; color: #8a5a00 }
   /* TB-129: live task-run detail page row tints */
   tr.row-assistant td.type { color: #06c }
   tr.row-tool { background: #f3f8ff } tr.row-tool td.type { color: #048 }
@@ -514,8 +516,31 @@ def _events_table(evts: list[dict], *, cfg: Config | None = None) -> str:
     )
 
 
-def _tasks_list(board: Board, section: str, *, limit: int | None = None) -> str:
+def _is_pending_review(t) -> bool:
+    """True iff task `t`'s only structural blocker is the `review` scheme.
+
+    TB-121: ideation-proposed tasks land with `@blocked:review` to gate
+    on operator approval. The pill rendered next to the task on
+    `/tasks` keys off this — we don't show it for tasks that have a
+    `review` token MIXED with other blockers (those are gated on the
+    other blockers too, so promotion timing is dominated by them).
+    """
+    blocked = getattr(t, "blocked_on", []) or []
+    if not blocked:
+        return False
+    return all(b.lower() == "review" for b in blocked)
+
+
+def _tasks_list(
+    board: Board,
+    section: str,
+    *,
+    limit: int | None = None,
+    only_pending_review: bool = False,
+) -> str:
     tasks = list(board.iter_tasks(section=section))
+    if only_pending_review:
+        tasks = [t for t in tasks if _is_pending_review(t)]
     if limit is not None:
         tasks = tasks[-limit:]
     if not tasks:
@@ -524,9 +549,18 @@ def _tasks_list(board: Board, section: str, *, limit: int | None = None) -> str:
     for t in tasks:
         tags = "".join(f'<span class="tag">{html.escape(tg)}</span>' for tg in t.tags)
         desc = f' — <span class="meta">{html.escape(t.description)}</span>' if t.description else ""
+        # TB-121: surface the review-gate pill so operators triaging
+        # the board can spot ideation proposals without reading the
+        # codespan column. Same lightweight `<span class="tag">` shape
+        # tags use, just a distinct CSS hook for styling.
+        pill = (
+            ' <span class="tag pending-review">pending review</span>'
+            if _is_pending_review(t)
+            else ""
+        )
         items.append(
             f'<li><a class="id" href="/task/{html.escape(t.id)}">{html.escape(t.id)}</a> '
-            f"<strong>{html.escape(t.title)}</strong>{tags}{desc}</li>"
+            f"<strong>{html.escape(t.title)}</strong>{tags}{pill}{desc}</li>"
         )
     return f'<ul class="tasks">{"".join(items)}</ul>'
 
@@ -620,17 +654,71 @@ def _render_events(cfg: Config, *, typ: str | None, n: int) -> str:
     return _layout("events", body)
 
 
-def _render_tasks(cfg: Config) -> str:
+def _render_tasks(cfg: Config, *, filter_kind: str | None = None) -> str:
+    """Tasks page. `filter_kind="pending-review"` restricts every
+    section to tasks gated on the `review` scheme (TB-121). The default
+    rendering shows everything.
+    """
     board = Board.load(cfg.tasks_file)
+    only_review = filter_kind == "pending-review"
+
+    # Filter bar: link to the unfiltered view, link to pending-review
+    # only. TB-121: this is the operator's "what's in my review queue"
+    # surface — separate from `/events` and the home page so the
+    # board-state read is one click and one URL.
+    pending_total = sum(
+        1 for t in board.iter_tasks() if _is_pending_review(t)
+    )
+    filt_parts = ['<div class="filter">filter:']
+    cls_all = "" if only_review else "on"
+    cls_review = "on" if only_review else ""
+    filt_parts.append(f' <a href="/tasks" class="{cls_all}">all</a>')
+    filt_parts.append(
+        f' <a href="/tasks?filter=pending-review" class="{cls_review}">'
+        f"pending review ({pending_total})</a>"
+    )
+    filt_parts.append("</div>")
+    filt = "".join(filt_parts)
+
     sections_html = []
     for s, limit in (("Active", None), ("Ready", None), ("Backlog", None),
                      ("Pipeline Pending", None),
                      ("Complete", 30), ("Frozen", None)):
-        label = f"{s} <span class=\"meta\">({sum(1 for _ in board.iter_tasks(section=s))} total)</span>"
-        if limit is not None:
+        # In pending-review filter mode, only Backlog can plausibly
+        # carry the gate (ideation only adds there) — but we don't
+        # short-circuit other sections; if a `@blocked:review` token
+        # somehow ends up in Active/Ready it's worth showing.
+        section_iter = board.iter_tasks(section=s)
+        if only_review:
+            tasks_in_section = [t for t in section_iter if _is_pending_review(t)]
+            count = len(tasks_in_section)
+            # Skip empty sections in filter mode to keep the page focused.
+            if count == 0:
+                continue
+        else:
+            count = sum(1 for _ in board.iter_tasks(section=s))
+        label = f"{s} <span class=\"meta\">({count} total)</span>"
+        if limit is not None and not only_review:
             label += f" <span class=\"meta\">— last {limit}</span>"
-        sections_html.append(f"<h2>{label}</h2>{_tasks_list(board, s, limit=limit)}")
-    body = "<h1>tasks</h1>" + "".join(sections_html)
+        sections_html.append(
+            f"<h2>{label}</h2>"
+            f"{_tasks_list(board, s, limit=None if only_review else limit, only_pending_review=only_review)}"
+        )
+    if only_review and not sections_html:
+        sections_html.append(
+            "<p><em>(no tasks pending review — ideation proposals are "
+            "either approved, deleted, or none have been authored yet)</em></p>"
+        )
+    body = (
+        "<h1>tasks"
+        + (
+            ' <span class="meta">— filter: pending review</span>'
+            if only_review
+            else ""
+        )
+        + f"</h1>{filt}"
+        + "".join(sections_html)
+    )
     return _layout("tasks", body)
 
 
@@ -1375,7 +1463,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 n = max(1, min(n, 5000))
                 body = _render_events(self.cfg, typ=typ, n=n)
             elif path == "/tasks":
-                body = _render_tasks(self.cfg)
+                # TB-121: ?filter=pending-review narrows to ideation
+                # proposals awaiting operator approval.
+                f_kind = qs.get("filter", [None])[0]
+                body = _render_tasks(self.cfg, filter_kind=f_kind)
             elif path.startswith("/task/"):
                 tb_id = path[len("/task/"):]
                 body = _render_task(self.cfg, tb_id)

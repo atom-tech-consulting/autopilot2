@@ -92,6 +92,30 @@ class DiagnoseReport:
     board_health: dict[str, Any]
 
 
+def is_wholly_pending_review(report: "DiagnoseReport") -> bool:
+    """True iff the only Backlog/Ready/Active task content is review-gated.
+
+    TB-121: the watchdog uses this to distinguish "operator AFK with
+    proposals waiting" from "daemon broken." Returned True when:
+    - Active and Ready are empty (nothing in flight, nothing about to
+      dispatch), AND
+    - Backlog is non-empty, AND every Backlog task is in `pending_review`
+      (i.e. its only blocker is the `review` scheme).
+
+    The watchdog's `_maybe_auto_diagnose` consults this BEFORE the
+    cooldown / threshold logic so a project with N proposals queued for
+    days doesn't get pinged with a "daemon idle for hours" diagnose when
+    the obvious action is `ap2 approve` (or `ap2 delete`). A separate,
+    softer `pending_review_reminder` event handles that surface.
+    """
+    bs = report.board_summary
+    if bs.get("Active", 0) or bs.get("Ready", 0):
+        return False
+    pending = report.board_health.get("pending_review") or []
+    backlog = bs.get("Backlog", 0)
+    return bool(pending) and len(pending) == backlog
+
+
 def build_report(
     cfg: Config,
     *,
@@ -161,6 +185,17 @@ def render_markdown(report: DiagnoseReport) -> str:
     if health.get("unsatisfiable_blocks"):
         ids = ", ".join(health["unsatisfiable_blocks"][:5])
         health_lines.append(f"- unsatisfiable Backlog blockers: {ids}")
+    if health.get("pending_review"):
+        # TB-121: pending operator approval is a soft state — operator-
+        # actionable but not a daemon health issue. Surfaced so the
+        # watchdog summary names the queue depth rather than just
+        # showing zero recent activity.
+        ids = ", ".join(health["pending_review"][:5])
+        n = len(health["pending_review"])
+        health_lines.append(
+            f"- pending operator review: {n} task"
+            f"{'s' if n != 1 else ''} ({ids}) — `ap2 approve TB-N`"
+        )
     if health.get("frozen_retry_exhausted"):
         ids = ", ".join(health["frozen_retry_exhausted"][:5])
         health_lines.append(f"- Frozen via retry_exhausted: {ids}")
@@ -280,13 +315,32 @@ def _board_health(board: Board | None, events_tail: list[dict]) -> dict[str, Any
     if board is None:
         return {"malformed_lines": [],
                 "unsatisfiable_blocks": [],
+                "pending_review": [],
                 "frozen_retry_exhausted": []}
 
     completed = board.completed_ids()
     frozen_ids = {t.id for t in board.iter_tasks("Frozen")}
+    # TB-121: tasks gated on the human-review clause are pending operator
+    # approval, NOT structurally unsatisfiable. Surfaced as a separate
+    # bucket so the watchdog can distinguish "operator AFK" (pending
+    # review accumulating) from "daemon broken" (real unsatisfiable
+    # blocker chains). Watchdog logic: when EVERY Backlog blocker is the
+    # `review` scheme, suppress auto-diagnose and post a softer "N
+    # ideation proposals pending review" reminder instead.
+    pending_review: list[str] = []
     unsatisfiable: list[str] = []
     for t in board.iter_tasks("Backlog"):
+        review_only = bool(t.blocked_on) and all(
+            b.lower() == "review" for b in t.blocked_on
+        )
+        if review_only:
+            pending_review.append(t.id)
+            continue
         for blocker in t.blocked_on:
+            # Skip the review token in mixed-blocker tasks — that part
+            # of the gate is operator-controlled, not unsatisfiable.
+            if blocker.lower() == "review":
+                continue
             if blocker not in completed and blocker in frozen_ids:
                 unsatisfiable.append(t.id)
                 break
@@ -307,6 +361,7 @@ def _board_health(board: Board | None, events_tail: list[dict]) -> dict[str, Any
     return {
         "malformed_lines": list(board.malformed_lines),
         "unsatisfiable_blocks": unsatisfiable,
+        "pending_review": pending_review,
         "frozen_retry_exhausted": frozen_exhausted,
     }
 
