@@ -118,7 +118,7 @@ def test_board_health_surfaces_malformed_lines(tmp_path: Path):
 
 
 def test_board_health_detects_unsatisfiable_block(tmp_path: Path):
-    """A Backlog task `(blocked on: TB-X)` where TB-X is in Frozen will never
+    """A Backlog task with `@blocked:TB-X` where TB-X is in Frozen will never
     auto-promote — the watchdog must call this out as a stalled blocker."""
     cfg = _project(tmp_path)
     board = Board.load(cfg.tasks_file)
@@ -127,7 +127,7 @@ def test_board_health_detects_unsatisfiable_block(tmp_path: Path):
         "Backlog",
         task_id="TB-91",
         title="Stalled task",
-        description="(blocked on: TB-90)",
+        meta={"blocked": "TB-90"},
     )
     board.save()
 

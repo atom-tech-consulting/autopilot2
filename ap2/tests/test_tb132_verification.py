@@ -123,53 +123,29 @@ def test_render_emits_blocked_codespan_after_tags_before_emdash_round_trip_byte_
 
 
 # ---------------------------------------------------------------------------
-# Bullet 4 — Legacy `(blocked on: TB-5)` clause keeps parsing under
-# transition fallback so existing tasks aren't broken.
+# Bullet 5 — TB-121's exact prose parses to `blocked_on == []` (original
+# failure mode is gone). The legacy `(blocked on: ...)` description-regex
+# fallback was dropped after the in-flight backlog finished migrating to
+# the codespan format; description prose no longer registers as blockers.
 
-def test_legacy_blocked_clause_in_description_still_parses_under_transition_fallback():
-    """A task with only legacy `(blocked on: TB-5)` in description (no
-    codespan) keeps parsing as blocked under the transition fallback,
-    so existing tasks aren't broken."""
-    # Default-on transition fallback — pre-TB-132 tasks keep working.
-    assert Task.legacy_blocked_fallback is True
-    t = Task(
-        id="TB-2",
-        title="t",
-        section="Backlog",
-        description="depends (blocked on: TB-5)",
-    )
-    assert t.blocked_on == ["TB-5"]
-
-
-# ---------------------------------------------------------------------------
-# Bullet 5 — TB-121's exact prose parses to `blocked_on == []` when the
-# legacy fallback is dropped (original failure mode is gone).
-
-def test_TB121_descriptive_prose_yields_empty_blocked_on_when_legacy_fallback_dropped():
+def test_TB121_descriptive_prose_yields_empty_blocked_on():
     """TB-121's exact prose (description containing `(blocked on: review)`
     as descriptive text, no `@blocked` codespan) parses with
-    `blocked_on == []` once the legacy fallback is dropped — the
-    original failure mode no longer happens."""
-    saved = Task.legacy_blocked_fallback
-    Task.legacy_blocked_fallback = False
-    try:
-        t = Task(
-            id="TB-121",
-            title="Gate ideation-proposed tasks behind human review",
-            section="Backlog",
-            description=(
-                "Stop the daemon from autonomously dispatching tasks "
-                "ideation just invented. Ideation emits each proposed "
-                "task with (blocked on: review); auto-promotion already "
-                "skips blocked tasks."
-            ),
-        )
-        # The prose contains "(blocked on: review)" verbatim. Without
-        # the legacy fallback, the codespan-only parser sees no
-        # blockers and returns []. TB-121 would have auto-promoted.
-        assert t.blocked_on == []
-    finally:
-        Task.legacy_blocked_fallback = saved
+    `blocked_on == []`. Pre-TB-132 the legacy regex auto-blocked
+    TB-121 on the non-existent token `review`. Codespan-only parsing
+    closes the failure mode."""
+    t = Task(
+        id="TB-121",
+        title="Gate ideation-proposed tasks behind human review",
+        section="Backlog",
+        description=(
+            "Stop the daemon from autonomously dispatching tasks "
+            "ideation just invented. Ideation emits each proposed "
+            "task with (blocked on: review); auto-promotion already "
+            "skips blocked tasks."
+        ),
+    )
+    assert t.blocked_on == []
 
 
 # ---------------------------------------------------------------------------

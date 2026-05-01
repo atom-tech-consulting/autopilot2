@@ -329,7 +329,7 @@ def test_tick_auto_promote_skips_blocked_backlog_task(e2e_project):
         "Backlog",
         task_id="TB-7",
         title="Depends on TB-99",
-        description="(blocked on: TB-99)",
+        meta={"blocked": "TB-99"},
     )
     board.add("Backlog", task_id="TB-8", title="Clear path")
     board.save()

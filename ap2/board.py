@@ -21,7 +21,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Iterator
+from typing import Iterator
 
 SECTIONS = ["Active", "Ready", "Backlog", "Pipeline Pending", "Complete", "Frozen"]
 SECTION_RE = re.compile(
@@ -48,19 +48,6 @@ TASK_LINE_RE = re.compile(
 _TAG_SPAN_RE = re.compile(r"`(#[^`]+)`")
 _META_SPAN_RE = re.compile(r"`@([A-Za-z][A-Za-z0-9_]*):([^`]*)`")
 
-# Legacy `(blocked on: ...)` description clause — kept ONLY as a transition
-# fallback for tasks authored before the `@blocked:...` codespan format
-# landed (TB-132). New tasks should set `meta['blocked']` via the codespan;
-# `Task.legacy_blocked_fallback = False` disables this fallback so prose
-# like TB-121's "(blocked on: review)" descriptive text never registers as
-# a structural blocker. Drop the regex entirely once the in-flight backlog
-# has migrated.
-_BLOCKED_CLAUSE_RE = re.compile(r"\(blocked on:\s*([^)]+)\)", re.IGNORECASE)
-# Token splitter: comma OR `and` (case-insensitive) so natural-language phrases
-# like "TB-5 and TB-7" still parse. Whitespace-only fragments are dropped.
-_BLOCKED_TOKEN_SPLIT_RE = re.compile(r",|\band\b", re.IGNORECASE)
-
-
 @dataclass
 class Task:
     id: str  # e.g. "TB-42"
@@ -78,14 +65,6 @@ class Task:
     checked: bool = False
     raw: str = ""  # original line for lossless preservation
 
-    # Class-level toggle for the legacy `(blocked on: ...)` description-
-    # regex fallback. Kept True so existing tasks (authored pre-TB-132)
-    # still parse blockers from prose; flip to False to verify the
-    # original auto-block-on-prose failure mode is gone (the briefing's
-    # TB-121 test case). Drop the entire fallback once every in-flight
-    # blocker has migrated to the `@blocked:...` codespan.
-    legacy_blocked_fallback: ClassVar[bool] = True
-
     @property
     def num(self) -> int:
         return int(self.id.split("-")[1])
@@ -101,29 +80,13 @@ class Task:
         declared, so the dependency check is a no-op for tasks that
         don't explicitly declare any.
 
-        TB-132 transition: if the codespan is absent and
-        `Task.legacy_blocked_fallback` is True (the default), fall back
-        to the historical `(blocked on: ...)` description regex so
-        existing tasks aren't broken. Disable the fallback (test-only)
-        to verify TB-121's prose ("(blocked on: review)" as descriptive
-        text) no longer registers as a blocker.
+        Closes TB-132's transition: the legacy `(blocked on: ...)`
+        description-regex fallback was kept around for migration; it's
+        gone now. Prose like TB-121's "(blocked on: review)" no longer
+        registers as a structural blocker.
         """
-        if "blocked" in self.meta:
-            return [
-                tok.strip()
-                for tok in self.meta["blocked"].split(",")
-                if tok.strip()
-            ]
-        if not Task.legacy_blocked_fallback:
-            return []
-        m = _BLOCKED_CLAUSE_RE.search(self.description)
-        if not m:
-            return []
-        return [
-            tok.strip()
-            for tok in _BLOCKED_TOKEN_SPLIT_RE.split(m.group(1))
-            if tok.strip()
-        ]
+        raw = self.meta.get("blocked", "")
+        return [tok.strip() for tok in raw.split(",") if tok.strip()]
 
     def render(self) -> str:
         check = "x" if self.checked else " "

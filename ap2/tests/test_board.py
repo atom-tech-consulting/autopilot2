@@ -128,36 +128,34 @@ def test_roundtrip_preserves_sections(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Dependency enforcement: `(blocked on: TB-X)` in description gates promotion
+# Dependency enforcement: `@blocked:TB-X,...` codespan on the task line gates promotion
 
-def _make(task_id: str, section: str, description: str = "") -> "Task":  # noqa: F821
+def _make(task_id: str, section: str, *, blocked: str = "", description: str = "") -> "Task":  # noqa: F821
     from ap2.board import Task
-    return Task(id=task_id, title="t", section=section, description=description)
+    meta = {"blocked": blocked} if blocked else {}
+    return Task(
+        id=task_id, title="t", section=section,
+        description=description, meta=meta,
+    )
 
 
 def test_blocked_on_single_id():
-    t = _make("TB-2", "Backlog", "needs this (blocked on: TB-5)")
+    t = _make("TB-2", "Backlog", blocked="TB-5")
     assert t.blocked_on == ["TB-5"]
 
 
 def test_blocked_on_multiple_ids_comma_separated():
-    t = _make("TB-2", "Backlog", "x (blocked on: TB-5, TB-7, TB-12) y")
+    t = _make("TB-2", "Backlog", blocked="TB-5,TB-7,TB-12")
     assert t.blocked_on == ["TB-5", "TB-7", "TB-12"]
 
 
-def test_blocked_on_case_insensitive_and_natural_language():
-    # Humans might type "Blocked on: TB-5 and TB-7" — should still parse.
-    t = _make("TB-2", "Backlog", "(Blocked on: TB-5 and TB-7)")
-    assert t.blocked_on == ["TB-5", "TB-7"]
-
-
-def test_blocked_on_empty_when_no_clause():
-    t = _make("TB-2", "Backlog", "plain description, no blockers here")
+def test_blocked_on_empty_when_no_meta():
+    t = _make("TB-2", "Backlog", description="plain description, no blockers here")
     assert t.blocked_on == []
 
 
 def test_blocked_on_empty_for_no_description():
-    t = _make("TB-2", "Backlog", "")
+    t = _make("TB-2", "Backlog")
     assert t.blocked_on == []
 
 
@@ -170,7 +168,7 @@ def test_next_ready_skips_blocked_task(tmp_path):
 
         ## Ready
 
-        - [ ] **TB-3** **needs TB-1** — go next after (blocked on: TB-1)
+        - [ ] **TB-3** **needs TB-1** `@blocked:TB-1` — go next after blocker clears
         - [ ] **TB-4** **standalone** — no blockers
 
         ## Backlog
@@ -197,7 +195,7 @@ def test_next_ready_returns_blocked_task_once_blocker_completes(tmp_path):
 
         ## Ready
 
-        - [ ] **TB-3** **depends** — needs it (blocked on: TB-1)
+        - [ ] **TB-3** **depends** `@blocked:TB-1` — needs the blocker
 
         ## Backlog
 
@@ -226,7 +224,7 @@ def test_next_dispatchable_backlog_skips_blocked(tmp_path):
 
         ## Backlog
 
-        - [ ] **TB-5** **first** — wants it (blocked on: TB-99)
+        - [ ] **TB-5** **first** `@blocked:TB-99` — wants a never-completing blocker
         - [ ] **TB-6** **second** — clear path
 
         ## Complete
@@ -250,8 +248,8 @@ def test_next_dispatchable_returns_none_when_all_blocked(tmp_path):
 
         ## Ready
 
-        - [ ] **TB-3** **a** — (blocked on: TB-99)
-        - [ ] **TB-4** **b** — (blocked on: TB-99)
+        - [ ] **TB-3** **a** `@blocked:TB-99` — never-completing blocker
+        - [ ] **TB-4** **b** `@blocked:TB-99` — also blocked
 
         ## Backlog
 
@@ -283,7 +281,7 @@ def test_malformed_complete_line_is_surfaced(tmp_path):
 
         ## Backlog
 
-        - [ ] **TB-10** **needs TB-9** — (blocked on: TB-9)
+        - [ ] **TB-10** **needs TB-9** `@blocked:TB-9` — gated on TB-9
 
         ## Complete
 
@@ -359,16 +357,12 @@ def test_clean_board_has_no_malformed_lines(tmp_path):
 # `<scheme>:<value>` schemes (currently `pid:<N>@<TS>`).
 
 def test_blocked_on_returns_pid_scheme_token():
-    t = _make("TB-2", "Backlog", "(blocked on: pid:12345@1700000000)")
+    t = _make("TB-2", "Backlog", blocked="pid:12345@1700000000")
     assert t.blocked_on == ["pid:12345@1700000000"]
 
 
 def test_blocked_on_returns_mixed_tb_and_pid_tokens():
-    t = _make(
-        "TB-2",
-        "Backlog",
-        "(blocked on: TB-5, pid:99@1700000000)",
-    )
+    t = _make("TB-2", "Backlog", blocked="TB-5,pid:99@1700000000")
     assert t.blocked_on == ["TB-5", "pid:99@1700000000"]
 
 
@@ -459,55 +453,29 @@ def test_render_emits_meta_after_tags_before_emdash():
     assert t2.render() == expected
 
 
-def test_legacy_blocked_clause_still_parses_under_transition_fallback():
-    """TB-132 transition: a task with only the legacy `(blocked on: TB-5)`
-    clause in its description (no `@blocked:` codespan) must still
-    parse as blocked, so existing pre-codespan tasks keep working
-    until they're migrated. Drop this fallback (and this test) once
-    the in-flight backlog has fully migrated."""
-    from ap2.board import Task
-
-    assert Task.legacy_blocked_fallback is True, (
-        "transition fallback should default-on so existing tasks aren't "
-        "broken when TB-132 lands"
-    )
-    t = Task(
-        id="TB-2",
-        title="t",
-        section="Backlog",
-        description="depends (blocked on: TB-5)",
-    )
-    assert t.blocked_on == ["TB-5"]
-
-
-def test_tb121_prose_does_not_block_when_legacy_fallback_dropped():
+def test_tb121_prose_does_not_block():
     """TB-132's specific failure-mode test: TB-121's exact prose contains
     `(blocked on: review)` as descriptive text (the design literally
-    quoted the proposed clause syntax). Under the legacy regex, that
-    prose auto-blocked TB-121 on the non-existent token `review` and
-    stranded it in Backlog forever. With the legacy fallback dropped,
-    a task whose only blocker signal is the description prose now
-    parses with `blocked_on == []` — the original failure mode is
-    gone."""
+    quoted the proposed clause syntax). Pre-TB-132 the legacy regex
+    auto-blocked TB-121 on the non-existent token `review` and stranded
+    it in Backlog forever. With TB-132's codespan format now exclusive
+    (the legacy fallback was dropped after the in-flight backlog
+    migrated), a task whose only blocker signal is the description prose
+    parses with `blocked_on == []`."""
     from ap2.board import Task
 
-    saved = Task.legacy_blocked_fallback
-    Task.legacy_blocked_fallback = False
-    try:
-        t = Task(
-            id="TB-121",
-            title="Gate ideation-proposed tasks behind human review",
-            section="Backlog",
-            description=(
-                "Stop the daemon from autonomously dispatching tasks "
-                "ideation just invented. Ideation emits each proposed "
-                "task with (blocked on: review); auto-promotion already "
-                "skips blocked tasks."
-            ),
-        )
-        assert t.blocked_on == []
-    finally:
-        Task.legacy_blocked_fallback = saved
+    t = Task(
+        id="TB-121",
+        title="Gate ideation-proposed tasks behind human review",
+        section="Backlog",
+        description=(
+            "Stop the daemon from autonomously dispatching tasks "
+            "ideation just invented. Ideation emits each proposed "
+            "task with (blocked on: review); auto-promotion already "
+            "skips blocked tasks."
+        ),
+    )
+    assert t.blocked_on == []
 
 
 def test_codespan_blocker_skipped_when_target_incomplete(tmp_path):
@@ -584,7 +552,7 @@ def test_next_dispatchable_pid_blocker_strands_task(tmp_path):
 
         ## Backlog
 
-        - [ ] **TB-5** **validate** — runs after the pipeline (blocked on: pid:12345@1700000000)
+        - [ ] **TB-5** **validate** `@blocked:pid:12345@1700000000` — runs after the pipeline
 
         ## Pipeline Pending
 
