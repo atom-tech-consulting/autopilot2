@@ -43,3 +43,10 @@ The check has no way to distinguish operator-driven mutations from agent mutatio
 - TB-120's kernel-level fence (still frozen; this is the cheaper application-layer fix).
 - Generalizing the violation check to "ignore any operator-authored mutation" — would require tracking authorship per file change, which is more complex than just narrowing the fenced list.
 - Auto-detecting that the agent forged a queue record (the design relies on uuid + state-file matching; a forged record wouldn't drain). If forgery becomes a real concern, file separately.
+## Attempts
+
+### 2026-05-01 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `! grep -qE "operator_queue\\.jsonl" ap2/tools.py | head -50` covering the fenced-paths tuple — confirm queue.jsonl is n
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T025509Z-TB-141.prompt.md`, `stream: .cc-autopilot/debug/20260501T025509Z-TB-141.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T025509Z-TB-141.messages.jsonl`
