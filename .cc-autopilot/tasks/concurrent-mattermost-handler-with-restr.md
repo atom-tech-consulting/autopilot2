@@ -245,3 +245,8 @@ concrete need for the full set.
 - **exit_code:** 1
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T233625Z-TB-122.prompt.md`, `stream: .cc-autopilot/debug/20260430T233625Z-TB-122.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T233625Z-TB-122.messages.jsonl`
+### 2026-05-01 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] Manual: kick a long-running task on stoch, mention `@claude-bot status` → handler replies in <30s.
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260430T235317Z-TB-122.prompt.md`, `stream: .cc-autopilot/debug/20260430T235317Z-TB-122.stream.jsonl`, `messages: .cc-autopilot/debug/20260430T235317Z-TB-122.messages.jsonl`
