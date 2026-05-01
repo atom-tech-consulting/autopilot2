@@ -95,3 +95,9 @@
 - **Summary:** TB-122 implementation already shipped in 5ebfae8 (main_loop → _main_tick_loop + _mm_loop, MM_HANDLER_TOOLS_RESTRICTED gate while a task is Active, asyncio.create_task per mention, toolset='restricted'|'full' on mattermost events, README + architecture docs); the only outstanding bullet was the TB-138-converted manual-stoch responsiveness gate, which this commit closes by adding test_mattermost_reply_lands_within_30s_of_mention_during_long_task to ap2/tests/e2e/test_concurrent_mm.py — drives a slow task responder + fast handler responder, captures the mention's enqueue timestamp, asserts the resulting mattermost_reply event lands within 30s, and pins toolset='restricted' so the in-flight branch is actually exercised; uv run pytest -q ap2/tests/ → 639 passed.
 - **Files:** ap2/tests/e2e/test_concurrent_mm.py
 - **Tests:** pass
+
+## [2026-05-01] TB-139: Embed source timestamp in ap2 --version output
+- **Commit:** `5805224`
+- **Summary:** Added ap2.get_version() (base + PEP 440 local-version `+<short-sha>.<commit-ts>` from git log -1 on the package's own checkout, empty suffix when no .git/), wired through ap2 --version, ap2 status (text + JSON), and the daemon's daemon_start event (extracted to _emit_daemon_start for testability); 7 new unit tests cover both git-repo and non-git fallback paths plus parity between CLI/status/daemon-event strings; full regression gate `uv run pytest -q ap2/tests/` passes (646 passed in 71.86s).
+- **Files:** ap2/__init__.py, ap2/cli.py, ap2/daemon.py, ap2/tests/test_cli.py
+- **Tests:** pass
