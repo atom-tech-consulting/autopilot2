@@ -9,6 +9,7 @@
 ## Backlog
 
 - [ ] **TB-121** **Gate ideation-proposed tasks behind human review before dispatch** `#autopilot` `#ideation` `#safety` — Stop the daemon from autonomously dispatching tasks ideation just invented. Ideation emits each proposed task with (blocked on: review); auto-promotion already skips blocked tasks. New 'ap2 approve TB-N' CLI strips the clause atomically. Watchdog learns to distinguish 'pending review' from 'daemon broken'. Reuses existing blocker-clause primitive instead of adding a 7th board section or overloading #proposed. [→ brief](.cc-autopilot/tasks/gate-ideation-proposed-tasks-behind-huma.md)
+- [ ] **TB-139** **Embed source timestamp in ap2 --version output** `#autopilot` `#version` `#observability` [→ brief](.cc-autopilot/tasks/embed-source-timestamp-in-ap2-version-ou.md)
 
 ## Pipeline Pending
 
