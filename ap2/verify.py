@@ -217,9 +217,24 @@ def _run_shell_bullet(
     assert bullet.kind == "shell"
     assert bullet.command is not None
     try:
+        # TB-147: pin the shell to /bin/bash. `subprocess.run(shell=True)` on
+        # POSIX defaults to /bin/sh — bash-in-POSIX-mode on macOS (no process
+        # substitution), dash on Debian-family (no `[[ ]]`, no arrays, no
+        # process substitution). Bullet authors — humans and LLMs alike —
+        # invariably write bash: `<(python3 -c ...)` for "compare against a
+        # script's output", `[[ -f path ]]` for file checks, `set -o
+        # pipefail`, etc. We've burned multiple briefings (TB-142..146) on
+        # bash-only bullets that were correct under any developer shell but
+        # tripped sh's parser before reaching the command. Aligning the
+        # verifier with bash eliminates that whole class of self-inflicted
+        # retry-exhaustion. macOS and every common Linux ship /bin/bash by
+        # default; CI environments without it would already be broken on
+        # operator scripts and aren't a target. Do NOT revert to /bin/sh
+        # for "more portable" without re-reading TB-147's rationale.
         proc = subprocess.run(
             bullet.command,
             shell=True,
+            executable="/bin/bash",
             cwd=str(project_root),
             capture_output=True,
             text=True,

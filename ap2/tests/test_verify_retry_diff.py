@@ -581,3 +581,84 @@ def test_judge_prompt_instructs_to_treat_working_tree_as_authoritative():
     assert "authoritative" in lower
     assert "working tree" in lower
     assert "grep" in lower or "glob" in lower
+
+
+# ---------------------------------------------------------------------------
+# _run_shell_bullet — TB-147: shell bullets execute under /bin/bash, not
+# /bin/sh. Without this override, common bash-only constructs (process
+# substitution, `[[ ]]`, arrays, `set -o pipefail`) fail at the parser stage
+# under sh (bash-in-POSIX-mode on macOS, dash on Debian-family Linux). Bullet
+# authors invariably write bash; the verifier should match.
+# ---------------------------------------------------------------------------
+
+
+def _shell_bullet(cmd: str):
+    """Build a VerifyBullet that `_run_shell_bullet` will execute as `cmd`."""
+    from ap2.verify import VerifyBullet
+
+    return VerifyBullet(kind="shell", text=f"`{cmd}`", command=cmd)
+
+
+def test_run_shell_bullet_supports_process_substitution(tmp_path: Path):
+    """`<(...)` is bash's process substitution. Under /bin/sh on macOS
+    (bash-in-POSIX-mode) it fails with `syntax error near unexpected token
+    '('`; under dash (Debian /bin/sh) it isn't implemented at all. With the
+    /bin/bash override, the same bullet parses and runs cleanly to exit 0.
+    Pins the bash override at the call site.
+    """
+    from ap2.verify import _run_shell_bullet
+
+    bullet = _shell_bullet("diff <(echo a) <(echo a)")
+    result = _run_shell_bullet(bullet, project_root=tmp_path, timeout_s=30)
+    assert result.status == "pass", (
+        f"process substitution failed: notes={result.notes!r}; "
+        "regression — verifier may have reverted to /bin/sh"
+    )
+
+
+def test_run_shell_bullet_supports_double_bracket_conditional(tmp_path: Path):
+    """`[[ ... ]]` is bash's extended test expression. POSIX sh parses `[[`
+    as a command name, so it exits 127 (`[[: not found`). With the bash
+    override, `[[ -d <existing_dir> ]]` returns 0.
+    """
+    from ap2.verify import _run_shell_bullet
+
+    (tmp_path / "marker").mkdir()
+    bullet = _shell_bullet("[[ -d marker ]]")
+    result = _run_shell_bullet(bullet, project_root=tmp_path, timeout_s=30)
+    assert result.status == "pass", (
+        f"[[ ]] conditional failed: notes={result.notes!r}; "
+        "regression — verifier may have reverted to /bin/sh"
+    )
+
+
+def test_run_shell_bullet_still_fails_on_genuine_command_error(tmp_path: Path):
+    """Belt-and-suspenders: bash isn't covering for an actual non-zero exit.
+    A bullet that deliberately exits 1 must still return `fail` — the bash
+    override only fixes shell-parser surprises, not command semantics.
+    """
+    from ap2.verify import _run_shell_bullet
+
+    bullet = _shell_bullet("python3 -c 'raise SystemExit(1)'")
+    result = _run_shell_bullet(bullet, project_root=tmp_path, timeout_s=30)
+    assert result.status == "fail"
+    assert "exit=1" in result.notes
+
+
+def test_run_shell_bullet_call_site_pins_bin_bash_executable():
+    """Defense in depth: pin the literal `executable="/bin/bash"` argument
+    in the call site so a maintainer can't silently drop it (a la "let's
+    make this more portable"). The behavioral tests above catch a dropped
+    override on bash-only constructs, but they'd silently pass on a system
+    where /bin/sh happens to be a recent bash and not POSIX-mode (some
+    Linux distros symlink /bin/sh -> /bin/bash). This test pins the source.
+    """
+    import inspect
+
+    from ap2 import verify
+
+    src = inspect.getsource(verify._run_shell_bullet)
+    assert 'executable="/bin/bash"' in src, (
+        "regression: TB-147's /bin/bash override is missing from "
+        "_run_shell_bullet — bash-only bullets will fail under sh"
+    )
