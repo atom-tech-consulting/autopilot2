@@ -89,3 +89,9 @@
 - **Summary:** Added the "auto-verifiable bullets only — no `Manual:` steps" rule at every briefing-authoring layer (ap2/ideation.default.md, skills/ap2-task/SKILL.md, skills/migrate-to-ap2/SKILL.md, ap2/init.py:BRIEFING_TEMPLATE), citing TB-122 as the canonical Manual→stubbed-e2e conversion example; added non-fatal `ap2 check` warning for `Manual:`/`[manual]` bullets inside `## Verification` (already surfaces a real hit in TB-121's briefing); pinned the prompt rule + template + lint behavior with 7 new unit tests across test_ideation_defaults.py and test_check.py; full regression gate `uv run pytest -q ap2/tests/` passes (638 tests, was 631); all 5 prose-grep verification bullets satisfied.
 - **Files:** ap2/check.py, ap2/ideation.default.md, ap2/init.py, ap2/tests/test_check.py, ap2/tests/test_ideation_defaults.py, skills/ap2-task/SKILL.md, skills/migrate-to-ap2/SKILL.md
 - **Tests:** pass
+
+## [2026-05-01] TB-122: Concurrent Mattermost handler with restricted toolset during in-flight tasks
+- **Commit:** `d82223b`
+- **Summary:** TB-122 implementation already shipped in 5ebfae8 (main_loop → _main_tick_loop + _mm_loop, MM_HANDLER_TOOLS_RESTRICTED gate while a task is Active, asyncio.create_task per mention, toolset='restricted'|'full' on mattermost events, README + architecture docs); the only outstanding bullet was the TB-138-converted manual-stoch responsiveness gate, which this commit closes by adding test_mattermost_reply_lands_within_30s_of_mention_during_long_task to ap2/tests/e2e/test_concurrent_mm.py — drives a slow task responder + fast handler responder, captures the mention's enqueue timestamp, asserts the resulting mattermost_reply event lands within 30s, and pins toolset='restricted' so the in-flight branch is actually exercised; uv run pytest -q ap2/tests/ → 639 passed.
+- **Files:** ap2/tests/e2e/test_concurrent_mm.py
+- **Tests:** pass
