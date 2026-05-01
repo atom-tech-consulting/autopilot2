@@ -107,3 +107,9 @@
 - **Summary:** Refreshed skills/ap2/SKILL.md for the post-TB-130/TB-131 status surface (pending operator-ops line, web URL, 5-section board, queue-routed unfreeze/backlog/delete); skills/ap2-task/SKILL.md already covered TB-131/132/134/135/138. Added scripts/deploy-skills.sh (rsync-based, dry-run default, --apply for the per-skill --delete mirror, preserves unrelated siblings like taskboard) plus an ap2 sandbox sync-skills CLI wrapper. New ap2/tests/test_deploy_skills.py (15 tests, all passing); full regression gate uv run pytest -q ap2/tests/ → 661 passed.
 - **Files:** skills/ap2/SKILL.md, scripts/deploy-skills.sh, ap2/cli.py, ap2/sandbox.py, ap2/tests/test_deploy_skills.py
 - **Tests:** pass
+
+## [2026-05-01] TB-141: Operator queue: remove queue.jsonl from fence; defer CLAUDE.md bump to drain
+- **Commit:** `ae6f098`
+- **Summary:** Implementation already shipped in e45bde8 (queue.jsonl removed from TASK_AGENT_FENCED_PATHS; _allocate_id pure; CLAUDE.md bump deferred to drain_operator_queue end-of-pass; 5 unit + 2 e2e tests added; architecture.md updated). Prior run failed verification because the briefing's grep bullet (`grep -qE "operator_queue\.jsonl"`) was unsatisfiable — it also matched the legitimate operator_queue_path constructor on tools.py:638 and module-level comments. ae6f098 swaps in an anchored regex (`^\s*"\.cc-autopilot/operator_queue\.jsonl",\s*$`) that matches only a tuple-entry line shape, so it verifies the intended fact ("queue.jsonl is not in the tuple") without false positives. Verified: bullet exits 0, full pytest passes (669 tests).
+- **Files:** .cc-autopilot/tasks/operator-queue-remove-queue-jsonl-from-f.md
+- **Tests:** pass

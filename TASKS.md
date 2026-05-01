@@ -9,7 +9,6 @@
 ## Backlog
 
 - [ ] **TB-121** **Gate ideation-proposed tasks behind human review before dispatch** `#autopilot` `#ideation` `#safety` — Stop the daemon from autonomously dispatching tasks ideation just invented. Ideation emits each proposed task with (blocked on: review); auto-promotion already skips blocked tasks. New 'ap2 approve TB-N' CLI strips the clause atomically. Watchdog learns to distinguish 'pending review' from 'daemon broken'. Reuses existing blocker-clause primitive instead of adding a 7th board section or overloading #proposed. [→ brief](.cc-autopilot/tasks/gate-ideation-proposed-tasks-behind-huma.md)
-- [ ] **TB-141** **Operator queue: remove queue.jsonl from fence; defer CLAUDE.md bump to drain** `#autopilot` `#operator-queue` `#fence` [→ brief](.cc-autopilot/tasks/operator-queue-remove-queue-jsonl-from-f.md)
 
 ## Pipeline Pending
 
@@ -34,6 +33,7 @@
 - [x] **TB-122** **Concurrent Mattermost handler with restricted toolset during in-flight tasks** `#autopilot` `#mattermost` `#concurrency` — Split daemon main_loop into _main_tick_loop + _mm_loop so MM polling doesn't block on long task agents. While a task is in flight, the handler gets MM_HANDLER_TOOLS_RESTRICTED — keeps reads + board_edit + mattermost_reply + log_event + daemon_control, drops cron_edit + ideation_state_write. Operator can pause / add / delete / freeze tasks mid-flight; can't mutate cron schedule or ideation state. Reuses the SDK allowlist primitive. [→ brief](.cc-autopilot/tasks/concurrent-mattermost-handler-with-restr.md)
 - [x] **TB-139** **Embed source timestamp in ap2 --version output** `#autopilot` `#version` `#observability` [→ brief](.cc-autopilot/tasks/embed-source-timestamp-in-ap2-version-ou.md)
 - [x] **TB-140** **Refresh /ap2 + /ap2-task skills; add deploy script to ~/.claude** `#autopilot` `#skills` `#deploy` [→ brief](.cc-autopilot/tasks/refresh-ap2-ap2-task-skills-add-deploy-s.md)
+- [x] **TB-141** **Operator queue: remove queue.jsonl from fence; defer CLAUDE.md bump to drain** `#autopilot` `#operator-queue` `#fence` [→ brief](.cc-autopilot/tasks/operator-queue-remove-queue-jsonl-from-f.md)
 
 ## Frozen
 
