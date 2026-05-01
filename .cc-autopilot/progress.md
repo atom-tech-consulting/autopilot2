@@ -113,3 +113,9 @@
 - **Summary:** Implementation already shipped in e45bde8 (queue.jsonl removed from TASK_AGENT_FENCED_PATHS; _allocate_id pure; CLAUDE.md bump deferred to drain_operator_queue end-of-pass; 5 unit + 2 e2e tests added; architecture.md updated). Prior run failed verification because the briefing's grep bullet (`grep -qE "operator_queue\.jsonl"`) was unsatisfiable — it also matched the legitimate operator_queue_path constructor on tools.py:638 and module-level comments. ae6f098 swaps in an anchored regex (`^\s*"\.cc-autopilot/operator_queue\.jsonl",\s*$`) that matches only a tuple-entry line shape, so it verifies the intended fact ("queue.jsonl is not in the tuple") without false positives. Verified: bullet exits 0, full pytest passes (669 tests).
 - **Files:** .cc-autopilot/tasks/operator-queue-remove-queue-jsonl-from-f.md
 - **Tests:** pass
+
+## [2026-05-01] TB-145: MM handler: always use RESTRICTED toolset; drop the in-flight check
+- **Commit:** `2390002`
+- **Summary:** Collapsed MM_HANDLER_TOOLS_FULL/_RESTRICTED into a single unconditional MM_HANDLER_TOOLS list (drops cron_edit, ideation_state_write, board_edit); removed handle_message's board snapshot check + task_in_flight branching across daemon/prompts; rewrote test_concurrent_mm.py (unit + e2e), test_prompts.py, test_operator_queue.py, test_tb142_mm_queue_routing.py and added 4 new MM_HANDLER_TOOLS pin tests in test_tools.py; updated README + architecture.md. 711/711 tests pass; all briefing greps pass (no MM_HANDLER_TOOLS_FULL or MM_HANDLER_TOOLS_RESTRICTED anywhere; MM_HANDLER_TOOLS present in tools.py).
+- **Files:** ap2/tools.py, ap2/daemon.py, ap2/prompts.py, ap2/README.md, ap2/architecture.md, ap2/tests/test_concurrent_mm.py, ap2/tests/test_prompts.py, ap2/tests/test_operator_queue.py, ap2/tests/test_tools.py, ap2/tests/e2e/test_concurrent_mm.py, ap2/tests/e2e/test_tb142_mm_queue_routing.py
+- **Tests:** pass

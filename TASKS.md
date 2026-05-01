@@ -9,7 +9,6 @@
 ## Backlog
 
 - [ ] **TB-121** **Gate ideation-proposed tasks behind human review before dispatch** `#autopilot` `#ideation` `#safety` — Stop the daemon from autonomously dispatching tasks ideation just invented. Ideation emits each proposed task with (blocked on: review); auto-promotion already skips blocked tasks. New 'ap2 approve TB-N' CLI strips the clause atomically. Watchdog learns to distinguish 'pending review' from 'daemon broken'. Reuses existing blocker-clause primitive instead of adding a 7th board section or overloading #proposed. [→ brief](.cc-autopilot/tasks/gate-ideation-proposed-tasks-behind-huma.md)
-- [ ] **TB-145** **MM handler: always use RESTRICTED toolset; drop the in-flight check** `#autopilot` `#mattermost` `#toolset` `#simplify` [→ brief](.cc-autopilot/tasks/mm-handler-always-use-restricted-toolset.md)
 - [ ] **TB-142** **MM handler RESTRICTED: drop board_edit; add `approve` to queue** `#autopilot` `#mattermost` `#operator-queue` `#fence` [→ brief](.cc-autopilot/tasks/mm-handler-restricted-drop-board-edit-ad.md)
 - [ ] **TB-146** **Hide cron_edit from agent toolsets until a clear use case lands** `#autopilot` `#cron` `#agent-tools` `#simplify` [→ brief](.cc-autopilot/tasks/hide-cron-edit-from-agent-toolsets-until.md)
 - [ ] **TB-143** **Re-fence operator_queue.jsonl; exclude from violation check** `#autopilot` `#fence` `#operator-queue` [→ brief](.cc-autopilot/tasks/re-fence-operator-queue-jsonl-exclude-fr.md)
@@ -40,6 +39,7 @@
 - [x] **TB-139** **Embed source timestamp in ap2 --version output** `#autopilot` `#version` `#observability` [→ brief](.cc-autopilot/tasks/embed-source-timestamp-in-ap2-version-ou.md)
 - [x] **TB-140** **Refresh /ap2 + /ap2-task skills; add deploy script to ~/.claude** `#autopilot` `#skills` `#deploy` [→ brief](.cc-autopilot/tasks/refresh-ap2-ap2-task-skills-add-deploy-s.md)
 - [x] **TB-141** **Operator queue: remove queue.jsonl from fence; defer CLAUDE.md bump to drain** `#autopilot` `#operator-queue` `#fence` [→ brief](.cc-autopilot/tasks/operator-queue-remove-queue-jsonl-from-f.md)
+- [x] **TB-145** **MM handler: always use RESTRICTED toolset; drop the in-flight check** `#autopilot` `#mattermost` `#toolset` `#simplify` [→ brief](.cc-autopilot/tasks/mm-handler-always-use-restricted-toolset.md)
 
 ## Frozen
 
