@@ -54,3 +54,10 @@ Two concrete drivers:
 - A `cron_run_now` mechanism for arbitrary cron jobs — broader scope, separate task.
 - Changing the status-report's prompt content or schedule — purely a refactor + new entry point.
 - Recognition of natural-language status queries beyond keyword matching — handler's existing prompt-matching surface is enough for V1.
+## Attempts
+
+### 2026-05-01 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -qE "mcp__autopilot__status_report_run" <(python3 -c "from ap2.tools import MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOL
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T041004Z-TB-144.prompt.md`, `stream: .cc-autopilot/debug/20260501T041004Z-TB-144.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T041004Z-TB-144.messages.jsonl`
