@@ -59,6 +59,7 @@ def check_project(cfg: Config) -> CheckReport:
     issues: list[Issue] = []
     issues.extend(_check_tasks_md(cfg))
     issues.extend(_check_briefing_links(cfg))
+    issues.extend(_check_briefings_manual_bullets(cfg))
     issues.extend(_check_cron_yaml(cfg))
     issues.extend(_check_json_state(cfg))
     issues.extend(_check_insights(cfg))
@@ -122,6 +123,58 @@ def _check_briefing_links(cfg: Config) -> list[Issue]:
                 "warning", "TASKS.md",
                 f"briefing link points to missing file: {path}",
             ))
+    return issues
+
+
+# Match a list bullet (`-` or `*`) whose first non-whitespace token is
+# `Manual:` or `[manual]` (any case). Anchors on the bullet marker so we
+# don't false-positive on prose that mentions the word inline.
+_MANUAL_BULLET_RE = re.compile(
+    r"^\s*[-*]\s*(?:Manual\s*:|\[manual\])",
+    re.IGNORECASE,
+)
+_VERIFICATION_HEADER_RE = re.compile(r"^##\s+Verification\s*$", re.M)
+_NEXT_SECTION_RE = re.compile(r"^##\s+", re.M)
+
+
+def _check_briefings_manual_bullets(cfg: Config) -> list[Issue]:
+    """TB-138: warn when a briefing's `## Verification` section contains a
+    `Manual:` (or `[manual]`) bullet. Such bullets cannot be evaluated by
+    the unattended per-task verifier — TB-122 hit `retry_exhausted` on a
+    single manual bullet despite the implementation being complete. The
+    rule is enforced at the briefing-author layer (ideation prompt + ap2-task
+    skill + briefing template); this lint is the operator-facing safety net.
+    Non-fatal — surfaced as a warning so the operator can fix it before
+    dispatch without blocking other ap2 check usage.
+    """
+    issues: list[Issue] = []
+    tasks_dir = cfg.project_root / ".cc-autopilot" / "tasks"
+    if not tasks_dir.exists():
+        return issues
+    for f in sorted(tasks_dir.iterdir()):
+        if not f.is_file() or f.suffix != ".md":
+            continue
+        try:
+            text = f.read_text()
+        except OSError:
+            continue
+        m = _VERIFICATION_HEADER_RE.search(text)
+        if not m:
+            continue
+        # Slice from the header to the next `## ` (or end of file).
+        start = m.end()
+        next_m = _NEXT_SECTION_RE.search(text, start)
+        body = text[start: next_m.start() if next_m else len(text)]
+        for line in body.splitlines():
+            if _MANUAL_BULLET_RE.match(line):
+                issues.append(Issue(
+                    "warning", f.name,
+                    "Verification section contains a `Manual:` bullet "
+                    "(TB-138) — convert to an auto-verifiable shell "
+                    "command, test name, or judge-checkable prose, or "
+                    "move to `## Out of scope`",
+                ))
+                break  # one warning per file is enough
     return issues
 
 

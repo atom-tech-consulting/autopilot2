@@ -197,6 +197,47 @@ def test_ideation_prompt_instructs_verification_section_population():
     assert "legacy" in lower or "skip" in lower
 
 
+def test_ideation_prompt_requires_auto_verifiable_bullets_only():
+    """TB-138: ideation must NEVER propose `Manual:` bullets — the per-task
+    verifier runs unattended and cannot observe live operator actions
+    (TB-122 hit `retry_exhausted` on a single manual bullet despite
+    implementation being complete). Pin the auto-verifiable rule, the
+    explicit no-Manual-bullet ban, the canonical TB-122 conversion
+    example, and the "out of scope" escape hatch so future prompt
+    rewrites don't silently drop the rule.
+    """
+    prompt = _default_prompt()
+    lower = prompt.lower()
+    # Rule keyword. Allow either "auto-verifiable" or "auto verifiable".
+    assert "auto-verifiable" in lower or "auto verifiable" in lower
+    # Explicit ban on manual bullets.
+    assert "Manual:" in prompt or "manual:" in lower
+    # The three valid bullet shapes are enumerated.
+    assert "shell command" in lower
+    assert "test" in lower
+    assert "diff" in lower or "working tree" in lower
+    # TB-122 cited as the canonical conversion example.
+    assert "TB-122" in prompt
+    # The "if you can't auto-verify, it's out of scope" escape hatch.
+    assert "Out of scope" in prompt or "out of scope" in lower
+    # No `## Manual checklist` end-run is suggested.
+    assert "Manual checklist" not in prompt or "Do not invent" in prompt or "do not invent" in lower
+
+
+def test_ideation_prompt_does_not_contain_a_manual_bullet():
+    """Self-consistency: the ideation prompt itself MUST NOT use a
+    `- Manual: ...` bullet anywhere. Catches accidental regression where
+    an editor pastes an example that violates the very rule the prompt
+    is teaching.
+    """
+    prompt = _default_prompt()
+    import re as _re
+    assert not _re.search(r"(?m)^\s*[-*]\s*Manual\s*:", prompt), (
+        "ideation prompt contains a `- Manual: ...` bullet — TB-138 forbids "
+        "these in any briefing, and the prompt itself must lead by example"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 

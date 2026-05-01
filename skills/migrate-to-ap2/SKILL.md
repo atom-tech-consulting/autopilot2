@@ -118,6 +118,14 @@ optional `Tags:` line, `## Goal`, `## Scope`, `## Design`, `## Verification`,
 concrete shell or prose bullet beyond the project-wide regression gate —
 without it, the verifier has nothing scope-specific to score against.
 
+**Auto-verifiable bullets only (TB-138).** Every `## Verification` bullet
+must be auto-verifiable — one of: (1) a backticked shell command the verifier
+can run, (2) a unit/e2e test name the regression gate covers, or (3) a prose
+claim that names a concrete file/symbol an SDK judge can confirm against the
+diff. **No `Manual:` bullets** — the per-task verifier runs unattended and
+cannot observe a live operator action. If a behavior genuinely cannot be
+auto-verified, it belongs in `## Out of scope`, not in the gating section.
+
 Already-migrated tasks on disk are unaffected: the briefing requirement
 gates only **future** `add_*` calls.
 

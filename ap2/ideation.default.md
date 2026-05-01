@@ -238,6 +238,43 @@ concrete acceptance bullets that the per-task verifier can evaluate:
 A briefing with no `## Verification` section will be skipped by the
 verifier (legacy compat). New work should not opt into that path.
 
+**Every `## Verification` bullet must be auto-verifiable** (TB-138).
+The per-task verifier runs unattended — it has the diff, the working
+tree, and a shell. It does NOT have a live operator, a running
+deployment, or any way to observe an out-of-band action. Three valid
+shapes:
+
+  1. **Backticked shell command** the verifier can `/bin/sh -c`
+     (e.g. `\`uv run pytest -q\``, `\`test -f reports/foo.csv\``,
+     `\`grep -q "auto-verifiable" ap2/init.py\``).
+  2. **Unit / e2e test name** the regression gate covers
+     (e.g. "new test `test_mm_handler_replies_within_30s` in
+     `ap2/tests/test_mattermost.py` pins the responsiveness claim").
+  3. **Prose claim a judge can confirm against the diff or working
+     tree** — must name a concrete file/symbol the SDK judge can
+     `Read` or `Grep` (e.g. "`Daemon.main_loop` in `ap2/daemon.py`
+     splits into `_main_tick_loop` + `_mm_loop` with
+     `asyncio.gather`").
+
+**No `Manual:` bullets. No "operator runs X live and observes Y"
+steps.** TB-122 hit this on 2026-05-01: 5/6 bullets passed, but a
+single `Manual: kick a long-running task on stoch, mention
+@claude-bot status → handler replies in <30s` kept failing because
+the verifier (correctly) cannot observe a live operator action →
+retry_exhausted, task re-frozen despite the implementation being
+complete. The fix: convert the manual procedure to an e2e test with
+stubbed dependencies. For the TB-122 case: stub a slow SDK reply,
+enqueue a Mattermost mention, assert the handler's
+`mattermost_reply` event lands within 30s of the mention timestamp —
+pins the same responsiveness claim end-to-end without a live
+deployment.
+
+If a behavior genuinely cannot be auto-verified (rare), it does NOT
+belong in the gating `## Verification` section — put it in `## Out
+of scope` instead. Do not invent a separate `## Manual checklist`
+section: if you can't write a test for it, the daemon can't gate
+on it, and it's out of scope.
+
 ## Long-running work
 If a proposed task plausibly takes more than ~5 minutes wall-clock
 (parameter sweeps, multi-day backtests, full-history data fetches

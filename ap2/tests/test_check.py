@@ -200,6 +200,106 @@ def test_index_md_not_treated_as_insight(cfg):
     assert not any(i.file == "_index.md" for i in report.issues)
 
 
+def test_briefing_with_manual_verification_bullet_is_warning(cfg):
+    """TB-138: a briefing whose `## Verification` contains a `- Manual: ...`
+    bullet emits a warning-level Issue (not an error) so operators can fix
+    it before dispatch without blocking the rest of `ap2 check`.
+    """
+    brief = cfg.tasks_dir / "tb-99-manual.md"
+    brief.write_text(
+        "# TB-99 — example\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Verification\n\n"
+        "- `uv run pytest -q` — full suite passes\n"
+        "- Manual: kick a long-running task and observe handler reply\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    # Warnings don't fail.
+    assert report.ok
+    assert any(
+        i.file == "tb-99-manual.md"
+        and "Manual" in i.message
+        and i.severity == "warning"
+        for i in report.warnings
+    ), [(i.severity, i.file, i.message) for i in report.issues]
+
+
+def test_briefing_with_bracketed_manual_tag_is_warning(cfg):
+    """`[manual]` prefix is also banned (case-insensitive) — same gating
+    consequence as `Manual:`."""
+    brief = cfg.tasks_dir / "tb-100-bracketed.md"
+    brief.write_text(
+        "# TB-100 — example\n\n"
+        "## Verification\n\n"
+        "- `uv run pytest -q`\n"
+        "- [manual] operator runs deploy and confirms\n"
+    )
+    report = check.check_project(cfg)
+    assert report.ok
+    assert any(
+        i.file == "tb-100-bracketed.md" and i.severity == "warning"
+        for i in report.warnings
+    )
+
+
+def test_briefing_with_only_auto_verifiable_bullets_no_warning(cfg):
+    """Backticked shell, test name, and judge-checkable prose all pass the
+    lint cleanly. Pins the rule's negative case so the lint doesn't
+    over-flag and become noise.
+    """
+    brief = cfg.tasks_dir / "tb-101-clean.md"
+    brief.write_text(
+        "# TB-101 — example\n\n"
+        "## Verification\n\n"
+        "- `uv run pytest -q` — regression gate\n"
+        "- `grep -q foo bar.py` — symbol pinned\n"
+        "- new test `test_foo_in_bar` covers the responsiveness claim\n"
+        "- prose: `Daemon.main_loop` in `ap2/daemon.py` splits via "
+        "`asyncio.gather`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    assert not any(
+        i.file == "tb-101-clean.md" and "Manual" in i.message
+        for i in report.issues
+    ), [(i.severity, i.file, i.message) for i in report.issues]
+
+
+def test_manual_bullet_outside_verification_section_not_flagged(cfg):
+    """A `Manual:` bullet outside `## Verification` (e.g. in `## Goal` or
+    `## Design` prose) is not the gating-criterion problem TB-138 targets;
+    don't flag it. The lint scopes to the `## Verification` slice only.
+    """
+    brief = cfg.tasks_dir / "tb-102-design.md"
+    brief.write_text(
+        "# TB-102 — example\n\n"
+        "## Design\n\n"
+        "- Manual: this prose-bullet is fine in design notes\n\n"
+        "## Verification\n\n"
+        "- `uv run pytest -q`\n"
+    )
+    report = check.check_project(cfg)
+    assert not any(
+        i.file == "tb-102-design.md" for i in report.issues
+    )
+
+
+def test_briefing_template_carries_auto_verifiable_rule():
+    """TB-138: the empty briefing template's `## Verification` preamble
+    must carry the auto-verifiable rule explicitly, so editor-mode
+    `ap2 add` users see it in the buffer they're filling in.
+    """
+    from ap2 import init as init_mod
+    text = init_mod.BRIEFING_TEMPLATE
+    lower = text.lower()
+    assert "auto-verifiable" in lower or "auto verifiable" in lower
+    # No-Manual-bullets rule is named.
+    assert "Manual:" in text or "manual:" in lower
+    # The escape hatch (move to `## Out of scope`) is named.
+    assert "Out of scope" in text
+
+
 def test_render_text_clean_path(cfg):
     text = check.render_text(check.check_project(cfg))
     assert "ap2 check: clean" in text
