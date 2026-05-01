@@ -13,6 +13,7 @@
 - [ ] **TB-144** **Hoist status-report into shared routine; expose as MCP tool** `#autopilot` `#status-report` `#mattermost` `#cron` `#refactor` [→ brief](.cc-autopilot/tasks/hoist-status-report-into-shared-routine.md)
 - [ ] **TB-145** **MM handler: always use RESTRICTED toolset; drop the in-flight check** `#autopilot` `#mattermost` `#toolset` `#simplify` [→ brief](.cc-autopilot/tasks/mm-handler-always-use-restricted-toolset.md)
 - [ ] **TB-142** **MM handler RESTRICTED: drop board_edit; add `approve` to queue** `#autopilot` `#mattermost` `#operator-queue` `#fence` [→ brief](.cc-autopilot/tasks/mm-handler-restricted-drop-board-edit-ad.md)
+- [ ] **TB-146** **Hide cron_edit from agent toolsets until a clear use case lands** `#autopilot` `#cron` `#agent-tools` `#simplify` [→ brief](.cc-autopilot/tasks/hide-cron-edit-from-agent-toolsets-until.md)
 
 ## Pipeline Pending
 
