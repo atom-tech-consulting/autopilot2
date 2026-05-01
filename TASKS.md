@@ -10,6 +10,9 @@
 
 - [ ] **TB-121** **Gate ideation-proposed tasks behind human review before dispatch** `#autopilot` `#ideation` `#safety` — Stop the daemon from autonomously dispatching tasks ideation just invented. Ideation emits each proposed task with (blocked on: review); auto-promotion already skips blocked tasks. New 'ap2 approve TB-N' CLI strips the clause atomically. Watchdog learns to distinguish 'pending review' from 'daemon broken'. Reuses existing blocker-clause primitive instead of adding a 7th board section or overloading #proposed. [→ brief](.cc-autopilot/tasks/gate-ideation-proposed-tasks-behind-huma.md)
 - [ ] **TB-142** **MM handler RESTRICTED: drop board_edit; add `approve` to queue** `#autopilot` `#mattermost` `#operator-queue` `#fence` [→ brief](.cc-autopilot/tasks/mm-handler-restricted-drop-board-edit-ad.md)
+- [ ] **TB-143** **Re-fence operator_queue.jsonl; exclude from violation check** `#autopilot` `#fence` `#operator-queue` [→ brief](.cc-autopilot/tasks/re-fence-operator-queue-jsonl-exclude-fr.md)
+- [ ] **TB-144** **Hoist status-report into shared routine; expose as MCP tool** `#autopilot` `#status-report` `#mattermost` `#cron` `#refactor` [→ brief](.cc-autopilot/tasks/hoist-status-report-into-shared-routine.md)
+- [ ] **TB-145** **MM handler: always use RESTRICTED toolset; drop the in-flight check** `#autopilot` `#mattermost` `#toolset` `#simplify` [→ brief](.cc-autopilot/tasks/mm-handler-always-use-restricted-toolset.md)
 
 ## Pipeline Pending
 
