@@ -119,3 +119,9 @@
 - **Summary:** Collapsed MM_HANDLER_TOOLS_FULL/_RESTRICTED into a single unconditional MM_HANDLER_TOOLS list (drops cron_edit, ideation_state_write, board_edit); removed handle_message's board snapshot check + task_in_flight branching across daemon/prompts; rewrote test_concurrent_mm.py (unit + e2e), test_prompts.py, test_operator_queue.py, test_tb142_mm_queue_routing.py and added 4 new MM_HANDLER_TOOLS pin tests in test_tools.py; updated README + architecture.md. 711/711 tests pass; all briefing greps pass (no MM_HANDLER_TOOLS_FULL or MM_HANDLER_TOOLS_RESTRICTED anywhere; MM_HANDLER_TOOLS present in tools.py).
 - **Files:** ap2/tools.py, ap2/daemon.py, ap2/prompts.py, ap2/README.md, ap2/architecture.md, ap2/tests/test_concurrent_mm.py, ap2/tests/test_prompts.py, ap2/tests/test_operator_queue.py, ap2/tests/test_tools.py, ap2/tests/e2e/test_concurrent_mm.py, ap2/tests/e2e/test_tb142_mm_queue_routing.py
 - **Tests:** pass
+
+## [2026-05-01] TB-142: MM handler RESTRICTED: drop board_edit; add `approve` to queue
+- **Commit:** `e147764`
+- **Summary:** TB-142 implementation already in HEAD (b62b492 + TB-145's rewrite at 2390002): board_edit absent from MM_HANDLER_TOOLS, approve added to OPERATOR_QUEUE_OPS with shared _approve_review_token helper between do_board_edit and drain_operator_queue, MM handler prompt routes board mutations through the queue (unconditional post-TB-145). Prior verification_failed was a stale briefing referencing the retired MM_HANDLER_TOOLS_RESTRICTED symbol that TB-145 collapsed into MM_HANDLER_TOOLS; e147764 updates the briefing's Verification section to match the post-TB-145 symbol and adds an explanatory note. uv run pytest -q ap2/tests/ → 711 passed; python3 -c assertion against MM_HANDLER_TOOLS passes.
+- **Files:** .cc-autopilot/tasks/mm-handler-restricted-drop-board-edit-ad.md
+- **Tests:** pass
