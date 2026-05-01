@@ -143,3 +143,9 @@
 - **Summary:** Implementation already shipped in cfcd19e (status_report.py, run_status_report routine, MCP tool, daemon delegation, MM handler routing, 716 pytest passing). Per-task verifier rolled it to Backlog because the briefing's third Verification bullet imported MM_HANDLER_TOOLS_FULL/_RESTRICTED — names TB-145 (2390002) collapsed into singular MM_HANDLER_TOOLS. This commit (b0a5618) updates the briefing's Scope item (4) and the assertion to use MM_HANDLER_TOOLS, preserving intent. Verified: pytest 716 passing; all 3 shell verification bullets now pass.
 - **Files:** .cc-autopilot/tasks/hoist-status-report-into-shared-routine.md
 - **Tests:** pass
+
+## [2026-05-01] TB-147: Verifier: run shell bullets via /bin/bash, not /bin/sh
+- **Commit:** `d3cb671`
+- **Summary:** Pinned verify._run_shell_bullet to /bin/bash via subprocess.run(executable="/bin/bash"), with a TB-147 rationale comment at the call site so it doesn't get reverted to "more portable sh"; sole shell=True site in the verification path (verified by grep). Added 4 tests in test_verify_retry_diff.py (process substitution, [[ ]] conditional, genuine non-zero exit still fails, source-level pin via inspect.getsource). Full ap2 suite passes 720/720 (+4).
+- **Files:** ap2/verify.py, ap2/tests/test_verify_retry_diff.py
+- **Tests:** pass
