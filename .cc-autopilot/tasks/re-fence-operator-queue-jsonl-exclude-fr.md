@@ -28,8 +28,8 @@ Refine TB-141. TB-141 dropped `.cc-autopilot/operator_queue.jsonl` from `TASK_AG
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
-- `grep -qE '"\\.cc-autopilot/operator_queue\\.jsonl"' ap2/tools.py` — operator_queue.jsonl back in `TASK_AGENT_FENCED_PATHS`.
-- `grep -qE 'operator_queue\\.jsonl' ap2/rollback.py` — explicitly named in the violation-check exclusion list (alongside events.jsonl).
+- `python3 -c "from ap2.tools import TASK_AGENT_FENCED_PATHS; assert '.cc-autopilot/operator_queue.jsonl' in TASK_AGENT_FENCED_PATHS"` — operator_queue.jsonl back in `TASK_AGENT_FENCED_PATHS`.
+- `python3 -c "from ap2.rollback import FENCED_PATHS_FOR_VIOLATION_CHECK; assert '.cc-autopilot/operator_queue.jsonl' not in FENCED_PATHS_FOR_VIOLATION_CHECK"` — excluded from violation-check (alongside events.jsonl).
 - New unit test in `test_rollback.py`: `FENCED_PATHS_FOR_VIOLATION_CHECK` does NOT contain `.cc-autopilot/operator_queue.jsonl`. Pins the exclusion alongside events.jsonl.
 - New unit test in `test_rollback.py`: simulating an operator writing a fresh record to `operator_queue.jsonl` between `snapshot_fenced_files` and `detect_fenced_violations` returns an empty violation list (regression — TB-139 scenario).
 - New unit test in `test_tools.py`: `TASK_AGENT_FENCED_PATHS` DOES contain `.cc-autopilot/operator_queue.jsonl`. Pins the defense-layer presence.

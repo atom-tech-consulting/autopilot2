@@ -26,7 +26,7 @@ There's also a concrete missing piece: TB-121's `approve` action (strip `(blocke
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
-- `! grep -qE "mcp__autopilot__board_edit" <(python3 -c "import ap2.tools as t; print('\n'.join(t.MM_HANDLER_TOOLS_RESTRICTED))")` — board_edit is absent from the restricted toolset.
+- `python3 -c "from ap2.tools import MM_HANDLER_TOOLS_RESTRICTED; assert 'mcp__autopilot__board_edit' not in MM_HANDLER_TOOLS_RESTRICTED"` — board_edit is absent from the restricted toolset.
 - New unit test in `test_prompts.py` (or wherever the toolsets are pinned): `MM_HANDLER_TOOLS_RESTRICTED` does NOT contain `mcp__autopilot__board_edit`. `MM_HANDLER_TOOLS_FULL` still does.
 - New unit test in `test_tools.py`: `OPERATOR_QUEUE_OPS` includes `"approve"`. `do_operator_queue_append({"op":"approve","task_id":"TB-X"})` queues a record with `op="approve"`. `drain_operator_queue` applies a queued `approve` op by invoking the existing `board_edit` approve action, leaving the task with no remaining `(blocked on: review)` clause.
 - New e2e test (`tests/e2e/`): seed Active task; queue an MM handler invocation that needs to add a Backlog task and approve a separate review-gated task; assert (a) both ops complete, (b) running task agent's snapshot check does NOT fire `task_state_violation`, (c) drain at next tick applies both, (d) the approved task is dispatchable on the following tick.

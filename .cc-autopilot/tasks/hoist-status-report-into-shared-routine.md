@@ -39,9 +39,9 @@ Two concrete drivers:
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
-- `grep -qE "run_status_report\\(" ap2/daemon.py` — cron path now delegates to the shared routine.
-- `grep -qE "status_report_run" ap2/tools.py` — new MCP tool registered.
-- `grep -qE "mcp__autopilot__status_report_run" <(python3 -c "from ap2.tools import MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED; print('\n'.join(MM_HANDLER_TOOLS_FULL + MM_HANDLER_TOOLS_RESTRICTED))")` — tool appears in both MM handler toolsets.
+- `grep -qE "run_status_report\(" ap2/daemon.py` — cron path now delegates to the shared routine.
+- `grep -q "status_report_run" ap2/tools.py` — new MCP tool registered.
+- `python3 -c "from ap2.tools import MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED; assert 'mcp__autopilot__status_report_run' in MM_HANDLER_TOOLS_FULL and 'mcp__autopilot__status_report_run' in MM_HANDLER_TOOLS_RESTRICTED"` — tool appears in both MM handler toolsets.
 - New unit test in `test_status_report_skip.py` (extends existing pin): `run_status_report(trigger="chat")` honors the skip-if-idle gate and emits a `cron_skipped` (or `status_report_skipped`) event without invoking the SDK.
 - New unit test: `run_status_report(trigger="cron")` advances `cron_state[status-report].last_run`; `run_status_report(trigger="chat")` does NOT advance it (cron schedule unaffected by chat-triggered reports).
 - New unit test in `test_tools.py`: the MCP tool `status_report_run({"reason":"operator asked"})` returns `_ok` and emits a `cron_start` event with `trigger="chat"` and the supplied reason in the payload.

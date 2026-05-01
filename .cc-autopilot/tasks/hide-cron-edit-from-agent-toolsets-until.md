@@ -34,7 +34,7 @@ If a future workflow legitimately needs programmatic cron mutation (e.g., ideati
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
-- `! grep -qE "mcp__autopilot__cron_edit" <(python3 -c "from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED; print('\n'.join(CONTROL_AGENT_TOOLS + MM_HANDLER_TOOLS_FULL + MM_HANDLER_TOOLS_RESTRICTED))")` — `cron_edit` is absent from all three agent toolsets.
+- `python3 -c "from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED; assert 'mcp__autopilot__cron_edit' not in CONTROL_AGENT_TOOLS + MM_HANDLER_TOOLS_FULL + MM_HANDLER_TOOLS_RESTRICTED"` — `cron_edit` is absent from all three agent toolsets.
 - New unit test in `test_tools.py`: `CONTROL_AGENT_TOOLS` does NOT contain `mcp__autopilot__cron_edit`.
 - New unit test in `test_ideation_defaults.py`: the ideation prompt does NOT instruct the agent to call `cron_edit`. Pin via grep that the rendered prompt mentions `cron_propose` events should be SURFACED (not adopted) in assessments.
 - Existing `test_tools.py`: the `cron_edit` MCP tool's wiring stays intact (CLI still uses it via `cmd_cron_edit` if such a command exists; otherwise it stays callable from Python). Verify by direct call test.

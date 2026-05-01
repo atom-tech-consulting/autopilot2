@@ -29,9 +29,9 @@ Post-TB-141/142/143, the queue-based design absorbs most of the "what if MM hand
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
-- `! grep -qE "MM_HANDLER_TOOLS_FULL" ap2/` — old constant is gone (rg -L for negative match across the package).
-- `! grep -qE "MM_HANDLER_TOOLS_RESTRICTED" ap2/` — old restricted name also gone (renamed to plain MM_HANDLER_TOOLS).
-- `grep -qE "MM_HANDLER_TOOLS\\b" ap2/tools.py` — single new constant exists.
+- `! grep -qrE "MM_HANDLER_TOOLS_FULL" ap2/` — old constant is gone (recursive grep across the package).
+- `! grep -qrE "MM_HANDLER_TOOLS_RESTRICTED" ap2/` — old restricted name also gone (renamed to plain MM_HANDLER_TOOLS).
+- `grep -qE "MM_HANDLER_TOOLS\b" ap2/tools.py` — single new constant exists.
 - New unit test in `test_tools.py`: `MM_HANDLER_TOOLS` does NOT contain `mcp__autopilot__cron_edit` or `mcp__autopilot__ideation_state_write`.
 - New unit test in `test_tools.py`: `MM_HANDLER_TOOLS` DOES contain `Read`, `Glob`, `Grep`, `mattermost_reply`, `log_event`, `daemon_control`, `operator_log_append`, `operator_queue_append`, and `git_log_grep`.
 - New unit test in `test_prompts.py`: the MM handler prompt does not mention conditional toolset switching (no "when a task is active" language).
