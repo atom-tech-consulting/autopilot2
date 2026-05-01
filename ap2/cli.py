@@ -130,12 +130,19 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # separately. Resolution mirrors the daemon's own — same env vars, same
     # default — so what we print is the URL the daemon is actually serving.
     web_url = _resolve_web_url(cfg) if running else None
+    # TB-139: surface the running CLI's full version (base + git suffix on
+    # editable installs) so an operator can confirm freshness alongside
+    # daemon liveness without a second `ap2 --version` call. Same string
+    # the daemon emits on its `daemon_start` event, so the post-mortem
+    # reader can correlate `ap2 status` output with state on disk.
+    version = _version_string()
 
     if args.json:
         out = {
             "running": running,
             "pid": pid,
             "paused": paused,
+            "version": version,
             "tick_interval_s": cfg.tick_interval_s,
             "board": counts,
             "cron_jobs": [j.name for j in jobs],
@@ -149,6 +156,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         return 0
 
     print(f"daemon:   {'running' if running else 'stopped'} (pid {pid or '-'}){' [paused]' if paused else ''}")
+    print(f"version:  ap2 {version}")
     print(f"tick:     {cfg.tick_interval_s}s")
     print(
         f"board:    {counts['Active']}A / {counts['Ready']}R / "
@@ -772,16 +780,23 @@ def _add_mm_url_token_args(p: argparse.ArgumentParser) -> None:
 
 
 def _version_string() -> str:
-    """Read the installed `autopilot2` version. Single source of truth is
-    `pyproject.toml`; we read it via importlib so the CLI tracks the installed
-    build and we don't have to keep two version strings in sync.
-    """
-    from importlib.metadata import PackageNotFoundError, version
+    """The full version string printed by `ap2 --version` and `ap2 status`.
 
-    try:
-        return version("autopilot2")
-    except PackageNotFoundError:
-        return "unknown"
+    Delegates to `ap2.get_version()` (TB-139), which combines the installed
+    base version (pyproject.toml, via `importlib.metadata`) with a PEP 440
+    local-version suffix `+<short-sha>.<commit-ts>` derived from the
+    package's own git checkout. Editable installs — the common case here —
+    therefore expose the source revision on every invocation, so an
+    operator can `ap2 --version` to confirm freshness against `git log -1`
+    instead of debugging through stale source.
+
+    Released wheels (no `.git/` next to the package) get just the base
+    version; no behavior change vs. the pre-TB-139 single-call importlib
+    lookup.
+    """
+    from . import get_version
+
+    return get_version()
 
 
 def build_parser() -> argparse.ArgumentParser:

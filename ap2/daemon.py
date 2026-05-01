@@ -1794,6 +1794,25 @@ def _task_state_paths(task) -> list[str]:
     return paths
 
 
+def _emit_daemon_start(cfg: Config) -> dict:
+    """Append the `daemon_start` event with the current source version (TB-139).
+
+    Stamps the running source revision so a post-mortem can correlate
+    state-file mutations with the exact commit the daemon was loading.
+    Editable installs (the common case here) get `<base>+<sha>.<ts>`;
+    released wheels get just the base version.
+
+    Extracted so the daemon's startup-event shape is unit-testable without
+    spinning up the full `main_loop` (which is async + needs the SDK).
+    """
+    from . import get_version
+
+    return events.append(
+        cfg.events_file, "daemon_start",
+        pid=os.getpid(), version=get_version(),
+    )
+
+
 async def main_loop(cfg: Config) -> None:
     """Start the daemon: bootstrap, then run the two concurrent loops until SIGTERM.
 
@@ -1823,7 +1842,7 @@ async def main_loop(cfg: Config) -> None:
     import claude_agent_sdk as sdk  # type: ignore
 
     mcp_server = build_mcp_server(cfg)
-    events.append(cfg.events_file, "daemon_start", pid=os.getpid())
+    _emit_daemon_start(cfg)
     cfg.pid_file.parent.mkdir(parents=True, exist_ok=True)
     cfg.pid_file.write_text(str(os.getpid()))
 
