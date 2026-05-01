@@ -11,3 +11,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-01T01:45:43Z — applied operator-queued add_backlog → TB-139
 - 2026-05-01T01:46:23Z — applied operator-queued add_backlog → TB-140
 - 2026-05-01T02:49:43Z — applied operator-queued add_backlog → TB-141
+- 2026-05-01T03:27:18Z — applied operator-queued add_backlog → TB-142
