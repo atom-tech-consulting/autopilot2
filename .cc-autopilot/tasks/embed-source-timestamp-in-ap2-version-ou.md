@@ -34,3 +34,10 @@ This session burned ~1 hour on a stale-source bug: lzhang's tool venv was editab
 - A `--short` / `--full` flag for the version string. One canonical format is enough.
 - A version bump policy (manual 0.3.0 → 0.4.0 etc.) — that stays operator-managed in pyproject.toml.
 - Source-tree mtime as the freshness signal — git's commit timestamp is more meaningful (uncommitted edits are an operator-visible state, not something to encode in the version string).
+## Attempts
+
+### 2026-05-01 — state_violation
+(no summary)
+- **fenced_files:** .cc-autopilot/operator_queue.jsonl, CLAUDE.md
+- **pre_run_head:** d53ec067
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T014608Z-TB-139.prompt.md`, `stream: .cc-autopilot/debug/20260501T014608Z-TB-139.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T014608Z-TB-139.messages.jsonl`
