@@ -30,7 +30,7 @@ The check has no way to distinguish operator-driven mutations from agent mutatio
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
-- `! grep -qE "operator_queue\\.jsonl" ap2/tools.py | head -50` covering the fenced-paths tuple — confirm queue.jsonl is no longer listed in `TASK_AGENT_FENCED_PATHS`. (Use a more targeted grep against the exact tuple definition, not just any mention.)
+- `! grep -qE '^\s*"\.cc-autopilot/operator_queue\.jsonl",\s*$' ap2/tools.py` — confirm queue.jsonl is no longer present as a tuple entry in `TASK_AGENT_FENCED_PATHS`. The anchored regex matches only the exact tuple-line shape (`    ".cc-autopilot/operator_queue.jsonl",`), so it ignores incidental mentions in module docstrings, the `operator_queue_path` path constructor, and explanatory comments — only a real tuple entry trips it.
 - New unit test in `test_tools.py`: `_allocate_id` does NOT write CLAUDE.md (open the file pre-call, snapshot mtime, call, mtime unchanged).
 - New unit test in `test_tools.py`: two back-to-back `do_operator_queue_append` calls with `add_backlog` allocate sequential TB-N (e.g. TB-100 then TB-101) without any CLAUDE.md mutation; the second call reads the first's preallocated_task_id from the queue file.
 - New unit test in `test_tools.py`: `drain_operator_queue` after two queued add_backlog ops correctly bumps CLAUDE.md once at the end (not once per op) to highest_allocated + 1.
