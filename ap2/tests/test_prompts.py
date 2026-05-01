@@ -308,3 +308,89 @@ def test_control_prompt_non_status_jobs_skip_status_report_contract(tmp_path):
     assert "Status-report contract" not in p_other
     # The shared `## Current state` block IS in both — it's harmless context.
     assert "## Current state" in p_other
+
+
+# ---------------------------------------------------------------------------
+# TB-144: MM handler prompt routes status queries through `status_report_run`
+# instead of composing freeform replies. Pin the recognition phrasing + the
+# tool name so a refactor can't silently drop the routing.
+
+def test_mattermost_prompt_routes_status_queries_through_status_report_run(tmp_path):
+    """TB-144: when the operator asks for a status report (recognize:
+    "status", "what's going on", etc.), the MM handler prompt must
+    instruct the agent to call `status_report_run` rather than compose
+    its own reply. Otherwise chat-triggered reports drift from the cron
+    format AND the audit trail loses the `cron_start`/`cron_complete`
+    pair (post-mortems can't tell on-demand from scheduled).
+
+    Pinned phrases — the recognition pattern (so the agent matches the
+    operator's wording), the tool name (so the agent calls the right
+    surface), and the don't-call-twice steer (the routine has its own
+    skip-gate; spamming it doesn't get a fresher report).
+
+    Both restricted (task in flight) and idle toolsets must carry the
+    routing — operators ask for status in both states, and the routine
+    is in CONTROL_AGENT_TOOLS so both toolsets advertise it.
+    """
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot status?",
+        "thread_id": "",
+    }
+    # Idle path.
+    p_idle = build_mattermost_prompt(cfg, msg)
+    assert "status_report_run" in p_idle
+    # Recognition pattern is explicit so the agent doesn't have to guess.
+    assert '"status"' in p_idle
+    assert "what's going on" in p_idle
+    # Don't-call-twice steer.
+    assert "more than once per turn" in p_idle or "Don't call it more than once" in p_idle
+
+    # Restricted (task in flight) path.
+    p_restricted = build_mattermost_prompt(cfg, msg, task_in_flight=True)
+    assert "status_report_run" in p_restricted
+    assert '"status"' in p_restricted
+    assert "what's going on" in p_restricted
+    # Same don't-spam steer applies.
+    assert "more than once per turn" in p_restricted or "Don't call it more than once" in p_restricted
+
+
+def test_mattermost_prompt_status_routing_steers_away_from_freeform_reply(tmp_path):
+    """The routing instruction must explicitly say "instead of composing
+    your own reply" so the agent doesn't BOTH call the tool AND fabricate
+    a status reply in the same turn (the routine's report goes through
+    its own mattermost_reply call inside the sub-agent — a parallel reply
+    from the handler would produce two posts)."""
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot status",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    assert "instead of composing your own reply" in p
+
+
+def test_status_report_run_in_both_mm_handler_toolsets():
+    """TB-144: the MCP tool must be available to the MM handler in BOTH
+    full and restricted modes — operators ask for status whether a task
+    is running or not. Adding to `CONTROL_AGENT_TOOLS` (the source for
+    both) is the load-bearing change; this test pins the result.
+    """
+    from ap2.tools import (
+        CONTROL_AGENT_TOOLS,
+        MM_HANDLER_TOOLS_FULL,
+        MM_HANDLER_TOOLS_RESTRICTED,
+    )
+
+    name = "mcp__autopilot__status_report_run"
+    assert name in CONTROL_AGENT_TOOLS
+    assert name in MM_HANDLER_TOOLS_FULL
+    assert name in MM_HANDLER_TOOLS_RESTRICTED

@@ -1256,3 +1256,152 @@ def test_drain_with_no_add_ops_leaves_claude_md_untouched(cfg, tmp_path):
 
     assert claude_md.read_text() == pre_text
     assert claude_md.stat().st_mtime_ns == pre_mtime
+
+
+# ---------------------------------------------------------------------------
+# TB-144: status_report_run MCP tool
+
+
+class _NoopSDK:
+    """SDK stub that records whether `query` was called.
+
+    Mirrors the shape `test_status_report_skip.py::_NoopSDK` uses — the
+    routine's only sdk requirement is `sdk.ClaudeAgentOptions(...)` plus
+    `sdk.query(...)` returning an async iterator. Both shapes are
+    satisfied here.
+    """
+
+    def __init__(self) -> None:
+        self.called = False
+
+    class ClaudeAgentOptions:
+        def __init__(self, **kw):
+            self.kw = kw
+
+    def query(self, *, prompt, options):  # noqa: ARG002
+        self.called = True
+
+        async def _gen():
+            if False:
+                yield None
+
+        return _gen()
+
+
+def test_status_report_run_emits_cron_start_with_chat_trigger(cfg, tmp_path, monkeypatch):
+    """TB-144: the `status_report_run` MCP tool, when called with a
+    reason, emits a `cron_start` event whose `trigger` is `"chat"` (not
+    `"cron"`) and whose payload carries the operator-supplied reason.
+    The companion `cron_complete` event mirrors the trigger field. This
+    is the audit-trail half of the TB-144 contract — without it,
+    post-mortems can't distinguish an on-demand operator report from a
+    scheduled cron run.
+    """
+    import asyncio
+    from ap2 import events, status_report as _sr
+
+    # Configure the routine with our NoopSDK so the MCP tool can find it.
+    sdk = _NoopSDK()
+    _sr.configure(sdk, mcp_server=None)
+
+    # Seed activity so the skip-gate doesn't fire (we want the run path).
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(
+        cfg.events_file, "task_complete", task="TB-1",
+        status="complete", commit="abc1234",
+    )
+    monkeypatch.setattr(
+        "ap2.prompts.build_control_prompt",
+        lambda cfg, name, body: "stub prompt",
+    )
+
+    res = asyncio.run(
+        tools.do_status_report_run(cfg, {"reason": "operator asked"})
+    )
+    body = _unwrap(res)
+    assert body.get("trigger") == "chat"
+    assert body.get("skipped") is False
+
+    # cron_start event landed with trigger="chat" + reason from the call.
+    evts = events.tail(cfg.events_file, 50)
+    starts = [e for e in evts if e.get("type") == "cron_start"
+              and e.get("job") == "status-report"
+              and e.get("trigger") == "chat"]
+    assert len(starts) == 1
+    assert starts[0].get("reason") == "operator asked"
+
+    # cron_complete also carries trigger="chat".
+    completes = [e for e in evts if e.get("type") == "cron_complete"
+                 and e.get("job") == "status-report"
+                 and e.get("trigger") == "chat"]
+    assert len(completes) == 1
+
+
+def test_status_report_run_requires_reason(cfg):
+    """The `reason` arg is required so the audit event isn't anonymous.
+    Without it, every chat-triggered report would be indistinguishable
+    in events.jsonl — that defeats the point of a separate trigger."""
+    import asyncio
+
+    res = asyncio.run(tools.do_status_report_run(cfg, {}))
+    assert res.get("isError"), res
+    assert "reason" in res["content"][0]["text"]
+
+
+def test_status_report_run_refuses_when_paused(cfg, tmp_path):
+    """Mirrors cron semantics: paused daemons skip due jobs. On-demand
+    triggers must follow the same rule — otherwise `@claude-bot status`
+    would silently bypass the operator's pause signal."""
+    import asyncio
+
+    cfg.pause_flag.parent.mkdir(parents=True, exist_ok=True)
+    cfg.pause_flag.write_text("operator paused\n")
+    res = asyncio.run(
+        tools.do_status_report_run(cfg, {"reason": "operator asked"})
+    )
+    assert res.get("isError"), res
+    assert "paused" in res["content"][0]["text"]
+
+
+def test_status_report_run_skip_path_is_one_line_summary(cfg, monkeypatch):
+    """When the skip-gate fires, the tool returns a one-line `_ok`
+    payload tagged `skipped=True` so the handler can mention it in its
+    mattermost_reply ("nothing has changed since the last report") rather
+    than going silent or composing a fake report."""
+    import asyncio
+    from ap2 import events, status_report as _sr
+
+    # Seed a recent cron_complete with no follow-up activity → gate fires.
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+
+    sdk = _NoopSDK()
+    _sr.configure(sdk, mcp_server=None)
+
+    res = asyncio.run(
+        tools.do_status_report_run(cfg, {"reason": "operator asked"})
+    )
+    body = _unwrap(res)
+    assert body.get("skipped") is True
+    assert body.get("trigger") == "chat"
+    # SDK must NOT have been invoked on the skip path — saving a turn is
+    # the whole point of the gate.
+    assert sdk.called is False
+
+
+def test_status_report_run_unconfigured_returns_error(cfg):
+    """If the daemon never configured the routine (CLI-only path / fresh
+    test harness with no setup), the tool must return a clear error
+    instead of crashing with AttributeError. The handler can then reply
+    with a meaningful message instead of a stack trace."""
+    import asyncio
+    from ap2 import status_report as _sr
+
+    # Wipe the configured refs to simulate an unconfigured environment.
+    _sr._SDK_REF["sdk"] = None
+    _sr._SDK_REF["mcp_server"] = None
+
+    res = asyncio.run(
+        tools.do_status_report_run(cfg, {"reason": "operator asked"})
+    )
+    assert res.get("isError"), res
+    assert "configure" in res["content"][0]["text"]

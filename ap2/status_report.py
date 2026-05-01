@@ -1,0 +1,328 @@
+"""Shared status-report routine (TB-144).
+
+Pre-TB-144 the status-report agent invocation was entangled with the cron
+tick: the prompt body lived in `cron.default.yaml`, the freshness contract
+was appended only when `job.name == "status-report"` in
+`prompts.build_control_prompt`, and the skip-if-idle gate
+(`_status_report_should_skip`) was a daemon-private helper called only
+from `daemon.run_cron`. The Mattermost handler had no way to compose a
+status report with the same shape and audit trail — it built freeform
+replies that drifted from the canonical format.
+
+This module hoists everything status-report-specific into one callable so
+the cron tick AND on-demand operator triggers (via the
+`mcp__autopilot__status_report_run` MCP tool) share:
+
+  - the same prompt body (`STATUS_REPORT_PROMPT`),
+  - the same skip-if-idle gate (TB-128),
+  - the same `cron_start` / `cron_complete` / `cron_skipped` event
+    vocabulary (with a `trigger="cron"|"chat"` field so post-mortems can
+    distinguish the two),
+  - the same allowed-tools surface and SDK plumbing
+    (`daemon._run_control_agent`).
+
+Cron-trigger reports advance `cron_state[status-report].last_run`; chat-
+trigger reports DO NOT — otherwise an operator-triggered report at 11:00
+would silence the scheduled noon cron, which is the opposite of what the
+operator asked for.
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Literal
+
+from . import events
+from .config import Config
+from .cron import mark_run
+
+
+# Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
+# field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
+# the daemon's `run_cron` short-circuits status-report jobs to
+# `run_status_report(...)` instead of `build_control_prompt(cfg, name,
+# job.prompt)`. Operators with pre-existing cron.yaml files keep their copy
+# until they re-bootstrap; the runtime ignores `job.prompt` for this job
+# regardless, so the routine's content is always authoritative.
+STATUS_REPORT_PROMPT = """\
+Post a concise autopilot status report to the mattermost channel
+identified by AP2_MM_REPORT_CHANNEL (or #autopilot if unset).
+
+Freshness contract (TB-128 — non-negotiable):
+- The headline timestamp in your post is the literal `now:` value
+  from the `## Current state` block at the top of this prompt. Do
+  NOT compute, guess, or copy a timestamp from any other source.
+- Re-read `.cc-autopilot/events.jsonl` (last ~50 lines) and
+  `TASKS.md` with the `Read` tool right now, before composing the
+  post. The board counts in the snapshot block above are
+  authoritative; the embedded events tail is a courtesy.
+- If nothing of substance has happened since the last
+  `status_report` event in the tail (no new task_start /
+  task_complete / verification_failed / pipeline_* /
+  retry_exhausted / daemon_pause / daemon_resume / operator_ack /
+  cron_proposed / ideation_complete events), SKIP the Mattermost
+  post entirely. Just call
+  `log_event(type="status_report", summary="skipped: no activity
+  since <ts>")` and finish. The daemon also has a deterministic
+  skip-gate, but you should mirror the decision so the report
+  reflects current reality if you do post.
+
+Body shape (when posting):
+- Headline: `**Autopilot Status Report** — <now>`
+- 4-8 bullets covering: tasks completed (TB-N + 1-line outcome +
+  short SHA), tasks failed / verification_failed / retry_exhausted,
+  pipelines started/completed, cron / ideation activity, daemon
+  pause/resume, operator acks, open issues. Keep under 12 lines.
+
+After posting (or skipping), call
+`log_event(type="status_report", summary="<one sentence>")` so the
+next run can find this report's marker in the tail.
+"""
+
+
+# Default max_turns for the status-report sub-agent. Mirrors the value
+# `cron.default.yaml` carried pre-TB-144. The cron path passes the cron
+# job's `max_turns` through so an operator who tunes `cron.yaml` keeps
+# control; the chat path uses this default.
+DEFAULT_MAX_TURNS = 10
+
+
+# Events the skip-gate treats as self-noise — i.e. the routine's own
+# bookkeeping that should NOT count as "fresh activity" for the purpose
+# of suppressing back-to-back reports. See `_status_report_should_skip`.
+_STATUS_REPORT_BORING_TYPES = frozenset(
+    {"cron_start", "cron_complete", "status_report", "cron_skipped",
+     "state_committed"}
+)
+
+
+def _status_report_should_skip(cfg: Config) -> bool:
+    """Return True iff a status-report run would be a no-op (TB-128).
+
+    "No-op" means: there's a previous `cron_complete job=status-report`
+    in the recent tail AND no events of interest have been appended
+    after it (positionally — the events log timestamps to one-second
+    resolution, so same-second self-noise after the cron_complete must
+    not be misread as fresh activity). Events of interest are anything
+    except this job's own bookkeeping (cron_start / cron_complete for
+    status-report, the agent's `status_report` log_event, the cron's
+    outbound `mattermost_reply` that quotes the status report header,
+    and previous `cron_skipped` markers).
+
+    Returns False if the job has never run before (or its last run
+    rolled out of the tail) — first-run / cold-cache, always run.
+
+    Pre-TB-144 this lived in `daemon.py` and was cron-only; now both
+    the cron tick AND the chat-trigger MCP tool route through the same
+    gate so on-demand operator reports honor the same idle-skip
+    semantics as scheduled ones.
+    """
+    evts = events.tail(cfg.events_file, n=200)
+    last_done_idx = -1
+    for i in range(len(evts) - 1, -1, -1):
+        e = evts[i]
+        if (
+            e.get("type") == "cron_complete"
+            and e.get("job") == "status-report"
+        ):
+            last_done_idx = i
+            break
+    if last_done_idx < 0:
+        return False  # never ran (or rolled out of tail) — run it.
+    for e in evts[last_done_idx + 1:]:
+        typ = e.get("type", "")
+        if typ in _STATUS_REPORT_BORING_TYPES:
+            continue
+        # The status-report cron's outbound post is a `mattermost_reply`
+        # whose summary starts with the report headline. Filter those
+        # out so back-to-back status posts don't keep "feeding" each
+        # other as activity.
+        if typ == "mattermost_reply":
+            summary = e.get("summary", "") or ""
+            if "Autopilot Status Report" in summary[:80]:
+                continue
+        # Found something interesting → don't skip.
+        return False
+    # Reached end of tail without finding interesting activity → skip.
+    return True
+
+
+@dataclass
+class StatusReportResult:
+    """Outcome shape for `run_status_report`.
+
+    `skipped=True` means the skip-if-idle gate fired and no SDK turn was
+    burned; `reason` carries the gate's reason string so the caller can
+    surface it in chat replies. `skipped=False` means the SDK turn ran;
+    `error` is set if the SDK timed out or crashed (mirrors the cron
+    path's error-event semantics — the caller can still report success
+    to the operator since the event audit trail is intact).
+    """
+
+    skipped: bool
+    reason: str | None = None
+    error: str | None = None
+    timed_out: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Daemon-side wiring for the MCP tool.
+#
+# `mcp__autopilot__status_report_run` is invoked from inside an MCP tool
+# handler; the handler doesn't have access to the daemon's `sdk` /
+# `mcp_server` references (those are positional args to `run_status_report`).
+# The daemon calls `configure(sdk, mcp_server)` once at startup
+# (`main_loop`, after `build_mcp_server`) so the MCP tool can resolve them
+# at call time. Tests configure their FakeSDK the same way before driving
+# `do_status_report_run` directly.
+#
+# Module-level dict (instead of a contextvar) because the references are
+# process-wide and immutable for the daemon's lifetime — the contextvar
+# pattern is for per-task plumbing (see `tools._task_id_ctx`), not for
+# long-lived singletons.
+
+_SDK_REF: dict = {"sdk": None, "mcp_server": None}
+
+
+def configure(sdk, mcp_server) -> None:
+    """Stash the daemon's SDK + MCP server references for the MCP tool.
+
+    Called once from `daemon.main_loop` after both are built. Tests that
+    drive `do_status_report_run` directly should call this with their
+    FakeSDK + a (possibly None) mcp_server before exercising the tool.
+    Idempotent — re-calling overwrites the previous references, which is
+    the right shape for tests that want to swap fakes between runs.
+    """
+    _SDK_REF["sdk"] = sdk
+    _SDK_REF["mcp_server"] = mcp_server
+
+
+def _resolved_sdk_refs() -> tuple[object, object]:
+    """Return the configured (sdk, mcp_server) pair.
+
+    Raises RuntimeError if `configure(...)` hasn't been called yet — the
+    MCP tool surfaces this as an error response so the operator sees
+    "status_report_run unavailable" instead of an opaque AttributeError.
+    """
+    sdk = _SDK_REF.get("sdk")
+    mcp_server = _SDK_REF.get("mcp_server")
+    if sdk is None:
+        raise RuntimeError(
+            "status_report.configure(sdk, mcp_server) has not been called; "
+            "the MCP tool cannot dispatch a sub-agent without the daemon's "
+            "SDK reference"
+        )
+    return sdk, mcp_server
+
+
+# ---------------------------------------------------------------------------
+# The shared routine.
+
+
+async def run_status_report(
+    cfg: Config,
+    sdk,
+    mcp_server,
+    *,
+    trigger: Literal["cron", "chat"],
+    reason: str | None = None,
+    max_turns: int = DEFAULT_MAX_TURNS,
+) -> StatusReportResult:
+    """Run a status-report agent (TB-144).
+
+    Both the cron tick (`daemon.run_cron` when `job.name ==
+    "status-report"`) and the chat-trigger MCP tool
+    (`mcp__autopilot__status_report_run`) call this so every status
+    report shares one prompt, one skip-gate, and one event vocabulary.
+
+    Steps:
+      1. Skip-if-idle gate (`_status_report_should_skip`). On skip,
+         emit `cron_skipped` with `trigger=...` and (cron only) advance
+         `cron_state` so the daemon doesn't re-fire every tick.
+      2. Build the control prompt — same `## Current state` snapshot the
+         cron path used pre-TB-144, with the freshness contract still
+         appended via `prompts.build_control_prompt(cfg, "status-report",
+         STATUS_REPORT_PROMPT)`.
+      3. Emit `cron_start` (with `trigger=...` field), invoke the SDK
+         via `daemon._run_control_agent`, emit `cron_complete` (with
+         `trigger=...`).
+      4. Cron-trigger advances `cron_state[status-report].last_run`;
+         chat-trigger does NOT (an operator-triggered report at 11:00
+         must not silence the scheduled noon cron).
+
+    Returns a `StatusReportResult` so the caller can surface skip/error
+    state to the operator.
+    """
+    # Lazy import to avoid the daemon ↔ status_report cycle. Same pattern
+    # `ideation._maybe_ideate` uses to reach `_run_control_agent` /
+    # `_commit_state_files`.
+    from . import daemon as _daemon
+    from . import prompts as _prompts
+    from .tools import CONTROL_AGENT_TOOLS
+
+    if _status_report_should_skip(cfg):
+        skip_payload: dict = {
+            "job": "status-report",
+            "trigger": trigger,
+            "reason": "no_activity_since_last_report",
+        }
+        if reason:
+            skip_payload["chat_reason"] = reason
+        events.append(cfg.events_file, "cron_skipped", **skip_payload)
+        if trigger == "cron":
+            mark_run(cfg.cron_state_file, "status-report")
+        return StatusReportResult(
+            skipped=True, reason="no_activity_since_last_report",
+        )
+
+    prompt = _prompts.build_control_prompt(
+        cfg, "status-report", STATUS_REPORT_PROMPT,
+    )
+    start_payload: dict = {"job": "status-report", "trigger": trigger}
+    if reason:
+        start_payload["reason"] = reason
+    events.append(cfg.events_file, "cron_start", **start_payload)
+
+    timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
+        cfg,
+        sdk,
+        mcp_server,
+        label="cron-status-report",
+        prompt=prompt,
+        allowed_tools=CONTROL_AGENT_TOOLS,
+        max_turns=max_turns,
+    )
+    if timed_out:
+        events.append(
+            cfg.events_file,
+            "cron_timeout",
+            job="status-report",
+            trigger=trigger,
+            timeout_s=cfg.control_timeout_s,
+            stderr_tail=stderr_tail,
+            prompt_dump=str(prompt_dump),
+        )
+    elif error is not None:
+        events.append(
+            cfg.events_file,
+            "cron_error",
+            job="status-report",
+            trigger=trigger,
+            error=error,
+            stderr_tail=stderr_tail,
+            prompt_dump=str(prompt_dump),
+        )
+
+    if trigger == "cron":
+        mark_run(cfg.cron_state_file, "status-report")
+    events.append(
+        cfg.events_file,
+        "cron_complete",
+        job="status-report",
+        trigger=trigger,
+    )
+    return StatusReportResult(
+        skipped=False,
+        timed_out=timed_out,
+        error=error,
+    )

@@ -2,37 +2,13 @@ jobs:
   - name: status-report
     interval: 2h
     prompt: |
-      Post a concise autopilot status report to the mattermost channel
-      identified by AP2_MM_REPORT_CHANNEL (or #autopilot if unset).
-
-      Freshness contract (TB-128 — non-negotiable):
-      - The headline timestamp in your post is the literal `now:` value
-        from the `## Current state` block at the top of this prompt. Do
-        NOT compute, guess, or copy a timestamp from any other source.
-      - Re-read `.cc-autopilot/events.jsonl` (last ~50 lines) and
-        `TASKS.md` with the `Read` tool right now, before composing the
-        post. The board counts in the snapshot block above are
-        authoritative; the embedded events tail is a courtesy.
-      - If nothing of substance has happened since the last
-        `status_report` event in the tail (no new task_start /
-        task_complete / verification_failed / pipeline_* /
-        retry_exhausted / daemon_pause / daemon_resume / operator_ack /
-        cron_proposed / ideation_complete events), SKIP the Mattermost
-        post entirely. Just call
-        `log_event(type="status_report", summary="skipped: no activity
-        since <ts>")` and finish. The daemon also has a deterministic
-        skip-gate, but you should mirror the decision so the report
-        reflects current reality if you do post.
-
-      Body shape (when posting):
-      - Headline: `**Autopilot Status Report** — <now>`
-      - 4–8 bullets covering: tasks completed (TB-N + 1-line outcome +
-        short SHA), tasks failed / verification_failed / retry_exhausted,
-        pipelines started/completed, cron / ideation activity, daemon
-        pause/resume, operator acks, open issues. Keep under 12 lines.
-
-      After posting (or skipping), call
-      `log_event(type="status_report", summary="<one sentence>")` so the
-      next run can find this report's marker in the tail.
+      (TB-144: this prompt body is a stub — the daemon dispatches
+      status-report jobs through `ap2.status_report.run_status_report`,
+      which builds the prompt from the canonical
+      `ap2.status_report.STATUS_REPORT_PROMPT` constant. Edit that
+      constant if you want to change the report's shape; editing this
+      stub has no effect at runtime. Kept here for legibility — `ap2
+      cron list` still shows that a status-report job exists, with the
+      operator-tunable `interval` / `max_turns` fields above.)
     max_turns: 10
     created_by: bootstrap

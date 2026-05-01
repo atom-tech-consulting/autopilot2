@@ -411,6 +411,12 @@ def build_mattermost_prompt(
             "- If the user asks to pause/resume the daemon: use `daemon_control`.",
             "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",
             "- If the user asks for cron / ideation-state changes: do NOT call cron_edit / ideation_state_write — reply via `mattermost_reply` explaining they'll be handled once the daemon is idle.",
+            # TB-144: status-report queries route through the shared MCP
+            # tool so chat-triggered and cron-triggered reports stay in
+            # sync (one prompt, one freshness contract, one event audit
+            # trail). Pinned phrasing — `tests/test_prompts.py` asserts
+            # the recognition pattern + the tool name.
+            "- If the user asks for a **status report** (recognize: \"status\", \"status?\", \"what's going on\", \"how are things\", \"how's the daemon\", \"any updates\"): call `status_report_run({\"reason\": \"<short paraphrase of what they asked>\"})` instead of composing your own reply. The routine handles posting (or skipping if nothing has changed) and emits the audit events. Don't call it more than once per turn — the skip-gate fires fast, but the SDK turn isn't free. Your `mattermost_reply` after the call can mention the result (\"posted to #ap2\" / \"skipped: nothing has changed since the last report\").",
             "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
             "- Log anything noteworthy via `log_event`.",
         ])
@@ -418,6 +424,10 @@ def build_mattermost_prompt(
         parts.extend([
             "- If the user asks for work: add tasks via `board_edit`. **Approving an ideation-proposed task** (TB-121) is action `approve` on a Backlog task — strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so it dispatches.",
             "- If the user asks for monitoring: add a job via `cron_edit`.",
+            # TB-144: status-report queries route through the shared MCP
+            # tool. Same shape in both restricted and full toolsets — the
+            # MM handler doesn't reinvent the report format.
+            "- If the user asks for a **status report** (recognize: \"status\", \"status?\", \"what's going on\", \"how are things\", \"how's the daemon\", \"any updates\"): call `status_report_run({\"reason\": \"<short paraphrase of what they asked>\"})` instead of composing your own reply. The routine handles posting (or skipping if nothing has changed) and emits the audit events. Don't call it more than once per turn.",
             "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
             "- Log anything noteworthy via `log_event`.",
         ])

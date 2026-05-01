@@ -1317,6 +1317,95 @@ def do_log_event(cfg: Config, args: dict) -> dict:
     return _ok(f"logged {typ}", event=evt)
 
 
+async def do_status_report_run(cfg: Config, args: dict) -> dict:
+    """Trigger an on-demand status report (TB-144).
+
+    Routes the operator's "@claude-bot status" through the same shared
+    `ap2.status_report.run_status_report` callable the cron tick uses, so
+    chat-triggered reports get the same prompt body, freshness contract,
+    and skip-if-idle gate as scheduled ones — and so the audit trail in
+    events.jsonl shows `cron_start` / `cron_complete` (with
+    `trigger="chat"`) the same way cron-triggered runs do.
+
+    Pre-TB-144 the MM handler composed status-shaped replies inline; the
+    format drifted from the canonical cron report and the audit shape
+    diverged (no cron_start/complete events landed for chat triggers).
+    Routing through the shared routine eliminates both gaps.
+
+    Behavior:
+      - If the daemon is paused, returns an error rather than running.
+        Mirrors cron semantics — paused daemons skip due jobs; chat
+        triggers should not bypass that signal.
+      - If the skip-gate fires (no activity since the last report),
+        returns a `_ok` summary noting the skip — the operator sees
+        "no new activity since <ts>" instead of a duplicate report.
+      - On a real run, the routine emits the `cron_start` /
+        `cron_complete` events; this handler returns a one-line summary
+        carrying the run's outcome so the handler agent can mention it
+        in its mattermost_reply.
+      - The chat path explicitly does NOT advance
+        `cron_state[status-report].last_run` (an operator-triggered
+        report at 11:00 must not silence the scheduled noon cron).
+
+    Async because the underlying routine is async (it dispatches a
+    sub-agent via `await sdk.query(...)`). Tests drive it through
+    `asyncio.run(tools.do_status_report_run(cfg, args))`; the MCP tool
+    adapter in `build_mcp_server` just awaits it.
+    """
+    # Lazy import to keep tools.py independent of the status_report ↔
+    # daemon import chain at module load.
+    from . import status_report as _sr
+
+    reason = (args.get("reason") or "").strip()
+    if not reason:
+        return _err(
+            "reason is required (one short sentence — what triggered "
+            "this on-demand report; lands in events.jsonl for audit)"
+        )
+
+    if cfg.pause_flag.exists():
+        return _err(
+            "daemon is paused; on-demand status reports are deferred "
+            "until the operator resumes (mirrors cron semantics — "
+            "paused daemons skip due jobs)"
+        )
+
+    try:
+        sdk, mcp_server = _sr._resolved_sdk_refs()
+    except RuntimeError as e:
+        return _err(str(e))
+
+    result = await _sr.run_status_report(
+        cfg, sdk, mcp_server, trigger="chat", reason=reason,
+    )
+    if result.skipped:
+        return _ok(
+            "status_report_run skipped (no activity since last report)",
+            skipped=True,
+            reason=result.reason or "",
+            trigger="chat",
+        )
+    if result.timed_out:
+        return _ok(
+            "status_report_run timed out (event audit trail intact)",
+            skipped=False,
+            timed_out=True,
+            trigger="chat",
+        )
+    if result.error:
+        return _ok(
+            f"status_report_run errored: {result.error}",
+            skipped=False,
+            error=result.error,
+            trigger="chat",
+        )
+    return _ok(
+        "status_report_run dispatched; cron_complete event emitted",
+        skipped=False,
+        trigger="chat",
+    )
+
+
 def do_daemon_control(cfg: Config, args: dict) -> dict:
     action = args.get("action")
     reason = args.get("reason") or ""
@@ -1626,6 +1715,28 @@ def build_mcp_server(cfg: Config):
         return do_cron_propose(cfg, args)
 
     @tool(
+        "status_report_run",
+        "Trigger an on-demand autopilot status report (TB-144). Use when "
+        "the operator explicitly asks for a status report (e.g. "
+        "\"@claude-bot status\", \"@claude-bot what's going on\"). The call "
+        "dispatches a sub-agent through the same shared routine the "
+        "scheduled status-report cron uses, so chat-triggered reports get "
+        "the same prompt body, freshness contract, and skip-if-idle gate "
+        "as cron-triggered ones; events.jsonl gains a `cron_start` / "
+        "`cron_complete` pair with `trigger=\"chat\"` so post-mortems can "
+        "distinguish on-demand vs. scheduled runs. Don't call repeatedly "
+        "— the routine has its own skip-if-idle gate, so calling more "
+        "often than that won't get you a fresher report. Args: reason "
+        "(one short sentence; what the operator asked for, lands in the "
+        "audit event). The chat trigger does NOT advance "
+        "`cron_state[status-report].last_run` — the next scheduled cron "
+        "still fires on its normal interval.",
+        {"reason": str},
+    )
+    async def status_report_run(args):
+        return await do_status_report_run(cfg, args)
+
+    @tool(
         "pipeline_task_start",
         "Launch a long-running pipeline as a detached OS subprocess. Use this "
         "when your task's work will exceed ~5 minutes of wall-clock time — "
@@ -1670,6 +1781,7 @@ def build_mcp_server(cfg: Config):
             operator_queue_append,
             report_result,
             cron_propose,
+            status_report_run,
             pipeline_task_start,
         ],
     )
@@ -1698,6 +1810,11 @@ CONTROL_AGENT_TOOLS = [
     # this over `board_edit` when a task agent is in flight — see the
     # tool docstring + MM_HANDLER_TOOLS_RESTRICTED below.
     "mcp__autopilot__operator_queue_append",
+    # TB-144: on-demand status report trigger. Available to control
+    # agents in general (not just the MM handler) so a future cron job
+    # can also fire one without re-implementing the routine; the MM
+    # handler is the immediate consumer (operator-triggered reports).
+    "mcp__autopilot__status_report_run",
 ]
 
 # TB-122: when a task agent is in flight, the Mattermost handler runs with a

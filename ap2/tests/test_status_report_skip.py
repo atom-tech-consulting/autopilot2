@@ -1,6 +1,6 @@
-"""TB-128: skip-if-idle gate for the status-report cron.
+"""TB-128 + TB-144: skip-if-idle gate for the status-report routine.
 
-The status-report cron has historically posted reports with stale headline
+Status-report has historically posted reports with stale headline
 timestamps when nothing changed between runs (the agent re-rendered text
 from a prior context's cache). The fix has two layers:
 
@@ -14,19 +14,28 @@ from a prior context's cache). The fix has two layers:
 Both layers are belt-and-braces: the agent could still ignore the prompt
 contract, but the daemon-level gate prevents an SDK turn from being
 burned in the first place when there's nothing new to report.
+
+TB-144 hoisted the gate (and the surrounding `run_status_report`
+routine) into `ap2.status_report` so the chat-trigger MCP tool shares
+the same skip semantics as the cron tick. The `_status_report_should_skip`
+import is preserved on `ap2.daemon` as a re-export — the symbol moved,
+the import contract didn't. Tests below exercise both call sites
+(cron-trigger and chat-trigger) against the same gate.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from ap2 import events
+from ap2 import events, status_report as status_report_mod
 from ap2.config import Config
 from ap2.cron import CronJob
 from ap2.daemon import _status_report_should_skip, run_cron
+from ap2.status_report import run_status_report
 
 
 def _cfg(tmp_path: Path) -> Config:
@@ -242,22 +251,22 @@ def test_run_cron_does_not_skip_when_activity_present(tmp_path, monkeypatch):
 # cron.default.yaml prompt content must encode the freshness contract.
 
 
-def test_default_status_report_prompt_pins_freshness_contract():
-    """The bootstrap default for `status-report` must spell out the
-    headline-timestamp / fresh-read / skip-if-idle rules so new projects
-    don't inherit the old stale-text behavior. Operators with
-    pre-existing cron.yaml files keep their copy until they re-bootstrap;
-    the daemon-side `## Current state` block + skip gate cover them
-    regardless.
-    """
-    from ap2.cron import load_jobs
+def test_status_report_prompt_constant_pins_freshness_contract():
+    """TB-144: the canonical status-report prompt body now lives at
+    `ap2.status_report.STATUS_REPORT_PROMPT` (hoisted out of
+    `cron.default.yaml` so the chat-trigger MCP tool can share it). The
+    headline-timestamp / fresh-read / skip-if-idle rules must be pinned
+    on that constant — operators editing the constant change the report
+    shape for both cron and chat triggers in lockstep.
 
-    default = (
-        Path(__file__).resolve().parent.parent / "cron.default.yaml"
-    )
-    jobs = {j.name: j for j in load_jobs(default)}
-    sr = jobs["status-report"]
-    body = sr.prompt
+    Pre-TB-144 this test asserted against the cron.default.yaml prompt;
+    that prompt is now a stub explaining the migration (the daemon
+    ignores it for the status-report job). The cron stub is checked
+    separately in `test_cron_default_status_report_prompt_is_stub`.
+    """
+    from ap2.status_report import STATUS_REPORT_PROMPT
+
+    body = STATUS_REPORT_PROMPT
     # Headline timestamp pin.
     assert "Freshness contract" in body
     assert "`now:` value" in body
@@ -267,3 +276,214 @@ def test_default_status_report_prompt_pins_freshness_contract():
     # Skip-if-idle pin.
     assert "SKIP" in body
     assert "status_report" in body
+
+
+def test_cron_default_status_report_prompt_is_stub():
+    """TB-144: `cron.default.yaml`'s status-report prompt body is now an
+    intentional stub that points at the canonical constant in
+    `ap2.status_report`. The daemon's `run_cron` ignores `job.prompt`
+    for the `status-report` job (see `daemon.run_cron` →
+    `status_report.run_status_report`), so an operator who edited their
+    local cron.yaml's prompt body pre-TB-144 won't see drift between
+    chat and cron reports — the routine is authoritative either way.
+
+    The stub mentions the canonical location so a curious operator
+    reading `ap2 cron list` follows the breadcrumb. The cron job's
+    `interval` and `max_turns` fields are still tunable from
+    cron.yaml — only the prompt body is hoisted.
+    """
+    from ap2.cron import load_jobs
+
+    default = (
+        Path(__file__).resolve().parent.parent / "cron.default.yaml"
+    )
+    jobs = {j.name: j for j in load_jobs(default)}
+    sr = jobs["status-report"]
+    body = sr.prompt
+    # The stub says where the canonical content lives.
+    assert "ap2.status_report" in body
+    assert "STATUS_REPORT_PROMPT" in body
+    # Anti-regression: the freshness contract must NOT live in two
+    # places (drift hazard). It lives in STATUS_REPORT_PROMPT only.
+    assert "Freshness contract" not in body
+    # Cron's interval / max_turns are still meaningful — operator-tunable.
+    assert sr.interval_s == 7200
+    assert sr.max_turns == 10
+
+
+# ---------------------------------------------------------------------------
+# TB-144: chat-trigger semantics for `run_status_report`.
+#
+# The shared routine routes both the cron tick and the on-demand
+# `mcp__autopilot__status_report_run` MCP tool. Tests below pin the
+# trigger-aware semantics: the skip-gate fires for both triggers, but
+# `cron_state` advance only happens for cron triggers (otherwise an
+# operator-triggered report at 11:00 would silence the scheduled noon
+# cron).
+
+
+def test_run_status_report_chat_trigger_honors_skip_gate(tmp_path):
+    """`run_status_report(trigger="chat")` honors the same skip-if-idle
+    gate as the cron path. On skip, no SDK turn is burned; a
+    `cron_skipped` event lands with `trigger="chat"` so post-mortems can
+    distinguish chat-trigger skips from cron-trigger skips."""
+    cfg = _cfg(tmp_path)
+    # Seed a recent cron_complete with no follow-up activity → gate fires.
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+
+    sdk = _NoopSDK()
+    result = asyncio.run(
+        run_status_report(
+            cfg, sdk, mcp_server=None,
+            trigger="chat", reason="operator asked",
+        )
+    )
+
+    assert result.skipped is True
+    assert result.reason == "no_activity_since_last_report"
+    assert sdk.called is False, "skipped chat trigger must not invoke the SDK"
+
+    evts = events.tail(cfg.events_file, 50)
+    skipped = [e for e in evts if e.get("type") == "cron_skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["trigger"] == "chat"
+    assert skipped[0]["reason"] == "no_activity_since_last_report"
+    # The operator's reason rides on the skipped event so the audit trail
+    # explains what was asked for, even when nothing was posted.
+    assert skipped[0].get("chat_reason") == "operator asked"
+
+
+def test_run_status_report_cron_trigger_advances_state(tmp_path, monkeypatch):
+    """`trigger="cron"` advances `cron_state[status-report].last_run` so
+    the daemon's `due_jobs` won't immediately re-fire the cron. Pin both
+    the state file write and the `trigger="cron"` field on the
+    `cron_start` / `cron_complete` events."""
+    cfg = _cfg(tmp_path)
+    # Seed activity so the skip-gate doesn't fire — we want to exercise
+    # the run path, not the skip path.
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(
+        cfg.events_file, "task_complete", task="TB-1",
+        status="complete", commit="abc1234",
+    )
+    monkeypatch.setattr(
+        "ap2.prompts.build_control_prompt",
+        lambda cfg, name, body: "stub prompt",
+    )
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert sdk.called is True
+
+    state = json.loads(cfg.cron_state_file.read_text())
+    assert "status-report" in state
+    assert state["status-report"] > 0, (
+        "cron-trigger must advance cron_state.last_run so due_jobs sees "
+        "the run as recent"
+    )
+
+    evts = events.tail(cfg.events_file, 50)
+    starts = [e for e in evts if e.get("type") == "cron_start"
+              and e.get("job") == "status-report"]
+    completes = [e for e in evts if e.get("type") == "cron_complete"
+                 and e.get("job") == "status-report"]
+    # Filter out the seeded cron_complete (no `trigger` field — pre-call).
+    completes_with_trigger = [e for e in completes if "trigger" in e]
+    assert any(e.get("trigger") == "cron" for e in starts)
+    assert any(e.get("trigger") == "cron" for e in completes_with_trigger)
+
+
+def test_run_status_report_chat_trigger_does_not_advance_state(tmp_path, monkeypatch):
+    """The chat trigger MUST NOT advance `cron_state[status-report].last_run`.
+    Otherwise an operator-triggered report at 11:00 would silence the
+    scheduled noon cron — the opposite of what the operator asked for.
+
+    The contract: cron and chat triggers share the prompt + skip-gate +
+    audit shape, but cron-trigger owns the schedule. Chat triggers are
+    additive, not replacement.
+    """
+    cfg = _cfg(tmp_path)
+    # Seed activity so the run path is exercised (skip-gate doesn't fire).
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(
+        cfg.events_file, "task_complete", task="TB-1",
+        status="complete", commit="abc1234",
+    )
+    monkeypatch.setattr(
+        "ap2.prompts.build_control_prompt",
+        lambda cfg, name, body: "stub prompt",
+    )
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(
+            cfg, sdk, mcp_server=None,
+            trigger="chat", reason="operator asked",
+        )
+    )
+
+    assert sdk.called is True, "chat-trigger run still hits the SDK"
+
+    # The cron_state file must remain untouched by the chat trigger.
+    # (It's allowed to not exist at all if no prior cron run created it.)
+    if cfg.cron_state_file.exists():
+        state = json.loads(cfg.cron_state_file.read_text())
+        assert "status-report" not in state, (
+            f"chat-trigger should NOT have written cron_state; got {state!r}"
+        )
+
+    # The cron_start event carries trigger="chat" and the operator's reason.
+    evts = events.tail(cfg.events_file, 50)
+    starts = [e for e in evts if e.get("type") == "cron_start"
+              and e.get("job") == "status-report"
+              and e.get("trigger") == "chat"]
+    assert len(starts) == 1
+    assert starts[0].get("reason") == "operator asked"
+
+    # cron_complete also carries trigger="chat".
+    completes = [e for e in evts if e.get("type") == "cron_complete"
+                 and e.get("job") == "status-report"
+                 and e.get("trigger") == "chat"]
+    assert len(completes) == 1
+
+
+def test_run_status_report_cron_trigger_skip_advances_state(tmp_path):
+    """Symmetric to the run path: cron-trigger SKIP also advances state
+    (so the daemon doesn't re-fire every tick when nothing is happening).
+    Chat-trigger skip does not — chat skips never silence cron.
+    """
+    cfg = _cfg(tmp_path)
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert sdk.called is False
+    state = json.loads(cfg.cron_state_file.read_text())
+    assert state["status-report"] > 0
+
+
+def test_run_status_report_chat_trigger_skip_does_not_advance_state(tmp_path):
+    """Mirror of the run-path test: chat-trigger skip must NOT advance
+    cron_state. If it did, the next scheduled cron would think a recent
+    run had already happened and slip past its interval."""
+    cfg = _cfg(tmp_path)
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(
+            cfg, sdk, mcp_server=None,
+            trigger="chat", reason="operator asked",
+        )
+    )
+
+    assert sdk.called is False
+    if cfg.cron_state_file.exists():
+        state = json.loads(cfg.cron_state_file.read_text())
+        assert "status-report" not in state
