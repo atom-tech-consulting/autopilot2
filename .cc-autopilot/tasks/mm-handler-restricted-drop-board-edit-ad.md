@@ -37,3 +37,10 @@ There's also a concrete missing piece: TB-121's `approve` action (strip `(blocke
 - Forcing `operator_queue_append` even on idle (FULL toolset still has direct `board_edit`). Could tighten later, but symmetry is not required for the state-violation fix.
 - Adding `move_to_active`, `move_to_complete`, `move_to_pipeline_pending` to the queue — those are daemon- or task-agent-driven, never operator-facing chat commands.
 - Re-architecting the MM handler to use a single mutation primitive everywhere; we only need the two changes above to close the false-positive class.
+## Attempts
+
+### 2026-05-01 — state_violation
+(no summary)
+- **fenced_files:** .cc-autopilot/operator_queue.jsonl
+- **pre_run_head:** d708803f
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T032915Z-TB-142.prompt.md`, `stream: .cc-autopilot/debug/20260501T032915Z-TB-142.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T032915Z-TB-142.messages.jsonl`
