@@ -137,3 +137,9 @@
 - **Summary:** Previously committed in 570c6c2: re-added operator_queue.jsonl to TASK_AGENT_FENCED_PATHS, introduced _VIOLATION_CHECK_EXCLUDED_PATHS=(events.jsonl, operator_queue.jsonl) in rollback.py, updated prompts._TASK_HEADER, and SDK disallowed_tools (via _TASK_DISALLOWED_TOOLS built from TASK_AGENT_FENCED_PATHS) blocks Edit/Write on operator_queue.jsonl. Verified all four briefing scope items present, all current Verification bullets pass (python3 -c assertions for tools/rollback succeed; disallowed_tools includes the Edit/Write blocks); full regression gate uv run pytest -q ap2/tests/ → 716 passed. Prior verification_failed was against the older grep-style bullets later rewritten to python3 -c by 3901b54.
 - **Files:** ap2/tools.py, ap2/rollback.py, ap2/prompts.py, ap2/tests/test_rollback.py, ap2/tests/test_tools.py, ap2/tests/test_prompts.py, ap2/tests/test_daemon_recovery.py, ap2/tests/test_operator_queue.py
 - **Tests:** pass
+
+## [2026-05-01] TB-144: Hoist status-report into shared routine; expose as MCP tool
+- **Commit:** `b0a5618`
+- **Summary:** Implementation already shipped in cfcd19e (status_report.py, run_status_report routine, MCP tool, daemon delegation, MM handler routing, 716 pytest passing). Per-task verifier rolled it to Backlog because the briefing's third Verification bullet imported MM_HANDLER_TOOLS_FULL/_RESTRICTED — names TB-145 (2390002) collapsed into singular MM_HANDLER_TOOLS. This commit (b0a5618) updates the briefing's Scope item (4) and the assertion to use MM_HANDLER_TOOLS, preserving intent. Verified: pytest 716 passing; all 3 shell verification bullets now pass.
+- **Files:** .cc-autopilot/tasks/hoist-status-report-into-shared-routine.md
+- **Tests:** pass
