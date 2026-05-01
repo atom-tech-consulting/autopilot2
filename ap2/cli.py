@@ -1046,6 +1046,19 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--user", default=sandbox.DEFAULT_USER)
     sc.set_defaults(func=sandbox.cmd_project_audit)
 
+    sc = sub_sbx.add_parser(
+        "sync-skills",
+        help="sync <repo>/skills/* into $HOME/.claude/skills/ "
+             "(TB-140; default dry-run, --apply to copy)",
+    )
+    sc.add_argument("--apply", action="store_true",
+                    help="copy each skill onto its deployed copy "
+                         "(default: dry-run drift summary)")
+    sc.add_argument("--dest", metavar="DIR",
+                    help="override destination root "
+                         "(default: $HOME/.claude/skills)")
+    sc.set_defaults(func=sandbox.cmd_sync_skills)
+
     return p
 
 

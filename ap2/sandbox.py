@@ -570,6 +570,52 @@ def _howto_source() -> Path:
     return Path(__file__).resolve().parent / "howto.md"
 
 
+def _skills_source() -> Path:
+    """Path to `<repo>/skills/` — the canonical copies of `/ap2`,
+    `/ap2-task`, and `/migrate-to-ap2` (TB-140). Live slash commands
+    read the deployed copies under `~<user>/.claude/skills/`; this is
+    the source of truth that `sync_skills` mirrors there."""
+    return Path(__file__).resolve().parent.parent / "skills"
+
+
+def _deploy_script_source() -> Path:
+    """Path to `<repo>/scripts/deploy-skills.sh` (TB-140). The CLI
+    subcommand `ap2 sandbox sync-skills` is a thin wrapper around this
+    bash script — single source of truth so contributors can run the
+    same script directly without going through the CLI."""
+    return Path(__file__).resolve().parent.parent / "scripts" / "deploy-skills.sh"
+
+
+def sync_skills(apply: bool = False, dest: Path | None = None) -> int:
+    """Sync `<repo>/skills/*` into `~/.claude/skills/` (TB-140).
+
+    Thin wrapper around `scripts/deploy-skills.sh` that resolves the
+    script's path from the package and invokes it with the right flags.
+    Default is dry-run (no mutations); pass `apply=True` to copy.
+
+    `dest` overrides the destination root — the script otherwise targets
+    `$HOME/.claude/skills`. This is intentionally the *current* user's
+    HOME, not the sandbox user's: operators run `/ap2`, `/ap2-task`,
+    `/migrate-to-ap2` from their own Claude Code session, so the
+    deployed copy lives under the operator's home, not the daemon's.
+
+    Returns the script's exit code.
+    """
+    script = _deploy_script_source()
+    if not script.exists():
+        print(f"sync-skills: script missing: {script}", file=sys.stderr)
+        return 1
+    if not os.access(script, os.X_OK):
+        print(f"sync-skills: script not executable: {script}", file=sys.stderr)
+        return 1
+    cmd = [str(script)]
+    if apply:
+        cmd.append("--apply")
+    if dest is not None:
+        cmd.extend(["--dest", str(dest)])
+    return subprocess.call(cmd)
+
+
 def install_howto(user: str) -> int:
     """Copy `ap2/howto.md` to `~<user>/.claude/ap2-howto.md`.
 
@@ -992,6 +1038,17 @@ def cmd_install_token(cfg, args) -> int:     # noqa: ARG001
     if token is None:
         return 1
     return install_oauth_token(args.user, token)
+
+
+def cmd_sync_skills(cfg, args) -> int:        # noqa: ARG001
+    """`ap2 sandbox sync-skills [--apply] [--dest DIR]` (TB-140).
+
+    Mirrors `<repo>/skills/*` into the operator's `~/.claude/skills/`.
+    Thin wrapper around `scripts/deploy-skills.sh` so operators don't
+    need to remember the script's path.
+    """
+    dest = Path(args.dest) if getattr(args, "dest", None) else None
+    return sync_skills(apply=bool(args.apply), dest=dest)
 
 
 def _resolve_token_arg(args) -> str | None:

@@ -33,8 +33,10 @@ Run all reads as the human user (you), not the sandbox user — state files in t
 Count task lines under each section. Output:
 
 ```
-board:    <A>A / <R>R / <B>B / <C>C / <F>F
+board:    <A>A / <R>R / <B>B / <P>P / <C>C / <F>F
 ```
+
+The five sections are Active, Ready, Backlog, Pipeline Pending (TB-103 long-running pipelines), Complete, Frozen — match the order `ap2 status` itself prints.
 
 Use: grep or a small awk pass. Don't invoke `ap2 status` for this — more robust and avoids sudo.
 
@@ -48,7 +50,7 @@ daemon:   running (pid <N>, up <ETIME>)  OR  stopped (stale pid file / no pid fi
 
 ### 3. Recent events — tail `.cc-autopilot/events.jsonl`
 
-Show the last 10 events of interesting types (`task_start`, `task_complete`, `task_error`, `task_timeout`, `retry_exhausted`, `backlog_auto_promoted`, `cron_complete`, `ideation_empty_board`, `ideation_complete`, `ideation_error`, `ideation_timeout`, `daemon_start`, `daemon_stop`, `mattermost*`). Skip noisy `cron_start`. Format one line per event:
+Show the last 10 events of interesting types (`task_start`, `task_complete`, `task_error`, `task_timeout`, `retry_exhausted`, `backlog_auto_promoted`, `cron_complete`, `ideation_empty_board`, `ideation_complete`, `ideation_error`, `ideation_timeout`, `daemon_start`, `daemon_stop`, `daemon_pause`, `daemon_resume`, `task_unfrozen`, `task_deleted`, `operator_queue_append`, `operator_queue_drained`, `mattermost*`). Skip noisy `cron_start`. Format one line per event:
 
 ```
 <ts>  <type>  <key=val key=val...>
@@ -79,6 +81,13 @@ Write a 2-line summary at the top of the output:
 open issues: <retries/errors from last 50 events, or "none">
 ```
 
+If the daemon is up, also surface (one line each, only when present):
+
+- `web:      http://127.0.0.1:<port>/` — the bundled read-only UI URL (TB-130). The daemon prints this line in `ap2 status` whenever `AP2_WEB_DISABLED` is unset, so the operator doesn't need a separate `ap2 web` step.
+- `pending:  N operator op(s)` — depth of the operator queue (TB-131). Non-zero with the daemon up means the next tick will drain them; non-zero with the daemon down is a stalled-queue red flag worth surfacing in `open issues`.
+
+These two are sourced from `ap2 status` itself when available, OR by reading `.cc-autopilot/operator_queue.jsonl` line count for `pending:` and resolving the URL from `AP2_WEB_HOST` / `AP2_WEB_PORT` / defaults otherwise.
+
 ## Rules
 
 - **Read-only.** Never edit files, restart daemon, or promote tasks. This skill reports, nothing else.
@@ -89,11 +98,13 @@ open issues: <retries/errors from last 50 events, or "none">
 ## Example output
 
 ```
-stoch: running (pid 98400, up 01:23:45); 0A / 0R / 0B / 10C / 1F; last task TB-11 at 2026-04-21T20:39Z (eb75288)
+stoch: running (pid 98400, up 01:23:45); 0A / 0R / 0B / 0P / 10C / 1F; last task TB-11 at 2026-04-21T20:39Z (eb75288)
 open issues: none
 
-board:    0A / 0R / 0B / 10C / 1F
+board:    0A / 0R / 0B / 0P / 10C / 1F
 daemon:   running (pid 98400, up 01:23:45)
+web:      http://127.0.0.1:8729/
+pending:  0 operator ops
 
 recent events:
   2026-04-21T20:39:05Z  task_complete    task=TB-11 commit=eb75288 summary=TB-11 CLI + run-config landed...
@@ -114,3 +125,22 @@ last task:
   - Result: complete.
   - Summary: ...
 ```
+
+## Adjacent commands the operator may want next
+
+This skill is read-only. If the operator follows up with a board-mutating
+ask, route them to the right CLI — the post-TB-131 surface is queue-routed,
+so each prints `... (will land at next tick)` and the daemon drains on its
+next tick:
+
+- `ap2 unfreeze <TB-N>` — Frozen → Backlog + reset retry counter.
+- `ap2 backlog <TB-N>` — any-section → Backlog (used to be `ap2 skip`).
+- `ap2 delete <TB-N>` — permanent removal; refuses Active/Ready without `--force`.
+- `ap2 pause` / `ap2 resume` — pause/resume daemon ticks (the flag file is
+  daemon-checked, not queue-routed; effective immediately).
+- `ap2 ack <TB-N> <decision>` — record an operator decision so ideation
+  stops re-proposing actions whose effects aren't filesystem-visible.
+- `ap2 rollback ...` — destructive history walk; not queue-routed.
+
+Do **not** invoke any of these from this skill — surfacing the command is
+fine, executing it isn't.
