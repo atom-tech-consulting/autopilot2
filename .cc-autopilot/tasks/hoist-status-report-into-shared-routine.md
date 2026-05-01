@@ -30,7 +30,7 @@ Two concrete drivers:
    - Calls `run_status_report(cfg, sdk, mcp_server, trigger="chat", reason=reason)` and returns a one-line `_ok` summary with the resulting event ts (so the handler can include it in its mattermost_reply).
    - Tool docstring tells the handler: "Use when the operator explicitly asks for a status report. Don't call repeatedly — the routine has its own skip-if-idle gate; calling more often than that won't get you a fresher report." This nudges the handler away from triggering on every casual status mention.
 
-(4) Add `mcp__autopilot__status_report_run` to `MM_HANDLER_TOOLS_FULL` and `MM_HANDLER_TOOLS_RESTRICTED` (both — operator should be able to ask for status whether a task is in flight or not).
+(4) Add `mcp__autopilot__status_report_run` to the MM handler toolset (operator should be able to ask for status whether a task is in flight or not). Note: TB-145 collapsed `MM_HANDLER_TOOLS_FULL`/`_RESTRICTED` into a single `MM_HANDLER_TOOLS`; TB-144 lands on top and just needs membership in the singular list.
 
 (5) MM handler prompt updates: when the operator's message asks for a status report (recognize phrases like "status", "what's going on", etc.), the handler invokes `status_report_run` instead of composing its own reply. Pin in `test_prompts.py`.
 
@@ -41,7 +41,7 @@ Two concrete drivers:
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
 - `grep -qE "run_status_report\(" ap2/daemon.py` — cron path now delegates to the shared routine.
 - `grep -q "status_report_run" ap2/tools.py` — new MCP tool registered.
-- `python3 -c "from ap2.tools import MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED; assert 'mcp__autopilot__status_report_run' in MM_HANDLER_TOOLS_FULL and 'mcp__autopilot__status_report_run' in MM_HANDLER_TOOLS_RESTRICTED"` — tool appears in both MM handler toolsets.
+- `python3 -c "from ap2.tools import MM_HANDLER_TOOLS; assert 'mcp__autopilot__status_report_run' in MM_HANDLER_TOOLS"` — tool appears in the (post-TB-145 singular) MM handler toolset.
 - New unit test in `test_status_report_skip.py` (extends existing pin): `run_status_report(trigger="chat")` honors the skip-if-idle gate and emits a `cron_skipped` (or `status_report_skipped`) event without invoking the SDK.
 - New unit test: `run_status_report(trigger="cron")` advances `cron_state[status-report].last_run`; `run_status_report(trigger="chat")` does NOT advance it (cron schedule unaffected by chat-triggered reports).
 - New unit test in `test_tools.py`: the MCP tool `status_report_run({"reason":"operator asked"})` returns `_ok` and emits a `cron_start` event with `trigger="chat"` and the supplied reason in the payload.
