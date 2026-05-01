@@ -200,8 +200,12 @@ concrete need for the full set.
   handler's reply explains the restriction. (If the SDK silently
   drops disallowed tool calls, this test asserts the absence of
   cron mutation in `events.jsonl`.)
-- Manual: kick a long-running task on stoch, mention `@claude-bot
-  status` → handler replies in <30s.
+- New e2e test: while a fake long-running task agent is in flight
+  (simulated by stubbing a slow SDK reply), enqueue an MM mention
+  and assert the handler's `mattermost_reply` event lands within
+  30s of the mention's timestamp. Pins responsiveness end-to-end
+  without needing a live deployment — replaces the prior
+  manual-stoch bullet so the criterion is auto-verifiable.
 
 ## Decision log
 
