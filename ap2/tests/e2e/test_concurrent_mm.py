@@ -1,15 +1,21 @@
-"""TB-122: e2e tests for concurrent Mattermost handler with restricted toolset.
+"""TB-122 / TB-145: e2e tests for the concurrent Mattermost handler.
 
-Exercises handle_message in isolation (without running the full two-loop
-daemon) because the FakeSDK's scripted responders give us full control over
-what `allowed_tools` is seen by each query. The _mm_loop / _main_tick_loop
-split is a structural change tested by the unit tests; here we test the
-observable behavioral contract:
+Originally TB-122 introduced a FULL/RESTRICTED toolset toggle keyed on
+whether a task agent was in flight. TB-145 collapsed that into a single
+unconditional `MM_HANDLER_TOOLS` set (the previous RESTRICTED shape).
 
-  (a) Handler fires while task in flight → allowed_tools == RESTRICTED.
-  (b) Handler fires while board is idle  → allowed_tools == FULL.
+Exercises `handle_message` in isolation (without running the full
+two-loop daemon) because the FakeSDK's scripted responders give us full
+control over what `allowed_tools` is seen by each query. The
+`_mm_loop` / `_main_tick_loop` split is a structural change tested by
+the unit tests; here we test the observable behavioral contract:
+
+  (a) Handler fires while task in flight → allowed_tools == MM_HANDLER_TOOLS.
+  (b) Handler fires while board is idle  → allowed_tools == MM_HANDLER_TOOLS.
   (c) Two concurrent handlers both complete without deadlock.
-  (d) Handler prompt explicitly forbids cron_edit when restricted.
+  (d) Handler prompt explicitly forbids cron_edit (always — TB-145).
+  (e) The toolset is invariant under board state transitions
+      (load-bearing TB-145 invariant — no FULL/RESTRICTED swap).
 """
 from __future__ import annotations
 
@@ -18,7 +24,7 @@ import json
 
 from ap2.board import Board
 from ap2.daemon import handle_message
-from ap2.tools import MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED
+from ap2.tools import MM_HANDLER_TOOLS
 
 from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg
 
@@ -55,11 +61,11 @@ def _capture_tools_factory():
     return gen, captured
 
 
-# ── test (a): restricted toolset when task is in flight ──────────────────────
+# ── test (a): MM_HANDLER_TOOLS used when task is in flight ────────────────────
 
 
-def test_mm_handler_restricted_when_task_active(e2e_project):
-    """While a task is in Active, handle_message must use MM_HANDLER_TOOLS_RESTRICTED."""
+def test_mm_handler_uses_fixed_toolset_when_task_active(e2e_project):
+    """While a task is in Active, handle_message must use MM_HANDLER_TOOLS."""
     cfg = e2e_project()
     _seed_active_task(cfg)
 
@@ -70,16 +76,17 @@ def test_mm_handler_restricted_when_task_active(e2e_project):
     asyncio.run(handle_message(cfg, sdk, mcp_server=None, msg=_mm_msg()))
 
     assert captured, "SDK.query was never called"
-    assert captured[0] == MM_HANDLER_TOOLS_RESTRICTED, (
-        f"Expected RESTRICTED; got {captured[0]}"
+    assert captured[0] == MM_HANDLER_TOOLS, (
+        f"Expected MM_HANDLER_TOOLS; got {captured[0]}"
     )
 
 
-# ── test (b): full toolset when board is idle ─────────────────────────────────
+# ── test (b): same fixed toolset when board is idle ───────────────────────────
 
 
-def test_mm_handler_full_toolset_when_idle(e2e_project):
-    """With no Active tasks, handle_message must use MM_HANDLER_TOOLS_FULL."""
+def test_mm_handler_uses_fixed_toolset_when_idle(e2e_project):
+    """With no Active tasks, handle_message must use the SAME
+    MM_HANDLER_TOOLS — TB-145: no FULL/RESTRICTED swap."""
     cfg = e2e_project()
 
     factory, captured = _capture_tools_factory()
@@ -89,8 +96,8 @@ def test_mm_handler_full_toolset_when_idle(e2e_project):
     asyncio.run(handle_message(cfg, sdk, mcp_server=None, msg=_mm_msg()))
 
     assert captured, "SDK.query was never called"
-    assert captured[0] == MM_HANDLER_TOOLS_FULL, (
-        f"Expected FULL; got {captured[0]}"
+    assert captured[0] == MM_HANDLER_TOOLS, (
+        f"Expected MM_HANDLER_TOOLS; got {captured[0]}"
     )
 
 
@@ -124,11 +131,12 @@ def test_two_concurrent_handlers_no_deadlock(e2e_project):
     assert len(mm_evts) == 2, f"Expected 2 mattermost events; got {len(mm_evts)}"
 
 
-# ── test (d): restricted prompt explicitly mentions the restriction ────────────
+# ── test (d): prompt explicitly mentions the cron_edit restriction ────────────
 
 
-def test_restricted_prompt_mentions_cron_restriction(e2e_project):
-    """When a task is in flight, the prompt must explain that cron_edit is off-limits."""
+def test_prompt_mentions_cron_restriction(e2e_project):
+    """TB-145: the prompt always explains that `cron_edit` is off-limits
+    (no longer gated on board state)."""
     cfg = e2e_project()
     _seed_active_task(cfg)
 
@@ -145,33 +153,38 @@ def test_restricted_prompt_mentions_cron_restriction(e2e_project):
 
     assert prompts_seen, "SDK.query was never called"
     prompt = prompts_seen[0]
-    assert "cron_edit" in prompt, "Restricted prompt must mention cron_edit restriction"
-    assert "task agent is currently running" in prompt or "in flight" in prompt
+    assert "cron_edit" in prompt, "Prompt must mention cron_edit restriction"
 
 
-# ── test: toolset transitions as board state changes ──────────────────────────
+# ── test (e): toolset is invariant under board state transitions ──────────────
 
 
-def test_toolset_transitions_with_board_state(e2e_project):
-    """Full → Restricted → Full as tasks enter and leave Active."""
+def test_toolset_invariant_under_board_state(e2e_project):
+    """TB-145 load-bearing: handler toolset must stay the same as the
+    board moves through idle → Active → Complete. The previous TB-122
+    design swapped between FULL and RESTRICTED on each transition; the
+    point of TB-145 is that this swap never happens."""
     cfg = e2e_project()
 
-    # Start idle → FULL
+    # Start idle.
     factory, captured = _capture_tools_factory()
     sdk = FakeSDK()
     sdk.on("Incoming mattermost message", factory)
     asyncio.run(handle_message(cfg, sdk, mcp_server=None, msg=_mm_msg()))
-    assert captured[0] == MM_HANDLER_TOOLS_FULL
+    assert captured[0] == MM_HANDLER_TOOLS
 
-    # Add active task → RESTRICTED
+    # Add active task — toolset MUST NOT change.
     _seed_active_task(cfg)
     factory2, captured2 = _capture_tools_factory()
     sdk2 = FakeSDK()
     sdk2.on("Incoming mattermost message", factory2)
     asyncio.run(handle_message(cfg, sdk2, mcp_server=None, msg=_mm_msg()))
-    assert captured2[0] == MM_HANDLER_TOOLS_RESTRICTED
+    assert captured2[0] == MM_HANDLER_TOOLS
+    assert captured2[0] == captured[0], (
+        "TB-145 violation: toolset changed when board went from idle to active"
+    )
 
-    # Move task to Complete → FULL again
+    # Move task to Complete — toolset still unchanged.
     board = Board.load(cfg.tasks_file)
     board.move("TB-1", "Complete", check=True)
     board.save()
@@ -179,7 +192,10 @@ def test_toolset_transitions_with_board_state(e2e_project):
     sdk3 = FakeSDK()
     sdk3.on("Incoming mattermost message", factory3)
     asyncio.run(handle_message(cfg, sdk3, mcp_server=None, msg=_mm_msg()))
-    assert captured3[0] == MM_HANDLER_TOOLS_FULL
+    assert captured3[0] == MM_HANDLER_TOOLS
+    assert captured3[0] == captured[0], (
+        "TB-145 violation: toolset changed when board went from active to complete"
+    )
 
 
 # ── test: concurrency proof — handler finishes during task's run ───────────────
@@ -190,9 +206,10 @@ def test_mm_handler_completes_during_task_agent_run(e2e_project):
 
     Spawn a slow task agent (sleeps 0.3s) and a fast MM handler at the same
     time. The handler must complete BEFORE the task agent — proving the MM
-    flow isn't queued behind run_task. The handler observes
-    `task_in_flight=True` because the daemon's `move_to_active` lands
-    before run_task awaits its first message.
+    flow isn't queued behind run_task. (TB-145: the handler no longer
+    snapshots the board for toolset selection, so this test no longer
+    cares about whether the snapshot landed in time — we just verify
+    end-to-end concurrency.)
     """
     import time
 
@@ -236,8 +253,9 @@ def test_mm_handler_completes_during_task_agent_run(e2e_project):
         task = next(t for t in board.iter_tasks("Ready") if t.id == "TB-5")
         run_t = asyncio.create_task(run_task(cfg, sdk, None, task))
         # Give run_task a beat to land move_to_active. After this await,
-        # the board has TB-5 in Active and any handler we spawn will see
-        # task_in_flight=True.
+        # the board has TB-5 in Active. (TB-145 historical note: prior
+        # to TB-145 the handler would observe task_in_flight=True here
+        # and pick the RESTRICTED toolset; that branch no longer exists.)
         await asyncio.sleep(0.05)
         board2 = Board.load(cfg.tasks_file)
         assert any(t.id == "TB-5" for t in board2.iter_tasks("Active")), (
@@ -259,22 +277,23 @@ def test_mm_handler_completes_during_task_agent_run(e2e_project):
         f"task={task_done_at[0]:.3f}"
     )
 
-    # The mattermost event for this handler was logged with toolset=restricted.
+    # The mattermost event for this handler was logged with toolset=restricted
+    # (TB-145: always "restricted" now).
     evts = ev_mod.tail(cfg.events_file, n=200)
     mm_evts = [e for e in evts if e.get("type") == "mattermost"]
     assert mm_evts and mm_evts[-1].get("toolset") == "restricted"
 
 
-# ── test: cron_edit attempt during restricted run leaves cron.yaml untouched ──
+# ── test: cron_edit attempt during handler run leaves cron.yaml untouched ─────
 
 
-def test_cron_edit_via_restricted_handler_does_not_mutate_cron(e2e_project):
-    """If the restricted handler somehow tried `cron_edit` (e.g. an SDK
-    that didn't enforce allowlists), the daemon's events stream would
-    NOT show a `cron_edit` mutation. The check is defensive: real SDK
-    rejects disallowed tools; our FakeSDK doesn't. So this test asserts
-    that no `cron.yaml` mutation event is fired by the restricted-mode
-    handler when its prompt explicitly tells it not to call cron_edit.
+def test_cron_edit_via_handler_does_not_mutate_cron(e2e_project):
+    """If the handler somehow tried `cron_edit` (e.g. an SDK that didn't
+    enforce allowlists), the daemon's events stream would NOT show a
+    `cron_edit` mutation. The check is defensive: real SDK rejects
+    disallowed tools; our FakeSDK doesn't. So this test asserts that
+    no `cron.yaml` mutation event is fired by the handler when its
+    prompt explicitly tells it not to call cron_edit.
     """
     from ap2 import events as ev_mod
 
@@ -371,9 +390,10 @@ def test_mattermost_reply_lands_within_30s_of_mention_during_long_task(e2e_proje
         board = Board.load(cfg.tasks_file)
         task = next(t for t in board.iter_tasks("Ready") if t.id == "TB-7")
         run_t = asyncio.create_task(run_task(cfg, sdk, None, task))
-        # Let move_to_active land before we spawn the handler so it
-        # sees task_in_flight=True (otherwise the test wouldn't be
-        # exercising the in-flight branch).
+        # Let move_to_active land before we spawn the handler. (TB-145:
+        # this no longer changes the toolset selection, but the
+        # responsiveness check still wants the realistic scenario where
+        # the handler fires while a task is genuinely active.)
         await asyncio.sleep(0.05)
         mention_ts_holder.append(_dt.datetime.now(_dt.timezone.utc))
         handler_t = asyncio.create_task(
@@ -403,9 +423,8 @@ def test_mattermost_reply_lands_within_30s_of_mention_during_long_task(e2e_proje
         f"(briefing requires <30s)"
     )
 
-    # And the in-flight branch was actually exercised — the mattermost
-    # event for this handler was logged with toolset=restricted.
+    # And the handler ran with the standard MM_HANDLER_TOOLS set —
+    # `mattermost` event records `toolset=restricted` (TB-145: always
+    # "restricted").
     mm_evts = [e for e in evts if e.get("type") == "mattermost"]
-    assert mm_evts and mm_evts[-1].get("toolset") == "restricted", (
-        "test must exercise the in-flight branch (toolset=restricted)"
-    )
+    assert mm_evts and mm_evts[-1].get("toolset") == "restricted"

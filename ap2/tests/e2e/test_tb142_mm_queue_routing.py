@@ -213,12 +213,14 @@ def test_mm_handler_queue_routes_around_state_violation(e2e_project):
     )
 
 
-def test_mm_handler_restricted_toolset_does_not_carry_board_edit(tmp_path):
+def test_mm_handler_toolset_does_not_carry_board_edit(tmp_path):
     """Constant-shape pin: this whole exercise is moot if the toolset
     constant still ships `board_edit`. Pin it here so a refactor can't
-    silently restore it."""
-    from ap2.tools import MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED
+    silently restore it. TB-145 collapsed FULL/RESTRICTED into a single
+    `MM_HANDLER_TOOLS` set, so `board_edit` is now unconditionally
+    absent (the previous TB-122 FULL variant kept it; that variant no
+    longer exists)."""
+    from ap2.tools import MM_HANDLER_TOOLS
 
-    assert "mcp__autopilot__board_edit" not in MM_HANDLER_TOOLS_RESTRICTED
-    assert "mcp__autopilot__board_edit" in MM_HANDLER_TOOLS_FULL
-    assert "mcp__autopilot__operator_queue_append" in MM_HANDLER_TOOLS_RESTRICTED
+    assert "mcp__autopilot__board_edit" not in MM_HANDLER_TOOLS
+    assert "mcp__autopilot__operator_queue_append" in MM_HANDLER_TOOLS

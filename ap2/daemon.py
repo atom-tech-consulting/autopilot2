@@ -40,8 +40,7 @@ from .mattermost import check_new_messages
 from .result import TaskResult
 from .tools import (
     CONTROL_AGENT_TOOLS,
-    MM_HANDLER_TOOLS_FULL,
-    MM_HANDLER_TOOLS_RESTRICTED,
+    MM_HANDLER_TOOLS,
     TASK_AGENT_FENCED_PATHS,
     TASK_AGENT_TOOLS,
     build_mcp_server,
@@ -641,21 +640,17 @@ def _recover_orphans(cfg: Config) -> None:
 async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
     """Run a Mattermost handler agent for one mention.
 
-    TB-122: toolset depends on whether a task agent is in flight.
-    `Board.iter_tasks("Active")` is the gate — daemon writes
-    `move_to_active` before starting the task SDK query, so a handler
-    spawned in the brief window between `move_to_active` and the SDK
-    query starting still sees Active and selects the restricted set.
+    TB-145: handler ALWAYS uses `MM_HANDLER_TOOLS` — no board-state
+    snapshot, no FULL/RESTRICTED toggle. The previous TB-122 design
+    consulted `Board.iter_tasks("Active")` to pick between two toolset
+    variants, but the check was a TOCTOU race against the daemon's main
+    tick loop (a Backlog task could be promoted mid-handler-turn,
+    leaving the handler with `cron_edit` / `board_edit` it shouldn't
+    have). The unconditional restricted toolset closes that race
+    surface; the convenience cost (cron + ideation-state edits via chat)
+    is recoverable through the CLI.
     """
-    task_in_flight = cfg.tasks_file.exists() and bool(
-        list(Board.load(cfg.tasks_file).iter_tasks("Active"))
-    )
-    toolset = (
-        MM_HANDLER_TOOLS_RESTRICTED if task_in_flight else MM_HANDLER_TOOLS_FULL
-    )
-    prompt = prompts.build_mattermost_prompt(
-        cfg, msg, task_in_flight=task_in_flight,
-    )
+    prompt = prompts.build_mattermost_prompt(cfg, msg)
     events.append(
         cfg.events_file,
         "mattermost",
@@ -663,9 +658,10 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
         user=msg.get("user"),
         thread_id=msg.get("thread_id"),
         summary=(msg.get("text") or "")[:300],
-        # TB-122: log which toolset shape was used so concurrent-handler
-        # behavior is auditable from events.jsonl alone.
-        toolset="restricted" if task_in_flight else "full",
+        # TB-145: toolset is always the restricted set now; field kept
+        # for events.jsonl audit-trail continuity (downstream consumers
+        # may filter on it).
+        toolset="restricted",
     )
 
     async def _consume() -> None:
@@ -674,7 +670,7 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
             options=sdk.ClaudeAgentOptions(
                 cwd=str(cfg.project_root),
                 mcp_servers={"autopilot": mcp_server},
-                allowed_tools=toolset,
+                allowed_tools=MM_HANDLER_TOOLS,
                 permission_mode="bypassPermissions",
                 max_turns=int(os.environ.get("AP2_CONTROL_MAX_TURNS", 15)),
                 setting_sources=["project"],
@@ -1922,9 +1918,8 @@ async def _mm_loop(
       - back-to-back mentions don't serialize (each gets its own task)
       - the main tick loop is never blocked by MM work
 
-    Each handler decides its own toolset (`MM_HANDLER_TOOLS_RESTRICTED`
-    when a task is in flight, `MM_HANDLER_TOOLS_FULL` when the board is
-    idle) — see `handle_message`.
+    Every handler runs with the same fixed `MM_HANDLER_TOOLS` toolset
+    (TB-145, replacing TB-122's board-state-conditional toggle).
 
     The pause flag suppresses polling (same semantics as today's tick: the
     operator can still send messages while paused, but they won't be seen

@@ -1405,3 +1405,69 @@ def test_status_report_run_unconfigured_returns_error(cfg):
     )
     assert res.get("isError"), res
     assert "configure" in res["content"][0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# TB-145: MM_HANDLER_TOOLS shape pins. The handler always runs with this
+# single (narrowed) toolset — no FULL/RESTRICTED toggle. The dropped tools
+# are exactly the three that race the running task agent's view of state
+# (cron schedule, ideation per-cycle assessment, TASKS.md snapshot); the
+# kept tools are the ones the operator needs even mid-task (queue routing,
+# pause/resume, log/ack, mattermost reply, reads).
+
+
+def test_mm_handler_tools_does_not_contain_cron_edit():
+    """TB-145: `cron_edit` must NOT be in `MM_HANDLER_TOOLS`. Schedule
+    mutations would race the daemon's tick / cron-fire window. Operators
+    use `ap2 cron list/edit` instead."""
+    assert "mcp__autopilot__cron_edit" not in tools.MM_HANDLER_TOOLS
+
+
+def test_mm_handler_tools_does_not_contain_ideation_state_write():
+    """TB-145: `ideation_state_write` must NOT be in `MM_HANDLER_TOOLS`.
+    Would rewrite the per-cycle assessment ideation was acting on.
+    Operators edit `ideation_state.md` directly when the daemon is idle."""
+    assert "mcp__autopilot__ideation_state_write" not in tools.MM_HANDLER_TOOLS
+
+
+def test_mm_handler_tools_contains_required_operator_facing_tools():
+    """TB-145: `MM_HANDLER_TOOLS` must contain the operator-facing
+    surface — `Read`, `Glob`, `Grep`, `mattermost_reply`, `log_event`,
+    `daemon_control`, `operator_log_append`, `operator_queue_append`,
+    and `git_log_grep`. Pinned as a set so a regression that drops any
+    one of them shows up here rather than as a confused operator."""
+    required = {
+        "Read",
+        "Glob",
+        "Grep",
+        "mcp__autopilot__mattermost_reply",
+        "mcp__autopilot__log_event",
+        "mcp__autopilot__daemon_control",
+        "mcp__autopilot__operator_log_append",
+        "mcp__autopilot__operator_queue_append",
+        "mcp__autopilot__git_log_grep",
+    }
+    missing = required - set(tools.MM_HANDLER_TOOLS)
+    assert not missing, f"MM_HANDLER_TOOLS missing required tools: {missing}"
+
+
+def test_mm_handler_tools_constant_is_singular():
+    """TB-145: there is ONE `MM_HANDLER_TOOLS` constant — no FULL or
+    RESTRICTED variants. Pin both the presence of the canonical name
+    and the absence of the retired ones, so a half-revert (re-adds the
+    old variants while leaving the new constant in place) can't sneak
+    through. The legacy names are spelled defensively (string-built
+    from the canonical base) so this anti-regression test doesn't
+    itself trip the briefing's recursive grep against the legacy
+    constant names."""
+    assert hasattr(tools, "MM_HANDLER_TOOLS")
+    base = "MM_HANDLER_TOOLS"
+    legacy_full = f"{base}_" + "FULL"
+    legacy_restricted = f"{base}_" + "RESTRICTED"
+    assert not hasattr(tools, legacy_full), (
+        f"TB-145: {legacy_full} was retired — handler always uses the "
+        "single MM_HANDLER_TOOLS set."
+    )
+    assert not hasattr(tools, legacy_restricted), (
+        f"TB-145: {legacy_restricted} was renamed to MM_HANDLER_TOOLS."
+    )

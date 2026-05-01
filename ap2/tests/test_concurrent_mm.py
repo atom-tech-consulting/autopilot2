@@ -1,13 +1,25 @@
-"""TB-122: unit tests for concurrent MM handler with restricted toolset.
+"""TB-122 / TB-145: unit tests for the concurrent MM handler toolset.
 
-Covers:
-  (a) MM_HANDLER_TOOLS_RESTRICTED drops exactly cron_edit + ideation_state_write.
-  (b) MM_HANDLER_TOOLS_RESTRICTED keeps the operator-facing tools.
-  (c) build_mattermost_prompt includes the restriction note when task_in_flight=True.
-  (d) build_mattermost_prompt has no restriction note when task_in_flight=False.
-  (e) handle_message passes MM_HANDLER_TOOLS_RESTRICTED to SDK while a task is active.
-  (f) handle_message passes MM_HANDLER_TOOLS_FULL to SDK when the board is idle.
-  (g) AP2_MM_TICK_S overrides the default mm_tick_interval_s (10s).
+Originally TB-122 introduced a FULL/RESTRICTED toggle keyed on whether a
+task agent was in flight. TB-145 collapsed that into a single
+unconditional `MM_HANDLER_TOOLS` set (the previous RESTRICTED shape),
+because the snapshot check was a TOCTOU race against the daemon's main
+tick loop. This file now covers:
+
+  (a) `MM_HANDLER_TOOLS` drops `cron_edit`, `ideation_state_write`, and
+      `board_edit` (the three tools that were the in-flight rationale).
+  (b) `MM_HANDLER_TOOLS` keeps the operator-facing tools (queue,
+      daemon_control, mattermost_reply, operator_log_append, log_event,
+      reads).
+  (c) `build_mattermost_prompt` includes the always-on restriction note
+      explaining the fixed toolset.
+  (d) `build_mattermost_prompt` does NOT mention conditional / state-
+      dependent toolset switching (no "when a task is active" / "when
+      the board is idle" language — TB-145 invariant).
+  (e) `handle_message` passes `MM_HANDLER_TOOLS` to the SDK regardless
+      of whether the board has Active tasks (no board snapshot at
+      handler-spawn time — TB-145 race fix).
+  (f) `AP2_MM_TICK_S` overrides the default `mm_tick_interval_s` (10s).
 """
 from __future__ import annotations
 
@@ -21,8 +33,7 @@ from ap2.config import Config
 from ap2.prompts import build_mattermost_prompt
 from ap2.tools import (
     CONTROL_AGENT_TOOLS,
-    MM_HANDLER_TOOLS_FULL,
-    MM_HANDLER_TOOLS_RESTRICTED,
+    MM_HANDLER_TOOLS,
 )
 
 
@@ -48,73 +59,69 @@ def _add_active_task(cfg: Config, task_id: str = "TB-1", title: str = "In-flight
 # ── toolset constant shape ────────────────────────────────────────────────────
 
 
-def test_mm_handler_tools_full_equals_control_agent_tools():
-    """MM_HANDLER_TOOLS_FULL is the same list as CONTROL_AGENT_TOOLS (no-change baseline)."""
-    assert MM_HANDLER_TOOLS_FULL is CONTROL_AGENT_TOOLS or MM_HANDLER_TOOLS_FULL == CONTROL_AGENT_TOOLS
+def test_mm_handler_tools_drops_cron_edit():
+    """TB-145: `cron_edit` must NOT be in `MM_HANDLER_TOOLS` (would race
+    the daemon's tick / cron-fire window)."""
+    assert "mcp__autopilot__cron_edit" not in MM_HANDLER_TOOLS
 
 
-def test_restricted_drops_cron_edit():
-    """MM_HANDLER_TOOLS_RESTRICTED must NOT include cron_edit."""
-    assert "mcp__autopilot__cron_edit" not in MM_HANDLER_TOOLS_RESTRICTED
+def test_mm_handler_tools_drops_ideation_state_write():
+    """TB-145: `ideation_state_write` must NOT be in `MM_HANDLER_TOOLS`
+    (would rewrite the per-cycle assessment ideation was acting on)."""
+    assert "mcp__autopilot__ideation_state_write" not in MM_HANDLER_TOOLS
 
 
-def test_restricted_drops_ideation_state_write():
-    """MM_HANDLER_TOOLS_RESTRICTED must NOT include ideation_state_write."""
-    assert "mcp__autopilot__ideation_state_write" not in MM_HANDLER_TOOLS_RESTRICTED
+def test_mm_handler_tools_drops_board_edit():
+    """TB-142 / TB-145: direct `board_edit` is the second false-positive
+    surface for TB-110's state-violation check. Operator chat commands
+    that previously routed through `board_edit` (`@claude-bot freeze /
+    approve / ...`) now go through `operator_queue_append`; the daemon
+    drains queued ops between tick stages, so an in-flight task's
+    snapshot window is never racing a direct TASKS.md mutation.
+    `MM_HANDLER_TOOLS` must NOT contain `board_edit`."""
+    assert "mcp__autopilot__board_edit" not in MM_HANDLER_TOOLS
 
 
-def test_restricted_drops_board_edit():
-    """TB-142: direct `board_edit` is the second false-positive surface for
-    TB-110's state-violation check. Operator chat commands that previously
-    routed through `board_edit` (`@claude-bot freeze/approve/...`) now go
-    through `operator_queue_append`; the daemon drains queued ops between
-    tick stages, so the in-flight task's snapshot window is never racing a
-    direct TASKS.md mutation. RESTRICTED must NOT contain `board_edit`.
-    """
-    assert "mcp__autopilot__board_edit" not in MM_HANDLER_TOOLS_RESTRICTED
-
-
-def test_full_keeps_board_edit():
-    """Idle handler runs (no Active tasks) keep direct `board_edit` — there's
-    no in-flight task to violate against, so the queue-routing dance isn't
-    needed. TB-142: only the RESTRICTED set drops `board_edit`."""
-    assert "mcp__autopilot__board_edit" in MM_HANDLER_TOOLS_FULL
-
-
-def test_restricted_keeps_daemon_control():
+def test_mm_handler_tools_keeps_daemon_control():
     """pause/resume mid-task is the primary use-case; daemon_control must stay."""
-    assert "mcp__autopilot__daemon_control" in MM_HANDLER_TOOLS_RESTRICTED
+    assert "mcp__autopilot__daemon_control" in MM_HANDLER_TOOLS
 
 
-def test_restricted_keeps_mattermost_reply():
+def test_mm_handler_tools_keeps_mattermost_reply():
     """Handler must still be able to reply."""
-    assert "mcp__autopilot__mattermost_reply" in MM_HANDLER_TOOLS_RESTRICTED
+    assert "mcp__autopilot__mattermost_reply" in MM_HANDLER_TOOLS
 
 
-def test_restricted_keeps_log_event():
-    assert "mcp__autopilot__log_event" in MM_HANDLER_TOOLS_RESTRICTED
+def test_mm_handler_tools_keeps_log_event():
+    assert "mcp__autopilot__log_event" in MM_HANDLER_TOOLS
 
 
-def test_restricted_keeps_operator_log_append():
+def test_mm_handler_tools_keeps_operator_log_append():
     """TB-122: operator_log_append is the operator's veto channel mid-task."""
-    assert "mcp__autopilot__operator_log_append" in MM_HANDLER_TOOLS_RESTRICTED
+    assert "mcp__autopilot__operator_log_append" in MM_HANDLER_TOOLS
 
 
-def test_restricted_keeps_read_glob_grep():
+def test_mm_handler_tools_keeps_read_glob_grep():
     """Read-only filesystem access must always be available."""
     for tool in ("Read", "Glob", "Grep"):
-        assert tool in MM_HANDLER_TOOLS_RESTRICTED, f"{tool} missing from RESTRICTED"
+        assert tool in MM_HANDLER_TOOLS, f"{tool} missing from MM_HANDLER_TOOLS"
 
 
-def test_restricted_keeps_git_log_grep():
-    assert "mcp__autopilot__git_log_grep" in MM_HANDLER_TOOLS_RESTRICTED
+def test_mm_handler_tools_keeps_git_log_grep():
+    assert "mcp__autopilot__git_log_grep" in MM_HANDLER_TOOLS
 
 
-def test_restricted_is_strict_subset_of_full():
-    """RESTRICTED ⊂ FULL — nothing new is added, some are dropped."""
-    full_set = set(MM_HANDLER_TOOLS_FULL)
-    restricted_set = set(MM_HANDLER_TOOLS_RESTRICTED)
-    assert restricted_set < full_set, "RESTRICTED must be a strict subset of FULL"
+def test_mm_handler_tools_is_strict_subset_of_control_agent_tools():
+    """MM_HANDLER_TOOLS ⊂ CONTROL_AGENT_TOOLS — nothing new is added,
+    just three are dropped (cron_edit, ideation_state_write, board_edit)."""
+    full_set = set(CONTROL_AGENT_TOOLS)
+    mm_set = set(MM_HANDLER_TOOLS)
+    assert mm_set < full_set, "MM_HANDLER_TOOLS must be a strict subset of CONTROL_AGENT_TOOLS"
+    assert full_set - mm_set == {
+        "mcp__autopilot__cron_edit",
+        "mcp__autopilot__ideation_state_write",
+        "mcp__autopilot__board_edit",
+    }
 
 
 # ── build_mattermost_prompt ───────────────────────────────────────────────────
@@ -131,44 +138,62 @@ def _base_msg():
     }
 
 
-def test_prompt_includes_restriction_note_when_in_flight(tmp_path):
-    """Prompt must tell the agent why its toolset is narrower."""
+def test_prompt_includes_unconditional_restriction_note(tmp_path):
+    """TB-145: the prompt must always carry the restriction note (no
+    longer gated on task_in_flight). The agent needs to know its
+    toolset is narrowed and why."""
     cfg = _cfg(tmp_path)
-    p = build_mattermost_prompt(cfg, _base_msg(), task_in_flight=True)
-    assert "task agent is currently running" in p
+    p = build_mattermost_prompt(cfg, _base_msg())
     assert "cron_edit" in p
     assert "ideation_state_write" in p
     assert "restricted toolset" in p or "Restricted toolset" in p
 
 
-def test_prompt_no_restriction_note_when_idle(tmp_path):
-    """Default prompt (no in-flight task) must NOT inject the restriction note."""
-    cfg = _cfg(tmp_path)
-    p = build_mattermost_prompt(cfg, _base_msg())
-    assert "task agent is currently running" not in p
-    assert "restricted toolset" not in p and "Restricted toolset" not in p
-
-
 def test_prompt_restriction_note_mentions_queue_routing_and_daemon_control(tmp_path):
-    """TB-142: the restriction note must (a) name `board_edit` as off-limits
-    so the agent doesn't try it, (b) point to `operator_queue_append` as
-    the queue-routed equivalent, and (c) keep `daemon_control` advertised
-    so pause/resume mid-task still works.
+    """TB-142 / TB-145: the restriction note must (a) name `board_edit` as
+    off-limits so the agent doesn't try it, (b) point to
+    `operator_queue_append` as the queue-routed equivalent, and (c) keep
+    `daemon_control` advertised so pause/resume mid-task still works.
     """
     cfg = _cfg(tmp_path)
-    p = build_mattermost_prompt(cfg, _base_msg(), task_in_flight=True)
-    # board_edit is mentioned (as disabled), and queue-routing is named.
+    p = build_mattermost_prompt(cfg, _base_msg())
     assert "board_edit" in p
     assert "operator_queue_append" in p
     assert "daemon_control" in p
 
 
 def test_prompt_mentions_approve_action(tmp_path):
-    """TB-121 cross-ref: prompt should mention 'approve' as a valid board_edit action."""
+    """TB-121 cross-ref: the prompt should mention 'approve' as a valid
+    queue op so operators can approve ideation-proposed tasks via chat."""
     cfg = _cfg(tmp_path)
-    # Should appear in both modes (it's in the "Your job" section).
     p = build_mattermost_prompt(cfg, _base_msg())
     assert "approve" in p
+
+
+def test_prompt_does_not_mention_conditional_toolset_switching(tmp_path):
+    """TB-145 invariant: the prompt must NOT carry any "when a task is
+    active" / "when the board is idle" / "your toolset varies" language.
+    The handler always runs with the same fixed toolset and the prompt
+    should reflect that — drift back into a conditional shape would be
+    a structural regression."""
+    cfg = _cfg(tmp_path)
+    p = build_mattermost_prompt(cfg, _base_msg())
+    lower = p.lower()
+    forbidden = [
+        "when a task is active",
+        "when the board is idle",
+        "task currently in flight",
+        "toolset varies",
+        "task agent is currently running",
+        "your toolset is restricted: `cron_edit`",  # the old in-flight prefix phrasing
+        "they'll be available again once the daemon is idle",
+        "depending on board state",
+        "depends on board state",
+    ]
+    for phrase in forbidden:
+        assert phrase.lower() not in lower, (
+            f"prompt mentions conditional toolset switching: {phrase!r}"
+        )
 
 
 # ── handle_message toolset selection ─────────────────────────────────────────
@@ -196,8 +221,12 @@ class _CapturingSDK:
         yield  # make it an async generator
 
 
-def test_handle_message_uses_restricted_toolset_when_task_active(tmp_path):
-    """handle_message must pass MM_HANDLER_TOOLS_RESTRICTED when Active task exists."""
+def test_handle_message_uses_mm_handler_tools_when_task_active(tmp_path):
+    """TB-145: handle_message must pass MM_HANDLER_TOOLS regardless of
+    whether the board has an Active task. The previous TB-122 design
+    snapshot-checked the board and switched to RESTRICTED only when an
+    Active task was present; that snapshot was a TOCTOU race, so the
+    selection is now unconditional."""
     cfg = _cfg(tmp_path)
     _add_active_task(cfg)
 
@@ -208,11 +237,12 @@ def test_handle_message_uses_restricted_toolset_when_task_active(tmp_path):
     asyncio.run(handle_message(cfg, sdk, mcp_server=None, msg=msg))
 
     assert sdk.captured_tools, "SDK.query was never called"
-    assert sdk.captured_tools[0] == MM_HANDLER_TOOLS_RESTRICTED
+    assert sdk.captured_tools[0] == MM_HANDLER_TOOLS
 
 
-def test_handle_message_uses_full_toolset_when_idle(tmp_path):
-    """handle_message must pass MM_HANDLER_TOOLS_FULL when board is idle."""
+def test_handle_message_uses_mm_handler_tools_when_idle(tmp_path):
+    """TB-145: same fixed toolset on an idle board — no snapshot-based
+    selection, so the toolset is identical to the active-task case."""
     cfg = _cfg(tmp_path)
 
     sdk = _CapturingSDK()
@@ -222,11 +252,36 @@ def test_handle_message_uses_full_toolset_when_idle(tmp_path):
     asyncio.run(handle_message(cfg, sdk, mcp_server=None, msg=msg))
 
     assert sdk.captured_tools, "SDK.query was never called"
-    assert sdk.captured_tools[0] == MM_HANDLER_TOOLS_FULL
+    assert sdk.captured_tools[0] == MM_HANDLER_TOOLS
+
+
+def test_handle_message_does_not_consult_board_for_toolset_selection(tmp_path):
+    """TB-145 (load-bearing): the handler must produce the exact same
+    `allowed_tools` regardless of board state. This is the single
+    behavioral pin against re-introducing the FULL/RESTRICTED toggle.
+    Same fixture run twice — once idle, once with an Active task —
+    must yield byte-identical toolsets."""
+    cfg = _cfg(tmp_path)
+
+    sdk_idle = _CapturingSDK()
+    from ap2.daemon import handle_message
+    asyncio.run(handle_message(cfg, sdk_idle, mcp_server=None, msg=_base_msg()))
+
+    _add_active_task(cfg)
+    sdk_active = _CapturingSDK()
+    asyncio.run(handle_message(cfg, sdk_active, mcp_server=None, msg=_base_msg()))
+
+    assert sdk_idle.captured_tools and sdk_active.captured_tools
+    assert sdk_idle.captured_tools[0] == sdk_active.captured_tools[0], (
+        "TB-145 violation: handle_message produced different toolsets for "
+        "idle vs active boards. Toolset selection must be unconditional."
+    )
 
 
 def test_handle_message_emits_toolset_field_in_event(tmp_path):
-    """`mattermost` event records which toolset shape was selected (audit trail)."""
+    """`mattermost` event records which toolset shape was used (audit
+    trail). TB-145: always "restricted" now (kept for downstream
+    compat — events.jsonl readers may still filter on it)."""
     from ap2 import events as _events
     from ap2.daemon import handle_message
 
@@ -243,7 +298,9 @@ def test_handle_message_emits_toolset_field_in_event(tmp_path):
     assert mm[-1].get("toolset") == "restricted"
 
 
-def test_handle_message_toolset_full_emitted_on_idle(tmp_path):
+def test_handle_message_emits_toolset_restricted_on_idle_too(tmp_path):
+    """TB-145: idle-board handler runs also emit `toolset=restricted` —
+    the handler no longer has a "full" mode."""
     from ap2 import events as _events
     from ap2.daemon import handle_message
 
@@ -255,7 +312,7 @@ def test_handle_message_toolset_full_emitted_on_idle(tmp_path):
 
     evts = _events.tail(cfg.events_file, 10)
     mm = [e for e in evts if e["type"] == "mattermost"]
-    assert mm and mm[-1].get("toolset") == "full"
+    assert mm and mm[-1].get("toolset") == "restricted"
 
 
 # ── config ────────────────────────────────────────────────────────────────────

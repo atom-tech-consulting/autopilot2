@@ -176,14 +176,16 @@ def test_mattermost_prompt_pins_explicit_thread_id(tmp_path):
     assert 'thread_id: "root-xyz"' in p2
 
 
-def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
-    """TB-122 + TB-142: when a task is in flight, the prompt explicitly
-    explains that cron_edit, ideation_state_write, and (TB-142) board_edit
-    are off-limits, and tells the agent to route board mutations through
-    `operator_queue_append` instead. The same prompt must spell out the
-    operator-still-available actions (queue add/approve/delete/backlog/
-    unfreeze, daemon_control, operator_log_append) so the handler doesn't
-    refuse work it CAN do."""
+def test_mattermost_prompt_restriction_note_is_unconditional(tmp_path):
+    """TB-122 + TB-142 + TB-145: the prompt always carries the toolset
+    restriction explanation — `cron_edit`, `ideation_state_write`, and
+    `board_edit` are off-limits, board mutations route through
+    `operator_queue_append`. TB-145 dropped the FULL/RESTRICTED gate
+    (the underlying toolset is now unconditional too), so the same
+    note appears regardless of board state. The same prompt must spell
+    out the operator-still-available actions (queue add/approve/delete/
+    backlog/unfreeze, daemon_control, operator_log_append) so the
+    handler doesn't refuse work it CAN do."""
     cfg = _cfg(tmp_path)
     msg = {
         "id": "post-1",
@@ -193,9 +195,8 @@ def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
         "text": "@claude-bot pause",
         "thread_id": "",
     }
-    p = build_mattermost_prompt(cfg, msg, task_in_flight=True)
-    # Pinned: agent knows why the toolset is narrower.
-    assert "task agent is currently running" in p
+    p = build_mattermost_prompt(cfg, msg)
+    # Pinned: agent knows the disabled tools by name.
     assert "cron_edit" in p
     assert "ideation_state_write" in p
     # Pinned (TB-142): board_edit is named as off-limits, and the
@@ -204,24 +205,20 @@ def test_mattermost_prompt_restriction_note_mentions_concurrent_task(tmp_path):
     assert "operator_queue_append" in p
     # Pinned: agent knows pause takes effect on the next tick.
     assert "next" in p.lower() and "tick" in p.lower()
-    # Pinned: TB-121 cross-ref — `approve` must remain discoverable from
-    # the restricted prompt (it's now a queue op, not a board_edit action).
+    # Pinned: TB-121 cross-ref — `approve` must remain discoverable
+    # (it's now a queue op, not a board_edit action).
     assert "approve" in p
     # Pinned: operator_log_append remains available so "ack:" still works.
     assert "operator_log_append" in p
 
-    # Idle prompt does NOT contain the concurrent-task header.
-    p_idle = build_mattermost_prompt(cfg, msg)
-    assert "task agent is currently running" not in p_idle
 
-
-def test_mattermost_prompt_restricted_routes_board_ops_through_queue(tmp_path):
-    """TB-142 (load-bearing): the restricted-mode "Your job" rubric must
-    direct the agent at `operator_queue_append` for board mutations and
-    explicitly steer it AWAY from `board_edit` (which is filtered out of
-    MM_HANDLER_TOOLS_RESTRICTED). Pin both the routing instruction and
-    the rationale (drain happens between tick stages, so the running
-    task's snapshot window never sees the mutation).
+def test_mattermost_prompt_routes_board_ops_through_queue(tmp_path):
+    """TB-142 + TB-145 (load-bearing): the "Your job" rubric must direct
+    the agent at `operator_queue_append` for board mutations and
+    explicitly steer it AWAY from `board_edit` (which is filtered out
+    of `MM_HANDLER_TOOLS`). Pin both the routing instruction and the
+    rationale (drain happens between tick stages, so any running task's
+    snapshot window never sees the mutation).
     """
     cfg = _cfg(tmp_path)
     msg = {
@@ -232,21 +229,50 @@ def test_mattermost_prompt_restricted_routes_board_ops_through_queue(tmp_path):
         "text": "@claude-bot approve TB-9",
         "thread_id": "",
     }
-    p = build_mattermost_prompt(cfg, msg, task_in_flight=True)
+    p = build_mattermost_prompt(cfg, msg)
     # The "Your job" rubric routes board mutations through the queue.
     assert "operator_queue_append" in p
-    # Explicit "NOT board_edit" guidance (so the agent doesn't fall back
-    # to `board_edit` if it remembers seeing it elsewhere).
+    # Explicit "NOT board_edit" guidance (so the agent doesn't fall
+    # back to `board_edit` if it remembers seeing it elsewhere).
     assert "NOT `board_edit`" in p or "not `board_edit`" in p.lower()
     # The TB-142 rationale ties the routing to the in-flight snapshot
     # window — agents who understand WHY are less likely to drift.
     assert "snapshot" in p.lower() or "TB-110" in p
 
-    # Idle prompt routes through `board_edit` directly (FULL toolset still
-    # has it; queue-routing is only required when restricted).
-    p_idle = build_mattermost_prompt(cfg, msg)
-    assert "board_edit" in p_idle
-    assert "approve" in p_idle
+
+def test_mattermost_prompt_does_not_mention_conditional_toolset_switching(tmp_path):
+    """TB-145 invariant: the MM handler prompt MUST NOT mention
+    "when a task is active" / "when the board is idle" / "your toolset
+    varies" / similar conditional language. The handler always runs
+    with the same fixed `MM_HANDLER_TOOLS` set, and the prompt should
+    reflect that. A regression here means either the prompt is back to
+    branching on `task_in_flight` or the prose still describes the
+    retired FULL/RESTRICTED toggle."""
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "dev",
+        "user": "alice",
+        "text": "@claude-bot status",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    lower = p.lower()
+    forbidden = [
+        "when a task is active",
+        "when the board is idle",
+        "task currently in flight",
+        "task agent is currently running",
+        "your toolset varies",
+        "depending on board state",
+        "depends on board state",
+        "they'll be available again once the daemon is idle",
+    ]
+    for phrase in forbidden:
+        assert phrase.lower() not in lower, (
+            f"prompt mentions conditional toolset switching: {phrase!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -316,21 +342,20 @@ def test_control_prompt_non_status_jobs_skip_status_report_contract(tmp_path):
 # tool name so a refactor can't silently drop the routing.
 
 def test_mattermost_prompt_routes_status_queries_through_status_report_run(tmp_path):
-    """TB-144: when the operator asks for a status report (recognize:
-    "status", "what's going on", etc.), the MM handler prompt must
-    instruct the agent to call `status_report_run` rather than compose
-    its own reply. Otherwise chat-triggered reports drift from the cron
-    format AND the audit trail loses the `cron_start`/`cron_complete`
-    pair (post-mortems can't tell on-demand from scheduled).
+    """TB-144 + TB-145: when the operator asks for a status report
+    (recognize: "status", "what's going on", etc.), the MM handler
+    prompt must instruct the agent to call `status_report_run` rather
+    than compose its own reply. Otherwise chat-triggered reports drift
+    from the cron format AND the audit trail loses the
+    `cron_start`/`cron_complete` pair (post-mortems can't tell on-demand
+    from scheduled).
 
     Pinned phrases — the recognition pattern (so the agent matches the
     operator's wording), the tool name (so the agent calls the right
     surface), and the don't-call-twice steer (the routine has its own
     skip-gate; spamming it doesn't get a fresher report).
 
-    Both restricted (task in flight) and idle toolsets must carry the
-    routing — operators ask for status in both states, and the routine
-    is in CONTROL_AGENT_TOOLS so both toolsets advertise it.
+    TB-145: there's only one prompt shape now, so we exercise it once.
     """
     cfg = _cfg(tmp_path)
     msg = {
@@ -341,22 +366,13 @@ def test_mattermost_prompt_routes_status_queries_through_status_report_run(tmp_p
         "text": "@claude-bot status?",
         "thread_id": "",
     }
-    # Idle path.
-    p_idle = build_mattermost_prompt(cfg, msg)
-    assert "status_report_run" in p_idle
+    p = build_mattermost_prompt(cfg, msg)
+    assert "status_report_run" in p
     # Recognition pattern is explicit so the agent doesn't have to guess.
-    assert '"status"' in p_idle
-    assert "what's going on" in p_idle
+    assert '"status"' in p
+    assert "what's going on" in p
     # Don't-call-twice steer.
-    assert "more than once per turn" in p_idle or "Don't call it more than once" in p_idle
-
-    # Restricted (task in flight) path.
-    p_restricted = build_mattermost_prompt(cfg, msg, task_in_flight=True)
-    assert "status_report_run" in p_restricted
-    assert '"status"' in p_restricted
-    assert "what's going on" in p_restricted
-    # Same don't-spam steer applies.
-    assert "more than once per turn" in p_restricted or "Don't call it more than once" in p_restricted
+    assert "more than once per turn" in p or "Don't call it more than once" in p
 
 
 def test_mattermost_prompt_status_routing_steers_away_from_freeform_reply(tmp_path):
@@ -378,19 +394,16 @@ def test_mattermost_prompt_status_routing_steers_away_from_freeform_reply(tmp_pa
     assert "instead of composing your own reply" in p
 
 
-def test_status_report_run_in_both_mm_handler_toolsets():
-    """TB-144: the MCP tool must be available to the MM handler in BOTH
-    full and restricted modes — operators ask for status whether a task
-    is running or not. Adding to `CONTROL_AGENT_TOOLS` (the source for
-    both) is the load-bearing change; this test pins the result.
+def test_status_report_run_in_mm_handler_toolset():
+    """TB-144 + TB-145: the MCP tool must be available to the MM
+    handler — operators ask for status whether a task is running or not.
+    Adding to `CONTROL_AGENT_TOOLS` (the source for the handler set) is
+    the load-bearing change; this test pins the result. TB-145
+    collapsed FULL/RESTRICTED into a single `MM_HANDLER_TOOLS`, so
+    there's only one set to check.
     """
-    from ap2.tools import (
-        CONTROL_AGENT_TOOLS,
-        MM_HANDLER_TOOLS_FULL,
-        MM_HANDLER_TOOLS_RESTRICTED,
-    )
+    from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS
 
     name = "mcp__autopilot__status_report_run"
     assert name in CONTROL_AGENT_TOOLS
-    assert name in MM_HANDLER_TOOLS_FULL
-    assert name in MM_HANDLER_TOOLS_RESTRICTED
+    assert name in MM_HANDLER_TOOLS

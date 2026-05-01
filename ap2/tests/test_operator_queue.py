@@ -393,15 +393,15 @@ def test_operator_queue_append_is_in_control_agent_tools_only():
     assert "mcp__autopilot__operator_queue_append" not in tools.TASK_AGENT_TOOLS
 
 
-def test_operator_queue_append_survives_mm_handler_restricted_filter():
+def test_operator_queue_append_survives_mm_handler_filter():
     """The whole point of TB-131 from the MM-handler angle: this tool
-    must remain available to the handler even during in-flight runs
-    (where `cron_edit` and `ideation_state_write` are filtered out
-    of MM_HANDLER_TOOLS_RESTRICTED to avoid mid-task interference).
-    The queue is exactly the path that side-steps the rollback +
-    stale-snapshot races, so it MUST stay in the restricted set.
+    must remain available to the handler. `cron_edit`,
+    `ideation_state_write`, and `board_edit` are all filtered out of
+    `MM_HANDLER_TOOLS` (TB-145, formerly TB-122's RESTRICTED variant),
+    but the queue is exactly the path that side-steps the rollback +
+    stale-snapshot races, so it MUST stay in the handler set.
     """
-    assert "mcp__autopilot__operator_queue_append" in tools.MM_HANDLER_TOOLS_RESTRICTED
+    assert "mcp__autopilot__operator_queue_append" in tools.MM_HANDLER_TOOLS
 
 
 # ---------------------------------------------------------------------------

@@ -1806,9 +1806,9 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__ideation_state_write",
     "mcp__autopilot__git_log_grep",
     "mcp__autopilot__operator_log_append",
-    # TB-131: queue-based board mutation. The MM handler should prefer
-    # this over `board_edit` when a task agent is in flight — see the
-    # tool docstring + MM_HANDLER_TOOLS_RESTRICTED below.
+    # TB-131: queue-based board mutation. The MM handler uses this in
+    # place of `board_edit` (which is filtered out of MM_HANDLER_TOOLS
+    # below — TB-145).
     "mcp__autopilot__operator_queue_append",
     # TB-144: on-demand status report trigger. Available to control
     # agents in general (not just the MM handler) so a future cron job
@@ -1817,20 +1817,29 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__status_report_run",
 ]
 
-# TB-122: when a task agent is in flight, the Mattermost handler runs with a
-# narrower toolset. Mutations that would race the running task agent's view of
-# the working tree are deferred until the daemon is idle:
-#   - `cron_edit` would change when the next status-report / ideation tick
-#     fires (possibly mid-edit on the running task's tree).
-#   - `ideation_state_write` rewrites the per-cycle assessment ideation was
-#     acting on when the running task was queued.
-#   - `board_edit` (TB-142) is the second false-positive surface for TB-110's
-#     state-violation check — every operator chat command that triggers
-#     `board_edit` (e.g. `@claude-bot freeze TB-X`, `@claude-bot approve
-#     TB-Y`) directly mutates TASKS.md during the running task's snapshot
-#     window and rolls back its work. Routed through `operator_queue_append`
-#     instead, where the daemon drains queued ops between tick stages.
-# What stays:
+# TB-145: the Mattermost handler ALWAYS runs with this single (narrowed)
+# toolset, regardless of whether a task agent is currently in flight. The
+# previous TB-122 design picked between FULL and RESTRICTED variants based on
+# a snapshot of `Board.iter_tasks("Active")` at handler-spawn time, but that
+# check was a TOCTOU race in two ways:
+#   1. Stale-at-spawn — the daemon's main tick loop could promote a Backlog
+#      task and start its run while the handler was mid-turn (handler picked
+#      FULL, then a new task started and the handler's `cron_edit` /
+#      `board_edit` calls landed against the running task's snapshot
+#      window, tripping TB-110's state-violation check).
+#   2. Stale-at-tool-call — even with a race-free snapshot, the toolset
+#      decision is anchored at handler-spawn time but the actual tool call
+#      may fire 30s later. There's no way to re-evaluate "is a task active"
+#      at every tool-call boundary without serializing the MM handler with
+#      the main tick.
+# Always-RESTRICTED removes both surfaces. Convenience cost: `cron_edit` and
+# `ideation_state_write` are no longer reachable from chat — operator uses
+# `ap2 cron list/edit` and direct `ideation_state.md` edits via the CLI
+# instead. The save-busy-task safety win is constant; the convenience loss
+# is rare. Post-TB-141/142/143, queue-routed board ops via
+# `operator_queue_append` are the primary mutation path anyway, so the
+# handler's day-to-day capability isn't materially reduced.
+# What's in MM_HANDLER_TOOLS:
 #   - read tools (Read/Glob/Grep/git_log_grep) so the agent can answer
 #     questions and reason about state.
 #   - `operator_queue_append` so the operator can still queue add / move /
@@ -1842,17 +1851,22 @@ CONTROL_AGENT_TOOLS = [
 #   - `operator_log_append` so "@claude-bot ack: …" still lands in the
 #     operator log (ideation reads it in Step 0 — the operator's veto
 #     channel must stay open even mid-task).
-# Idle handler runs (no Active tasks) keep the full CONTROL_AGENT_TOOLS set —
-# direct `board_edit` is fine when there's no running task to violate against.
-MM_HANDLER_TOOLS_FULL = list(CONTROL_AGENT_TOOLS)
-MM_HANDLER_TOOLS_RESTRICTED = [
+#   - `status_report_run` (TB-144) so chat-triggered status reports use the
+#     same routine as the cron job.
+# What's dropped (relative to CONTROL_AGENT_TOOLS):
+#   - `cron_edit` — schedule mutations could race a status-report / ideation
+#     tick fire window. CLI alternative: `ap2 cron list/edit`.
+#   - `ideation_state_write` — would rewrite the per-cycle assessment
+#     ideation was acting on. CLI alternative: edit `ideation_state.md`
+#     directly while the daemon is idle.
+#   - `board_edit` — direct TASKS.md mutation during an in-flight run trips
+#     TB-110's state-violation check. Route via `operator_queue_append`
+#     instead.
+MM_HANDLER_TOOLS = [
     t for t in CONTROL_AGENT_TOOLS
     if t not in (
         "mcp__autopilot__cron_edit",
         "mcp__autopilot__ideation_state_write",
-        # TB-142: dropped — board mutations during in-flight runs trip
-        # TB-110's snapshot check. Route via `operator_queue_append`
-        # instead. Idle runs (FULL toolset) still get direct `board_edit`.
         "mcp__autopilot__board_edit",
     )
 ]

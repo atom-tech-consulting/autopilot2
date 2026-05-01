@@ -33,9 +33,12 @@ _tick(cfg, sdk, mcp_server):
 ```
 _mm_loop(cfg, sdk, mcp_server):
   - check_new_messages → asyncio.create_task(handle_message(...)) per mention
-  - Each handler independently selects toolset based on board state:
-      idle board  → MM_HANDLER_TOOLS_FULL  (full CONTROL_AGENT_TOOLS)
-      Active task → MM_HANDLER_TOOLS_RESTRICTED  (drops cron_edit + ideation_state_write)
+  - Every handler runs with the SAME fixed toolset (TB-145):
+      MM_HANDLER_TOOLS  (CONTROL_AGENT_TOOLS minus cron_edit,
+                         ideation_state_write, board_edit)
+    No board snapshot is taken at handler-spawn time — the previous
+    TB-122 FULL/RESTRICTED toggle was a TOCTOU race against the
+    main tick loop and was retired in TB-145.
 ```
 
 The two loops share the same `Config`, SDK handle, and MCP server. Board mutations go through `locked_board()` (fcntl.flock), which serializes concurrent access. The pause flag (`<root>/.cc-autopilot/paused`, presence-only) short-circuits both loops.
@@ -50,7 +53,7 @@ There are four kinds of SDK queries, each with its own prompt builder, tool allo
 |---|---|---|---|---|
 | **Task** | `run_task` (step 3) | `prompts.build_task_prompt` | `TASK_AGENT_TOOLS` (Read/Edit/Write/Bash + `pipeline_task_start`) | `AP2_TASK_TIMEOUT_S` (1200s) |
 | **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/cron/mm/log_event/daemon_control/ideation_state_write) | `AP2_CONTROL_TIMEOUT_S` (300s) |
-| **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS_FULL` (idle) or `MM_HANDLER_TOOLS_RESTRICTED` (task in flight) — TB-122 | `AP2_CONTROL_TIMEOUT_S` |
+| **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS` (CONTROL_AGENT_TOOLS minus cron_edit/ideation_state_write/board_edit — TB-145, was TB-122's RESTRICTED) | `AP2_CONTROL_TIMEOUT_S` |
 | **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
 
 Task agents are the only kind that gets `Write`/`Edit`. They commit code; everything else mutates state through MCP tools.

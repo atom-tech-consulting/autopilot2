@@ -15,7 +15,7 @@ from pathlib import Path
 from . import events
 from .board import Board, Task
 from .config import Config
-from .tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS_FULL, MM_HANDLER_TOOLS_RESTRICTED
+from .tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS
 
 
 # TB-128: status-report cron was emitting reports with stale headline
@@ -285,25 +285,6 @@ def _briefing_block(cfg: Config, task: Task) -> str:
     return f"## Briefing ({path})\n\n{full.read_text()}"
 
 
-def pick_mm_toolset(cfg: Config) -> list[str]:
-    """Return MM_HANDLER_TOOLS_FULL (idle) or MM_HANDLER_TOOLS_RESTRICTED (task in flight).
-
-    TB-122: while a task agent is running (any Active task on the board), the
-    Mattermost handler gets a narrower toolset — drops `cron_edit` and
-    `ideation_state_write` to avoid cron-schedule mutations and ideation-state
-    conflicts while another agent owns the working tree. Operator-facing tools
-    (board_edit, daemon_control, mattermost_reply, operator_log_append) are
-    kept regardless — the whole point of concurrent MM polling is that the
-    operator can pause, queue, approve, or ack mid-task.
-    """
-    if not cfg.tasks_file.exists():
-        return MM_HANDLER_TOOLS_FULL
-    board = Board.load(cfg.tasks_file)
-    if list(board.iter_tasks("Active")):
-        return MM_HANDLER_TOOLS_RESTRICTED
-    return MM_HANDLER_TOOLS_FULL
-
-
 def build_task_prompt(cfg: Config, task: Task) -> str:
     parts = [
         _TASK_HEADER,
@@ -321,8 +302,6 @@ def build_task_prompt(cfg: Config, task: Task) -> str:
 def build_mattermost_prompt(
     cfg: Config,
     msg: dict,
-    *,
-    task_in_flight: bool = False,
 ) -> str:
     """Prompt for a mattermost handler agent.
 
@@ -330,18 +309,20 @@ def build_mattermost_prompt(
         {"id": "...", "channel_id": "...", "channel_name": "dev",
          "user": "sarah", "text": "start the pipeline", "thread_id": "..."}
 
-    `task_in_flight` (TB-122): set True when a task agent is running
-    concurrently. The prompt explains that `cron_edit`,
-    `ideation_state_write`, and (TB-142) `board_edit` are off-limits for
-    this turn (the daemon's `_main_tick_loop` will pick those up once the
-    board is idle, and queued board ops drain between tick stages so they
-    never overlap with the running task's snapshot window), and the "your
-    job" rubric is rewritten to route mutations through
-    `operator_queue_append` instead of `board_edit`. The handler still has
-    `operator_queue_append` (covers add / move_to_backlog / unfreeze /
-    delete / approve — TB-142), `daemon_control`, `mattermost_reply`,
-    `log_event`, and `operator_log_append` — enough to pause, queue
-    add/delete/approve mutations, ack operator decisions, and reply.
+    TB-145: the prompt is unconditional — there is no FULL/RESTRICTED
+    variant anymore. The handler always runs with `MM_HANDLER_TOOLS`
+    (drops `cron_edit`, `ideation_state_write`, and `board_edit` from
+    `CONTROL_AGENT_TOOLS`); the prompt always tells the agent that those
+    tools are off-limits and that board mutations route through
+    `operator_queue_append`. The previous TB-122 toggle was a TOCTOU
+    race against the daemon's main tick loop — see `MM_HANDLER_TOOLS`
+    in `tools.py` for the full rationale.
+
+    The handler retains `operator_queue_append` (covers add /
+    move_to_backlog / unfreeze / delete / approve — TB-142),
+    `daemon_control`, `mattermost_reply`, `log_event`, and
+    `operator_log_append` — enough to pause, queue add/delete/approve
+    mutations, ack operator decisions, and reply.
     """
     channel_id = msg.get("channel_id", "")
     channel_name = msg.get("channel_name") or channel_id or "?"
@@ -350,46 +331,44 @@ def build_mattermost_prompt(
     thread = msg.get("thread_id") or msg.get("root_id") or ""
     parts: list[str] = [_CONTROL_HEADER]
 
-    if task_in_flight:
-        # Pinned phrasing — `tests/test_prompts.py` asserts these phrases
-        # stay in the prompt so the restriction signal can't silently drift.
-        parts.append(
-            "\n## Note: restricted toolset (task currently in flight)\n"
-            "A task agent is currently running (the daemon's main loop and "
-            "this Mattermost handler are concurrent — TB-122). For this turn "
-            "your toolset is restricted: `cron_edit`, `ideation_state_write`, "
-            "and `board_edit` are off-limits because they would race the "
-            "running task's view of the schedule / ideation state / TASKS.md "
-            "snapshot (TB-142 — direct `board_edit` mutations during the "
-            "in-flight window trip TB-110's state-violation check and roll "
-            "back the running task). They'll be available again once the "
-            "daemon is idle.\n"
-            "\n"
-            "Use `operator_queue_append` for ALL board mutations this turn — "
-            "it's the queue-routed equivalent of `board_edit`. The daemon "
-            "drains queued ops between tick stages, so the running task's "
-            "snapshot window never sees the mutation. Supported ops: "
-            "`add_ready` / `add_backlog` / `add_frozen` / `move_to_backlog` "
-            "/ `unfreeze` / `delete` / `approve` (TB-142 — strips "
-            "`@blocked:review` from an ideation-proposed task so it "
-            "dispatches). For `add_*` ops the TB-N is allocated synchronously "
-            "and you can mention it in your reply.\n"
-            "\n"
-            "Still available directly: `daemon_control` (pause / resume — "
-            "pause takes effect on the **next** tick; the running task "
-            "continues to completion, then no further dispatch), "
-            "`operator_log_append` (the operator's veto channel — "
-            "\"@claude-bot ack: ...\" style messages), `mattermost_reply`, "
-            "`log_event`, plus all reads.\n"
-            "\n"
-            "If the user asked for cron / ideation-state changes or for a "
-            "board op the queue doesn't cover (e.g. `move_to_frozen` / "
-            "`move_to_complete`), reply via `mattermost_reply` explaining "
-            "the restriction and that the request will be handled once the "
-            "daemon is idle. Do not try to call the disabled tools — the "
-            "SDK will reject them and the rejection lands in events.jsonl "
-            "as noise."
-        )
+    # Pinned phrasing — `tests/test_prompts.py` asserts these phrases
+    # stay in the prompt so the restriction signal can't silently drift.
+    # TB-145: this note is unconditional; the previous task-in-flight
+    # gate was removed because the toolset itself is unconditional now.
+    parts.append(
+        "\n## Note: restricted toolset (always)\n"
+        "Your toolset is fixed and narrowed (TB-145, formerly the in-flight "
+        "branch of TB-122): `cron_edit`, `ideation_state_write`, and "
+        "`board_edit` are off-limits — `cron_edit` and `ideation_state_write` "
+        "would race the daemon's tick / ideation cycle, and direct `board_edit` "
+        "mutations could land inside a task agent's snapshot window and trip "
+        "TB-110's state-violation check (TB-142). These tools are unreachable "
+        "from chat; operator changes them via the CLI (`ap2 cron list/edit`, "
+        "manual `ideation_state.md` edits) when the daemon is idle.\n"
+        "\n"
+        "Use `operator_queue_append` for ALL board mutations — it's the "
+        "queue-routed equivalent of `board_edit`. The daemon drains queued "
+        "ops between tick stages, so a running task's snapshot window never "
+        "sees the mutation. Supported ops: `add_ready` / `add_backlog` / "
+        "`add_frozen` / `move_to_backlog` / `unfreeze` / `delete` / "
+        "`approve` (TB-142 — strips `@blocked:review` from an ideation-"
+        "proposed task so it dispatches). For `add_*` ops the TB-N is "
+        "allocated synchronously and you can mention it in your reply.\n"
+        "\n"
+        "Still available directly: `daemon_control` (pause / resume — "
+        "pause takes effect on the **next** tick; any running task "
+        "continues to completion, then no further dispatch), "
+        "`operator_log_append` (the operator's veto channel — "
+        "\"@claude-bot ack: ...\" style messages), `mattermost_reply`, "
+        "`log_event`, plus all reads.\n"
+        "\n"
+        "If the user asked for cron / ideation-state changes or for a "
+        "board op the queue doesn't cover (e.g. `move_to_frozen` / "
+        "`move_to_complete`), reply via `mattermost_reply` explaining "
+        "the restriction and that the request needs an operator CLI "
+        "action. Do not try to call the disabled tools — the SDK will "
+        "reject them and the rejection lands in events.jsonl as noise."
+    )
 
     parts.extend([
         "\n## Incoming mattermost message",
@@ -404,33 +383,21 @@ def build_mattermost_prompt(
         "## Your job",
         "Interpret this message in context (read board/events as needed), then take action via tools:",
     ])
-    if task_in_flight:
-        parts.extend([
-            "- If the user asks to add / approve / delete / backlog / unfreeze a task: use `operator_queue_append` (NOT `board_edit` — it's disabled this turn, TB-142). The daemon drains the queue between tick stages, so your op lands at the next tick boundary without racing the running task's snapshot window. **Approving an ideation-proposed task** (TB-121) is `op=\"approve\"` with `task_id=TB-N` — the drain-side handler strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so the task dispatches at the next tick.",
-            "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining they'll be handled once the daemon is idle.",
-            "- If the user asks to pause/resume the daemon: use `daemon_control`.",
-            "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",
-            "- If the user asks for cron / ideation-state changes: do NOT call cron_edit / ideation_state_write — reply via `mattermost_reply` explaining they'll be handled once the daemon is idle.",
-            # TB-144: status-report queries route through the shared MCP
-            # tool so chat-triggered and cron-triggered reports stay in
-            # sync (one prompt, one freshness contract, one event audit
-            # trail). Pinned phrasing — `tests/test_prompts.py` asserts
-            # the recognition pattern + the tool name.
-            "- If the user asks for a **status report** (recognize: \"status\", \"status?\", \"what's going on\", \"how are things\", \"how's the daemon\", \"any updates\"): call `status_report_run({\"reason\": \"<short paraphrase of what they asked>\"})` instead of composing your own reply. The routine handles posting (or skipping if nothing has changed) and emits the audit events. Don't call it more than once per turn — the skip-gate fires fast, but the SDK turn isn't free. Your `mattermost_reply` after the call can mention the result (\"posted to #ap2\" / \"skipped: nothing has changed since the last report\").",
-            "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
-            "- Log anything noteworthy via `log_event`.",
-        ])
-    else:
-        parts.extend([
-            "- If the user asks for work: add tasks via `board_edit`. **Approving an ideation-proposed task** (TB-121) is action `approve` on a Backlog task — strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so it dispatches.",
-            "- If the user asks for monitoring: add a job via `cron_edit`.",
-            # TB-144: status-report queries route through the shared MCP
-            # tool. Same shape in both restricted and full toolsets — the
-            # MM handler doesn't reinvent the report format.
-            "- If the user asks for a **status report** (recognize: \"status\", \"status?\", \"what's going on\", \"how are things\", \"how's the daemon\", \"any updates\"): call `status_report_run({\"reason\": \"<short paraphrase of what they asked>\"})` instead of composing your own reply. The routine handles posting (or skipping if nothing has changed) and emits the audit events. Don't call it more than once per turn.",
-            "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
-            "- Log anything noteworthy via `log_event`.",
-        ])
+    parts.extend([
+        "- If the user asks to add / approve / delete / backlog / unfreeze a task: use `operator_queue_append` (NOT `board_edit` — it's disabled, TB-142/TB-145). The daemon drains the queue between tick stages, so your op lands at the next tick boundary without racing any running task's snapshot window. **Approving an ideation-proposed task** (TB-121) is `op=\"approve\"` with `task_id=TB-N` — the drain-side handler strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so the task dispatches at the next tick.",
+        "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining the request needs an operator CLI action.",
+        "- If the user asks to pause/resume the daemon: use `daemon_control`.",
+        "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",
+        "- If the user asks for cron / ideation-state changes: do NOT call cron_edit / ideation_state_write (they're not in your toolset) — reply via `mattermost_reply` explaining the request needs an operator CLI action (`ap2 cron list/edit` or manual `ideation_state.md` edit).",
+        # TB-144: status-report queries route through the shared MCP
+        # tool so chat-triggered and cron-triggered reports stay in
+        # sync (one prompt, one freshness contract, one event audit
+        # trail). Pinned phrasing — `tests/test_prompts.py` asserts
+        # the recognition pattern + the tool name.
+        "- If the user asks for a **status report** (recognize: \"status\", \"status?\", \"what's going on\", \"how are things\", \"how's the daemon\", \"any updates\"): call `status_report_run({\"reason\": \"<short paraphrase of what they asked>\"})` instead of composing your own reply. The routine handles posting (or skipping if nothing has changed) and emits the audit events. Don't call it more than once per turn — the skip-gate fires fast, but the SDK turn isn't free. Your `mattermost_reply` after the call can mention the result (\"posted to #ap2\" / \"skipped: nothing has changed since the last report\").",
+        "- If the user asks a question: read what's needed and answer via `mattermost_reply`.",
+        "- Log anything noteworthy via `log_event`.",
+    ])
 
     parts.extend([
         "",
