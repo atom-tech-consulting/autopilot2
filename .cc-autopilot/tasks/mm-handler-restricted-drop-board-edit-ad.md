@@ -44,3 +44,8 @@ There's also a concrete missing piece: TB-121's `approve` action (strip `(blocke
 - **fenced_files:** .cc-autopilot/operator_queue.jsonl
 - **pre_run_head:** d708803f
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T032915Z-TB-142.prompt.md`, `stream: .cc-autopilot/debug/20260501T032915Z-TB-142.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T032915Z-TB-142.messages.jsonl`
+### 2026-05-01 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `! grep -qE "mcp__autopilot__board_edit" <(python3 -c "import ap2.tools as t; print('\n'.join(t.MM_HANDLER_TOOLS_RESTRIC
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260501T034300Z-TB-142.prompt.md`, `stream: .cc-autopilot/debug/20260501T034300Z-TB-142.stream.jsonl`, `messages: .cc-autopilot/debug/20260501T034300Z-TB-142.messages.jsonl`
