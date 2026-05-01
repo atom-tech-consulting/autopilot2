@@ -77,6 +77,119 @@ def test_verification_partial_in_quick_filters(project: Config):
     assert "?type=verification_partial" in html
 
 
+# --------- TB-148: status-aware tinting for task_complete rows ---------
+
+
+def test_row_class_task_complete_status_aware():
+    """`task_complete` row class reads `status` so the operator can tell
+    a passing run from a failure-mode at a glance, without expanding the
+    row. `complete` keeps the green lifecycle class today's UI already
+    uses; failure modes reuse the existing `failure` (red) and `warning`
+    (orange) classes; `retry_exhausted` and unknown/missing statuses get
+    their own dedicated `frozen` and `neutral` classes."""
+    # Happy path → green (lifecycle).
+    assert web._row_class({"type": "task_complete", "status": "complete"}) \
+        == "lifecycle"
+    # Pipeline-pending is a parked-not-failed state; treat as lifecycle.
+    assert web._row_class(
+        {"type": "task_complete", "status": "pipeline_pending"}
+    ) == "lifecycle"
+    # Soft warning — committed but verification didn't pass.
+    assert web._row_class(
+        {"type": "task_complete", "status": "verification_failed"}
+    ) == "warning"
+    # Hard failures — distinct from soft warning, distinct from happy path.
+    for s in ("state_violation", "error", "timeout",
+              "incomplete", "blocked", "failed"):
+        assert web._row_class({"type": "task_complete", "status": s}) \
+            == "failure", s
+    # Retry-exhausted — task abandoned permanently. Its own dark-red tint.
+    assert web._row_class(
+        {"type": "task_complete", "status": "retry_exhausted"}
+    ) == "frozen"
+    # Defensive: unknown / missing status falls into a neutral gray bucket
+    # so an unexpected string can't quietly inherit `complete`'s green.
+    assert web._row_class({"type": "task_complete", "status": "unknown"}) \
+        == "neutral"
+    assert web._row_class({"type": "task_complete", "status": ""}) \
+        == "neutral"
+    assert web._row_class({"type": "task_complete"}) == "neutral"
+    assert web._row_class(
+        {"type": "task_complete", "status": "wat-no-such-status"}
+    ) == "neutral"
+
+
+def test_row_class_three_task_complete_statuses_distinct():
+    """The briefing's gating one-liner — `complete`, `verification_failed`,
+    `state_violation` must produce three different row classes so the
+    operator sees three different colors at a glance."""
+    a = web._row_class({"type": "task_complete", "status": "complete"})
+    b = web._row_class({"type": "task_complete", "status": "verification_failed"})
+    c = web._row_class({"type": "task_complete", "status": "state_violation"})
+    assert a != b and b != c and a != c
+
+
+def test_row_class_non_task_complete_unaffected():
+    """The status-aware branch must not affect rows whose type isn't
+    `task_complete` — failure-class events still get red regardless of
+    any (irrelevant) status field they happen to carry."""
+    assert web._row_class({"type": "task_error", "status": "ignored"}) \
+        == "failure"
+    assert web._row_class({"type": "verification_partial"}) == "warning"
+    assert web._row_class({"type": "daemon_start"}) == "lifecycle"
+    assert web._row_class({"type": "mattermost_reply"}) == ""
+
+
+def test_events_page_tints_task_complete_rows_by_status(project: Config):
+    """End-to-end: the rendered events HTML must carry the matching CSS
+    class on each task_complete row's `<tr>`, and not collapse them into a
+    single uniform color. Probes for each row by its summary string so the
+    assertion isn't fragile to row order."""
+    # Fixture already has TB-3 task_complete with status=complete (green).
+    # Stack on the failure modes the briefing calls out.
+    ev_mod.append(project.events_file, "task_complete", task="TB-A",
+                  status="verification_failed", commit="aaa11111",
+                  summary="probe-verif-failed")
+    ev_mod.append(project.events_file, "task_complete", task="TB-B",
+                  status="state_violation", commit="",
+                  summary="probe-state-violation")
+    ev_mod.append(project.events_file, "task_complete", task="TB-C",
+                  status="retry_exhausted", commit="",
+                  summary="probe-retry-exhausted")
+    ev_mod.append(project.events_file, "task_complete", task="TB-D",
+                  status="totally-bogus", commit="",
+                  summary="probe-bogus")
+    html = web._render_events(project, typ="task_complete", n=50)
+    rows_block = html.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+
+    def _row_for(needle: str) -> str:
+        return next(r for r in rows_block.split("<tr ") if needle in r)
+
+    # Original fixture row (status=complete) → lifecycle (green).
+    assert 'class="lifecycle"' in _row_for("finished it")
+    # verification_failed → warning (orange).
+    assert 'class="warning"' in _row_for("probe-verif-failed")
+    # state_violation → failure (red).
+    assert 'class="failure"' in _row_for("probe-state-violation")
+    # retry_exhausted → frozen (dark red).
+    assert 'class="frozen"' in _row_for("probe-retry-exhausted")
+    # Unknown status → neutral (gray) — defensive bucket.
+    assert 'class="neutral"' in _row_for("probe-bogus")
+
+
+def test_events_page_includes_legend(project: Config):
+    """A small legend block teaches the row colors on the /events page so
+    a first-time viewer can map color → meaning without reading code.
+    Behind a `<details>` to keep the chrome quiet for repeat visitors."""
+    html = web._render_events(project, typ=None, n=10)
+    # The legend is wrapped in a <details> with summary "row colors".
+    assert "row colors" in html
+    # Each tint label appears in the legend swatch list.
+    for swatch in ("complete", "verification_failed", "state_violation",
+                   "retry_exhausted"):
+        assert swatch in html
+
+
 def test_events_renders_full_text(project: Config):
     """Truncation-free rendering — long values land verbatim in the page.
 

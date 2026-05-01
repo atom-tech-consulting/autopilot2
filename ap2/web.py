@@ -292,6 +292,27 @@ _CSS = """<style>
   tr.warning { background: #fffbea }
   tr.warning td.type { color: #b87000 }
   tr.lifecycle td.type { color: #2a8 }
+  /* TB-148: `frozen` is a deeper-red tint for task_complete rows whose
+     status is `retry_exhausted` — the task was abandoned permanently and
+     moved to Frozen. Distinct from plain `failure` so the operator can
+     tell "tried and gave up" apart from "tried and rolled back / hit
+     verification". `neutral` is gray for `task_complete` with unknown
+     or missing status — defensive bucket so an unexpected status string
+     doesn't quietly inherit the green of `complete`. */
+  tr.frozen { background: #f8e0e0 }
+  tr.frozen td.type { color: #811; font-weight: 600 }
+  tr.neutral { background: #f5f5f5 }
+  tr.neutral td.type { color: #888 }
+  /* TB-148: legend swatches on the /events page — same palette as the
+     row tints so the legend genuinely teaches the row colors. */
+  .legend-swatch { display: inline-block; padding: 0.1rem 0.4rem;
+                   border-radius: 3px; margin-right: 0.3rem;
+                   font-size: 11px; font-family: ui-monospace, monospace }
+  .legend-swatch.lifecycle { background: #e0f5e0; color: #2a8 }
+  .legend-swatch.warning { background: #fffbea; color: #b87000 }
+  .legend-swatch.failure { background: #fff7f7; color: #c33 }
+  .legend-swatch.frozen { background: #f8e0e0; color: #811 }
+  .legend-swatch.neutral { background: #f5f5f5; color: #888 }
   .ts { color: #888; font-family: ui-monospace, monospace; font-size: 12px; white-space: nowrap }
   .type { font-family: ui-monospace, monospace; font-weight: 500 }
   /* `table-layout: fixed` is what actually makes `<pre>` inside a `<td>`
@@ -387,12 +408,50 @@ _WARNING_EVENT_TYPES = frozenset({
 })
 
 
-def _row_class(typ: str) -> str:
+# TB-148: per-status row class for `task_complete`. The event type alone
+# would tint every task_complete row green (lifecycle), hiding the most
+# operationally relevant signal — did the task actually pass, fail
+# verification, or roll back? Reuses the existing `failure` / `warning`
+# classes so the operator's color-memory ("orange = soft warning,
+# red = hard fail") carries over from the failure-mode events; adds
+# `frozen` (dark red, retry_exhausted) and `neutral` (gray, unknown)
+# for the cases that don't map cleanly onto the existing palette.
+_TASK_COMPLETE_STATUS_CLASS: dict[str, str] = {
+    "complete": "lifecycle",            # green — the happy path
+    "pipeline_pending": "lifecycle",    # parked in Pipeline Pending; not a failure
+    "verification_failed": "warning",   # orange — committed but didn't verify
+    "state_violation": "failure",       # red — rolled back, no useful artifacts
+    "timeout": "failure",               # red — defensive (lives as task_timeout today)
+    "error": "failure",                 # red — defensive (lives as task_error today)
+    "incomplete": "failure",            # red — agent reported partial progress
+    "blocked": "failure",               # red — agent hit a blocker
+    "failed": "failure",                # red — agent reported outright failure
+    "retry_exhausted": "frozen",        # dark red — task abandoned permanently
+}
+
+
+def _row_class(e: dict) -> str:
+    """Row CSS class for one event row.
+
+    For most event types the class is type-driven: failure-class events
+    (FAILURE_EVENT_TYPES) get red, warning-class events get orange,
+    lifecycle events get green, everything else is uncolored. For
+    `task_complete` we additionally read `status` so a `complete` row
+    differs visually from `verification_failed` / `state_violation` /
+    `retry_exhausted` (TB-148). The status-aware tinting reuses the
+    existing failure/warning classes where possible to keep the palette
+    tight; `frozen` (dark red) and `neutral` (gray) cover the cases that
+    don't fit either bucket.
+    """
+    typ = e.get("type", "")
+    if typ == "task_complete":
+        status = str(e.get("status") or "").strip().lower()
+        return _TASK_COMPLETE_STATUS_CLASS.get(status, "neutral")
     if typ in diagnose.FAILURE_EVENT_TYPES:
         return "failure"
     if typ in _WARNING_EVENT_TYPES:
         return "warning"
-    if typ in {"task_start", "task_complete", "cron_start", "cron_complete",
+    if typ in {"task_start", "cron_start", "cron_complete",
                "ideation_empty_board", "ideation_complete", "daemon_start",
                "daemon_stop", "backlog_auto_promoted"}:
         return "lifecycle"
@@ -428,7 +487,7 @@ def _events_table(evts: list[dict], *, cfg: Config | None = None) -> str:
     for i, e in enumerate(evts):
         ts = e.get("ts", "")
         typ = e.get("type", "?")
-        cls = _row_class(typ)
+        cls = _row_class(e)
         full_json = json.dumps(e, indent=2, default=str)
         extra = _event_extra(e)
         run_link = ""
@@ -535,9 +594,26 @@ def _render_events(cfg: Config, *, typ: str | None, n: int) -> str:
         filt += f' <a href="/events?type={k}&n={n}" class="{cls}">{k}</a>'
     filt += "</div>"
 
+    # TB-148: tiny legend so the row tints are self-documenting on first
+    # visit. Hidden behind a `<details>` so it doesn't crowd the filter
+    # bar — operators who already know the palette never see it expanded.
+    legend = (
+        '<details class="filter"><summary>row colors</summary>'
+        '<div style="padding:0.4rem 0;font-size:12px;line-height:1.6">'
+        '<span class="meta">task_complete tints by status:</span> '
+        '<span class="legend-swatch lifecycle">complete</span> '
+        '<span class="legend-swatch warning">verification_failed</span> '
+        '<span class="legend-swatch failure">state_violation / error / timeout / '
+        'incomplete / blocked / failed</span> '
+        '<span class="legend-swatch frozen">retry_exhausted</span> '
+        '<span class="legend-swatch neutral">unknown</span>'
+        '</div></details>'
+    )
+
     body = (
         f"<h1>events <span class=\"meta\">"
         f"— {len(evts)} shown{', filter: ' + html.escape(typ) if typ else ''}</span></h1>"
+        f"{legend}"
         f"{filt}"
         f"{_events_table(evts, cfg=cfg)}"
     )
