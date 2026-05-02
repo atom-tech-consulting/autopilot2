@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-149** **Add `mattermost_thread_read` MCP tool for chat conversation context** `#autopilot` `#mattermost` `#mcp-tools` [→ brief](.cc-autopilot/tasks/add-mattermost-thread-read-mcp-tool-for.md)
 
 ## Pipeline Pending
 
