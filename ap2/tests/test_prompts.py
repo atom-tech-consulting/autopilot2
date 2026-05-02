@@ -421,6 +421,69 @@ def test_mattermost_prompt_pins_approve_tb_n_recognition(tmp_path):
     assert "@blocked:review" in p
 
 
+# ---------------------------------------------------------------------------
+# TB-149: thread-reply context. When the incoming MM message has a
+# non-empty thread_id, the prompt instructs the handler to call
+# `mattermost_thread_read` first; for top-level mentions the instruction
+# is absent (the message is self-contained).
+
+
+def test_mattermost_prompt_threaded_reply_instructs_thread_read(tmp_path):
+    """A thread-reply message (non-empty thread_id) must surface a
+    `mattermost_thread_read` instruction in the prompt so the handler
+    fetches prior context before acting. The thread_id must appear
+    inside the suggested call so the agent doesn't have to re-derive it
+    from the events block (which often contains unrelated cron threads).
+    """
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-2",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "yes",
+        "thread_id": "root-xyz",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Tool name surfaced — agent sees the symbol it needs to call.
+    assert "mattermost_thread_read" in p
+    # The actual thread_id is embedded in the suggested call so the
+    # agent doesn't have to derive it from elsewhere in the prompt.
+    assert 'thread_id="root-xyz"' in p
+    # The "why" — pin the rationale so a future prompt rewrite that
+    # silently drops the thread-context guidance trips this test.
+    assert "thread reply" in p.lower()
+
+
+def test_mattermost_prompt_top_level_message_skips_thread_read(tmp_path):
+    """A top-level mention (empty thread_id) must NOT include the
+    `mattermost_thread_read` instruction — the message is self-contained
+    and the tool would error on an empty thread_id anyway. Pin the
+    absence of the instruction sentence + the section header so a
+    future prompt rewrite that always emits the section (regardless of
+    thread_id) trips this test.
+
+    Note: the tool name `mattermost_thread_read` itself may legitimately
+    appear elsewhere in the prompt (e.g. a future toolset reminder) —
+    the load-bearing check is that the *thread-context instruction
+    section* is omitted for top-level messages, so we anchor on the
+    section header phrasing rather than the tool name."""
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot status?",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Section header from the threaded branch must be absent.
+    assert "thread context" not in p.lower()
+    # The threaded-branch instruction sentence is also absent.
+    assert "this message is a thread reply" not in p.lower()
+
+
 def test_status_report_run_in_mm_handler_toolset():
     """TB-144 + TB-145: the MCP tool must be available to the MM
     handler — operators ask for status whether a task is running or not.

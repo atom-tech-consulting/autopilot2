@@ -111,16 +111,38 @@ def test_mm_handler_tools_keeps_git_log_grep():
     assert "mcp__autopilot__git_log_grep" in MM_HANDLER_TOOLS
 
 
-def test_mm_handler_tools_is_strict_subset_of_control_agent_tools():
-    """MM_HANDLER_TOOLS ⊂ CONTROL_AGENT_TOOLS — nothing new is added,
-    and post-TB-146 the only tools dropped from CONTROL_AGENT_TOOLS by
-    the handler filter are `ideation_state_write` and `board_edit`.
-    (`cron_edit` is filtered defensively but TB-146 already removed it
-    from `CONTROL_AGENT_TOOLS`, so it doesn't show up in this diff.)"""
+def test_mm_handler_tools_relation_to_control_agent_tools():
+    """MM_HANDLER_TOOLS = (CONTROL_AGENT_TOOLS − {ideation_state_write,
+    board_edit}) ∪ {mattermost_thread_read}.
+
+    Pre-TB-149 this was a strict subset (MM_HANDLER_TOOLS ⊂
+    CONTROL_AGENT_TOOLS). TB-149 lifted that invariant by adding
+    `mattermost_thread_read` to the handler set ONLY — cron jobs and
+    ideation never receive a thread_id, so widening
+    CONTROL_AGENT_TOOLS for a tool only the MM handler can use would
+    grow the cron / ideation surface for no gain. The handler-set
+    minus the explicit MM-only addition must still be a subset of
+    CONTROL_AGENT_TOOLS, which is what we pin below."""
     full_set = set(CONTROL_AGENT_TOOLS)
     mm_set = set(MM_HANDLER_TOOLS)
-    assert mm_set < full_set, "MM_HANDLER_TOOLS must be a strict subset of CONTROL_AGENT_TOOLS"
-    assert full_set - mm_set == {
+    # TB-149: mattermost_thread_read is the explicit MM-only addition.
+    mm_only_additions = {"mcp__autopilot__mattermost_thread_read"}
+    assert mm_only_additions <= mm_set, (
+        f"TB-149: {mm_only_additions} should be in MM_HANDLER_TOOLS"
+    )
+    assert mm_only_additions.isdisjoint(full_set), (
+        f"TB-149: {mm_only_additions} should be MM-handler-only — "
+        "adding to CONTROL_AGENT_TOOLS would widen the cron / ideation "
+        "surface for a tool only the MM handler can use."
+    )
+    # Subtract the MM-only additions; the remainder must still be a
+    # strict subset of CONTROL_AGENT_TOOLS (the original TB-145 shape).
+    mm_minus_additions = mm_set - mm_only_additions
+    assert mm_minus_additions < full_set, (
+        "MM_HANDLER_TOOLS minus its explicit MM-only additions must be "
+        "a strict subset of CONTROL_AGENT_TOOLS"
+    )
+    assert full_set - mm_minus_additions == {
         "mcp__autopilot__ideation_state_write",
         "mcp__autopilot__board_edit",
     }

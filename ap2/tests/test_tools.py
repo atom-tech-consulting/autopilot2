@@ -1502,6 +1502,44 @@ def test_cron_edit_absent_from_every_agent_toolset():
     assert name not in tools.TASK_AGENT_TOOLS
 
 
+# ---------------------------------------------------------------------------
+# TB-149: `mattermost_thread_read` MCP tool wiring + misconfig path.
+
+
+def test_mattermost_thread_read_unconfigured_returns_err(cfg, monkeypatch):
+    """do_mattermost_thread_read returns _err — does NOT raise — when
+    MATTERMOST_URL / MATTERMOST_TOKEN are unset. The handler agent gets
+    a distinguishable failure so it can fall back to a `mattermost_reply`
+    explaining it can't read thread history right now."""
+    monkeypatch.delenv("MATTERMOST_URL", raising=False)
+    monkeypatch.delenv("MATTERMOST_TOKEN", raising=False)
+    res = tools.do_mattermost_thread_read(
+        cfg, {"thread_id": "root1", "max_messages": 50},
+    )
+    assert res.get("isError"), res
+    assert "mattermost not configured" in res["content"][0]["text"]
+
+
+def test_mattermost_thread_read_requires_thread_id(cfg, monkeypatch):
+    """Empty thread_id is an immediate _err — there's no sensible default."""
+    monkeypatch.setenv("MATTERMOST_URL", "https://mm.example")
+    monkeypatch.setenv("MATTERMOST_TOKEN", "tok")
+    res = tools.do_mattermost_thread_read(cfg, {"thread_id": ""})
+    assert res.get("isError"), res
+    assert "thread_id is required" in res["content"][0]["text"]
+
+
+def test_mattermost_thread_read_in_mm_handler_toolset_only():
+    """TB-149 scope discipline: the tool is wired into MM_HANDLER_TOOLS
+    (the handler is the only agent with thread context) but kept OUT of
+    CONTROL_AGENT_TOOLS (cron / ideation never receive a thread_id) and
+    TASK_AGENT_TOOLS (task agents have no chat surface)."""
+    name = "mcp__autopilot__mattermost_thread_read"
+    assert name in tools.MM_HANDLER_TOOLS
+    assert name not in tools.CONTROL_AGENT_TOOLS
+    assert name not in tools.TASK_AGENT_TOOLS
+
+
 def test_cron_edit_handler_still_callable_from_python(cfg):
     """TB-146: removing `cron_edit` from agent toolsets must NOT remove
     the underlying `do_cron_edit` handler — the operator CLI and unit

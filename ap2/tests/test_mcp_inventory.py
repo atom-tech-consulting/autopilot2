@@ -51,21 +51,32 @@ _OPERATOR_ONLY_ADVERTISED_TOOLS = frozenset({
 
 
 def test_advertised_tools_match_agent_allowlists():
-    """Every tool the MCP server advertises must show up in either
-    TASK_AGENT_TOOLS or CONTROL_AGENT_TOOLS (with the `mcp__autopilot__`
-    prefix Claude Code applies) — UNLESS it's in the explicit
-    operator-only set (TB-146). The reverse direction also holds: every
-    `mcp__autopilot__<tool>` entry in the allowlists must be backed by a
-    real advertised tool — that's the load-bearing check that catches the
-    "decorated but not registered" bug.
+    """Every tool the MCP server advertises must show up in some agent
+    allowlist (TASK_AGENT_TOOLS, CONTROL_AGENT_TOOLS, or
+    MM_HANDLER_TOOLS), with the `mcp__autopilot__` prefix Claude Code
+    applies — UNLESS it's in the explicit operator-only set (TB-146).
+    The reverse direction also holds: every `mcp__autopilot__<tool>`
+    entry in the allowlists must be backed by a real advertised tool —
+    that's the load-bearing check that catches the "decorated but not
+    registered" bug.
+
+    TB-149: `MM_HANDLER_TOOLS` is included in the union because it's
+    no longer a strict subset of `CONTROL_AGENT_TOOLS` —
+    `mattermost_thread_read` is wired into the handler set only (cron
+    / ideation never receive a thread to read), so a check that only
+    summed task + control would false-positive on it.
     """
-    from ap2.tools import CONTROL_AGENT_TOOLS, TASK_AGENT_TOOLS
+    from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS, TASK_AGENT_TOOLS
 
     srv = _build_server()
     advertised = set(asyncio.run(_list_advertised_tool_names(srv)))
     advertised_prefixed = {f"mcp__autopilot__{n}" for n in advertised}
 
-    union_allowlists = set(TASK_AGENT_TOOLS) | set(CONTROL_AGENT_TOOLS)
+    union_allowlists = (
+        set(TASK_AGENT_TOOLS)
+        | set(CONTROL_AGENT_TOOLS)
+        | set(MM_HANDLER_TOOLS)
+    )
     mcp_in_allowlists = {t for t in union_allowlists if t.startswith("mcp__autopilot__")}
 
     # Forward direction: every advertised tool is in some allowlist OR

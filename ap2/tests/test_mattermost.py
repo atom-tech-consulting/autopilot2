@@ -159,6 +159,108 @@ def test_thread_cache_trim(monkeypatch):
     assert set(cache.keys()) == {"r2", "r3", "r4"}
 
 
+# ---------------- TB-149: fetch_thread ----------------
+
+
+def test_fetch_thread_returns_chronological_with_user_resolution(cfg, monkeypatch):
+    """fetch_thread mocks _api_get with a fake 3-post thread (mixed users,
+    out-of-order create_at) and asserts the returned list is sorted
+    oldest-first and resolves user_ids via the same `users` cache
+    `check_new_messages` populates."""
+    # Pre-seed one user in the cache so the helper exercises BOTH the
+    # cache-hit and the API-fetch paths. Leave u_bob unresolved so the
+    # helper has to fetch it from /api/v4/users/u_bob.
+    cfg.mm_state_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.mm_state_file.write_text(
+        json.dumps({
+            "cursors": {},
+            "channel_names": {},
+            "users": {"u_alice": "alice"},
+            "thread_mentions": {},
+        })
+    )
+
+    user_calls: list[str] = []
+
+    def fake_get(url, token, path):
+        if path == "/api/v4/posts/root1/thread":
+            return {
+                # Out-of-order on purpose — the helper must sort.
+                "order": ["root1", "p3", "p2"],
+                "posts": {
+                    "root1": {"id": "root1", "user_id": "u_alice",
+                              "message": "approve TB-99?", "create_at": 100},
+                    "p2": {"id": "p2", "user_id": "u_bob",
+                           "message": "looking", "create_at": 200},
+                    "p3": {"id": "p3", "user_id": "u_alice",
+                           "message": "yes", "create_at": 300},
+                },
+            }
+        if path == "/api/v4/users/u_bob":
+            user_calls.append(path)
+            return {"username": "bob"}
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(mattermost, "_api_get", fake_get)
+    out = mattermost.fetch_thread(cfg, "root1")
+
+    # Chronological (oldest-first).
+    assert [p["create_at"] for p in out] == [100, 200, 300]
+    assert [p["text"] for p in out] == ["approve TB-99?", "looking", "yes"]
+    assert [p["post_id"] for p in out] == ["root1", "p2", "p3"]
+    # u_alice came from the seeded cache (no API call); u_bob was fetched.
+    assert [p["user"] for p in out] == ["alice", "bob", "alice"]
+    assert user_calls == ["/api/v4/users/u_bob"]
+
+    # Newly resolved username persisted to the state file so a second
+    # call would skip the user fetch.
+    state = json.loads(cfg.mm_state_file.read_text())
+    assert state["users"]["u_bob"] == "bob"
+
+
+def test_fetch_thread_max_messages_truncates_oldest(cfg, monkeypatch):
+    """`max_messages=2` keeps the most-recent 2 posts (drops the oldest /
+    deepest-history first). The agent always sees the most-recent
+    context; deep history is what gets dropped on a long thread."""
+    def fake_get(url, token, path):
+        if path == "/api/v4/posts/root1/thread":
+            return {
+                "order": ["root1", "p2", "p3", "p4"],
+                "posts": {
+                    "root1": {"id": "root1", "user_id": "u",
+                              "message": "first", "create_at": 100},
+                    "p2": {"id": "p2", "user_id": "u",
+                           "message": "second", "create_at": 200},
+                    "p3": {"id": "p3", "user_id": "u",
+                           "message": "third", "create_at": 300},
+                    "p4": {"id": "p4", "user_id": "u",
+                           "message": "fourth", "create_at": 400},
+                },
+            }
+        if path == "/api/v4/users/u":
+            return {"username": "alice"}
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(mattermost, "_api_get", fake_get)
+    out = mattermost.fetch_thread(cfg, "root1", max_messages=2)
+    # The 2 MOST RECENT posts kept (oldest end dropped first).
+    assert [p["text"] for p in out] == ["third", "fourth"]
+    assert [p["create_at"] for p in out] == [300, 400]
+
+
+def test_fetch_thread_unconfigured_returns_empty(cfg, monkeypatch):
+    """Without MATTERMOST_URL/TOKEN the helper short-circuits to []
+    rather than calling _api_get — symmetric with check_new_messages."""
+    monkeypatch.delenv("MATTERMOST_URL", raising=False)
+    monkeypatch.delenv("MATTERMOST_TOKEN", raising=False)
+
+    def fake_get(url, token, path):
+        raise AssertionError("should not call _api_get when unconfigured")
+
+    monkeypatch.setattr(mattermost, "_api_get", fake_get)
+    assert mattermost.fetch_thread(cfg, "root1") == []
+
+
 def test_mention_filter_still_works_post_seed(cfg, monkeypatch):
     """After seeding, non-mention messages with no threaded mention are dropped."""
     cfg.mm_state_file.parent.mkdir(parents=True, exist_ok=True)

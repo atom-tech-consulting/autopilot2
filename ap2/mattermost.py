@@ -171,6 +171,94 @@ def _normalize(url: str, token: str, post: dict, name_cache: dict, user_cache: d
     }
 
 
+def fetch_thread(cfg: Config, thread_id: str, *, max_messages: int = 50) -> list[dict]:
+    """Fetch all posts in a Mattermost thread (root + replies).
+
+    TB-149: lets the MM handler agent read the rest of a thread it was
+    invoked on. The single message that lands in `check_new_messages`
+    carries `thread_id` + `text` only — a thread-reply like "yes" to a
+    prompt the bot asked 10 minutes ago has no context. This helper
+    fills that gap by hitting `/api/v4/posts/{post_id}/thread` (the same
+    endpoint `_thread_has_mention` already uses) and normalizing the
+    response into chronologically-ordered dicts the agent can reason
+    about.
+
+    Returns a list of `{user, text, create_at, post_id}` dicts ordered
+    oldest-first. user_ids are resolved to display names via the same
+    `users` cache `check_new_messages` populates (so repeat reads in the
+    same daemon process avoid re-fetching the user record).
+
+    `max_messages` (default 50) bounds the returned list at the OLDEST
+    end — i.e. the most-recent N posts are kept, deepest history is
+    dropped first. Operator threads in practice are well under 50 posts;
+    bigger threads can be summarized server-side in a follow-up tool.
+
+    Returns `[]` if mattermost env is missing — matches `check_new_messages`'s
+    skip behavior so the daemon stays usable without mattermost wired up.
+    The caller (`do_mattermost_thread_read`) translates the unconfigured
+    case into an `_err` for the MCP surface so the agent gets a
+    distinguishable failure rather than an empty list.
+    """
+    url = os.environ.get("MATTERMOST_URL", "").rstrip("/")
+    token = os.environ.get("MATTERMOST_TOKEN", "")
+    if not (url and token):
+        return []
+    if not thread_id:
+        return []
+
+    state = _load_state(cfg)
+    user_cache: dict = state.setdefault("users", {})
+
+    try:
+        data = _api_get(url, token, f"/api/v4/posts/{thread_id}/thread")
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+
+    posts = data.get("posts", {}) or {}
+    order = data.get("order", []) or []
+    # `order` is API-defined as oldest-first for the thread endpoint, but
+    # be defensive: sort by create_at to guarantee chronological order
+    # regardless of server quirks. Fall back to `posts` keys if `order`
+    # is missing.
+    pids = list(order) if order else list(posts.keys())
+    enriched: list[tuple[int, str, dict]] = []
+    for pid in pids:
+        p = posts.get(pid)
+        if not isinstance(p, dict):
+            continue
+        enriched.append((int(p.get("create_at", 0) or 0), pid, p))
+    enriched.sort(key=lambda t: (t[0], t[1]))
+
+    # `max_messages` truncates from the OLDEST end (drop deepest history
+    # first) so the agent always sees the most-recent context.
+    if max_messages > 0 and len(enriched) > max_messages:
+        enriched = enriched[-max_messages:]
+
+    out: list[dict] = []
+    for _ts, pid, post in enriched:
+        user_id = post.get("user_id", "")
+        user = user_cache.get(user_id)
+        if not user and user_id:
+            try:
+                u = _api_get(url, token, f"/api/v4/users/{user_id}")
+                user = u.get("username", user_id)
+                user_cache[user_id] = user
+            except Exception:
+                user = user_id
+        out.append({
+            "post_id": post.get("id", pid),
+            "user": user or user_id,
+            "text": post.get("message", ""),
+            "create_at": post.get("create_at", 0),
+        })
+
+    # Persist any newly-resolved usernames so repeat reads avoid re-fetching.
+    _save_state(cfg, state)
+    return out
+
+
 def _thread_has_mention(
     url: str,
     token: str,

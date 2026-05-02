@@ -390,6 +390,33 @@ def build_mattermost_prompt(
         text,
         "```",
         "",
+    ])
+
+    # TB-149: thread-reply context. The single message we receive is a
+    # `text + thread_id + sender` triple — the rest of the conversation
+    # isn't in the prompt. For thread replies, instruct the agent to
+    # fetch prior messages via `mattermost_thread_read` BEFORE acting,
+    # so a reply like "yes" or "what about that line?" lands with the
+    # context the operator implied. Top-level messages (empty
+    # thread_id) are self-contained — no instruction needed.
+    if thread:
+        parts.extend([
+            "## Thread context (this message is a thread reply)",
+            (
+                f"This message is a reply in thread `{thread}`, not a "
+                "top-level mention. The operator's intent likely depends "
+                "on prior messages in the thread (e.g. a 'yes' to a "
+                "question the bot asked earlier, or a follow-up nudge "
+                "to a summary). Call `mattermost_thread_read("
+                f'thread_id="{thread}")` first to read the prior '
+                "messages, then act on the user's intent in that "
+                "context. One call is enough — the thread is small and "
+                "the result already covers the full root + replies."
+            ),
+            "",
+        ])
+
+    parts.extend([
         "## Your job",
         "Interpret this message in context (read board/events as needed), then take action via tools:",
     ])

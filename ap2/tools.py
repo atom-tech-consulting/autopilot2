@@ -1424,6 +1424,60 @@ def do_daemon_control(cfg: Config, args: dict) -> dict:
     return _err(f"unknown action {action!r}")
 
 
+def do_mattermost_thread_read(cfg: Config, args: dict) -> dict:
+    """Fetch all posts in a Mattermost thread for the MM handler agent (TB-149).
+
+    Args (string-shaped — matches every other MCP tool in this server):
+      thread_id: post id of the thread root (the `thread_id` field on
+        the incoming message). Required; an empty value is rejected.
+      max_messages: optional integer / numeric string capping the number
+        of returned posts (default 50, truncates from the OLDEST end).
+
+    Returns an `_ok` dict whose body has:
+      thread_id: echoed back so the agent can correlate calls.
+      count: number of posts returned.
+      posts: list of `{user, text, create_at, post_id}` dicts in
+        chronological (oldest-first) order.
+
+    Returns `_err("mattermost not configured")` when MATTERMOST_URL or
+    MATTERMOST_TOKEN are unset — matches `check_new_messages`'s skip
+    behavior and gives the handler a distinguishable failure so it can
+    fall back to a `mattermost_reply` ("I can't read thread history
+    right now") rather than acting on empty context.
+    """
+    from . import mattermost as _mm
+
+    thread_id = (args.get("thread_id") or "").strip()
+    if not thread_id:
+        return _err("thread_id is required")
+
+    raw_max = args.get("max_messages")
+    if raw_max in (None, ""):
+        max_messages = 50
+    else:
+        try:
+            max_messages = int(raw_max)
+        except (TypeError, ValueError):
+            return _err(f"max_messages must be an int, got {raw_max!r}")
+    if max_messages <= 0:
+        max_messages = 50
+
+    if not (os.environ.get("MATTERMOST_URL") and os.environ.get("MATTERMOST_TOKEN")):
+        return _err("mattermost not configured")
+
+    try:
+        posts = _mm.fetch_thread(cfg, thread_id, max_messages=max_messages)
+    except Exception as e:  # noqa: BLE001
+        return _err(f"{type(e).__name__}: {e}")
+
+    return _ok(
+        f"fetched {len(posts)} thread post(s)",
+        thread_id=thread_id,
+        count=len(posts),
+        posts=posts,
+    )
+
+
 def do_mattermost_reply(cfg: Config, args: dict) -> dict:
     channel = args.get("channel") or ""
     text = args.get("text") or ""
@@ -1555,6 +1609,28 @@ def build_mcp_server(cfg: Config):
     )
     async def mattermost_reply(args):
         return do_mattermost_reply(cfg, args)
+
+    @tool(
+        "mattermost_thread_read",
+        "Fetch all messages in a Mattermost thread (root + replies). Use "
+        "when the user's incoming message is a thread reply and you need "
+        "context from earlier in the conversation (e.g. the operator "
+        "replied 'yes' in a thread where the bot earlier asked 'approve "
+        "TB-N?'). `thread_id` is the post id of the thread root — pass "
+        "the `thread_id` field from the incoming message verbatim. "
+        "`max_messages` defaults to 50 and truncates from the OLDEST end "
+        "(most-recent N posts are kept). Returns `posts` as a "
+        "chronologically-ordered list of {user, text, create_at, "
+        "post_id} dicts. This is a local-only HTTP call to the Mattermost "
+        "server — not Anthropic-side tool budget — so it's cheap; still, "
+        "one call per turn is enough (no point re-reading the same "
+        "thread). Returns an error if MATTERMOST_URL / MATTERMOST_TOKEN "
+        "are unset; in that case fall back to a `mattermost_reply` "
+        "explaining you can't read thread history right now.",
+        {"thread_id": str, "max_messages": int},
+    )
+    async def mattermost_thread_read(args):
+        return do_mattermost_thread_read(cfg, args)
 
     @tool(
         "log_event",
@@ -1779,6 +1855,7 @@ def build_mcp_server(cfg: Config):
             board_edit,
             cron_edit,
             mattermost_reply,
+            mattermost_thread_read,
             log_event,
             daemon_control,
             ideation_state_write,
@@ -1889,6 +1966,15 @@ MM_HANDLER_TOOLS = [
         "mcp__autopilot__ideation_state_write",
         "mcp__autopilot__board_edit",
     )
+] + [
+    # TB-149: thread-context read for the MM handler. NOT in
+    # CONTROL_AGENT_TOOLS because cron jobs and ideation don't have a
+    # thread to read — the handler is the only agent that receives a
+    # `thread_id` in its prompt. Kept off TASK_AGENT_TOOLS for the same
+    # reason (task agents have no chat surface). Added explicitly here
+    # rather than via CONTROL_AGENT_TOOLS so we don't widen the cron /
+    # ideation toolset for a tool they can't use.
+    "mcp__autopilot__mattermost_thread_read",
 ]
 
 # `pipeline_task_start` is the first MCP tool task agents can call directly
