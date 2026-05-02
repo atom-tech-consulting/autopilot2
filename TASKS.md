@@ -8,6 +8,9 @@
 
 ## Backlog
 
+- [ ] **TB-150** **`ap2 check`: lint TB-76 shell pitfalls in `## Verification` bullets** `#autopilot` `#check` `#verify` `#briefing` `#lint` `@blocked:review` — Extend `ap2 check` to warn on TB-76-class shell pitfalls inside briefing `## Verification` shell bullets — bare `python`, path-as-command, multi-line — mirroring the `Manual:` lint TB-138 added. Author-side safety net for the verifier. [→ brief](.cc-autopilot/tasks/ap2-check-lint-tb-76-shell-pitfalls-in-v.md)
+- [ ] **TB-151** **Surface pending-review TB-Ns (not just count) in `ap2 status` and cron status-report** `#autopilot` `#status-report` `#review-gate` `#observability` `#cli` `@blocked:review` — `ap2 status` prints "review: 3 ideation proposals pending" but not which TB-Ns; cron status_report omits pending-review entirely. Operator has to grep TASKS.md to find IDs to approve. List the IDs in both surfaces. [→ brief](.cc-autopilot/tasks/surface-pending-review-tb-ns-not-just-co.md)
+- [ ] **TB-152** **`ap2 reject TB-N` (CLI + chat) — explicit rejection logged to operator_log.md** `#autopilot` `#review-gate` `#operator-queue` `#cli` `#mattermost` `@blocked:review` — Today operator deletes ideation proposals via `ap2 delete TB-N`, which doesn't communicate "decided against" to ideation. Add a `reject` verb (CLI + chat) that removes the task and appends a "rejected ideation proposal → TB-N" line to operator_log.md so future ideation cycles respect the decision. [→ brief](.cc-autopilot/tasks/ap2-reject-tb-n-cli-chat-explicit-reject.md)
 
 ## Pipeline Pending
 
