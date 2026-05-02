@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-149** **Add `mattermost_thread_read` MCP tool for chat conversation context** `#autopilot` `#mattermost` `#mcp-tools` [→ brief](.cc-autopilot/tasks/add-mattermost-thread-read-mcp-tool-for.md)
 
 ## Pipeline Pending
 
@@ -42,6 +41,7 @@
 - [x] **TB-147** **Verifier: run shell bullets via /bin/bash, not /bin/sh** `#autopilot` `#verify` `#shell` [→ brief](.cc-autopilot/tasks/verifier-run-shell-bullets-via-bin-bash.md)
 - [x] **TB-148** **Web UI: tint task_complete rows by status, not uniform green** `#autopilot` `#web` `#observability` [→ brief](.cc-autopilot/tasks/web-ui-tint-task-complete-rows-by-status.md)
 - [x] **TB-121** **Gate ideation-proposed tasks behind human review before dispatch** `#autopilot` `#ideation` `#safety` — Stop the daemon from autonomously dispatching tasks ideation just invented. Ideation emits each proposed task with (blocked on: review); auto-promotion already skips blocked tasks. New 'ap2 approve TB-N' CLI strips the clause atomically. Watchdog learns to distinguish 'pending review' from 'daemon broken'. Reuses existing blocker-clause primitive instead of adding a 7th board section or overloading #proposed. [→ brief](.cc-autopilot/tasks/gate-ideation-proposed-tasks-behind-huma.md)
+- [x] **TB-149** **Add `mattermost_thread_read` MCP tool for chat conversation context** `#autopilot` `#mattermost` `#mcp-tools` [→ brief](.cc-autopilot/tasks/add-mattermost-thread-read-mcp-tool-for.md)
 
 ## Frozen
 
