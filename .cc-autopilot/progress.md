@@ -191,3 +191,9 @@
 - **Summary:** Closed the single failing per-task verification criterion from TB-155's first attempt (649eca3): added focused `test_serve_async_no_conflict_binds_start_port` in test_web.py exercising `serve_async(start_port=X)` directly when X is free and asserting `on_bind` fires with bound==start_port, plus an `assert "requested_port" not in starts[0]` to test_web_loop_emits_start_and_stop in test_daemon_web.py so the no-conflict audit signal stays meaningful. No production-code changes — the daemon wrapper already omits requested_port on the happy path; this locks that behavior in tests. `uv run pytest -q ap2/tests/` → 845 passed.
 - **Files:** ap2/tests/test_web.py, ap2/tests/test_daemon_web.py
 - **Tests:** pass
+
+## [2026-05-04] TB-157: Token-usage instrumentation across all SDK call sites
+- **Commit:** `95ec926`
+- **Summary:** Captured usage/model_usage in _summarize_message + _serialize_message_full; wired judge_call event emission in verify._judge_prose_bullet (threaded events_file/task_id/bullet_idx through verify_task); added per-run usage totals footer + ?show=tokens opt-in column + inline judge_call token summary in web.py; built adhoc/token_breakdown.py aggregator (gitignored) grouping by agent-kind run-id pattern; new tests in test_daemon_message_log.py, e2e/test_verify_per_task.py, test_web.py — full ap2/tests/ suite passes (856 passed in 80.94s).
+- **Files:** ap2/daemon.py, ap2/verify.py, ap2/web.py, ap2/tests/test_daemon_message_log.py, ap2/tests/test_web.py, ap2/tests/e2e/test_verify_per_task.py, adhoc/token_breakdown.py
+- **Tests:** pass
