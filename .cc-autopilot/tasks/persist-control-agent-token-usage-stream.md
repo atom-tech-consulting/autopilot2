@@ -88,3 +88,10 @@ Persisting `stream.jsonl` + `messages.jsonl` for every fire could grow `.cc-auto
 - Refactoring `adhoc/token_breakdown.py` to read `control_run_usage` events instead of stream.jsonl. Both surfaces work; switching is optional polish.
 - Renaming the existing label-specific events (`ideation_timeout` → `control_run_timeout`). Additive only; existing event vocabulary stays.
 - Splitting per-run-kind event types (`ideation_run_usage` vs `cron_run_usage` vs `mm_run_usage`). One unified `control_run_usage` event with a `label` field is sufficient and keeps `events.jsonl` grep-friendly.
+## Attempts
+
+### 2026-05-04 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE '"control_run_usage"' ap2/tests/` — at least one test asserts the event shape.; [fail] prose: a test pins the error path — synthesize a control-agent run that raises an exception inside `sdk.query` (mock the
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260504T215753Z-TB-166.prompt.md`, `stream: .cc-autopilot/debug/20260504T215753Z-TB-166.stream.jsonl`, `messages: .cc-autopilot/debug/20260504T215753Z-TB-166.messages.jsonl`
