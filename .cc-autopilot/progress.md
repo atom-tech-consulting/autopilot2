@@ -215,3 +215,9 @@
 - **Summary:** Added `ap2 reject TB-N [--reason ...]` (CLI + MM-handler chat) — registered the `reject` op in OPERATOR_QUEUE_OPS, gated it to Backlog + `@blocked:review` proposals (else routes operator at `ap2 delete`), drain emits `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` to operator_log.md (placeholder `(no reason given)` when omitted) plus the standard `applied operator-queued reject → TB-N` line, with full test coverage; `uv run pytest -q ap2/tests/` 886 passed in 70s.
 - **Files:** ap2/tools.py, ap2/cli.py, ap2/prompts.py, ap2/README.md, skills/ap2/SKILL.md, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_prompts.py
 - **Tests:** pass
+
+## [2026-05-04] TB-162: Surface pending operator queue ops in the web view
+- **Commit:** `3524f34`
+- **Summary:** Added `_render_pending_queue(cfg)` helper + `.pending-queue` CSS in `ap2/web.py`, wired into `_render_home` above the events table; reads `operator_queue.jsonl`, filters against `operator_queue_state.json`'s applied-set, omits the card server-side when empty, renders op badge + task_id + HH:MM:SSZ ts + 8-char uuid prefix + per-op-kind summary (`title="..."` for add_*, `fields=<csv>` for update, none for approve/etc.); 5 new tests in `ap2/tests/test_web.py` cover three-op rendering, empty-state omission, uuid truncation, drained-entry filter, grep-visibility; full gate `uv run pytest -q ap2/tests/` 891 passed.
+- **Files:** ap2/web.py, ap2/tests/test_web.py
+- **Tests:** pass
