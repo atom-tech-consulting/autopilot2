@@ -239,3 +239,9 @@
 - **Summary:** Implementation already landed in 481655d (task_run_usage event on every terminal run_task path, debug-dump retention on success, _prep_debug_dumps docstring update, 5 pinning tests in test_daemon_recovery.py). Prior verification failed on a single typo'd shell bullet — `grep -nE '"task_run_usage"' ap2/tests/` exits 2 because grep needs `-r` for directory arguments. This commit fixes the briefing's bullet to `grep -rnE …`, which now exits 0 and satisfies the verifier; all 923 ap2/tests pass.
 - **Files:** .cc-autopilot/tasks/persist-task-run-token-usage-in-events-j.md
 - **Tests:** pass
+
+## [2026-05-04] TB-167: Default `ap2 add` section to Backlog (was Ready)
+- **Commit:** `718bb29`
+- **Summary:** Defaulted `ap2 add`'s `-s/--section` to Backlog (was Ready) so operator-filed adds match ideation proposals' triage semantics and `--blocked review` surfaces in `ap2 status`. Explicit `-s Ready`/`-s Frozen` still route through `add_ready`/`add_frozen`. Added 5 regression tests (argparse default, default-routes-to-add_backlog, explicit Ready/Frozen, and default+--blocked review surfaces in cmd_status pending_review_ids); full ap2 suite passes (928 tests).
+- **Files:** ap2/cli.py, ap2/README.md, ap2/tests/test_cli.py
+- **Tests:** pass
