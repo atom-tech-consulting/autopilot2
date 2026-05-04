@@ -83,3 +83,10 @@ Files to touch:
 - Renaming `<slug>.md` to follow a changed title — preserves history at the cost of file-name staleness, accepted trade-off.
 - `update` of section (e.g. move from Backlog to Frozen) — that's `move_to_backlog` / `unfreeze` / `delete` / `move_to_frozen` territory; this op is for content edits, not section changes.
 - Bulk update across multiple tasks in one CLI call — single-task-per-invocation, mirrors `add` / `delete` shape.
+## Attempts
+
+### 2026-05-04 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `python3 -c "from ap2.tools import OPERATOR_QUEUE_OPS; assert 'update' in OPERATOR_QUEUE_OPS"` — queue op registered.; [fail] New unit tests in `test_operator_queue.py`, one per field path: `title`, `tags`, `blocked`, `description`, `briefing`, `
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260504T060336Z-TB-153.prompt.md`, `stream: .cc-autopilot/debug/20260504T060336Z-TB-153.stream.jsonl`, `messages: .cc-autopilot/debug/20260504T060336Z-TB-153.messages.jsonl`
