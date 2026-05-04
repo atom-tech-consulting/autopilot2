@@ -94,3 +94,10 @@ Today's debug/ has ~131 files for ~25 retained (failure) runs — ~5 files per r
 - Compressing debug dumps. Plain-text retention is fine at current volume; gzip-on-archive is a separate TB if storage becomes a concern.
 - Refactoring `adhoc/token_breakdown.py` to read `task_run_usage` events instead of stream.jsonl. Both surfaces work; switching is optional polish.
 - Backfilling missing usage data from past `task_complete` events. Pre-this-task-runs are gone; we accept the gap.
+## Attempts
+
+### 2026-05-04 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE '"task_run_usage"' ap2/tests/` — at least one test asserts the event shape.
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260504T183101Z-TB-165.prompt.md`, `stream: .cc-autopilot/debug/20260504T183101Z-TB-165.stream.jsonl`, `messages: .cc-autopilot/debug/20260504T183101Z-TB-165.messages.jsonl`
