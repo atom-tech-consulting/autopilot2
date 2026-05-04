@@ -167,3 +167,9 @@
 - **Summary:** Added mattermost_thread_read MCP tool: ap2.mattermost.fetch_thread() (chronological, oldest-end truncation, reuses users cache), do_mattermost_thread_read in tools.py with _err on missing env, wired into MM_HANDLER_TOOLS only (cron/ideation/task agents don't need it), and build_mattermost_prompt now adds a "Thread context" section with the embedded thread_id when the incoming message is a thread reply. New tests in test_mattermost.py (3), test_tools.py (3), test_prompts.py (2), and e2e/test_tb149_mm_thread_read.py (1); updated test_concurrent_mm.py and test_mcp_inventory.py to reflect the new MM-handler-only addition. Full ap2 regression gate green: 761 passed.
 - **Files:** ap2/mattermost.py, ap2/tools.py, ap2/prompts.py, ap2/tests/test_mattermost.py, ap2/tests/test_tools.py, ap2/tests/test_prompts.py, ap2/tests/test_concurrent_mm.py, ap2/tests/test_mcp_inventory.py, ap2/tests/e2e/test_tb149_mm_thread_read.py
 - **Tests:** pass
+
+## [2026-05-04] TB-154: Validate briefing structure at queue-append time
+- **Commit:** `13896a5`
+- **Summary:** Closed the gap from TB-154's first attempt: wired _validate_briefing_structure into the update-op branch of do_operator_queue_append (before the slug-stable briefing write) and added test_tb154_validate_briefing_structure_fires_for_update_op covering Acceptance-rename, missing-Verification, empty-Verification reject paths plus a canonical-accept sanity. Tightened the operator_queue_append docstring to name update alongside add_*. Full suite (814 tests) green; previous TB-154 work from 54a7f6e (validator + add_* wiring + check.py lint + prompts.py + init.py constant) remains in main.
+- **Files:** ap2/tools.py, ap2/tests/test_tools.py
+- **Tests:** pass
