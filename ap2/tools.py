@@ -85,6 +85,40 @@ SINGLE_LINE_ERR = (
 )
 
 
+def _validate_update_args(args: dict) -> str | None:
+    """Single-line gate for TB-153 `update` op inputs.
+
+    `update` reuses TB-134's "no embedded newlines on a board-line
+    field" rule (TASK_LINE_RE is line-anchored). A multi-line title /
+    tag / description / blocked CSV would silently split the rendered
+    task across lines and strand the trailing `[→ brief](...)` link.
+    Briefing content is exempt — that's free-form prose in its own
+    file, not on the TASKS.md task line.
+    """
+    title = args.get("title")
+    if title is not None:
+        err = _validate_single_line("title", str(title))
+        if err:
+            return err
+    desc = args.get("description")
+    if desc is not None:
+        err = _validate_single_line("description", str(desc))
+        if err:
+            return err
+    blocked = args.get("blocked")
+    if blocked is not None:
+        err = _validate_single_line("blocked", str(blocked))
+        if err:
+            return err
+    tags = args.get("tags")
+    if tags is not None:
+        for tag in tags:
+            err = _validate_single_line("tag", str(tag))
+            if err:
+                return err
+    return None
+
+
 def _validate_single_line(field: str, value: str | None) -> str | None:
     """Reject a multi-line operator input (newline / carriage-return).
 
@@ -841,6 +875,15 @@ OPERATOR_QUEUE_OPS = (
     # "approve",...})` instance. Drain-side handler shares the
     # `_approve_review_token` helper with `do_board_edit`.
     "approve",
+    # TB-153: in-place edit of an existing task's `title` / `tags` /
+    # `@blocked` codespan / `description` and/or its briefing file.
+    # Routed through the same queue-drain path as `add_*` / `delete` /
+    # `unfreeze` / `approve` so it never lands inside a task agent's
+    # snapshot window. Preserves TB-N (vs. delete + re-add which would
+    # orphan every prior reference) and the briefing's slug-stable
+    # filename (vs. allocating a new slug, which would orphan git
+    # history of `.cc-autopilot/tasks/<slug>.md`).
+    "update",
 )
 
 
@@ -1026,6 +1069,7 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         with board_file_lock(cfg.tasks_file):
             board = Board.load(cfg.tasks_file)
             loc = board.find(task_id)
+            existing = board.get(task_id) if loc else None
         if loc is None:
             return _err(f"{task_id} not on board")
         section = loc[0]
@@ -1043,6 +1087,112 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         rec_args = {"task_id": task_id}
         if op == "delete":
             rec_args["force"] = bool(args.get("force"))
+        if op == "update":
+            # TB-153: in-place edit. Translate the public CLI / MCP shape
+            # (title / tags / blocked / description / briefing flags +
+            # explicit `clear_tags` / `clear_blocked`) into the queue
+            # record's update_kwargs dialect (title / tags / description /
+            # briefing / meta_set / meta_clear) the drain branch consumes
+            # via `Board.update`.
+            #
+            # Field-presence convention: a key in `args` with a non-None
+            # value means "set this field"; a missing key means "leave
+            # unchanged." `clear_tags` and `clear_blocked` are explicit
+            # bools so an operator who really means "clear" doesn't have
+            # to encode that as `--tags ""` (ambiguous: typo vs intent).
+            update_err = _validate_update_args(args)
+            if update_err:
+                return _err(update_err)
+
+            # Per-target fence (TB-153 design): mirrors `delete`'s fence —
+            # keyed on the target's section, not directory-wide. Other
+            # tasks running is fine; what matters is whether THIS task is
+            # in flight (Active or Pipeline Pending).
+            briefing_content = args.get("briefing")
+            has_briefing_edit = (
+                briefing_content is not None
+                and str(briefing_content).strip() != ""
+            )
+            if section in ("Active", "Pipeline Pending"):
+                if has_briefing_edit:
+                    # Hard-refused with no `--force` escape — the agent
+                    # may re-read its briefing mid-run via `Read` and
+                    # TB-110's snapshot may hash the file. Deferred-draft
+                    # handling is carved out as a follow-up; the fence
+                    # covers the 90% case where edits target Backlog /
+                    # Ready / Frozen.
+                    return _err(
+                        f"{task_id} is in {section} — briefing-content "
+                        f"edits to a running task are refused (the agent "
+                        f"may re-read its briefing mid-run; TB-110 "
+                        f"snapshot hash). Wait for the task to leave "
+                        f"{section}, or update only board-line fields."
+                    )
+                if not args.get("force"):
+                    return _err(
+                        f"{task_id} is in {section} — refusing update "
+                        f"without --force. Pass --force to edit "
+                        f"board-line fields (title / tags / blocked / "
+                        f"description); briefing-content edits remain "
+                        f"refused."
+                    )
+
+            # Build the update payload + the `fields=[...]` diff list
+            # the drain emits on the `task_updated` event.
+            fields: list[str] = []
+            if "title" in args and args["title"] is not None:
+                rec_args["title"] = str(args["title"])
+                fields.append("title")
+            if args.get("clear_tags"):
+                rec_args["tags"] = []
+                fields.append("tags")
+            elif "tags" in args and args["tags"] is not None:
+                rec_args["tags"] = list(args["tags"])
+                fields.append("tags")
+            if "description" in args and args["description"] is not None:
+                rec_args["description"] = str(args["description"])
+                fields.append("description")
+            if args.get("clear_blocked"):
+                rec_args["meta_clear"] = ["blocked"]
+                fields.append("blocked")
+            elif "blocked" in args and args["blocked"] is not None:
+                rec_args["meta_set"] = {"blocked": str(args["blocked"])}
+                fields.append("blocked")
+
+            # Briefing path resolution: write at queue-append time so the
+            # update is durable across daemon restarts. Slug-stable —
+            # overwrite the existing file when the task already has a
+            # briefing path; allocate a fresh slug (from the CURRENT
+            # title, not the new one) only for legacy / pre-TB-135 tasks
+            # that have no briefing on disk yet. Title changes never
+            # rename the briefing — file-name staleness is the accepted
+            # trade-off for keeping git history of the briefing file
+            # contiguous (TB-153 design's "Locked decisions").
+            if has_briefing_edit:
+                if existing and existing.briefing:
+                    brief_path = cfg.project_root / existing.briefing
+                    briefing_rel = existing.briefing
+                else:
+                    slug = slugify(existing.title if existing else task_id)
+                    brief_path = cfg.tasks_dir / f"{slug}.md"
+                    n = 2
+                    while brief_path.exists():
+                        brief_path = cfg.tasks_dir / f"{slug}-{n}.md"
+                        n += 1
+                    briefing_rel = str(brief_path.relative_to(cfg.project_root))
+                brief_path.parent.mkdir(parents=True, exist_ok=True)
+                brief_path.write_text(briefing_content)
+                rec_args["briefing"] = briefing_rel
+                fields.append("briefing")
+
+            if not fields:
+                return _err(
+                    "update op requires at least one field to change "
+                    "(title / tags / blocked / description / briefing). "
+                    "Pass `clear_tags=true` / `clear_blocked=true` for "
+                    "explicit clears."
+                )
+            rec_args["fields"] = fields
 
     # Non-add ops: no preallocation, no lock needed for the queue write
     # (the record is opaque to `_allocate_id`'s queue-max scan).
@@ -1306,6 +1456,43 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             raise RuntimeError("approve op missing task_id")
         _approve_review_token(board, tid)
         events.append(cfg.events_file, "ideation_approved", task=tid)
+        return
+    if op == "update":
+        # TB-153: drain-side update. The queue-append handler already
+        # wrote the briefing file (slug-stable) when `briefing` was in
+        # the update payload, so this branch only mutates the task line
+        # via `Board.update`. The `fields=[...]` list is what the
+        # queue-append handler computed — it's the diff the operator's
+        # CLI / MM-handler call asked for, and we forward it verbatim
+        # onto the audit event so post-mortems can grep
+        # `task_updated fields=[blocked]` etc.
+        tid = args.get("task_id", "")
+        if not tid:
+            raise RuntimeError("update op missing task_id")
+        update_kwargs: dict[str, Any] = {}
+        if "title" in args:
+            update_kwargs["title"] = args["title"]
+        if "tags" in args:
+            update_kwargs["tags"] = list(args["tags"] or [])
+        if "description" in args:
+            update_kwargs["description"] = args["description"]
+        if "briefing" in args:
+            update_kwargs["briefing"] = args["briefing"]
+        if args.get("meta_set"):
+            update_kwargs["meta_set"] = dict(args["meta_set"])
+        if args.get("meta_clear"):
+            update_kwargs["meta_clear"] = list(args["meta_clear"])
+        try:
+            board.update(tid, **update_kwargs)
+        except KeyError:
+            raise RuntimeError(f"{tid} not on board")
+        fields = list(args.get("fields") or [])
+        events.append(
+            cfg.events_file,
+            "task_updated",
+            task=tid,
+            fields=fields,
+        )
         return
     raise RuntimeError(f"unknown op {op!r}")
 
@@ -1839,10 +2026,16 @@ def build_mcp_server(cfg: Config):
         "judge-checkable prose claim). "
         "Args: op (one of add_ready, "
         "add_backlog, add_frozen, move_to_backlog, unfreeze, delete, "
-        "approve); task_id (TB-N for non-add ops); title / tags "
+        "approve, update); task_id (TB-N for non-add ops); title / tags "
         "(comma-separated string) / description / briefing / blocked_on "
         "(for add ops); force (true/false, for delete from Active/Ready/"
-        "Pipeline Pending).",
+        "Pipeline Pending, OR for update on Active/Pipeline Pending — "
+        "but briefing-content edits to a running task are hard-refused "
+        "regardless). For `update` ops (TB-153): the same fields apply "
+        "(title / tags / description / briefing) but `blocked` (CSV) "
+        "replaces `blocked_on`, and explicit `clear_tags` / "
+        "`clear_blocked` (true/false) clear those fields — an omitted "
+        "flag means unchanged. At least one field must be set.",
         {
             "op": str,
             "task_id": str,
@@ -1851,6 +2044,9 @@ def build_mcp_server(cfg: Config):
             "description": str,
             "briefing": str,
             "blocked_on": str,
+            "blocked": str,
+            "clear_tags": str,
+            "clear_blocked": str,
             "force": str,
         },
     )
@@ -1858,16 +2054,31 @@ def build_mcp_server(cfg: Config):
         # Normalize string-shaped args to the dict shape do_operator_queue_append
         # expects: tags is a comma-separated string here but a list inside.
         normalized = dict(args)
-        raw_tags = normalized.get("tags") or ""
-        if isinstance(raw_tags, str) and raw_tags.strip():
-            normalized["tags"] = [
-                t.strip() for t in raw_tags.split(",") if t.strip()
-            ]
-        else:
-            normalized["tags"] = []
+        raw_tags = normalized.get("tags")
+        if isinstance(raw_tags, str):
+            if raw_tags.strip():
+                normalized["tags"] = [
+                    t.strip() for t in raw_tags.split(",") if t.strip()
+                ]
+            else:
+                # TB-153: for `update` ops, distinguish "tags omitted"
+                # (don't touch tags) from "tags=''" (clear). Operators
+                # who really mean "clear" should use `clear_tags=true`,
+                # so an empty string here is treated as "omitted" by
+                # dropping the key. For other ops the existing
+                # behavior (treat empty as []) is preserved by the
+                # add-side handler defaulting via `args.get("tags") or []`.
+                normalized.pop("tags", None)
         force = normalized.get("force")
         if isinstance(force, str):
             normalized["force"] = force.strip().lower() in ("1", "true", "yes")
+        # TB-153: explicit-clear flags ride as strings on the MCP wire
+        # (the schema is all-string for SDK compatibility); coerce to
+        # bools so the queue-append handler's truthy checks land cleanly.
+        for flag in ("clear_tags", "clear_blocked"):
+            v = normalized.get(flag)
+            if isinstance(v, str):
+                normalized[flag] = v.strip().lower() in ("1", "true", "yes")
         return do_operator_queue_append(cfg, normalized)
 
     @tool(

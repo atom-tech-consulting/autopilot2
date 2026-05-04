@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from . import doctor, events, rollback, sandbox
-from .board import Board, board_file_lock
+from .board import Board, _norm_tag, board_file_lock
 from .config import Config
 from .cron import load_jobs, load_state
 from .init import init_project
@@ -463,6 +463,115 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
         return 1
     msg = json.loads(res["content"][0]["text"])
     print(f"{msg.get('task_id')} (queued; will land at next tick)")
+    return 0
+
+
+def cmd_update(cfg: Config, args: argparse.Namespace) -> int:
+    """In-place edit of an existing task (TB-153).
+
+    Mirrors `cmd_add`'s briefing-resolution flow: `--briefing-file
+    <path|->` reads the new briefing from a path or stdin (the
+    file is overwritten in place — slug-stable so the briefing's
+    git history stays contiguous). Other flags map onto the task's
+    board-line fields:
+
+      --title <str>          replace the task title
+      --tags <csv>           replace tags (comma-separated; e.g.
+                             "#foo,#bar" or "foo,bar"). Existing tags
+                             are dropped — use the explicit add path
+                             if you want to append.
+      --blocked <csv>        replace the `@blocked:<csv>` codespan
+                             (TB-N or scheme:value tokens; same
+                             vocabulary as `ap2 add --blocked`).
+      --description <str>    replace the description prose.
+      --clear-tags           explicit clear of all tags. Distinct
+                             from `--tags ""` which is ambiguous and
+                             rejected (typo vs intent).
+      --clear-blocked        explicit clear of the `@blocked:`
+                             codespan.
+      --force                allow board-line field updates on a
+                             task in Active or Pipeline Pending. Has
+                             no effect on briefing-content edits —
+                             those are hard-refused on a running task
+                             regardless, since the agent may re-read
+                             its briefing mid-run.
+
+    Omitted flag = field unchanged. At least one field must be set.
+
+    Routes through the operator queue (`do_operator_queue_append`)
+    so the mutation lands at a tick boundary, never mid-task-run —
+    same anti-race rationale as `add_*` / `delete` / `unfreeze` /
+    `approve`.
+    """
+    payload: dict[str, Any] = {"op": "update", "task_id": args.task_id}
+
+    # --briefing-file / -. Briefing edits are optional for update
+    # (unlike `cmd_add` where it's mandatory) — only read the file if
+    # the flag was supplied.
+    briefing: str | None = None
+    if args.briefing_file:
+        try:
+            briefing = _read_briefing_file(args.briefing_file)
+        except OSError as e:
+            print(f"ap2 update: {e}", file=sys.stderr)
+            return 1
+        if not briefing.strip():
+            print(
+                "ap2 update: --briefing-file is empty — refusing.\n"
+                "  Pass a non-empty briefing or omit the flag.",
+                file=sys.stderr,
+            )
+            return 1
+        payload["briefing"] = briefing
+
+    if args.title is not None:
+        payload["title"] = args.title
+    if args.description is not None:
+        payload["description"] = args.description
+
+    # Tags. `--clear-tags` is the explicit-intent path; `--tags ""`
+    # would be ambiguous (typo vs intentional clear), so mutually
+    # exclude them at the argparse layer.
+    if args.clear_tags:
+        payload["clear_tags"] = True
+    elif args.tags is not None:
+        tags_csv = args.tags.strip()
+        if not tags_csv:
+            print(
+                "ap2 update: --tags must be non-empty. Use --clear-tags "
+                "to remove all tags.",
+                file=sys.stderr,
+            )
+            return 1
+        payload["tags"] = [
+            _norm_tag(t) for t in tags_csv.split(",") if t.strip()
+        ]
+
+    # Blocked. Same explicit-clear shape as tags.
+    if args.clear_blocked:
+        payload["clear_blocked"] = True
+    elif args.blocked is not None:
+        blocked = args.blocked.strip()
+        if not blocked:
+            print(
+                "ap2 update: --blocked must be non-empty. Use "
+                "--clear-blocked to remove the @blocked: codespan.",
+                file=sys.stderr,
+            )
+            return 1
+        payload["blocked"] = blocked
+
+    payload["force"] = bool(getattr(args, "force", False))
+
+    res = tools.do_operator_queue_append(cfg, payload)
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    body = json.loads(res["content"][0]["text"])
+    print(
+        f"queued update {body.get('task_id', args.task_id)} "
+        f"(will land at next tick)"
+    )
     return 0
 
 
@@ -958,6 +1067,65 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-f", "--force", action="store_true",
                    help="allow deletion from Active or Ready (use with care)")
     s.set_defaults(func=cmd_delete)
+
+    s = sub.add_parser(
+        "update",
+        help="in-place edit a task's title / tags / description / "
+             "@blocked codespan and/or its briefing file (TB-153). "
+             "Routes through the operator queue so the mutation lands "
+             "at a tick boundary, never mid-task-run. Omitted flag = "
+             "field unchanged.",
+    )
+    s.add_argument("task_id", help="TB-N to update")
+    s.add_argument("--title", default=None, help="replace task title")
+    s.add_argument(
+        "--tags",
+        default=None,
+        metavar="CSV",
+        help="replace tags (comma-separated, e.g. `#foo,#bar` or "
+             "`foo,bar`). Use --clear-tags to remove all tags.",
+    )
+    s.add_argument(
+        "--blocked",
+        default=None,
+        metavar="CSV",
+        help="replace the `@blocked:<csv>` codespan (TB-N or "
+             "scheme:value tokens). Use --clear-blocked to remove the "
+             "codespan entirely.",
+    )
+    s.add_argument(
+        "--description",
+        default=None,
+        help="replace description prose on the task line",
+    )
+    s.add_argument(
+        "--clear-tags",
+        action="store_true",
+        help="explicit clear of all tags (vs. ambiguous --tags '')",
+    )
+    s.add_argument(
+        "--clear-blocked",
+        action="store_true",
+        help="explicit clear of the @blocked: codespan",
+    )
+    s.add_argument(
+        "--briefing-file",
+        default=None,
+        metavar="PATH",
+        help="path to the new briefing markdown (or `-` for stdin). "
+             "The existing briefing file is overwritten in place "
+             "(slug-stable so git history of the briefing stays "
+             "contiguous).",
+    )
+    s.add_argument(
+        "--force",
+        action="store_true",
+        help="allow board-line field updates on a task in Active or "
+             "Pipeline Pending. Has no effect on briefing-content "
+             "edits — those are hard-refused on a running task "
+             "regardless.",
+    )
+    s.set_defaults(func=cmd_update)
 
     s = sub.add_parser(
         "approve",

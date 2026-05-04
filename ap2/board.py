@@ -261,6 +261,65 @@ class Board:
         line = self.sections[section].pop(idx)
         return parse_task_line(line, section)
 
+    def update(
+        self,
+        task_id: str,
+        *,
+        title: str | None = None,
+        tags: list[str] | None = None,
+        description: str | None = None,
+        briefing: str | None = None,
+        meta_set: dict[str, str] | None = None,
+        meta_clear: list[str] | None = None,
+    ) -> Task:
+        """In-place edit of a single task's board-line fields (TB-153).
+
+        Only fields passed as non-None get applied; everything else
+        survives the round-trip. `meta_set` merges into the existing
+        `meta` dict (so e.g. `{"blocked": "TB-5,TB-7"}` updates only
+        that key) and `meta_clear` drops named keys (so
+        `meta_clear=["blocked"]` removes a `@blocked:` codespan from
+        the rendered task line). Tags get normalized through
+        `_norm_tag` so the rendered line is uniform with `add()`'s
+        output.
+
+        Section, ID, and the rendered ordering are preserved — the
+        section's task list is mutated in place at the same index, so
+        adjacent tasks don't shift. `Task.render()` reproduces the
+        canonical line shape regardless of the original raw line's
+        whitespace, so a mutated line is always re-parseable by
+        `TASK_LINE_RE`.
+
+        Raises `KeyError` if the task isn't on the board, and
+        `ValueError` if the existing line fails to parse as a task
+        line (malformed_lines case — should not happen for tasks
+        `find()` returned).
+        """
+        loc = self.find(task_id)
+        if not loc:
+            raise KeyError(f"{task_id} not on board")
+        section, idx = loc
+        line = self.sections[section][idx]
+        t = parse_task_line(line, section)
+        if t is None:
+            raise ValueError(f"{task_id}: malformed task line")
+        if title is not None:
+            t.title = title
+        if tags is not None:
+            t.tags = [_norm_tag(x) for x in tags]
+        if description is not None:
+            t.description = description
+        if briefing is not None:
+            t.briefing = briefing
+        if meta_set:
+            for k, v in meta_set.items():
+                t.meta[k] = v
+        if meta_clear:
+            for k in meta_clear:
+                t.meta.pop(k, None)
+        self.sections[section][idx] = t.render()
+        return t
+
     def iter_tasks(self, section: str | None = None) -> Iterator[Task]:
         sections = [section] if section else SECTIONS
         for s in sections:

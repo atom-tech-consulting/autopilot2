@@ -623,3 +623,412 @@ def test_drain_approve_idempotent_on_unblocked_task(cfg: Config):
     assert post is not None
     assert post.meta == pre.meta
     assert post.blocked_on == []
+
+
+# ---------------------------------------------------------------------------
+# TB-153: `update` op for in-place task / briefing edits.
+#
+# Per-field round-trip: title / tags / blocked / description / briefing /
+# explicit clears. Plus the per-target Active / Pipeline-Pending fence
+# (mirrors `delete`'s fence — keyed on the target's section, not
+# directory-wide), and slug-stable briefing-file overwrites.
+
+
+def _seed_backlog_task(
+    cfg: Config,
+    task_id: str = "TB-400",
+    *,
+    title: str = "original title",
+    tags: list[str] | None = None,
+    meta: dict[str, str] | None = None,
+    description: str = "",
+    briefing: str | None = None,
+) -> None:
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id=task_id,
+        title=title,
+        tags=tags or [],
+        meta=meta or {},
+        description=description,
+        briefing=briefing,
+    )
+    board.save()
+
+
+def test_operator_queue_ops_includes_update():
+    """Pin the constant directly so a refactor can't silently drop the
+    op (TB-153)."""
+    assert "update" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_queue_append_update_rejects_unknown_task(cfg: Config):
+    """Snapshot validation rejects an update against a non-existent
+    task_id at queue-append time — same UX as the other non-add ops."""
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "update", "task_id": "TB-99999", "title": "x"}
+    )
+    assert res.get("isError")
+    assert "not on board" in res["content"][0]["text"]
+
+
+def test_queue_append_update_rejects_no_fields(cfg: Config):
+    """At least one field must be set — otherwise the op is a no-op
+    that would still emit a `task_updated` event with an empty diff."""
+    _seed_backlog_task(cfg)
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "update", "task_id": "TB-400"}
+    )
+    assert res.get("isError")
+    assert "at least one field" in res["content"][0]["text"]
+
+
+def test_queue_append_update_rejects_multiline_title(cfg: Config):
+    """Single-line gate fires for `update` too — TASK_LINE_RE is line-
+    anchored and a multi-line title would split the rendered line."""
+    _seed_backlog_task(cfg)
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "title": "two\nlines"},
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+
+
+# ---- per-field round-trip
+
+
+def test_update_title_round_trips(cfg: Config):
+    _seed_backlog_task(cfg, title="old title")
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "title": "shiny new title"},
+    )
+    body = _unwrap(res)
+    assert body["op"] == "update"
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert t.title == "shiny new title"
+
+
+def test_update_tags_round_trips(cfg: Config):
+    _seed_backlog_task(cfg, tags=["#old"])
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "tags": ["#foo", "#bar"]},
+    )
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert "#foo" in t.tags
+    assert "#bar" in t.tags
+    assert "#old" not in t.tags
+
+
+def test_update_blocked_round_trips(cfg: Config):
+    _seed_backlog_task(cfg)
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "blocked": "TB-9,review"},
+    )
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert t.meta.get("blocked") == "TB-9,review"
+    raw = cfg.tasks_file.read_text()
+    assert "`@blocked:TB-9,review`" in raw
+
+
+def test_update_description_round_trips(cfg: Config):
+    _seed_backlog_task(cfg, description="old prose")
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "description": "new prose"},
+    )
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert t.description == "new prose"
+
+
+def test_update_briefing_round_trips(cfg: Config):
+    """Briefing-edit through the queue: queue-append writes the new
+    bytes to disk under the EXISTING briefing path (slug-stable), and
+    the drain leaves the task line's `[→ brief](...)` link unchanged."""
+    # Seed a task that already has a briefing on disk.
+    brief_dir = cfg.tasks_dir
+    brief_dir.mkdir(parents=True, exist_ok=True)
+    brief_path = brief_dir / "the-original-slug.md"
+    brief_path.write_text(_BRIEFING)
+    rel = str(brief_path.relative_to(cfg.project_root))
+    _seed_backlog_task(cfg, briefing=rel)
+
+    new_briefing = (
+        "# Updated\n\n"
+        "## Goal\n\nBetter goal.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nedit\n\n"
+        "## Verification\n- `pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "briefing": new_briefing},
+    )
+    tools.drain_operator_queue(cfg)
+
+    # Same briefing file path — slug-stable.
+    assert brief_path.exists()
+    assert brief_path.read_text() == new_briefing
+    # Task line still points at it (no rename, no new file).
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert t.briefing == rel
+
+
+def test_update_clear_tags_explicit_path(cfg: Config):
+    """`clear_tags=True` removes all tags. Distinguished from omitted
+    `tags` which is unchanged."""
+    _seed_backlog_task(cfg, tags=["#a", "#b"])
+    tools.do_operator_queue_append(
+        cfg, {"op": "update", "task_id": "TB-400", "clear_tags": True}
+    )
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert t.tags == []
+
+
+def test_update_clear_blocked_explicit_path(cfg: Config):
+    """`clear_blocked=True` strips the `@blocked:` codespan entirely.
+    Other `meta` keys (none in this seed) survive."""
+    _seed_backlog_task(cfg, meta={"blocked": "TB-9"})
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "clear_blocked": True},
+    )
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert "blocked" not in t.meta
+    raw = cfg.tasks_file.read_text()
+    assert "`@blocked:" not in raw
+
+
+# ---- task_updated event diff
+
+
+def test_drain_emits_task_updated_with_fields_diff(cfg: Config):
+    """`task_updated` event records the field set the operator changed —
+    queryable post-mortem signal (`grep task_updated fields=[blocked]`)."""
+    _seed_backlog_task(cfg, tags=["#old"])
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update",
+            "task_id": "TB-400",
+            "tags": ["#new"],
+            "blocked": "TB-7",
+        },
+    )
+    tools.drain_operator_queue(cfg)
+    evts = events.tail(cfg.events_file, 20)
+    updated = [e for e in evts if e["type"] == "task_updated"]
+    assert len(updated) == 1
+    assert updated[0]["task"] == "TB-400"
+    assert "tags" in updated[0]["fields"]
+    assert "blocked" in updated[0]["fields"]
+
+
+def test_drain_update_appends_audit_line(cfg: Config):
+    """The drain appends an `applied operator-queued update → TB-N` line
+    to operator_log.md, same as every other queued op."""
+    _seed_backlog_task(cfg)
+    tools.do_operator_queue_append(
+        cfg, {"op": "update", "task_id": "TB-400", "title": "new"}
+    )
+    tools.drain_operator_queue(cfg)
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "applied operator-queued update" in log
+    assert "TB-400" in log
+
+
+# ---- per-target Active / Pipeline-Pending fence (mirrors delete's)
+
+
+def test_update_on_active_without_force_is_refused(cfg: Config):
+    """Active ⇒ refuse without `--force`. Same UX shape as `delete`."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-410", title="running")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "update", "task_id": "TB-410", "title": "x"}
+    )
+    assert res.get("isError")
+    assert "Active" in res["content"][0]["text"]
+    assert "force" in res["content"][0]["text"]
+    # Queue file unchanged — no pending op should land.
+    qpath = tools.operator_queue_path(cfg)
+    if qpath.exists():
+        for ln in qpath.read_text().splitlines():
+            if ln.strip():
+                rec = json.loads(ln)
+                assert rec.get("op") != "update", rec
+
+
+def test_update_on_active_with_force_for_board_line_field(cfg: Config):
+    """`--force` allows board-line field updates on Active. Drain
+    successfully applies the title change."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-411", title="old running title")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update",
+            "task_id": "TB-411",
+            "title": "renamed running",
+            "force": True,
+        },
+    )
+    body = _unwrap(res)
+    assert body["op"] == "update"
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-411")
+    assert t is not None
+    assert t.title == "renamed running"
+
+
+def test_update_on_active_force_still_refuses_briefing(cfg: Config):
+    """Briefing-content edit to a running task is hard-refused — even
+    with `--force`. The agent may re-read its briefing mid-run via
+    `Read`, and TB-110's snapshot may hash the file."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-412", title="running")
+    board.save()
+    new_briefing = (
+        "# Updated\n\n"
+        "## Goal\n\nBetter\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nedit\n\n"
+        "## Verification\n- `pytest`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update",
+            "task_id": "TB-412",
+            "briefing": new_briefing,
+            "force": True,
+        },
+    )
+    assert res.get("isError")
+    assert "briefing" in res["content"][0]["text"].lower()
+    assert "Active" in res["content"][0]["text"]
+
+
+def test_update_on_pipeline_pending_without_force_refused(cfg: Config):
+    """Pipeline Pending mirrors Active for the fence — both are
+    "task in flight" sections."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Pipeline Pending", task_id="TB-413", title="awaiting verify")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "update", "task_id": "TB-413", "title": "x"}
+    )
+    assert res.get("isError")
+    assert "Pipeline Pending" in res["content"][0]["text"]
+
+
+@pytest.mark.parametrize("section", ["Backlog", "Ready", "Frozen"])
+def test_update_on_idle_sections_succeeds_without_force(
+    cfg: Config, section: str
+):
+    """Backlog / Ready / Frozen are not "in flight" — the fence
+    doesn't apply, no `--force` needed."""
+    board = Board.load(cfg.tasks_file)
+    board.add(section, task_id="TB-420", title=f"in {section}")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-420", "title": "renamed"},
+    )
+    body = _unwrap(res)
+    assert body["op"] == "update"
+    tools.drain_operator_queue(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-420")
+    assert t is not None
+    assert t.title == "renamed"
+
+
+# ---- briefing slug-stable end-to-end
+
+
+def test_update_briefing_preserves_filename(cfg: Config):
+    """End-to-end briefing edit through the queue keeps the
+    `<slug>.md` filename. The on-disk briefing is rewritten in
+    place — no rename, no new file. Pins the
+    `git log -- .cc-autopilot/tasks/<slug>.md` continuity property."""
+    brief_dir = cfg.tasks_dir
+    brief_dir.mkdir(parents=True, exist_ok=True)
+    brief_path = brief_dir / "stable-slug.md"
+    brief_path.write_text(_BRIEFING)
+    rel = str(brief_path.relative_to(cfg.project_root))
+    _seed_backlog_task(
+        cfg, title="Original title that would re-slug", briefing=rel
+    )
+    pre_files = sorted(p.name for p in brief_dir.glob("*.md"))
+
+    new_briefing = _BRIEFING.replace("Test briefing", "Edited briefing")
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update",
+            "task_id": "TB-400",
+            "title": "Brand-new title that would have re-slugged",
+            "briefing": new_briefing,
+        },
+    )
+    tools.drain_operator_queue(cfg)
+
+    # File set unchanged — same names, no new file allocated.
+    post_files = sorted(p.name for p in brief_dir.glob("*.md"))
+    assert post_files == pre_files
+    # Content is the new briefing.
+    assert brief_path.read_text() == new_briefing
+    # Task line still references the same slug.
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert t.briefing == rel
+
+
+def test_update_briefing_for_legacy_task_allocates_slug(cfg: Config):
+    """Tasks with no briefing yet (legacy / pre-TB-135) get a slug
+    allocated from their CURRENT title at queue-append time."""
+    _seed_backlog_task(cfg, title="Legacy task", briefing=None)
+
+    new_briefing = (
+        "# Legacy briefing\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nedit\n\n"
+        "## Verification\n- `pytest`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-400", "briefing": new_briefing},
+    )
+    tools.drain_operator_queue(cfg)
+
+    t = Board.load(cfg.tasks_file).get("TB-400")
+    assert t is not None
+    assert t.briefing is not None
+    target = cfg.project_root / t.briefing
+    assert target.exists()
+    assert target.read_text() == new_briefing
+    # Slug derived from the CURRENT title.
+    assert "legacy-task" in t.briefing

@@ -976,3 +976,367 @@ def test_emit_daemon_start_includes_version(tmp_path: Path):
     starts = [e for e in tail if e["type"] == "daemon_start"]
     assert starts and starts[-1]["version"] == get_version()
 
+
+
+# ---------------------------------------------------------------------------
+# TB-153: cmd_update — in-place edit via --title / --tags / --blocked /
+# --description / --briefing-file / --clear-tags / --clear-blocked.
+#
+# Each test uses _drain to advance from "queued" → "applied" so the
+# post-state assertions match the pre-TB-131 synchronous semantics
+# operators are used to.
+
+
+def _update_args(
+    task_id: str,
+    *,
+    title: str | None = None,
+    tags: str | None = None,
+    blocked: str | None = None,
+    description: str | None = None,
+    clear_tags: bool = False,
+    clear_blocked: bool = False,
+    briefing_file: str | None = None,
+    force: bool = False,
+) -> Namespace:
+    """Build a Namespace shaped like cmd_update's argparse output."""
+    return Namespace(
+        task_id=task_id,
+        title=title,
+        tags=tags,
+        blocked=blocked,
+        description=description,
+        clear_tags=clear_tags,
+        clear_blocked=clear_blocked,
+        briefing_file=briefing_file,
+        force=force,
+    )
+
+
+def _seed(cfg: Config, task_id: str = "TB-500", **kwargs) -> None:
+    board = Board.load(cfg.tasks_file)
+    board.add("Backlog", task_id=task_id, title=kwargs.pop("title", "seed"), **kwargs)
+    board.save()
+
+
+def test_cmd_update_invokes_queue_append_with_field_dict(
+    tmp_path: Path, monkeypatch
+):
+    """`ap2 update TB-X --tags foo,bar` calls `do_operator_queue_append`
+    with `op="update"` + the right field dict; omitted flags are NOT
+    present-as-None in the payload so the queue-append handler can
+    distinguish "unchanged" from "None"."""
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-500")
+
+    captured: dict = {}
+
+    def fake_append(cfg_arg, payload):
+        captured["payload"] = payload
+        return {
+            "content": [
+                {"type": "text", "text": '{"op":"update","task_id":"TB-500"}'},
+            ]
+        }
+
+    monkeypatch.setattr(tools, "do_operator_queue_append", fake_append)
+
+    rc = cmd_update(cfg, _update_args("TB-500", tags="foo,bar"))
+    assert rc == 0
+    payload = captured["payload"]
+    assert payload["op"] == "update"
+    assert payload["task_id"] == "TB-500"
+    assert payload["tags"] == ["#foo", "#bar"]
+    # Omitted flags absent (not present-as-None).
+    assert "title" not in payload
+    assert "description" not in payload
+    assert "blocked" not in payload
+    assert "briefing" not in payload
+
+
+def test_cmd_update_title_round_trips(tmp_path: Path):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-501", title="old")
+    rc = cmd_update(cfg, _update_args("TB-501", title="brand new"))
+    assert rc == 0
+    _drain(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-501")
+    assert t is not None
+    assert t.title == "brand new"
+
+
+def test_cmd_update_tags_replaces_existing(tmp_path: Path):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-502", tags=["#old"])
+    rc = cmd_update(cfg, _update_args("TB-502", tags="alpha,#beta"))
+    assert rc == 0
+    _drain(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-502")
+    assert t is not None
+    assert "#alpha" in t.tags
+    assert "#beta" in t.tags
+    assert "#old" not in t.tags
+
+
+def test_cmd_update_clear_tags_removes_all(tmp_path: Path):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-503", tags=["#a", "#b"])
+    rc = cmd_update(cfg, _update_args("TB-503", clear_tags=True))
+    assert rc == 0
+    _drain(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-503")
+    assert t is not None
+    assert t.tags == []
+
+
+def test_cmd_update_blocked_round_trips(tmp_path: Path):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-504")
+    rc = cmd_update(cfg, _update_args("TB-504", blocked="TB-7,review"))
+    assert rc == 0
+    _drain(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-504")
+    assert t is not None
+    assert t.meta.get("blocked") == "TB-7,review"
+
+
+def test_cmd_update_clear_blocked_removes_codespan(tmp_path: Path):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-505", meta={"blocked": "TB-7"})
+    rc = cmd_update(cfg, _update_args("TB-505", clear_blocked=True))
+    assert rc == 0
+    _drain(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-505")
+    assert t is not None
+    assert "blocked" not in t.meta
+
+
+def test_cmd_update_description_round_trips(tmp_path: Path):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-506", description="old prose")
+    rc = cmd_update(cfg, _update_args("TB-506", description="new prose"))
+    assert rc == 0
+    _drain(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-506")
+    assert t is not None
+    assert t.description == "new prose"
+
+
+def test_cmd_update_briefing_file_round_trips(tmp_path: Path):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    # Seed a task with an existing briefing.
+    cfg.tasks_dir.mkdir(parents=True, exist_ok=True)
+    bp = cfg.tasks_dir / "stable.md"
+    bp.write_text("# old\n\n## Goal\nx\n## Scope\n- f\n## Design\nx\n## Verification\n- `t`\n## Out of scope\n- n\n")
+    rel = str(bp.relative_to(cfg.project_root))
+    _seed(cfg, task_id="TB-507", briefing=rel)
+
+    new_brief = tmp_path / "new.md"
+    new_brief.write_text(
+        "# Updated\n\n"
+        "## Goal\n\nbetter\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nedit\n\n"
+        "## Verification\n- `pytest`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    rc = cmd_update(cfg, _update_args("TB-507", briefing_file=str(new_brief)))
+    assert rc == 0
+    _drain(cfg)
+    # Briefing file overwritten in place — slug-stable.
+    assert bp.read_text() == new_brief.read_text()
+    t = Board.load(cfg.tasks_file).get("TB-507")
+    assert t.briefing == rel
+
+
+def test_cmd_update_briefing_file_stdin(tmp_path: Path, monkeypatch):
+    """`--briefing-file -` reads from stdin."""
+    import io
+
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    cfg.tasks_dir.mkdir(parents=True, exist_ok=True)
+    bp = cfg.tasks_dir / "via-stdin.md"
+    bp.write_text("# old\n\n## Goal\nx\n## Scope\n- f\n## Design\nx\n## Verification\n- `t`\n## Out of scope\n- n\n")
+    rel = str(bp.relative_to(cfg.project_root))
+    _seed(cfg, task_id="TB-508", briefing=rel)
+
+    new_briefing = (
+        "# Stdin briefing\n\n"
+        "## Goal\n\ng\n\n"
+        "## Scope\n\n- f\n\n"
+        "## Design\n\nd\n\n"
+        "## Verification\n- `t`\n\n"
+        "## Out of scope\n\n- n\n"
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(new_briefing))
+
+    rc = cmd_update(cfg, _update_args("TB-508", briefing_file="-"))
+    assert rc == 0
+    _drain(cfg)
+    assert bp.read_text() == new_briefing
+
+
+def test_cmd_update_unknown_task_returns_error(tmp_path: Path, capsys):
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    rc = cmd_update(cfg, _update_args("TB-9999", title="x"))
+    assert rc == 1
+    assert "not on board" in capsys.readouterr().err
+
+
+def test_cmd_update_no_fields_returns_error(tmp_path: Path, capsys):
+    """No flags → no-op → refuse, since the queue would otherwise carry
+    a record with empty `fields=[]`."""
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-510")
+    rc = cmd_update(cfg, _update_args("TB-510"))
+    assert rc == 1
+    assert "field" in capsys.readouterr().err.lower()
+
+
+def test_cmd_update_empty_tags_string_is_rejected(tmp_path: Path, capsys):
+    """`--tags ''` is ambiguous (typo vs intentional clear) → refuse,
+    nudging at `--clear-tags`."""
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    _seed(cfg, task_id="TB-511", tags=["#a"])
+    rc = cmd_update(cfg, _update_args("TB-511", tags=""))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "--clear-tags" in err
+
+
+def test_cmd_update_active_without_force_returns_error(
+    tmp_path: Path, capsys
+):
+    """The fence message comes from `do_operator_queue_append` and
+    surfaces verbatim through `cmd_update`."""
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-512", title="running")
+    board.save()
+    rc = cmd_update(cfg, _update_args("TB-512", title="x"))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Active" in err
+    assert "force" in err
+
+
+def test_cmd_update_active_with_force_succeeds(tmp_path: Path):
+    """`--force` allows the title update to land on Active."""
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-513", title="old running")
+    board.save()
+    rc = cmd_update(cfg, _update_args("TB-513", title="renamed", force=True))
+    assert rc == 0
+    _drain(cfg)
+    t = Board.load(cfg.tasks_file).get("TB-513")
+    assert t is not None
+    assert t.title == "renamed"
+
+
+def test_cmd_update_active_force_briefing_still_refused(
+    tmp_path: Path, capsys
+):
+    """Even with `--force`, briefing-content edits to Active are
+    hard-refused (TB-110 snapshot hash + agent mid-run re-read)."""
+    from ap2.cli import cmd_update
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    cfg.tasks_dir.mkdir(parents=True, exist_ok=True)
+    bp = cfg.tasks_dir / "running-task.md"
+    bp.write_text("# old\n\n## Goal\nx\n## Scope\n- f\n## Design\nx\n## Verification\n- `t`\n## Out of scope\n- n\n")
+    rel = str(bp.relative_to(cfg.project_root))
+    board.add("Active", task_id="TB-514", title="running", briefing=rel)
+    board.save()
+
+    new_brief = tmp_path / "new.md"
+    new_brief.write_text("# new\n\n## Goal\nz\n## Scope\n- f\n## Design\ne\n## Verification\n- `t`\n## Out of scope\n- n\n")
+    rc = cmd_update(
+        cfg,
+        _update_args(
+            "TB-514", briefing_file=str(new_brief), force=True
+        ),
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Active" in err
+    assert "briefing" in err.lower()
+
+
+# ---- argparse layer wiring
+
+
+def test_cmd_update_argparse_wires_through_build_parser(tmp_path: Path):
+    """`ap2 update TB-X --title 'x' ...` → cmd_update with the right
+    Namespace. Belt-and-suspenders: the unit tests above call
+    cmd_update directly; this one verifies argparse-side wiring so a
+    refactor of `build_parser` can't silently drop the subcommand."""
+    from ap2.cli import build_parser
+
+    p = build_parser()
+    args = p.parse_args(
+        [
+            "--project", str(tmp_path),
+            "update", "TB-700",
+            "--title", "renamed",
+            "--tags", "foo,bar",
+            "--blocked", "TB-9",
+            "--description", "blurb",
+            "--force",
+        ]
+    )
+    assert args.cmd == "update"
+    assert args.task_id == "TB-700"
+    assert args.title == "renamed"
+    assert args.tags == "foo,bar"
+    assert args.blocked == "TB-9"
+    assert args.description == "blurb"
+    assert args.force is True
+    assert args.clear_tags is False
+    assert args.clear_blocked is False
+    assert args.briefing_file is None
+
+
+def test_cmd_update_argparse_supports_clear_flags(tmp_path: Path):
+    from ap2.cli import build_parser
+
+    p = build_parser()
+    args = p.parse_args(
+        [
+            "--project", str(tmp_path),
+            "update", "TB-701",
+            "--clear-tags",
+            "--clear-blocked",
+        ]
+    )
+    assert args.clear_tags is True
+    assert args.clear_blocked is True
