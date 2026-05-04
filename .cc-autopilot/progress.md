@@ -251,3 +251,9 @@
 - **Summary:** Followup to 7131e71 (substance unchanged). Fixed the verification grep typo in the briefing (`grep -nE` → `grep -rnE` on `ap2/tests/`, same fix TB-165 needed) and added `test_ideation_error_emits_both_events` which routes a raising SDK stub through `_run_ideation` and asserts BOTH `control_run_usage` (status=error) AND the pre-existing `ideation_error` event fire — pinning the additive-event contract that the prose error-path bullet required end-to-end. `uv run pytest -q ap2/tests/` → 938 passed.
 - **Files:** .cc-autopilot/tasks/persist-control-agent-token-usage-stream.md, ap2/tests/test_control_run_usage.py
 - **Tests:** pass
+
+## [2026-05-04] TB-161: Briefing validator: require Goal section to cite a goal.md focus item or Done-when bullet
+- **Commit:** `35364bd`
+- **Summary:** Extended `_validate_briefing_structure` (TB-154) with a TB-161 goal-anchor check: the briefing's `## Goal` body must cite (as a substring) one of goal.md's `## Current focus` heading titles or `## Done when` bullets, derived via the new `GOAL_ANCHOR_HEADINGS` constant in ap2/init.py and the `_goal_md_anchors` helper in ap2/tools.py; ap2/check.py mirrors the rule as a warning-level lint; ap2/prompts.py + ideation.default.md + the operator_queue_append MCP docstring carry the new requirement; falls back to skip-the-check when goal.md is missing or all-placeholder. Full regression (949 tests) passes.
+- **Files:** ap2/check.py, ap2/ideation.default.md, ap2/init.py, ap2/prompts.py, ap2/tests/test_check.py, ap2/tests/test_tools.py, ap2/tools.py
+- **Tests:** pass
