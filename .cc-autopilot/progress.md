@@ -233,3 +233,9 @@
 - **Summary:** Added `ap2 ideate [--force]` — a manual operator trigger for an ideation pass that bypasses the natural empty-board / cooldown / `AP2_IDEATION_DISABLED` gates. Routed through the operator queue (registered `ideate` in OPERATOR_QUEUE_OPS); drain emits `ideation_forced` event + `(forced)` operator_log.md audit line and signals `_tick` via a new `force_ideate` key in `drain_operator_queue`'s return dict. Default refuses on Active-task; `--force` overrides. Refactored `_maybe_ideate` to share `_run_ideation` with new `force_ideate` helper that still calls `mark_run` so back-to-back forced fires don't lap the next natural cooldown. Full ap2/tests/ suite (923 tests) passes.
 - **Files:** ap2/cli.py, ap2/daemon.py, ap2/ideation.py, ap2/tools.py, ap2/tests/test_cli.py, ap2/tests/test_ideation_trigger.py, ap2/tests/test_operator_queue.py
 - **Tests:** pass
+
+## [2026-05-04] TB-165: Persist task-run token usage in events.jsonl + retain debug dumps on success
+- **Commit:** `26ac188`
+- **Summary:** Implementation already landed in 481655d (task_run_usage event on every terminal run_task path, debug-dump retention on success, _prep_debug_dumps docstring update, 5 pinning tests in test_daemon_recovery.py). Prior verification failed on a single typo'd shell bullet — `grep -nE '"task_run_usage"' ap2/tests/` exits 2 because grep needs `-r` for directory arguments. This commit fixes the briefing's bullet to `grep -rnE …`, which now exits 0 and satisfies the verifier; all 923 ap2/tests pass.
+- **Files:** .cc-autopilot/tasks/persist-task-run-token-usage-in-events-j.md
+- **Tests:** pass
