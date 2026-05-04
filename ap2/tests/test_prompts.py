@@ -678,3 +678,233 @@ def test_status_report_run_in_mm_handler_toolset():
     name = "mcp__autopilot__status_report_run"
     assert name in CONTROL_AGENT_TOOLS
     assert name in MM_HANDLER_TOOLS
+
+
+# ---------------------------------------------------------------------------
+# TB-168: `_current_state_block` accepts `include_board` / `include_commits`
+# kwargs so ideation can opt out of two sub-blocks that don't pay rent for
+# it specifically (board counts re-derived from TASKS.md; recent commits
+# ~60% daemon meta-noise, signal subsumed by progress.md). Defaults stay
+# True so the status-report cron path keeps its byte-identical rendering.
+
+
+def _init_git_with_two_commits(repo: Path) -> None:
+    """Helper: initialize a git repo at `repo` with two commits so the
+    `_current_state_block` git-log subprocess returns real short-shas.
+    Used by the byte-identical and trim-shape tests below."""
+    import subprocess as _sp
+
+    _sp.run(["git", "init", "-q"], cwd=repo, check=True)
+    _sp.run(
+        ["git", "config", "user.email", "tb168@example.com"],
+        cwd=repo, check=True,
+    )
+    _sp.run(["git", "config", "user.name", "tb168"], cwd=repo, check=True)
+    _sp.run(
+        ["git", "config", "commit.gpgsign", "false"], cwd=repo, check=True,
+    )
+    (repo / "first.txt").write_text("first\n")
+    _sp.run(["git", "add", "first.txt"], cwd=repo, check=True)
+    _sp.run(
+        ["git", "commit", "-q", "-m", "first commit"],
+        cwd=repo, check=True,
+    )
+    (repo / "second.txt").write_text("second\n")
+    _sp.run(["git", "add", "second.txt"], cwd=repo, check=True)
+    _sp.run(
+        ["git", "commit", "-q", "-m", "second commit"],
+        cwd=repo, check=True,
+    )
+
+
+def test_current_state_block_default_kwargs_render_unchanged_shape(tmp_path):
+    """TB-168: with default kwargs (both include_board and include_commits
+    True), `_current_state_block` produces the same shape it did pre-TB-168
+    — header line, `now:`, `board:`, `recent commits (HEAD~10):`, indented
+    commit lines. This pins backwards compatibility for the status-report
+    cron path (which calls the function via `build_control_prompt`'s
+    default kwargs and embeds the rendered block in the posted report).
+    """
+    from ap2.prompts import _current_state_block
+
+    # Fixture: ≥1 task in TASKS.md (so board counts are real, not the
+    # `(board not found)` fallback) and ≥2 commits (so the commits sub-
+    # block has real short-shas to render).
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n- [TB-1] one ready task\n\n"
+        "## Backlog\n\n## Complete\n\n## Frozen\n"
+    )
+    _init_git_with_two_commits(tmp_path)
+    cfg = Config.load(tmp_path)
+
+    result = _current_state_block(cfg)
+    lines = result.split("\n")
+
+    # Line 0: snapshot header (load-bearing — `_STATUS_REPORT_CONTRACT`
+    # references this block by name).
+    assert lines[0] == (
+        "## Current state (rendered just before this prompt was sent)"
+    )
+    # Line 1: `now: <ISO-Z timestamp>` — the status-report cron uses this
+    # value verbatim as the headline timestamp.
+    import re
+
+    assert re.match(
+        r"^- now: 20\d\d-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\dZ$",
+        lines[1],
+    ), f"line 1 not a `now:` line: {lines[1]!r}"
+    # Line 2: `- board: <counts> (Active/Ready/Backlog/Pipeline-Pending/...)`.
+    assert lines[2].startswith("- board: ")
+    assert lines[2].endswith(
+        " (Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)"
+    )
+    # Line 3: the `recent commits (HEAD~10):` heading.
+    assert lines[3] == "- recent commits (HEAD~10):"
+    # Subsequent non-empty lines: commit lines, each indented with two
+    # spaces. We have exactly 2 commits, so lines[4] and lines[5] are
+    # commits. (lines[6] is the trailing-newline empty string.)
+    for idx in (4, 5):
+        assert re.match(
+            r"^  [0-9a-f]{7,} ", lines[idx]
+        ), f"line {idx} not a commit short-sha entry: {lines[idx]!r}"
+    # The block ends with a single trailing newline, no orphan blank lines.
+    assert result.endswith("\n")
+    assert "\n\n" not in result, (
+        "default rendering should not contain blank lines — extras and "
+        "rejections are absent in this fixture"
+    )
+
+
+def test_current_state_block_omits_board_and_commits_when_kwargs_false(
+    tmp_path,
+):
+    """TB-168: with include_board=False and include_commits=False, the
+    rendered snapshot contains only the header and `now:` — the two sub-
+    blocks are dropped entirely. Pin: (a) `now:` survives, (b) `board:`
+    is gone, (c) the recent-commits heading and commit short-sha lines
+    are gone, (d) no whitespace-only orphan blocks where the suppressed
+    sections would have been."""
+    from ap2.prompts import _current_state_block
+
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n- [TB-1] one ready task\n\n"
+        "## Backlog\n\n## Complete\n\n## Frozen\n"
+    )
+    _init_git_with_two_commits(tmp_path)
+    cfg = Config.load(tmp_path)
+
+    result = _current_state_block(
+        cfg, include_board=False, include_commits=False,
+    )
+
+    # (a) `now:` survives.
+    import re
+
+    assert re.search(
+        r"now: 20\d\d-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\dZ", result
+    ), "`now:` line missing from trimmed snapshot"
+    # (b) `board:` substring is gone — both the line label AND the
+    # `(Active/Ready/Backlog/...)` legend it carried.
+    assert "board:" not in result
+    assert (
+        "(Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)"
+        not in result
+    )
+    # (c) `recent commits` heading is gone, and no commit short-sha
+    # patterns appear (would render as `^  [0-9a-f]{7,} <subject>`).
+    assert "recent commits" not in result.lower()
+    for line in result.splitlines():
+        assert not re.match(
+            r"^  [0-9a-f]{7,} ", line
+        ), f"line looks like a commit short-sha: {line!r}"
+    # (d) No orphan blank lines. With both sub-blocks suppressed and no
+    # extras / rejections in the fixture, the rendered body is exactly
+    # the header + `now:` + trailing newline.
+    assert result == (
+        "## Current state (rendered just before this prompt was sent)\n"
+        + result.split("\n", 2)[1] + "\n"
+    ), "trimmed body has unexpected content beyond header + `now:`"
+
+
+def test_current_state_block_omits_only_board_when_commits_kept(tmp_path):
+    """TB-168: kwargs are independent — include_board=False keeps the
+    commits sub-block and vice versa. Pins both (a) the per-kwarg
+    independence, and (b) that suppressing one sub-block doesn't leave
+    an orphan blank line where it would have rendered."""
+    from ap2.prompts import _current_state_block
+
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n"
+        "## Complete\n\n## Frozen\n"
+    )
+    _init_git_with_two_commits(tmp_path)
+    cfg = Config.load(tmp_path)
+
+    only_commits = _current_state_block(cfg, include_board=False)
+    # `now:` and `recent commits` survive; `board:` is gone.
+    assert "now:" in only_commits
+    assert "- recent commits (HEAD~10):" in only_commits
+    assert "board:" not in only_commits
+    # No blank line between `now:` and the commits sub-block.
+    assert "\n\n" not in only_commits
+
+    only_board = _current_state_block(cfg, include_commits=False)
+    # `now:` and `board:` survive; `recent commits` is gone.
+    assert "now:" in only_board
+    assert "- board: " in only_board
+    assert "recent commits" not in only_board.lower()
+    assert "\n\n" not in only_board
+
+
+def test_build_control_prompt_forwards_include_kwargs_to_state_block(
+    tmp_path,
+):
+    """TB-168: `build_control_prompt(cfg, "ideation", load_prompt(cfg),
+    include_board=False, include_commits=False)` produces a prompt whose
+    `## Current state` block contains `now:` but neither `board:` nor
+    `recent commits`. The rest of the prompt (`_CONTROL_HEADER`, body,
+    `## Guidance`, `_events_block`) is unchanged.
+    """
+    cfg = _cfg(tmp_path)
+    p = build_control_prompt(
+        cfg, "ideation", "(ideation body)",
+        include_board=False, include_commits=False,
+    )
+
+    # Snapshot block: `now:` survives, `board:`/`recent commits` are gone.
+    assert "## Current state (rendered just before this prompt was sent)" in p
+    assert "now:" in p
+    assert "board:" not in p
+    assert "recent commits" not in p.lower()
+    # The `(Active/Ready/Backlog/...)` legend lived only inside the
+    # `board:` line — its absence is a strong negative pin.
+    assert (
+        "(Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)" not in p
+    )
+
+    # Rest of the prompt is unchanged: `_CONTROL_HEADER`, the job-name
+    # framing, the body verbatim, the guidance block, the events tail.
+    assert "autopilot v2 control agent" in p  # _CONTROL_HEADER lead-in
+    assert "## Control job: ideation" in p
+    assert "(ideation body)" in p
+    assert "## Guidance" in p
+    assert "## Recent events" in p
+
+
+def test_build_control_prompt_default_kwargs_keep_status_report_shape(
+    tmp_path,
+):
+    """TB-168: when called WITHOUT the new kwargs, `build_control_prompt`
+    renders the snapshot block in its pre-TB-168 shape — `now:`,
+    `board:`, and `recent commits` all present. This pins backwards
+    compatibility for the status-report cron and any future caller that
+    omits the kwargs."""
+    cfg = _cfg(tmp_path)
+    p = build_control_prompt(cfg, "status-report", "post a status report")
+
+    # All three load-bearing snapshot lines render.
+    assert "- now: " in p
+    assert "- board: " in p
+    assert "- recent commits (HEAD~10):" in p
+    # The board legend is intact.
+    assert "(Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)" in p

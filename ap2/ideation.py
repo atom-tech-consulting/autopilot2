@@ -136,7 +136,19 @@ async def _run_ideation(cfg: Config, sdk, mcp_server) -> None:
     from . import prompts
     from .tools import CONTROL_AGENT_TOOLS
 
-    full_prompt = prompts.build_control_prompt(cfg, IDEATION_NAME, load_prompt(cfg))
+    # TB-168: ideation opts out of the board-counts and recent-commits
+    # sub-blocks of `_current_state_block`. The board snapshot is
+    # redundant — ideation reads `TASKS.md` directly per its read-order
+    # and gets per-section detail with full task titles. The 10 recent
+    # commits are ~60% `state:` daemon meta-commits with no signal, and
+    # the remaining shipped-feature lines are subsumed by `progress.md`
+    # (Step 5 of `ap2/ideation.default.md`). `now:` survives — it's
+    # ideation's only deterministic clock for the `_Last updated:` line
+    # in the `ideation_state.md` schema.
+    full_prompt = prompts.build_control_prompt(
+        cfg, IDEATION_NAME, load_prompt(cfg),
+        include_board=False, include_commits=False,
+    )
     max_turns = int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT))
     # TB-126: snapshot the state surface before ideation runs so the post-
     # run state commit only stages paths ideation actually touched (new

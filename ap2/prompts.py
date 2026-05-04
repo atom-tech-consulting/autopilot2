@@ -34,38 +34,76 @@ _REJECTION_LINE_MAX_CHARS = 200
 # no ambiguity about which timestamp belongs in the headline.
 def _current_state_block(
     cfg: Config, extras: list[str] | None = None,
+    *,
+    include_board: bool = True,
+    include_commits: bool = True,
 ) -> str:
-    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    counts_line = "(board not found)"
-    if cfg.tasks_file.exists():
-        try:
-            board = Board.load(cfg.tasks_file)
-            c = {s: len(board.sections.get(s, [])) for s in
-                 ["Active", "Ready", "Backlog", "Pipeline Pending",
-                  "Complete", "Frozen"]}
-            counts_line = (
-                f"{c['Active']}A / {c['Ready']}R / {c['Backlog']}B / "
-                f"{c['Pipeline Pending']}P / {c['Complete']}C / "
-                f"{c['Frozen']}F"
-            )
-        except Exception as e:  # noqa: BLE001
-            counts_line = f"(board load error: {type(e).__name__})"
+    """Render the `## Current state` snapshot block prepended to control prompts.
 
-    commits = "(git log unavailable)"
-    if (cfg.project_root / ".git").exists():
-        try:
-            proc = subprocess.run(
-                [
-                    "git", "-c", "safe.directory=*",
-                    "-C", str(cfg.project_root),
-                    "log", "--oneline", "-n", "10",
-                ],
-                capture_output=True, text=True, timeout=5,
-            )
-            if proc.returncode == 0 and proc.stdout.strip():
-                commits = proc.stdout.strip()
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+    `now:` is always rendered — it's the agent's only deterministic clock
+    (control agents have no Bash) and is load-bearing for ideation's
+    `_Last updated:` line in `ideation_state.md`.
+
+    TB-168: `include_board` and `include_commits` toggle the two sub-
+    blocks that don't pay rent for ideation specifically — the agent
+    reads `TASKS.md` and `progress.md` later in its read-order and gets
+    richer signal from those surfaces. Defaults stay True so the
+    status-report cron (which uses both) keeps its byte-identical
+    rendering. Ideation opts out via `_run_ideation` to sharpen prompt
+    signal density.
+    """
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # The header + `now:` line are unconditional. Sub-blocks (board,
+    # commits) are appended only when the corresponding kwarg is True.
+    # TB-168: keeping the build list-based avoids whitespace-only
+    # orphan blocks where suppressed sections would have been rendered.
+    body_lines: list[str] = [
+        "## Current state (rendered just before this prompt was sent)",
+        f"- now: {now}",
+    ]
+
+    if include_board:
+        counts_line = "(board not found)"
+        if cfg.tasks_file.exists():
+            try:
+                board = Board.load(cfg.tasks_file)
+                c = {s: len(board.sections.get(s, [])) for s in
+                     ["Active", "Ready", "Backlog", "Pipeline Pending",
+                      "Complete", "Frozen"]}
+                counts_line = (
+                    f"{c['Active']}A / {c['Ready']}R / {c['Backlog']}B / "
+                    f"{c['Pipeline Pending']}P / {c['Complete']}C / "
+                    f"{c['Frozen']}F"
+                )
+            except Exception as e:  # noqa: BLE001
+                counts_line = f"(board load error: {type(e).__name__})"
+        body_lines.append(
+            f"- board: {counts_line} "
+            "(Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)"
+        )
+
+    if include_commits:
+        commits = "(git log unavailable)"
+        if (cfg.project_root / ".git").exists():
+            try:
+                proc = subprocess.run(
+                    [
+                        "git", "-c", "safe.directory=*",
+                        "-C", str(cfg.project_root),
+                        "log", "--oneline", "-n", "10",
+                    ],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if proc.returncode == 0 and proc.stdout.strip():
+                    commits = proc.stdout.strip()
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+        body_lines.append("- recent commits (HEAD~10):")
+        for ln in commits.splitlines():
+            body_lines.append(f"  {ln}")
+
+    body = "\n".join(body_lines) + "\n"
 
     # TB-151: caller-supplied extras (e.g. status-report's "Pending
     # operator review (N): ..." line) get appended below the recent-
@@ -105,16 +143,7 @@ def _current_state_block(
             + "\n"
         )
 
-    return (
-        "## Current state (rendered just before this prompt was sent)\n"
-        f"- now: {now}\n"
-        f"- board: {counts_line} (Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)\n"
-        "- recent commits (HEAD~10):\n"
-        + "\n".join(f"  {ln}" for ln in commits.splitlines())
-        + "\n"
-        + extras_block
-        + rejections_block
-    )
+    return body + extras_block + rejections_block
 
 
 # TB-128: the status-report cron has historically posted reports with
@@ -537,6 +566,8 @@ def build_control_prompt(
     job_prompt: str,
     *,
     state_extras: list[str] | None = None,
+    include_board: bool = True,
+    include_commits: bool = True,
 ) -> str:
     """Build the prompt for a control-agent run (cron job or ideation cycle).
 
@@ -555,11 +586,21 @@ def build_control_prompt(
     inside the snapshot block. The status-report routine uses this to
     inject "Pending operator review (N): TB-..." so the agent can
     forward it verbatim into the posted Mattermost report.
+
+    TB-168: `include_board` and `include_commits` are forwarded to
+    `_current_state_block` so callers (ideation) can opt out of sub-
+    blocks that don't pay rent for them specifically. Defaults stay
+    True for backwards compatibility with the status-report cron and
+    any future control-agent callers.
     """
     parts = [
         _CONTROL_HEADER,
         "",
-        _current_state_block(cfg, extras=state_extras),
+        _current_state_block(
+            cfg, extras=state_extras,
+            include_board=include_board,
+            include_commits=include_commits,
+        ),
         f"\n## Control job: {job_name}",
         "",
         job_prompt,

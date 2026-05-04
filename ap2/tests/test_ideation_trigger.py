@@ -313,6 +313,85 @@ def test_force_ideate_bypasses_disable_cooldown_and_backlog_gates(
     )
 
 
+# ---------------------------------------------------------------------------
+# TB-168: ideation's `_run_ideation` calls `build_control_prompt` with
+# `include_board=False, include_commits=False` so the rendered prompt has
+# only `now:` under the snapshot header. Pin the captured prompt shape via
+# the same `_stub_run_control_agent` harness the trigger-gate tests use.
+
+
+def test_run_ideation_prompt_omits_board_counts_and_recent_commits(
+    tmp_path, monkeypatch
+):
+    """Integration-flavored: drive `_maybe_ideate` end-to-end with the
+    standard stub harness and assert the captured prompt's snapshot
+    block matches the TB-168 trimmed shape:
+      (a) `now:` line is present (load-bearing — ideation has no other
+          clock for `_Last updated:` in `ideation_state.md`).
+      (b) `board:` line is absent (ideation re-derives counts from
+          TASKS.md per its read-order; the pre-flight snapshot is
+          redundant).
+      (c) `recent commits (HEAD~10):` heading is absent — and no commit
+          short-sha lines appear inside the snapshot block (~60% of the
+          original 10 lines are `state:` daemon meta-commits with no
+          signal; the remaining feature lines are subsumed by
+          `progress.md`).
+    """
+    monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={"Backlog": [("TB-1", "first"), ("TB-2", "second")]},
+    )
+    calls = _stub_run_control_agent(monkeypatch)
+
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    assert len(calls) == 1, "ideation should have fired"
+    prompt = calls[0]["prompt"]
+
+    # (a) Snapshot header + `now:` line are intact.
+    assert (
+        "## Current state (rendered just before this prompt was sent)"
+        in prompt
+    )
+    import re
+
+    assert re.search(
+        r"- now: 20\d\d-[01]\d-[0-3]\dT[0-2]\d:[0-5]\d:[0-5]\dZ", prompt
+    ), "trimmed snapshot must still carry a `now:` line for ideation"
+
+    # (b) No `board:` snapshot line. The `(Active/Ready/Backlog/...)`
+    # legend is the strong negative pin — it lived only on the `board:`
+    # line, so its absence proves the line is gone (not just its label).
+    assert "- board:" not in prompt
+    assert (
+        "(Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)"
+        not in prompt
+    )
+
+    # (c) The recent-commits sub-block is gone. Search inside the
+    # snapshot block specifically — TB-N references in the `## Recent
+    # events` tail aren't load-bearing here. The snapshot ends at the
+    # blank line before `## Control job:`.
+    snapshot_start = prompt.find(
+        "## Current state (rendered just before this prompt was sent)"
+    )
+    snapshot_end = prompt.find("## Control job:", snapshot_start)
+    assert snapshot_start != -1 and snapshot_end != -1
+    snapshot = prompt[snapshot_start:snapshot_end]
+    assert "recent commits" not in snapshot.lower()
+    # Commit lines render as `^  [0-9a-f]{7,40} <subject>`. Even when
+    # the test fixture's tmp_path has no `.git` (so the original code
+    # would have rendered "(git log unavailable)"), the heading line
+    # itself was the load-bearing thing — pin its absence directly,
+    # then double-check no commit-shaped lines slipped through.
+    for line in snapshot.splitlines():
+        assert not re.match(r"^  [0-9a-f]{7,40} ", line), (
+            f"snapshot still contains a commit-shaped line: {line!r}"
+        )
+
+
 def test_force_ideate_emits_ideation_empty_board_event(tmp_path, monkeypatch):
     """The shared `_run_ideation` helper still emits
     `ideation_empty_board` as the entry marker (the historical event
