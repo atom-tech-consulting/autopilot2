@@ -61,7 +61,7 @@ Drop from 100,000 to 30,000 chars in `verify._judge_prose_bullet`. The constant 
 - `uv run pytest -q ap2/tests/` — full regression gate passes (gating)
 - `grep -qE "diff_text\[:30_000\]" ap2/verify.py` — diff truncation lowered to 30KB.
 - `grep -qE "AP2_VERIFY_JUDGE_EFFORT" ap2/verify.py` — per-judge effort env knob present.
-- `grep -qE "AP2_STATUS_REPORT_EFFORT" ap2/` — per-status-report effort env knob present (in status_report.py or daemon.py status-report branch, depending on where TB-144 placed the shared routine).
+- `grep -qrE "AP2_STATUS_REPORT_EFFORT" ap2/` — per-status-report effort env knob present (in status_report.py or daemon.py status-report branch, depending on where TB-144 placed the shared routine).
 - New unit test pinning the judge's default effort: with neither `AP2_VERIFY_JUDGE_EFFORT` nor `AP2_AGENT_EFFORT` set, the SDK options handed to `_judge_prose_bullet` carry `extra_args["effort"] == "high"`. With `AP2_VERIFY_JUDGE_EFFORT="medium"` set, they carry `"medium"`. With only `AP2_AGENT_EFFORT="xhigh"` set, they fall back to `"xhigh"` (per-site var takes precedence; absence falls through to the global, then to the per-site default).
 - New unit test pinning the status-report's default effort: same shape — neither env set → `"medium"`; `AP2_STATUS_REPORT_EFFORT="high"` → `"high"`; `AP2_AGENT_EFFORT="xhigh"` only → `"xhigh"`.
 - New unit test for diff truncation: a synthetic 50KB diff handed to `_judge_prose_bullet` is truncated to 30KB in the prompt sent to the SDK.
