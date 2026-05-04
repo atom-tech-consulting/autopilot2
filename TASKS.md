@@ -9,9 +9,9 @@
 ## Backlog
 
 - [ ] **TB-152** **`ap2 reject TB-N` (CLI + chat) — explicit rejection logged to operator_log.md** `#autopilot` `#review-gate` `#operator-queue` `#cli` `#mattermost` `@blocked:review` — Today operator deletes ideation proposals via `ap2 delete TB-N`, which doesn't communicate "decided against" to ideation. Add a `reject` verb (CLI + chat) that removes the task and appends a "rejected ideation proposal → TB-N" line to operator_log.md so future ideation cycles respect the decision. [→ brief](.cc-autopilot/tasks/ap2-reject-tb-n-cli-chat-explicit-reject.md)
-- [ ] **TB-156** **Tier-1 token tuning: diff trim + per-agent effort lowering** `#autopilot` `#verify` `#status-report` `#cost` [→ brief](.cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md)
 - [ ] **TB-155** **Web port auto-enumerate on conflict** `#autopilot` `#web` `#daemon` [→ brief](.cc-autopilot/tasks/web-port-auto-enumerate-on-conflict.md)
 - [ ] **TB-157** **Token-usage instrumentation across all SDK call sites** `#autopilot` `#instrumentation` `#observability` `#cost` [→ brief](.cc-autopilot/tasks/token-usage-instrumentation-across-all-s.md)
+- [ ] **TB-156** **Tier-1 token tuning: diff trim + per-agent effort lowering** `#autopilot` `#verify` `#status-report` `#cost` [→ brief](.cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md)
 
 ## Pipeline Pending
 

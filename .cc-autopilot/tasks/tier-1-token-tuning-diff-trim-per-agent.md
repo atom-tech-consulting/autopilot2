@@ -75,3 +75,10 @@ Drop from 100,000 to 30,000 chars in `verify._judge_prose_bullet`. The constant 
 - Prompt caching / cache_control breakpoints (Tier 2 work — bigger refactor, file separately if Tier 1 isn't enough).
 - Batching the per-prose-bullet judge into one SDK call (Tier 2 — bigger design, file separately).
 - Trimming the `## Current state` block's git-log size or making `_STATUS_REPORT_CONTRACT` injection conditional (Tier 2 — file separately).
+## Attempts
+
+### 2026-05-04 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -qE "AP2_STATUS_REPORT_EFFORT" ap2/` — per-status-report effort env knob present (in status_report.py or daemon.py
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260504T071522Z-TB-156.prompt.md`, `stream: .cc-autopilot/debug/20260504T071522Z-TB-156.stream.jsonl`, `messages: .cc-autopilot/debug/20260504T071522Z-TB-156.messages.jsonl`
