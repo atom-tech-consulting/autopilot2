@@ -109,7 +109,7 @@ def test_chat_triggered_status_report_routes_through_shared_routine(
     # the routing wiring under test.
     monkeypatch.setattr(
         "ap2.prompts.build_control_prompt",
-        lambda cfg, name, body: f"stub control prompt for {name}",
+        lambda cfg, name, body, **_kw: f"stub control prompt for {name}",
     )
 
     # FakeSDK: two responders.

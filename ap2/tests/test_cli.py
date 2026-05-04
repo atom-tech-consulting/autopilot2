@@ -311,7 +311,11 @@ def test_delete_unknown_task_returns_error(tmp_path: Path, capsys):
 
 def test_status_shows_pending_review_count(tmp_path: Path, capsys):
     """When N>0 pending-review tasks exist, status emits a `review:` line
-    naming the count and the action (`ap2 approve TB-N`)."""
+    naming the count and the action (`ap2 approve TB-N`).
+
+    TB-151: the line also names the actual TB-Ns (`test_status_lists_
+    pending_review_ids` below pins the ID-listing + truncation contract);
+    here we only assert the count + action survive."""
     import json as _json
     from ap2.cli import cmd_status
 
@@ -331,7 +335,7 @@ def test_status_shows_pending_review_count(tmp_path: Path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "review:" in out
-    assert "2 ideation proposal" in out
+    assert "2 pending" in out
     assert "ap2 approve" in out
 
     rc = cmd_status(cfg, Namespace(json=True))
@@ -356,6 +360,87 @@ def test_status_omits_pending_review_when_zero(tmp_path: Path, capsys):
     assert rc == 0
     payload = _json.loads(capsys.readouterr().out)
     assert payload["pending_review"] == 0
+    # TB-151: machine-readable list parallels the count.
+    assert payload["pending_review_ids"] == []
+
+
+# ---------------------------------------------------------------------------
+# TB-151: surface the pending-review TB-Ns themselves (not just the count)
+# in `ap2 status` text + JSON, with a 5-ID truncation rule. Operators were
+# having to grep TASKS.md to figure out which TB-Ns to pass to
+# `ap2 approve`.
+
+def test_status_lists_pending_review_ids(tmp_path: Path, capsys):
+    """3 review-gated tasks → the `review:` line names all 3 TB-Ns
+    (under the 5-ID truncation cap) and the JSON branch carries the
+    same list under `pending_review_ids`."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    for i, tid in enumerate(("TB-800", "TB-801", "TB-802")):
+        board.add(
+            "Backlog", task_id=tid, title=f"prop {i}",
+            meta={"blocked": "review"},
+        )
+    board.save()
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    # The actual IDs land on the `review:` line — operator can copy any
+    # of them straight into `ap2 approve TB-N`.
+    assert "TB-800" in out
+    assert "TB-801" in out
+    assert "TB-802" in out
+    # No truncation suffix when N <= 5.
+    assert "more)" not in out
+    # Action hint survives.
+    assert "ap2 approve" in out
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["pending_review"] == 3
+    assert payload["pending_review_ids"] == ["TB-800", "TB-801", "TB-802"]
+
+
+def test_status_truncates_pending_review_ids_after_five(tmp_path: Path, capsys):
+    """6 review-gated tasks → the text line names the first 5 TB-Ns
+    with a "(+1 more)" suffix; the JSON branch carries all 6 unmolested
+    so machine consumers don't lose data to a presentation cap."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    ids = [f"TB-{n}" for n in range(900, 906)]  # TB-900 .. TB-905
+    for i, tid in enumerate(ids):
+        board.add(
+            "Backlog", task_id=tid, title=f"prop {i}",
+            meta={"blocked": "review"},
+        )
+    board.save()
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    # First 5 IDs visible.
+    for tid in ids[:5]:
+        assert tid in out
+    # 6th ID dropped from the text rendering — replaced by the suffix.
+    assert "TB-905" not in out
+    assert "(+1 more)" in out
+    # Count still reflects the full N=6.
+    assert "6 pending" in out
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    # JSON branch keeps the full list — truncation is presentation-only.
+    assert payload["pending_review_ids"] == ids
+    assert payload["pending_review"] == 6
 
 
 # --------- TB-130: `ap2 status` reports the bundled web URL ---------

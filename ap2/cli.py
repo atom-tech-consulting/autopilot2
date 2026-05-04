@@ -130,10 +130,14 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # "Backlog has 5 ideation proposals waiting for an operator nod."
     # Cheap inline scan (the same board we already loaded above); avoids
     # importing diagnose.py for one number.
-    pending_review = sum(
-        1 for t in board.iter_tasks("Backlog")
+    # TB-151: keep the TB-Ns (not just the count) so the text branch can
+    # name them and the JSON branch can carry a `pending_review_ids`
+    # list — operators were having to grep TASKS.md to find the IDs.
+    pending_review_ids = [
+        t.id for t in board.iter_tasks("Backlog")
         if t.blocked_on and all(b.lower() == "review" for b in t.blocked_on)
-    )
+    ]
+    pending_review = len(pending_review_ids)
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -161,6 +165,10 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             "web_url": web_url,
             "operator_queue_pending": queue_pending,
             "pending_review": pending_review,
+            # TB-151: full TB-N list for machine consumers (web UI,
+            # external monitors). The `pending_review` count is kept
+            # for backward compat with anything that already parsed it.
+            "pending_review_ids": pending_review_ids,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -183,14 +191,18 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             f"pending:  {queue_pending} operator op"
             f"{'s' if queue_pending != 1 else ''}"
         )
-    if pending_review:
+    if pending_review_ids:
         # TB-121: shown only when N>0 so a clean board doesn't grow a
         # zero-line. Mention `ap2 approve` so the action is one
         # readable nudge away.
+        # TB-151: name the actual TB-Ns (truncated to 5 with a
+        # "(+N more)" suffix via the shared helper) so the operator
+        # doesn't have to grep TASKS.md to find the IDs to approve.
+        from .status_report import _format_pending_review_line
+        ids_line = _format_pending_review_line(pending_review_ids)
         print(
-            f"review:   {pending_review} ideation proposal"
-            f"{'s' if pending_review != 1 else ''} pending "
-            f"(`ap2 approve TB-N` to dispatch)"
+            f"review:   {pending_review} pending — {ids_line}\n"
+            f"          (`ap2 approve TB-N`)"
         )
     nxt = board.next_ready()
     if nxt:

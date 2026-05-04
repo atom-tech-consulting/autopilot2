@@ -229,7 +229,7 @@ def test_run_cron_does_not_skip_when_activity_present(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "ap2.daemon.prompts.build_control_prompt",
-        lambda cfg, name, body: "stub prompt",
+        lambda cfg, name, body, **_kw: "stub prompt",
     )
 
     sdk = _NoopSDK()
@@ -368,7 +368,7 @@ def test_run_status_report_cron_trigger_advances_state(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "ap2.prompts.build_control_prompt",
-        lambda cfg, name, body: "stub prompt",
+        lambda cfg, name, body, **_kw: "stub prompt",
     )
 
     sdk = _NoopSDK()
@@ -414,7 +414,7 @@ def test_run_status_report_chat_trigger_does_not_advance_state(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         "ap2.prompts.build_control_prompt",
-        lambda cfg, name, body: "stub prompt",
+        lambda cfg, name, body, **_kw: "stub prompt",
     )
 
     sdk = _NoopSDK()
@@ -487,3 +487,148 @@ def test_run_status_report_chat_trigger_skip_does_not_advance_state(tmp_path):
     if cfg.cron_state_file.exists():
         state = json.loads(cfg.cron_state_file.read_text())
         assert "status-report" not in state
+
+
+# ---------------------------------------------------------------------------
+# TB-151: pending-review TB-Ns in the snapshot block + agent-prompt forwarder.
+#
+# The status-report routine collects Backlog tasks whose only blocker is
+# the `review` scheme and injects "Pending operator review (N): TB-..."
+# into the `## Current state` snapshot block via `state_extras` on
+# `build_control_prompt`. The prompt body separately instructs the agent
+# to copy the line verbatim into the posted Mattermost report. Both
+# halves are pinned below.
+
+
+def _seed_active_for_run(cfg: Config) -> None:
+    """Seed an event so the skip-gate doesn't fire — we need the run path."""
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(
+        cfg.events_file, "task_complete", task="TB-1",
+        status="complete", commit="abc1234",
+    )
+
+
+def _board_with_review_tasks(cfg: Config, ids: list[str]) -> None:
+    """Seed `ids` into the Backlog with the `@blocked:review` codespan."""
+    from ap2.board import Board
+
+    board = Board.load(cfg.tasks_file)
+    for i, tid in enumerate(ids):
+        board.add(
+            "Backlog", task_id=tid, title=f"prop {i}",
+            meta={"blocked": "review"},
+        )
+    board.save()
+
+
+def test_run_status_report_injects_pending_review_line_when_n_positive(
+    tmp_path, monkeypatch,
+):
+    """When the board carries N>0 review-gated Backlog tasks, the prompt
+    handed to the SDK contains a "Pending operator review (N): TB-..." line
+    inside the `## Current state` snapshot block, with the IDs listed."""
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+    _board_with_review_tasks(cfg, ["TB-300", "TB-301", "TB-302"])
+
+    captured: dict[str, str] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        # Reproduce build_control_prompt's behavior just enough to thread
+        # state_extras into the captured prompt for the assertion.
+        block = "## Current state\n"
+        if state_extras:
+            block += "\n".join(state_extras) + "\n"
+        captured["prompt"] = block + f"\n## Control job: {name}\n{body}"
+        return captured["prompt"]
+
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", _capture_prompt)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert sdk.called is True
+    prompt = captured["prompt"]
+    # The injected line appears in the prompt fed to the SDK, with the
+    # "(N): " preamble + each TB-N + the action hint.
+    assert "Pending operator review (3):" in prompt
+    assert "TB-300" in prompt
+    assert "TB-301" in prompt
+    assert "TB-302" in prompt
+    assert "ap2 approve TB-N" in prompt
+
+
+def test_run_status_report_truncates_pending_review_in_snapshot(
+    tmp_path, monkeypatch,
+):
+    """6 review-gated tasks → snapshot line truncates to first 5 + "(+1 more)",
+    matching the CLI's truncation cap (helpers shared)."""
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+    ids = [f"TB-{n}" for n in range(400, 406)]  # TB-400 .. TB-405
+    _board_with_review_tasks(cfg, ids)
+
+    captured: dict[str, str] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        captured["extras"] = "\n".join(state_extras or [])
+        return "stub"
+
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", _capture_prompt)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    extras = captured["extras"]
+    # First 5 named.
+    for tid in ids[:5]:
+        assert tid in extras
+    # 6th truncated out of the text but counted in the suffix; total N=6.
+    assert "TB-405" not in extras
+    assert "(+1 more)" in extras
+    assert "Pending operator review (6):" in extras
+
+
+def test_run_status_report_omits_pending_review_line_when_zero(
+    tmp_path, monkeypatch,
+):
+    """Clean board (zero review-gated tasks) → no snapshot line, so a
+    routine post doesn't grow a noisy "0 pending" bullet."""
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+    # No review-gated Backlog tasks added.
+
+    captured: dict[str, list[str]] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        captured["extras"] = list(state_extras or [])
+        return "stub"
+
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", _capture_prompt)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    # Nothing injected — list is empty.
+    assert captured["extras"] == []
+
+
+def test_status_report_prompt_instructs_forwarding_pending_review_line():
+    """The canonical STATUS_REPORT_PROMPT body must tell the agent to
+    forward the "Pending operator review" snapshot line into the posted
+    Mattermost report verbatim. Without this instruction the snapshot
+    line would land in the agent's context but not in the operator-
+    visible report — defeating the purpose of the injection."""
+    from ap2.status_report import STATUS_REPORT_PROMPT
+
+    body = STATUS_REPORT_PROMPT
+    assert "Pending operator review" in body
+    # The forwarding rule is explicit (verbatim copy, not paraphrase).
+    assert "verbatim" in body.lower() or "VERBATIM" in body

@@ -33,8 +33,64 @@ from dataclasses import dataclass
 from typing import Literal
 
 from . import events
+from .board import Board
 from .config import Config
 from .cron import mark_run
+
+
+# TB-151: shared truncation rule for pending-review TB-N lists. `ap2
+# status` (CLI) and the cron status-report both call
+# `_format_pending_review_line` so the cap stays in sync — bumping it
+# here moves both surfaces in lockstep.
+_PENDING_REVIEW_TRUNCATE_AT = 5
+
+
+def _format_pending_review_line(ids: list[str]) -> str:
+    """Format pending-review TB-Ns into a comma-joined display string.
+
+    Truncates to the first `_PENDING_REVIEW_TRUNCATE_AT` IDs with a
+    "(+N more)" suffix when the list is longer, matching the
+    `diagnose._auto_diagnose_summary` rendering precedent so all three
+    surfaces (CLI, cron status-report, watchdog summary) cap noise the
+    same way. Returns the empty string for an empty list — callers
+    decide whether to suppress their wrapping prefix when N=0.
+
+    Pure / no I/O so both `ap2.cli.cmd_status` and
+    `ap2.status_report.run_status_report` can call it without dragging
+    in a Board load. Defined in this module (and imported by `cli.py`)
+    so the verification grep `_format_pending_review_line` lands in
+    both files (TB-151).
+    """
+    if not ids:
+        return ""
+    if len(ids) <= _PENDING_REVIEW_TRUNCATE_AT:
+        return ", ".join(ids)
+    head = ", ".join(ids[:_PENDING_REVIEW_TRUNCATE_AT])
+    return f"{head} (+{len(ids) - _PENDING_REVIEW_TRUNCATE_AT} more)"
+
+
+def _pending_review_ids(cfg: Config) -> list[str]:
+    """Return TB-Ns of Backlog tasks gated solely on the human-review clause.
+
+    Mirrors the comprehension at `cli.cmd_status` (kept inline there to
+    avoid a `diagnose` import for one number) and the per-task scan in
+    `diagnose._board_health` — same predicate: at least one blocker,
+    and every blocker is the `review` scheme. The status-report routine
+    needs the full list (not just the count) to inject the
+    "Pending operator review (N): TB-..." line into the snapshot block;
+    failing to load the board is treated as zero pending so a transient
+    parse error never blocks a status post.
+    """
+    if not cfg.tasks_file.exists():
+        return []
+    try:
+        board = Board.load(cfg.tasks_file)
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        t.id for t in board.iter_tasks("Backlog")
+        if t.blocked_on and all(b.lower() == "review" for b in t.blocked_on)
+    ]
 
 
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
@@ -73,6 +129,11 @@ Body shape (when posting):
   short SHA), tasks failed / verification_failed / retry_exhausted,
   pipelines started/completed, cron / ideation activity, daemon
   pause/resume, operator acks, open issues. Keep under 12 lines.
+- TB-151: if the snapshot's `## Current state` block carries a
+  `- Pending operator review (N): TB-...` line, copy that line
+  VERBATIM as one of your bullets so the operator sees which TB-Ns
+  are waiting on `ap2 approve` without having to grep TASKS.md. If
+  the line is absent, omit the bullet — there's nothing to surface.
 
 After posting (or skipping), call
 `log_event(type="status_report", summary="<one sentence>")` so the
@@ -275,8 +336,26 @@ async def run_status_report(
             skipped=True, reason="no_activity_since_last_report",
         )
 
+    # TB-151: surface pending-review TB-Ns inside the `## Current state`
+    # snapshot block so the agent can copy the line verbatim into the
+    # posted Mattermost report. The list is collected fresh per run
+    # (board state moves between ticks); when N=0 we skip the line
+    # entirely so a clean board doesn't grow a noisy "0 pending"
+    # bullet. The wrapping prefix mirrors `diagnose._auto_diagnose_summary`'s
+    # phrasing — "Pending operator review (N): TB-..." — so an operator
+    # who reads watchdog summaries and status reports doesn't have to
+    # context-switch between two phrasings.
+    pending_ids = _pending_review_ids(cfg)
+    state_extras: list[str] = []
+    if pending_ids:
+        state_extras.append(
+            f"- Pending operator review ({len(pending_ids)}): "
+            f"{_format_pending_review_line(pending_ids)} "
+            "— `ap2 approve TB-N`"
+        )
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
+        state_extras=state_extras,
     )
     start_payload: dict = {"job": "status-report", "trigger": trigger}
     if reason:

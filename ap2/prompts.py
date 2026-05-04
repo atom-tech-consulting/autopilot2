@@ -25,7 +25,9 @@ from .tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS
 # top of every control prompt. The status-report prompt then references
 # this block by name ("use the `now:` timestamp verbatim"), so there's
 # no ambiguity about which timestamp belongs in the headline.
-def _current_state_block(cfg: Config) -> str:
+def _current_state_block(
+    cfg: Config, extras: list[str] | None = None,
+) -> str:
     now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     counts_line = "(board not found)"
     if cfg.tasks_file.exists():
@@ -58,6 +60,16 @@ def _current_state_block(cfg: Config) -> str:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
+    # TB-151: caller-supplied extras (e.g. status-report's "Pending
+    # operator review (N): ..." line) get appended below the recent-
+    # commits sub-block so they sit inside the same `## Current state`
+    # snapshot the agent reads at the top of the prompt. Each extra is
+    # one line; the caller pre-formats it (including any leading "- "
+    # bullet marker) so this function stays presentation-agnostic.
+    extras_block = ""
+    if extras:
+        extras_block = "\n" + "\n".join(extras) + "\n"
+
     return (
         "## Current state (rendered just before this prompt was sent)\n"
         f"- now: {now}\n"
@@ -65,6 +77,7 @@ def _current_state_block(cfg: Config) -> str:
         "- recent commits (HEAD~10):\n"
         + "\n".join(f"  {ln}" for ln in commits.splitlines())
         + "\n"
+        + extras_block
     )
 
 
@@ -460,7 +473,13 @@ def build_mattermost_prompt(
     return "\n".join(parts)
 
 
-def build_control_prompt(cfg: Config, job_name: str, job_prompt: str) -> str:
+def build_control_prompt(
+    cfg: Config,
+    job_name: str,
+    job_prompt: str,
+    *,
+    state_extras: list[str] | None = None,
+) -> str:
     """Build the prompt for a control-agent run (cron job or ideation cycle).
 
     Used by `daemon.run_cron` (status-report and any future cron jobs) and
@@ -472,11 +491,17 @@ def build_control_prompt(cfg: Config, job_name: str, job_prompt: str) -> str:
     injected above the job prompt so the agent has a deterministic
     "right now" snapshot. The status-report job additionally gets an
     explicit timestamp / freshness contract appended.
+
+    TB-151: optional `state_extras` are pre-formatted lines (one per
+    list item, leading bullet marker included by the caller) appended
+    inside the snapshot block. The status-report routine uses this to
+    inject "Pending operator review (N): TB-..." so the agent can
+    forward it verbatim into the posted Mattermost report.
     """
     parts = [
         _CONTROL_HEADER,
         "",
-        _current_state_block(cfg),
+        _current_state_block(cfg, extras=state_extras),
         f"\n## Control job: {job_name}",
         "",
         job_prompt,

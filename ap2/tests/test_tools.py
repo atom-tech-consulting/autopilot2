@@ -1345,7 +1345,7 @@ def test_status_report_run_emits_cron_start_with_chat_trigger(cfg, tmp_path, mon
     )
     monkeypatch.setattr(
         "ap2.prompts.build_control_prompt",
-        lambda cfg, name, body: "stub prompt",
+        lambda cfg, name, body, **_kw: "stub prompt",
     )
 
     res = asyncio.run(
