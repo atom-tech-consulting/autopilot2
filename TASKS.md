@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-152** **`ap2 reject TB-N` (CLI + chat) — capture rejection reasons in operator_log.md for ideation learning** `#autopilot` `#review-gate` `#operator-queue` `#cli` `#mattermost` — Today `ap2 delete TB-N` records the rejection action without a reason field, so ideation has no signal to avoid re-proposing the same idea next cycle. Add a `reject TB-N [--reason ...]` verb (CLI + chat) that writes `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` to operator_log.md (already read by ideation Step 0). [→ brief](.cc-autopilot/tasks/ap2-reject-tb-n-cli-chat-explicit-reject.md)
 
 ## Pipeline Pending
 
@@ -50,6 +49,7 @@
 - [x] **TB-157** **Token-usage instrumentation across all SDK call sites** `#autopilot` `#instrumentation` `#observability` `#cost` [→ brief](.cc-autopilot/tasks/token-usage-instrumentation-across-all-s.md)
 - [x] **TB-156** **Tier-1 token tuning: diff trim + per-agent effort lowering** `#autopilot` `#verify` `#status-report` `#cost` [→ brief](.cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md)
 - [x] **TB-158** **Surface bullet failures clearly in events logs (CLI + web)** `#autopilot` `#verify` `#observability` `#ux` [→ brief](.cc-autopilot/tasks/surface-bullet-failures-clearly-in-event.md)
+- [x] **TB-152** **`ap2 reject TB-N` (CLI + chat) — capture rejection reasons in operator_log.md for ideation learning** `#autopilot` `#review-gate` `#operator-queue` `#cli` `#mattermost` — Today `ap2 delete TB-N` records the rejection action without a reason field, so ideation has no signal to avoid re-proposing the same idea next cycle. Add a `reject TB-N [--reason ...]` verb (CLI + chat) that writes `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` to operator_log.md (already read by ideation Step 0). [→ brief](.cc-autopilot/tasks/ap2-reject-tb-n-cli-chat-explicit-reject.md)
 
 ## Frozen
 

@@ -209,3 +209,9 @@
 - **Summary:** Added shared `events.summarize_verification_failed` helper and wired it into `ap2 logs` (cmd_logs renders counter + failing-bullet headlines + judge notes for verification_failed rows; --json path unchanged), `/events` (inline counter + failed-bullet sub-list, passes/unverified collapsed into the counter), and `/task-run/<run-id>` (top-of-page verification summary block when terminal verdict is verification_failed, fires on the latest matching event so retries don't surface stale failures). 868 ap2 tests pass; new tests in test_events.py / test_cli.py / test_web.py pin shape, sort, truncation, fallback, --json regression, inline rendering, summary block, and cross-file grep visibility.
 - **Files:** ap2/events.py, ap2/cli.py, ap2/web.py, ap2/tests/test_events.py, ap2/tests/test_cli.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-04] TB-152: `ap2 reject TB-N` (CLI + chat) — capture rejection reasons in operator_log.md for ideation learning
+- **Commit:** `8bc5297`
+- **Summary:** Added `ap2 reject TB-N [--reason ...]` (CLI + MM-handler chat) — registered the `reject` op in OPERATOR_QUEUE_OPS, gated it to Backlog + `@blocked:review` proposals (else routes operator at `ap2 delete`), drain emits `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` to operator_log.md (placeholder `(no reason given)` when omitted) plus the standard `applied operator-queued reject → TB-N` line, with full test coverage; `uv run pytest -q ap2/tests/` 886 passed in 70s.
+- **Files:** ap2/tools.py, ap2/cli.py, ap2/prompts.py, ap2/README.md, skills/ap2/SKILL.md, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_prompts.py
+- **Tests:** pass
