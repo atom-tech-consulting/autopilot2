@@ -41,8 +41,6 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import mistune
-
 
 # Mistune AST parser — used for `## Verification` section detection and bullet
 # classification (TB-102). Replaces the regex tower (`_VERIFICATION_HEADER_RE`,
@@ -53,7 +51,27 @@ import mistune
 #     code spans (`` ` `cmd` ` ``)
 # Markdown is rich enough that ad-hoc regex against it is a losing
 # arms race. mistune's AST handles all of these natively.
-_MD = mistune.create_markdown(renderer="ast")
+#
+# TB-153: import lazily. Importing mistune at module load made `from
+# ap2.verify import parse_verification_section` (and every transitive
+# importer such as `ap2.tools`) fail under any python interpreter that
+# doesn't carry mistune in site-packages — notably the system `python3`
+# the per-task verifier shells `python3 -c "..."` bullets through. The
+# parser only matters when the daemon walks bullets in-process, so we
+# defer the import to first call.
+_MD = None  # type: ignore[var-annotated]
+
+
+def _get_md():
+    """Lazily build the mistune AST parser. Called only when the daemon
+    actually parses a `## Verification` section (in-process, where mistune
+    is always present). Shell-bullet `python3 -c` invocations that import
+    `ap2.verify` transitively never hit this path."""
+    global _MD
+    if _MD is None:
+        import mistune
+        _MD = mistune.create_markdown(renderer="ast")
+    return _MD
 
 
 @dataclass
@@ -178,7 +196,7 @@ def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
     bullets, and any other markdown rendering quirk natively — eliminating
     the regex-brittleness class that produced TB-91 and TB-146.
     """
-    nodes = _MD(briefing_text) or []
+    nodes = _get_md()(briefing_text) or []
     # Find the LAST verification heading; capture all sibling list nodes
     # following it until the next heading (or EOF).
     last_idx: int | None = None

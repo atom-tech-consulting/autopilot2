@@ -699,6 +699,16 @@ def test_queue_append_update_rejects_multiline_title(cfg: Config):
 # ---- per-field round-trip
 
 
+def _last_task_updated(cfg: Config) -> dict:
+    """TB-153: pull the most recent `task_updated` event from the events
+    file. Per-field round-trip tests assert the field-of-interest is in
+    its `fields=[...]` diff so the audit signal stays grep-able."""
+    evts = events.tail(cfg.events_file, 50)
+    updated = [e for e in evts if e["type"] == "task_updated"]
+    assert updated, f"no task_updated event in tail: {evts}"
+    return updated[-1]
+
+
 def test_update_title_round_trips(cfg: Config):
     _seed_backlog_task(cfg, title="old title")
     res = tools.do_operator_queue_append(
@@ -711,6 +721,10 @@ def test_update_title_round_trips(cfg: Config):
     t = Board.load(cfg.tasks_file).get("TB-400")
     assert t is not None
     assert t.title == "shiny new title"
+    # TB-153: task_updated event must name the changed field.
+    evt = _last_task_updated(cfg)
+    assert evt["task"] == "TB-400"
+    assert "title" in evt["fields"]
 
 
 def test_update_tags_round_trips(cfg: Config):
@@ -725,6 +739,10 @@ def test_update_tags_round_trips(cfg: Config):
     assert "#foo" in t.tags
     assert "#bar" in t.tags
     assert "#old" not in t.tags
+    # TB-153: task_updated event must name the changed field.
+    evt = _last_task_updated(cfg)
+    assert evt["task"] == "TB-400"
+    assert "tags" in evt["fields"]
 
 
 def test_update_blocked_round_trips(cfg: Config):
@@ -739,6 +757,10 @@ def test_update_blocked_round_trips(cfg: Config):
     assert t.meta.get("blocked") == "TB-9,review"
     raw = cfg.tasks_file.read_text()
     assert "`@blocked:TB-9,review`" in raw
+    # TB-153: task_updated event must name the changed field.
+    evt = _last_task_updated(cfg)
+    assert evt["task"] == "TB-400"
+    assert "blocked" in evt["fields"]
 
 
 def test_update_description_round_trips(cfg: Config):
@@ -751,6 +773,10 @@ def test_update_description_round_trips(cfg: Config):
     t = Board.load(cfg.tasks_file).get("TB-400")
     assert t is not None
     assert t.description == "new prose"
+    # TB-153: task_updated event must name the changed field.
+    evt = _last_task_updated(cfg)
+    assert evt["task"] == "TB-400"
+    assert "description" in evt["fields"]
 
 
 def test_update_briefing_round_trips(cfg: Config):
@@ -786,6 +812,10 @@ def test_update_briefing_round_trips(cfg: Config):
     t = Board.load(cfg.tasks_file).get("TB-400")
     assert t is not None
     assert t.briefing == rel
+    # TB-153: task_updated event must name the changed field.
+    evt = _last_task_updated(cfg)
+    assert evt["task"] == "TB-400"
+    assert "briefing" in evt["fields"]
 
 
 def test_update_clear_tags_explicit_path(cfg: Config):
@@ -799,6 +829,11 @@ def test_update_clear_tags_explicit_path(cfg: Config):
     t = Board.load(cfg.tasks_file).get("TB-400")
     assert t is not None
     assert t.tags == []
+    # TB-153: task_updated event must name the changed field — `tags`
+    # covers the clear path same as a populating path.
+    evt = _last_task_updated(cfg)
+    assert evt["task"] == "TB-400"
+    assert "tags" in evt["fields"]
 
 
 def test_update_clear_blocked_explicit_path(cfg: Config):
@@ -815,6 +850,11 @@ def test_update_clear_blocked_explicit_path(cfg: Config):
     assert "blocked" not in t.meta
     raw = cfg.tasks_file.read_text()
     assert "`@blocked:" not in raw
+    # TB-153: task_updated event must name the changed field — `blocked`
+    # covers the clear path same as a populating path.
+    evt = _last_task_updated(cfg)
+    assert evt["task"] == "TB-400"
+    assert "blocked" in evt["fields"]
 
 
 # ---- task_updated event diff
