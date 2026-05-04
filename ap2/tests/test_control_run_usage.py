@@ -422,6 +422,54 @@ def test_ideation_timeout_emits_both_events(cfg, monkeypatch):
     assert runs[0]["status"] == "timeout"
 
 
+def test_ideation_error_emits_both_events(cfg, monkeypatch):
+    """Error path additive contract through `_run_ideation`: a control-agent
+    run that raises an exception inside `sdk.query` triggers BOTH the new
+    `control_run_usage` event (status=error, error=<Type>: <msg>, dumps
+    survive on disk for forensic inspection) AND the pre-existing
+    `ideation_error` label-specific event from the caller. This pins that
+    `control_run_usage` is purely additive — pre-TB-166 events keep firing
+    unchanged.
+
+    Helper-level coverage of the error path lives in
+    `test_control_run_usage_event_on_error_carries_error_field` above; this
+    test pins the call-site interaction so a regression in
+    `_run_ideation`'s error-branch ordering surfaces here."""
+    from ap2 import ideation as ideation_mod
+    from ap2 import daemon as _daemon
+    from ap2 import insights as insights_mod
+
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setattr(_daemon, "_snapshot_state_paths", lambda cfg_: {})
+    monkeypatch.setattr(_daemon, "_changed_state_paths", lambda pre, post: [])
+    monkeypatch.setattr(_daemon, "_commit_state_files", lambda *a, **kw: None)
+    monkeypatch.setattr(insights_mod, "maybe_regenerate_index", lambda cfg_: None)
+    monkeypatch.setattr(
+        "ap2.prompts.build_control_prompt",
+        lambda cfg_, name, body, **_kw: "stub",
+    )
+
+    sdk = _sdk_raising(RuntimeError("kaboom"))
+    asyncio.run(ideation_mod._run_ideation(cfg, sdk, mcp_server=None))
+
+    evts = events.tail(cfg.events_file, 30)
+    errors = [e for e in evts if e["type"] == "ideation_error"]
+    runs = [e for e in evts if e["type"] == "control_run_usage"]
+    assert len(errors) == 1, "pre-existing ideation_error event must fire"
+    assert errors[0]["error"] == "RuntimeError: kaboom"
+    assert len(runs) == 1, "new control_run_usage event must fire"
+    assert runs[0]["label"] == "ideation"
+    assert runs[0]["status"] == "error"
+    assert runs[0]["error"] == "RuntimeError: kaboom"
+    assert runs[0].get("note") == "stream_incomplete"
+
+    # Dumps still live on disk after the error path through `_run_ideation`.
+    debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
+    assert list(debug_dir.glob("*ideation.prompt.md"))
+    assert list(debug_dir.glob("*ideation.stream.jsonl"))
+    assert list(debug_dir.glob("*ideation.messages.jsonl"))
+
+
 def test_control_run_usage_emitted_via_status_report(cfg, monkeypatch):
     """End-to-end through `run_status_report`: the event lands with
     `label="cron-status-report"`. Pins call-site coverage for the

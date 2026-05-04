@@ -72,7 +72,7 @@ Persisting `stream.jsonl` + `messages.jsonl` for every fire could grow `.cc-auto
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes.
 - `grep -nE "control_run_usage" ap2/daemon.py` — event emission is wired into `_run_control_agent`.
-- `grep -nE '"control_run_usage"' ap2/tests/` — at least one test asserts the event shape.
+- `grep -rnE '"control_run_usage"' ap2/tests/` — at least one test asserts the event shape.
 - prose: a test in `test_daemon*.py` (or `test_ideation*.py`) runs a control-agent invocation (real or stubbed SDK) to a successful complete and asserts that (a) the corresponding `<compact_ts>-<label>.stream.jsonl` AND `<compact_ts>-<label>.messages.jsonl` files exist on disk after `_run_control_agent` returns, AND (b) `events.jsonl` contains a `control_run_usage` event whose `label` matches the run's label, `status="complete"`, and `usage.input_tokens` / `output_tokens` / `total_cost_usd` are non-zero (or match the stubbed ResultMessage values).
 - prose: a test pins the timeout path — synthesize a control-agent run that times out (the existing TimeoutError branch); assert `control_run_usage` is emitted with `status="timeout"`, the prompt + (partial) stream + (partial) messages files all exist on disk, and the existing label-specific event (`ideation_timeout` etc.) ALSO fires unchanged.
 - prose: a test pins the error path — synthesize a control-agent run that raises an exception inside `sdk.query` (mock the SDK to raise); assert `control_run_usage` with `status="error"` AND `error="<Type>: <msg>"` is emitted, dumps survive, and the existing `ideation_error` (or equivalent) event also fires.
