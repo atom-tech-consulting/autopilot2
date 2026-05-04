@@ -5,6 +5,7 @@
 
 ## Ready
 
+- [ ] **TB-165** **Persist task-run token usage in events.jsonl + retain debug dumps on success** [→ brief](.cc-autopilot/tasks/persist-task-run-token-usage-in-events-j.md)
 - [ ] **TB-159** **`ap2 ideate` CLI for manual ideation trigger that bypasses the natural gates** [→ brief](.cc-autopilot/tasks/ap2-ideate-cli-for-manual-ideation-trigg.md)
 
 ## Backlog
