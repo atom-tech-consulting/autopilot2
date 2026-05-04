@@ -5,6 +5,7 @@
 
 ## Ready
 
+- [ ] **TB-166** **Persist control-agent token usage + stream/messages dumps for ideation, cron, MM handler** `@blocked:review` [→ brief](.cc-autopilot/tasks/persist-control-agent-token-usage-stream.md)
 
 ## Backlog
 

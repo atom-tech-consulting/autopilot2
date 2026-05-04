@@ -34,3 +34,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-04T17:58:56Z — applied operator-queued add_ready → TB-160
 - 2026-05-04T18:10:29Z — applied operator-queued add_ready → TB-162
 - 2026-05-04T18:25:17Z — applied operator-queued add_ready → TB-165
+- 2026-05-04T21:45:55Z — applied operator-queued add_ready → TB-166
