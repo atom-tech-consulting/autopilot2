@@ -9,6 +9,7 @@
 ## Backlog
 
 - [ ] **TB-152** **`ap2 reject TB-N` (CLI + chat) — explicit rejection logged to operator_log.md** `#autopilot` `#review-gate` `#operator-queue` `#cli` `#mattermost` `@blocked:review` — Today operator deletes ideation proposals via `ap2 delete TB-N`, which doesn't communicate "decided against" to ideation. Add a `reject` verb (CLI + chat) that removes the task and appends a "rejected ideation proposal → TB-N" line to operator_log.md so future ideation cycles respect the decision. [→ brief](.cc-autopilot/tasks/ap2-reject-tb-n-cli-chat-explicit-reject.md)
+- [ ] **TB-158** **Surface bullet failures clearly in events logs (CLI + web)** `#autopilot` `#verify` `#observability` `#ux` [→ brief](.cc-autopilot/tasks/surface-bullet-failures-clearly-in-event.md)
 
 ## Pipeline Pending
 
