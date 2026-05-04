@@ -257,3 +257,9 @@
 - **Summary:** Extended `_validate_briefing_structure` (TB-154) with a TB-161 goal-anchor check: the briefing's `## Goal` body must cite (as a substring) one of goal.md's `## Current focus` heading titles or `## Done when` bullets, derived via the new `GOAL_ANCHOR_HEADINGS` constant in ap2/init.py and the `_goal_md_anchors` helper in ap2/tools.py; ap2/check.py mirrors the rule as a warning-level lint; ap2/prompts.py + ideation.default.md + the operator_queue_append MCP docstring carry the new requirement; falls back to skip-the-check when goal.md is missing or all-placeholder. Full regression (949 tests) passes.
 - **Files:** ap2/check.py, ap2/ideation.default.md, ap2/init.py, ap2/prompts.py, ap2/tests/test_check.py, ap2/tests/test_tools.py, ap2/tools.py
 - **Tests:** pass
+
+## [2026-05-04] TB-163: Inject "Recent operator rejections (last 5)" block into ideation prompt header
+- **Commit:** `aa86c18`
+- **Summary:** Added "Recent operator rejections (last K)" subsection to build_control_prompt's snapshot header, backed by new ap2/operator_log.py::tail_rejections helper; ideation prompt directive added; full ap2 test suite (952 tests) passes.
+- **Files:** ap2/operator_log.py, ap2/prompts.py, ap2/ideation.default.md, ap2/tests/test_prompts.py
+- **Tests:** pass
