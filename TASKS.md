@@ -5,6 +5,9 @@
 
 ## Ready
 
+- [ ] **TB-162** **Surface pending operator queue ops in the web view** [→ brief](.cc-autopilot/tasks/surface-pending-operator-queue-ops-in-th.md)
+- [ ] **TB-160** **Make ideation trigger threshold configurable via `AP2_IDEATION_TRIGGER_TASK_COUNT` (default 3)** [→ brief](.cc-autopilot/tasks/make-ideation-trigger-threshold-configur.md)
+- [ ] **TB-159** **`ap2 ideate` CLI for manual ideation trigger that bypasses the natural gates** [→ brief](.cc-autopilot/tasks/ap2-ideate-cli-for-manual-ideation-trigg.md)
 
 ## Backlog
 
