@@ -1059,6 +1059,54 @@ def test_bind_with_enumeration_non_eaddrinuse_propagates_immediately():
     )
 
 
+def test_serve_async_no_conflict_binds_start_port(project: Config):
+    """TB-155 baseline: with no port collision, `serve_async(start_port=X)`
+    binds X exactly — no enumeration churn, the `on_bind` callback fires
+    with the requested port. The daemon wrapper relies on this equality
+    to decide whether to omit the `requested_port` field from the
+    `web_start` event (the audit signal that a silent enumeration
+    happened); if `serve_async` ever drifted off the requested port on
+    the happy path, every daemon startup would emit a spurious
+    `requested_port` and the audit signal would lose its meaning."""
+    import asyncio
+
+    start_port = _free_port()
+    bound_holder: dict = {}
+
+    def _on_bind(host: str, port: int) -> None:
+        bound_holder["host"] = host
+        bound_holder["port"] = port
+
+    async def _exercise() -> None:
+        task = asyncio.create_task(
+            web.serve_async(
+                project,
+                host="127.0.0.1",
+                start_port=start_port,
+                max_attempts=10,
+                on_bind=_on_bind,
+            )
+        )
+        try:
+            for _ in range(50):
+                await asyncio.sleep(0.02)
+                if "port" in bound_holder:
+                    break
+            assert "port" in bound_holder, "on_bind never fired"
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(_exercise())
+
+    # Resolved port equals requested — no enumeration, no offset.
+    assert bound_holder["host"] == "127.0.0.1"
+    assert bound_holder["port"] == start_port, (
+        f"expected bound=={start_port} on the no-conflict path, "
+        f"got {bound_holder['port']}"
+    )
+
+
 def test_serve_async_auto_enumerates_on_conflict(project: Config):
     """End-to-end: with `start_port` already bound, `serve_async` quietly
     binds the next free port and the `on_bind` callback fires with the

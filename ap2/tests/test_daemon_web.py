@@ -77,6 +77,14 @@ def test_web_loop_emits_start_and_stop(tmp_path: Path, monkeypatch):
     assert len(starts) == 1, starts
     assert starts[0]["port"] == port
     assert starts[0]["url"] == f"http://127.0.0.1:{port}/"
+    # TB-155: when the bound port matches the requested port (the
+    # no-conflict happy path), `requested_port` must NOT appear in the
+    # `web_start` payload — its presence is the audit signal of a
+    # silent enumeration. Operators grepping `requested_port` should
+    # only see hits when something actually clashed.
+    assert "requested_port" not in starts[0], (
+        "`requested_port` must be omitted on the no-conflict path"
+    )
     # `web_stop` always fires on the way out — the daemon-stop summary in
     # operator reports relies on its presence even if the bind failed.
     assert len(stops) == 1, stops
