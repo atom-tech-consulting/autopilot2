@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-168** **Trim `_current_state_block` for ideation: drop board counts + recent commits, keep `now:`** [→ brief](.cc-autopilot/tasks/trim-current-state-block-for-ideation-dr.md)
 - [ ] **TB-169** **Trim ideation's `_events_block` to a curated allowlist of event types** [→ brief](.cc-autopilot/tasks/trim-ideation-s-events-block-to-a-curate.md)
 
 ## Pipeline Pending
@@ -61,6 +60,7 @@
 - [x] **TB-161** **Briefing validator: require Goal section to cite a goal.md focus item or Done-when bullet** `#autopilot` `#ideation` `#briefing` `#validation` `#goal-alignment` — Extend TB-154's `_validate_briefing_structure` so the `## Goal` section must reference a goal.md "Current focus" item title or a `## Done when` bullet — rejects ap2-meta-polish drift before TB-N is allocated. [→ brief](.cc-autopilot/tasks/briefing-validator-require-goal-section.md)
 - [x] **TB-163** **Inject "Recent operator rejections (last 5)" block into ideation prompt header** `#autopilot` `#ideation` `#prompts` `#operator-log` `#review-gate` — TB-152 captures rejection reasons in operator_log.md but ideation only reads them per-line. Render a "Recent operator rejections" block in build_control_prompt's snapshot header so pattern-level signal reaches the ideator at proposal time. [→ brief](.cc-autopilot/tasks/inject-recent-operator-rejections-last-5.md)
 - [x] **TB-164** **Briefing validator: require non-empty "Why now" rationale within Goal section** `#autopilot` `#ideation` `#briefing` `#validation` `#scope-creep` — Extend TB-154's _validate_briefing_structure to require an explicit "Why now" rationale paragraph within ## Goal answering goal.md's delete-test ("if we delete this and the goal still ships, was it useful?") — closes the scope-creep guard gap mechanically. [→ brief](.cc-autopilot/tasks/briefing-validator-require-non-empty-why.md)
+- [x] **TB-168** **Trim `_current_state_block` for ideation: drop board counts + recent commits, keep `now:`** [→ brief](.cc-autopilot/tasks/trim-current-state-block-for-ideation-dr.md)
 
 ## Frozen
 
