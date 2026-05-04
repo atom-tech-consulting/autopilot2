@@ -79,7 +79,7 @@ Today's debug/ has ~131 files for ~25 retained (failure) runs — ~5 files per r
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes.
 - `grep -nE "task_run_usage" ap2/daemon.py` — event emission is wired into `run_task`.
-- `grep -nE '"task_run_usage"' ap2/tests/` — at least one test asserts the event shape.
+- `grep -rnE '"task_run_usage"' ap2/tests/` — at least one test asserts the event shape.
 - prose: a test in `test_daemon*.py` runs a task agent (real or stubbed SDK) to a successful complete and asserts that (a) the `prompt.md` / `stream.jsonl` / `messages.jsonl` files for that run still exist on disk after the post-run state-commit step, AND (b) `events.jsonl` now contains a `task_run_usage` event whose `task` matches the run's TB-N AND whose `usage.input_tokens` / `output_tokens` / `total_cost_usd` are non-zero (or match the values placed in the stub ResultMessage).
 - prose: a test pins the failure-path parity — a task that hits `verification_failed` ALSO emits `task_run_usage`, with `status=verification_failed` and the same usage fields populated. Pre-existing failure-path retention behavior (debug files preserved) is unchanged.
 - prose: a test pins the run_id format — `task_run_usage.run_id` equals the `<compact_ts>-<task_id>` filename prefix of the debug dumps, so an operator can `ls .cc-autopilot/debug/<run_id>.*` after grepping for the event.
