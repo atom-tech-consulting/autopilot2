@@ -424,6 +424,40 @@ def test_mattermost_prompt_status_routing_steers_away_from_freeform_reply(tmp_pa
     assert "instead of composing your own reply" in p
 
 
+def test_mattermost_prompt_pins_reject_tb_n_recognition(tmp_path):
+    """TB-152: the MM handler agent must recognize "reject TB-N" as an
+    operator command for ideation proposals, route it through
+    `operator_queue_append` with `op="reject"`, and know that the chat
+    surface accepts a `reason: ...` arg. Pin the cross-reference + the
+    routing contract so a future prompt rewrite can't silently drop the
+    surface (which would force operators back to the CLI for a chat-
+    natural action). Also pin that `reject` is described as ideation-
+    proposals-only with `delete` as the fallback for everything else."""
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot reject TB-9 reason: duplicates TB-3",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Cross-ref + routing instruction.
+    assert "TB-152" in p
+    assert "reject TB-N" in p
+    assert "operator_queue_append" in p
+    # Op name surfaced (matches the same form as the approve test).
+    assert '"reject"' in p or "op=\"reject\"" in p
+    # The verb's ideation-only scope is documented so the handler doesn't
+    # apply it to typos / superseded tasks (where `delete` is correct).
+    p_lower = p.lower()
+    assert "ideation proposal" in p_lower
+    # operator_log.md is named so the handler knows where the reason
+    # lands (and why capturing one matters).
+    assert "operator_log.md" in p
+
+
 def test_mattermost_prompt_pins_approve_tb_n_recognition(tmp_path):
     """TB-121: the MM handler agent must recognize "approve TB-N" as an
     operator command and route it through `operator_queue_append` with

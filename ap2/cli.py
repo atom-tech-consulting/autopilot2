@@ -785,6 +785,44 @@ def cmd_delete(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reject(cfg: Config, args: argparse.Namespace) -> int:
+    """Reject an ideation-proposed task with a captured reason (TB-152).
+
+    Mirrors `cmd_delete`'s removal semantics — the drain handler drops
+    the row, removes the briefing file, and emits `task_deleted` — but
+    the audit line is richer: `<ts> — rejected ideation proposal →
+    TB-N (<title>): <reason>` lands in `.cc-autopilot/operator_log.md`
+    so ideation Step 0 has a per-cycle signal to avoid re-proposing
+    the same idea. The standard `applied operator-queued reject → TB-N`
+    line is also written so the verb-vs-`delete` distinction shows up
+    in the audit trail.
+
+    Pre-validation: the verb is reserved for Backlog tasks still gated
+    by `@blocked:review` (i.e. unapproved ideation proposals). For
+    anything else — Active runs, already-approved Backlog tasks, Frozen
+    failures, etc. — the queue-append handler refuses with a message
+    pointing the operator at `ap2 delete`. Both checks live on the
+    queue-append side (`do_operator_queue_append`) so the chat surface
+    in `prompts.py` benefits from the same gate.
+
+    `--reason` is optional (operator may want to reject quickly); when
+    omitted the placeholder `(no reason given)` is recorded — itself a
+    signal ideation can spot.
+    """
+    payload: dict = {"op": "reject", "task_id": args.task_id}
+    if args.reason is not None:
+        payload["reason"] = args.reason
+    res = tools.do_operator_queue_append(cfg, payload)
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print(
+        f"queued reject {args.task_id} (will land at next tick; "
+        f"reason written to operator_log.md)"
+    )
+    return 0
+
+
 def cmd_approve(cfg: Config, args: argparse.Namespace) -> int:
     """Strip the `(blocked on: review)` review-gate clause from a task
     (TB-121).
@@ -1226,6 +1264,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("task_id")
     s.set_defaults(func=cmd_approve)
+
+    s = sub.add_parser(
+        "reject",
+        help="reject an ideation-proposed task (TB-152): drops the row "
+             "and briefing file (same removal as `delete`) AND writes "
+             "`rejected ideation proposal → TB-N (<title>): <reason>` to "
+             "operator_log.md so ideation Step 0 learns to avoid "
+             "re-proposing it. Reserved for Backlog tasks still gated "
+             "by `@blocked:review`; for anything else use `ap2 delete`.",
+    )
+    s.add_argument("task_id")
+    s.add_argument(
+        "--reason",
+        default=None,
+        help="single-line reason captured in operator_log.md. Omit for "
+             "a quick reject — `(no reason given)` is recorded as a "
+             "placeholder, itself a signal to ideation.",
+    )
+    s.set_defaults(func=cmd_reject)
 
     s = sub.add_parser(
         "rollback",

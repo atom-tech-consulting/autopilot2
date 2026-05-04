@@ -24,6 +24,7 @@ from ap2.cli import (
     cmd_add,
     cmd_backlog,
     cmd_delete,
+    cmd_reject,
     cmd_start,
     cmd_unfreeze,
 )
@@ -302,6 +303,151 @@ def test_delete_unknown_task_returns_error(tmp_path: Path, capsys):
     rc = cmd_delete(cfg, Namespace(task_id="TB-999", force=False))
     assert rc == 1
     assert "not on board" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# cmd_reject (TB-152) — explicit rejection of an ideation-proposed task,
+# with a reason captured to operator_log.md so ideation Step 0 has a
+# signal to avoid re-proposing the same idea next cycle. Pre-validation
+# limits the verb to Backlog tasks still gated by `@blocked:review`;
+# anything else gets routed at `ap2 delete`.
+
+
+def _seed_proposal(cfg: Config, task_id: str, title: str = "an ideation proposal") -> None:
+    """Synthesize a Backlog task with the `@blocked:review` codespan —
+    the canonical "ideation proposal awaiting operator decision" shape."""
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id=task_id,
+        title=title,
+        meta={"blocked": "review"},
+    )
+    board.save()
+
+
+def test_reject_end_to_end_writes_reason_to_operator_log(tmp_path: Path):
+    """Briefing-spec verification: synthesize a Backlog task with
+    `@blocked:review`, run cmd_reject with a reason, drain the queue, and
+    assert (a) TASKS.md no longer contains the row, (b) the briefing file
+    is gone, AND (c) operator_log.md contains the rejected-proposal line
+    with the supplied reason text — not just the action verb."""
+    cfg = _project(tmp_path)
+    # Stage a real briefing file so we can pin the unlink behavior.
+    briefing_path = cfg.tasks_dir / "the-proposal.md"
+    briefing_path.parent.mkdir(parents=True, exist_ok=True)
+    briefing_path.write_text("# stub briefing\n")
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id="TB-810",
+        title="redundant idea",
+        meta={"blocked": "review"},
+        briefing=str(briefing_path.relative_to(cfg.project_root)),
+    )
+    board.save()
+
+    rc = cmd_reject(
+        cfg,
+        Namespace(task_id="TB-810", reason="duplicates TB-700, no incremental signal"),
+    )
+    assert rc == 0
+    _drain(cfg)
+
+    # (a) Row is gone from TASKS.md.
+    assert Board.load(cfg.tasks_file).find("TB-810") is None
+    # (b) Briefing file is gone.
+    assert not briefing_path.exists()
+    # (c) operator_log.md carries the rejected-proposal line WITH the reason
+    # — not just the bare action verb. Both "rejected ideation proposal"
+    # and the supplied reason text must be in the log.
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "rejected ideation proposal" in log
+    assert "TB-810" in log
+    assert "redundant idea" in log  # title preserved in the audit line
+    assert "duplicates TB-700, no incremental signal" in log
+
+
+def test_reject_without_reason_records_placeholder(tmp_path: Path):
+    """A reject with `--reason` omitted records `(no reason given)` —
+    itself a signal ideation can spot in operator_log.md."""
+    cfg = _project(tmp_path)
+    _seed_proposal(cfg, "TB-811", title="quiet rejection")
+
+    rc = cmd_reject(cfg, Namespace(task_id="TB-811", reason=None))
+    assert rc == 0
+    _drain(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "rejected ideation proposal" in log
+    assert "TB-811" in log
+    assert "(no reason given)" in log
+
+
+def test_reject_refuses_non_backlog_task(tmp_path: Path, capsys):
+    """Pre-validation: cmd_reject refuses to act on Active tasks (not an
+    ideation proposal anymore — a running task with `@blocked:review`
+    structurally couldn't dispatch, but the verb still belongs to
+    `delete`'s lane). The error message points the operator at
+    `ap2 delete`."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Active",
+        task_id="TB-820",
+        title="running",
+        meta={"blocked": "review"},
+    )
+    board.save()
+
+    rc = cmd_reject(cfg, Namespace(task_id="TB-820", reason="nope"))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "not a pending-review proposal" in err or "pending-review" in err
+    assert "ap2 delete" in err
+    # Task untouched.
+    assert Board.load(cfg.tasks_file).find("TB-820")[0] == "Active"
+
+
+def test_reject_refuses_already_approved_proposal(tmp_path: Path, capsys):
+    """Pre-validation: a Backlog task without `@blocked:review` (i.e.
+    operator already approved it, or it never had the review gate) is
+    not a pending-review proposal — refuse and route the operator at
+    `ap2 delete`."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Backlog", task_id="TB-821", title="already approved")
+    board.save()
+
+    rc = cmd_reject(cfg, Namespace(task_id="TB-821", reason="changed mind"))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "ap2 delete" in err
+    # Task untouched.
+    assert Board.load(cfg.tasks_file).find("TB-821")[0] == "Backlog"
+
+
+def test_reject_unknown_task_returns_error(tmp_path: Path, capsys):
+    cfg = _project(tmp_path)
+    rc = cmd_reject(cfg, Namespace(task_id="TB-9999", reason="x"))
+    assert rc == 1
+    assert "not on board" in capsys.readouterr().err
+
+
+def test_reject_emits_task_deleted_event(tmp_path: Path):
+    """Drain emits `task_deleted` so the audit-event surface stays
+    grep-able by the same event type as `delete` (the verb-vs-`delete`
+    distinction is carried by the operator_log.md line shape, not the
+    event type)."""
+    cfg = _project(tmp_path)
+    _seed_proposal(cfg, "TB-830", title="eventful reject")
+
+    cmd_reject(cfg, Namespace(task_id="TB-830", reason="overlaps TB-799"))
+    _drain(cfg)
+
+    evts = events.tail(cfg.events_file, 10)
+    deleted = [e for e in evts if e["type"] == "task_deleted"]
+    assert any(d["task"] == "TB-830" for d in deleted)
 
 
 # ---------------------------------------------------------------------------

@@ -77,6 +77,7 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 backlog <TB-N>` | Move any task to Backlog. |
 | `ap2 unfreeze <TB-N>` | Un-freeze + reset retry counter. Refuses if not in Frozen. |
 | `ap2 delete <TB-N>` | Permanently remove a task. Refuses Active/Ready without `--force`. Emits `task_deleted`. |
+| `ap2 reject <TB-N> [--reason "..."]` | Reject an ideation-proposed task (Backlog + `@blocked:review` only) AND capture the rejection reason in `.cc-autopilot/operator_log.md` so ideation Step 0 stops re-proposing it (TB-152). Drops the row + briefing same as `delete`. For non-proposals use `ap2 delete`. |
 | `ap2 pause --reason "..."` | Set the pause flag (daemon stops dispatching, stays running). |
 | `ap2 resume` | Clear the pause flag. |
 | `ap2 cron list` | List cron jobs + last-fired timestamps. |

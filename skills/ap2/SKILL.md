@@ -136,6 +136,7 @@ next tick:
 - `ap2 unfreeze <TB-N>` — Frozen → Backlog + reset retry counter.
 - `ap2 backlog <TB-N>` — any-section → Backlog (used to be `ap2 skip`).
 - `ap2 delete <TB-N>` — permanent removal; refuses Active/Ready without `--force`.
+- `ap2 reject <TB-N> [--reason "..."]` — ideation proposals only (Backlog + `@blocked:review`); drops the row AND captures the rejection reason in `.cc-autopilot/operator_log.md` so ideation Step 0 stops re-proposing it. Use `ap2 delete` for everything else (typos, superseded tasks, etc.).
 - `ap2 pause` / `ap2 resume` — pause/resume daemon ticks (the flag file is
   daemon-checked, not queue-routed; effective immediately).
 - `ap2 ack <TB-N> <decision>` — record an operator decision so ideation

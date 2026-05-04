@@ -1072,3 +1072,230 @@ def test_update_briefing_for_legacy_task_allocates_slug(cfg: Config):
     assert target.read_text() == new_briefing
     # Slug derived from the CURRENT title.
     assert "legacy-task" in t.briefing
+
+
+# ---------------------------------------------------------------------------
+# TB-152: `reject` op — explicit rejection of an ideation-proposed task,
+# captures the operator's reason in operator_log.md so ideation Step 0
+# learns to avoid re-proposing the same idea next cycle. The drain-side
+# audit-line shape is the load-bearing distinction from `delete`.
+
+
+def _seed_proposal(
+    cfg: Config,
+    task_id: str = "TB-900",
+    *,
+    title: str = "an ideation proposal",
+    briefing: str | None = None,
+) -> None:
+    """Synthesize a Backlog task with the `@blocked:review` codespan —
+    the canonical "ideation proposal awaiting operator decision" shape."""
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id=task_id,
+        title=title,
+        meta={"blocked": "review"},
+        briefing=briefing,
+    )
+    board.save()
+
+
+def test_operator_queue_ops_includes_reject():
+    """Pin the constant directly so a refactor can't silently drop the
+    op (TB-152)."""
+    assert "reject" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_queue_append_reject_refuses_non_proposal(cfg: Config):
+    """A reject against a task without `@blocked:review` is refused at
+    queue-append time — the verb is reserved for ideation proposals.
+    Error message points the operator at `ap2 delete` for the generic
+    remove path."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Backlog", task_id="TB-901", title="already approved")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "reject", "task_id": "TB-901", "reason": "x"}
+    )
+    assert res.get("isError")
+    text = res["content"][0]["text"]
+    assert "ap2 delete" in text
+
+
+def test_queue_append_reject_refuses_non_backlog(cfg: Config):
+    """Even with `@blocked:review` set, only Backlog tasks are
+    pending-review proposals — Active / Frozen / etc. with the codespan
+    aren't a real proposal lifecycle and route at `ap2 delete`."""
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Frozen",
+        task_id="TB-902",
+        title="stuck running",
+        meta={"blocked": "review"},
+    )
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "reject", "task_id": "TB-902", "reason": "x"}
+    )
+    assert res.get("isError")
+    assert "ap2 delete" in res["content"][0]["text"]
+
+
+def test_queue_append_reject_rejects_unknown_task(cfg: Config):
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "reject", "task_id": "TB-99999", "reason": "x"}
+    )
+    assert res.get("isError")
+    assert "not on board" in res["content"][0]["text"]
+
+
+def test_queue_append_reject_rejects_multiline_reason(cfg: Config):
+    """TB-134 single-line gate fires for the reason field too — a
+    multi-line reason would split the operator_log.md line and break
+    ideation Step 0's grep."""
+    _seed_proposal(cfg, "TB-903")
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "reject", "task_id": "TB-903", "reason": "two\nlines"},
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+
+
+def test_queue_append_reject_queues_record_with_reason_and_title(cfg: Config):
+    """The queue record carries the reason AND the title snapshot so the
+    drain-side audit-line write doesn't need to look the title up after
+    `board.remove` has dropped the row."""
+    _seed_proposal(cfg, "TB-904", title="a snappy title")
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "reject",
+            "task_id": "TB-904",
+            "reason": "redundant with TB-700",
+        },
+    )
+    body = _unwrap(res)
+    assert body["op"] == "reject"
+    queue_path = tools.operator_queue_path(cfg)
+    lines = [
+        json.loads(ln)
+        for ln in queue_path.read_text().splitlines()
+        if ln.strip()
+    ]
+    assert len(lines) == 1
+    rec = lines[0]
+    assert rec["op"] == "reject"
+    assert rec["args"]["task_id"] == "TB-904"
+    assert rec["args"]["reason"] == "redundant with TB-700"
+    assert rec["args"]["title"] == "a snappy title"
+
+
+def test_drain_reject_writes_rejected_proposal_line(cfg: Config):
+    """The drain handler writes `<ts> — rejected ideation proposal →
+    TB-N (<title>): <reason>` to operator_log.md — the ideation Step 0
+    surface the briefing's Goal calls out as load-bearing."""
+    _seed_proposal(cfg, "TB-905", title="speculative idea")
+
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "reject",
+            "task_id": "TB-905",
+            "reason": "no measurable signal in last 3 cycles",
+        },
+    )
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "rejected ideation proposal → TB-905" in log
+    assert "(speculative idea)" in log
+    assert "no measurable signal in last 3 cycles" in log
+
+
+def test_drain_reject_no_reason_writes_placeholder(cfg: Config):
+    """Reason omitted → drain writes `(no reason given)`. Itself signal:
+    ideation can spot quiet rejects vs. reasoned rejects and decide
+    whether to re-propose."""
+    _seed_proposal(cfg, "TB-906", title="quiet kill")
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "reject", "task_id": "TB-906"}
+    )
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "rejected ideation proposal → TB-906" in log
+    assert "(no reason given)" in log
+
+
+def test_drain_reject_removes_row_and_briefing(cfg: Config):
+    """Removal semantics mirror `delete` — the row drops out of TASKS.md
+    AND the briefing file is unlinked so a future re-add can reuse the
+    slug. (Briefing-file unlink isn't done by `delete` today, but
+    `reject` adds it because an ideation rejection truly means "this
+    proposal is gone" — keeping the briefing on disk would create a
+    ghost file under `.cc-autopilot/tasks/`.)"""
+    briefing_path = cfg.tasks_dir / "speculative-idea.md"
+    briefing_path.parent.mkdir(parents=True, exist_ok=True)
+    briefing_path.write_text("# briefing\n\n## Goal\nfoo\n")
+    _seed_proposal(
+        cfg,
+        "TB-907",
+        title="speculative idea",
+        briefing=str(briefing_path.relative_to(cfg.project_root)),
+    )
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "reject", "task_id": "TB-907", "reason": "stale"}
+    )
+    tools.drain_operator_queue(cfg)
+
+    assert Board.load(cfg.tasks_file).find("TB-907") is None
+    assert not briefing_path.exists()
+
+
+def test_drain_reject_emits_task_deleted_event(cfg: Config):
+    """Drain emits `task_deleted` (same event shape as `delete`) — the
+    verb-vs-`delete` distinction is carried by the operator_log.md line
+    shape, not the event type. Keeps `events.jsonl` consumers stable."""
+    _seed_proposal(cfg, "TB-908", title="logged reject")
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "reject", "task_id": "TB-908", "reason": "noise"}
+    )
+    tools.drain_operator_queue(cfg)
+
+    evts = events.tail(cfg.events_file, 20)
+    deleted = [e for e in evts if e["type"] == "task_deleted"]
+    assert any(d["task"] == "TB-908" for d in deleted)
+
+
+def test_drain_reject_audit_line_distinct_from_delete(cfg: Config):
+    """Briefing-spec verification: applying a `reject` op writes the
+    standard `applied operator-queued reject → TB-N` audit line; a
+    `delete` op writes `applied operator-queued delete → TB-N`. Pins
+    that the verbs aren't collapsed in the audit trail — ideation Step 0
+    can still distinguish them when scanning operator_log.md."""
+    # Seed two tasks: one that gets rejected, one that gets deleted.
+    _seed_proposal(cfg, "TB-909", title="will be rejected")
+    board = Board.load(cfg.tasks_file)
+    board.add("Frozen", task_id="TB-910", title="will be deleted")
+    board.save()
+
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "reject", "task_id": "TB-909", "reason": "duplicates TB-700"},
+    )
+    tools.do_operator_queue_append(
+        cfg, {"op": "delete", "task_id": "TB-910"}
+    )
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "applied operator-queued reject → TB-909" in log
+    assert "applied operator-queued delete → TB-910" in log
+    # And the rejected-proposal line is ONLY emitted for the reject op.
+    assert "rejected ideation proposal → TB-909" in log
+    assert "rejected ideation proposal → TB-910" not in log

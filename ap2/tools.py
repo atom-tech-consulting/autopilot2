@@ -884,6 +884,18 @@ OPERATOR_QUEUE_OPS = (
     # filename (vs. allocating a new slug, which would orphan git
     # history of `.cc-autopilot/tasks/<slug>.md`).
     "update",
+    # TB-152: explicit operator rejection of an ideation-proposed task.
+    # Removal semantics mirror `delete` (drop the row + briefing file +
+    # emit `task_deleted`) but the audit trail is richer: the drain-side
+    # writes `<ts> — rejected ideation proposal → TB-N (<title>):
+    # <reason>` to operator_log.md so ideation Step 0 has a signal to
+    # avoid re-proposing the same idea next cycle. The `delete` verb
+    # remains the generic "remove a task" path; `reject` is specifically
+    # "I considered this ideation proposal and decided against it." Pre-
+    # validation in `cmd_reject` / chat-side limits the verb to
+    # Backlog + `@blocked:review` tasks (ideation proposals); other
+    # sections route the operator at `ap2 delete`.
+    "reject",
 )
 
 
@@ -1084,9 +1096,53 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                 f"{task_id} is in {section} — refusing without force. "
                 f"Use `ap2 backlog {task_id}` first, or pass --force."
             )
+        if op == "reject":
+            # TB-152: `reject` is the explicit "operator considered this
+            # ideation proposal and decided against it" path. The verb is
+            # narrower than `delete` by design — it only fires on
+            # Backlog tasks with the `@blocked:review` codespan still
+            # present, i.e. unapproved ideation proposals. Anything else
+            # (Active runs, Ready dispatches, already-approved tasks,
+            # Frozen failures) routes the operator at `ap2 delete`,
+            # which carries the generic remove semantics. This keeps
+            # the audit-line distinction clean: `rejected ideation
+            # proposal → TB-N: <reason>` only ever describes a real
+            # ideation rejection.
+            blocked_csv = (existing.meta.get("blocked", "") if existing else "")
+            blocked_tokens = [
+                tok.strip().lower() for tok in blocked_csv.split(",") if tok.strip()
+            ]
+            if section != "Backlog" or "review" not in blocked_tokens:
+                return _err(
+                    f"{task_id} is not a pending-review proposal "
+                    f"(section={section}, "
+                    f"@blocked={blocked_csv or '(none)'}) — "
+                    f"use `ap2 delete {task_id}` instead. `reject` is "
+                    f"reserved for Backlog tasks still gated by "
+                    f"`@blocked:review` (ideation proposals)."
+                )
         rec_args = {"task_id": task_id}
         if op == "delete":
             rec_args["force"] = bool(args.get("force"))
+        if op == "reject":
+            # TB-152: snapshot the title under the board lock so the
+            # drain-side audit line ("<ts> — rejected ideation proposal
+            # → TB-N (<title>): <reason>") doesn't have to re-look it
+            # up after `board.remove` has dropped the row. Reason is
+            # single-line per TB-134; the placeholder `(no reason
+            # given)` is itself a signal — ideation can spot the
+            # difference between rejected-with-reason and rejected-
+            # silently and decide whether to re-propose.
+            raw_reason = args.get("reason")
+            reason = (raw_reason if raw_reason is not None else "").strip()
+            if reason:
+                err = _validate_single_line("reason", reason)
+                if err:
+                    return _err(err)
+            else:
+                reason = "(no reason given)"
+            rec_args["title"] = existing.title if existing else ""
+            rec_args["reason"] = reason
         if op == "update":
             # TB-153: in-place edit. Translate the public CLI / MCP shape
             # (title / tags / blocked / description / briefing flags +
@@ -1464,6 +1520,42 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             title=title,
         )
         return
+    if op == "reject":
+        # TB-152: shares `delete`'s removal codepath — drop the row +
+        # briefing file (briefing-file removal is implicit: `Board.remove`
+        # only drops the line; the briefing under `.cc-autopilot/tasks/`
+        # is unlinked here so a future re-add doesn't collide on slug).
+        # Emits `task_deleted` (same event shape as `delete` — the
+        # operator-log.md line is what carries the reject-vs-delete
+        # distinction). The `<ts> — rejected ideation proposal → TB-N
+        # (<title>): <reason>` line is written by
+        # `_append_operator_audit_line`'s reject branch using the title +
+        # reason snapshotted into the queue record at append time.
+        tid = args.get("task_id", "")
+        if not tid:
+            raise RuntimeError("reject op missing task_id")
+        loc = board.find(tid)
+        if loc is None:
+            raise RuntimeError(f"{tid} not on board")
+        section = loc[0]
+        existing = board.get(tid)
+        title = existing.title if existing else args.get("title", "")
+        briefing_rel = existing.briefing if existing else None
+        board.remove(tid)
+        if briefing_rel:
+            brief_path = cfg.project_root / briefing_rel
+            try:
+                brief_path.unlink()
+            except FileNotFoundError:
+                pass
+        events.append(
+            cfg.events_file,
+            "task_deleted",
+            task=tid,
+            section=section,
+            title=title,
+        )
+        return
     if op == "approve":
         # TB-142: drain-side approve. Shares `_approve_review_token` with
         # `do_board_edit({"action":"approve",...})` (the idle-path entry)
@@ -1534,9 +1626,26 @@ def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
         "%Y-%m-%dT%H:%M:%SZ"
     )
     arrow = f" → {task}" if task else ""
-    line = f"- {ts} — applied operator-queued {op}{arrow}\n"
+    lines: list[str] = [f"- {ts} — applied operator-queued {op}{arrow}\n"]
+    if op == "reject":
+        # TB-152: in addition to the standard `applied operator-queued
+        # reject → TB-N` audit line above (so the reject vs. delete
+        # distinction shows up in the verb), emit the richer
+        # `<ts> — rejected ideation proposal → TB-N (<title>): <reason>`
+        # line that ideation Step 0 reads as ground truth on operator
+        # decisions. Title + reason were snapshotted into the queue
+        # record at append time so this branch doesn't have to re-look
+        # them up post-`board.remove`.
+        title = args.get("title", "") or ""
+        reason = args.get("reason", "") or "(no reason given)"
+        title_part = f" ({title})" if title else ""
+        lines.append(
+            f"- {ts} — rejected ideation proposal{arrow}"
+            f"{title_part}: {reason}\n"
+        )
     with log_path.open("a") as f:
-        f.write(line)
+        for line in lines:
+            f.write(line)
 
 
 def _load_operator_queue_applied(state_path: Path) -> set[str]:

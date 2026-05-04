@@ -375,8 +375,14 @@ def build_mattermost_prompt(
         "sees the mutation. Supported ops: `add_ready` / `add_backlog` / "
         "`add_frozen` / `move_to_backlog` / `unfreeze` / `delete` / "
         "`approve` (TB-142 — strips `@blocked:review` from an ideation-"
-        "proposed task so it dispatches). For `add_*` ops the TB-N is "
-        "allocated synchronously and you can mention it in your reply.\n"
+        "proposed task so it dispatches) / `reject TB-N [reason: ...]` "
+        "(TB-152 — ideation proposals only; drops the row AND captures "
+        "`<reason>` in operator_log.md so ideation Step 0 stops "
+        "re-proposing it; route via `operator_queue_append({\"op\": "
+        "\"reject\", \"task_id\": \"TB-N\", \"reason\": \"...\"})`; for "
+        "non-proposal removals use `delete`). For `add_*` ops the TB-N "
+        "is allocated synchronously and you can mention it in your "
+        "reply.\n"
         "\n"
         "Still available directly: `daemon_control` (pause / resume — "
         "pause takes effect on the **next** tick; any running task "
@@ -434,7 +440,7 @@ def build_mattermost_prompt(
         "Interpret this message in context (read board/events as needed), then take action via tools:",
     ])
     parts.extend([
-        "- If the user asks to add / approve / delete / backlog / unfreeze a task: use `operator_queue_append` (NOT `board_edit` — it's disabled, TB-142/TB-145). The daemon drains the queue between tick stages, so your op lands at the next tick boundary without racing any running task's snapshot window. **Approving an ideation-proposed task** (TB-121) is `op=\"approve\"` with `task_id=TB-N` — the drain-side handler strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so the task dispatches at the next tick.",
+        "- If the user asks to add / approve / reject / delete / backlog / unfreeze a task: use `operator_queue_append` (NOT `board_edit` — it's disabled, TB-142/TB-145). The daemon drains the queue between tick stages, so your op lands at the next tick boundary without racing any running task's snapshot window. **Approving an ideation-proposed task** (TB-121) is `op=\"approve\"` with `task_id=TB-N` — the drain-side handler strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so the task dispatches at the next tick. **Rejecting an ideation-proposed task** (TB-152) is `op=\"reject\"` with `task_id=TB-N` and `reason=\"...\"` — drops the row AND writes `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` to operator_log.md so ideation Step 0 learns from the rejection. `reject` is reserved for ideation proposals (Backlog + `@blocked:review`); for anything else (typo, superseded, no-longer-relevant) route the operator at `delete`.",
         # TB-154: pinned phrasing — `tests/test_prompts.py` asserts every
         # canonical section name appears in the prompt body so future
         # edits can't silently drop the briefing-shape contract. The
