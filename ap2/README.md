@@ -73,7 +73,7 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 stop` | SIGTERM the daemon. `-f` for SIGKILL. |
 | `ap2 status` | Daemon liveness, board counts, cron jobs, next task. `--json`. |
 | `ap2 logs -n 40` | Tail recent events. `--json`. |
-| `ap2 add "<title>"` | Append a task. `-s Ready\|Backlog\|Frozen`, `-t #tag`, `-d <desc>`, `--briefing-file <path>`, `--no-verify`. |
+| `ap2 add "<title>"` | Append a task. `-s Ready\|Backlog\|Frozen` (default: `Backlog` — TB-167; operator-filed tasks land in triage alongside ideation proposals and the daemon auto-promotes when capacity opens), `-t #tag`, `-d <desc>`, `--briefing-file <path>`, `--no-verify`. |
 | `ap2 backlog <TB-N>` | Move any task to Backlog. |
 | `ap2 unfreeze <TB-N>` | Un-freeze + reset retry counter. Refuses if not in Frozen. |
 | `ap2 delete <TB-N>` | Permanently remove a task. Refuses Active/Ready without `--force`. Emits `task_deleted`. |

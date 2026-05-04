@@ -1158,7 +1158,16 @@ def build_parser() -> argparse.ArgumentParser:
              "Required since TB-135 — the daemon's per-task verifier "
              "needs a real `## Verification` section.",
     )
-    s.add_argument("-s", "--section", default="Ready", help="Ready|Backlog|Frozen")
+    s.add_argument(
+        "-s", "--section", default="Backlog",
+        help="Ready|Backlog|Frozen (default: Backlog — operator-filed "
+             "tasks land in triage alongside ideation proposals; the "
+             "daemon auto-promotes Backlog → Ready when capacity opens. "
+             "Pass `-s Ready` for prior fast-track behavior; "
+             "`--blocked review` only surfaces from Backlog so leaving "
+             "the default keeps review-pending tasks visible to "
+             "`ap2 status` — TB-167.)",
+    )
     s.add_argument(
         "-t", "--tags", nargs="*",
         help="extra tags appended to those parsed from the briefing's "

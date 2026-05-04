@@ -1174,6 +1174,187 @@ def test_compose_briefing_via_editor_returns_none_without_editor(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# TB-167: `ap2 add` defaults the target section to Backlog (was Ready).
+# Backlog matches ideation-proposed tasks (uniform "to be triaged" semantics),
+# the daemon's auto-promotion fast-tracks an empty-board add to Ready on the
+# next tick, and `--blocked review` only surfaces in `ap2 status` when the
+# task lands in Backlog — keeping operator-filed review-pending tasks from
+# vanishing into a Ready half-state. Explicit `-s Ready`/`-s Frozen` keep
+# their existing semantics for callers that want them.
+
+
+def test_add_argparse_default_section_is_backlog(tmp_path: Path):
+    """TB-167: the `add` subparser's `-s/--section` argument defaults to
+    Backlog — i.e. `ap2 add --briefing-file <path>` (no `-s`) parses
+    with `args.section == "Backlog"`. Prior default was "Ready"; this
+    test pins the new contract at the argparse layer so a refactor of
+    `build_parser` can't silently regress to the old behavior."""
+    from ap2.cli import build_parser
+
+    p = build_parser()
+    args = p.parse_args(
+        [
+            "--project", str(tmp_path),
+            "add",
+            "--briefing-file", "/dev/null",
+        ]
+    )
+    assert args.cmd == "add"
+    assert args.section == "Backlog"
+
+
+def test_add_with_default_section_routes_through_add_backlog(tmp_path: Path):
+    """TB-167: `cmd_add` with no explicit `-s` (default = "Backlog")
+    enqueues `op="add_backlog"` and, after the operator-queue drain,
+    the new task lands in the Backlog section.
+
+    Exercises the helper-default path that scripts and the
+    ap2-task-skill quickstart hit — what the operator gets when they
+    just type `ap2 add --briefing-file …`."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    # `_add_args` defaults `section` to "Backlog" (mirrors the new
+    # argparse default — TB-167). Pass it explicitly here so the
+    # assertion below documents the contract under test.
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief), section="Backlog"))
+    assert rc == 0
+
+    # Pending op is `add_backlog` (not `add_ready`) — verifiable on the
+    # operator-queue file before the drain runs.
+    queue = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    import json as _json
+    rec = _json.loads(queue.read_text().strip().splitlines()[-1])
+    assert rec["op"] == "add_backlog", rec
+
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None
+    section, _ = board.find(found.id)
+    assert section == "Backlog"
+
+
+def test_add_with_explicit_ready_routes_through_add_ready(tmp_path: Path):
+    """TB-167 regression: callers that *do* want the prior fast-track
+    behavior pass `-s Ready` and get exactly that — `op="add_ready"`
+    and the task lands in the Ready section. Pins the explicit-flag
+    path so the default change doesn't bleed into the `-s Ready`
+    branch."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief), section="Ready"))
+    assert rc == 0
+
+    queue = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    import json as _json
+    rec = _json.loads(queue.read_text().strip().splitlines()[-1])
+    assert rec["op"] == "add_ready", rec
+
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None
+    section, _ = board.find(found.id)
+    assert section == "Ready"
+
+
+def test_add_with_explicit_frozen_routes_through_add_frozen(tmp_path: Path):
+    """TB-167 regression: `-s Frozen` continues to route through
+    `op="add_frozen"` and land the task in Frozen. The third branch
+    of the section_map — same default-only contract as `-s Ready`."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief), section="Frozen"))
+    assert rc == 0
+
+    queue = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    import json as _json
+    rec = _json.loads(queue.read_text().strip().splitlines()[-1])
+    assert rec["op"] == "add_frozen", rec
+
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None
+    section, _ = board.find(found.id)
+    assert section == "Frozen"
+
+
+def test_add_default_with_blocked_review_surfaces_in_status(
+    tmp_path: Path, capsys,
+):
+    """TB-167's motivating UX gap: `ap2 add --briefing-file <path>
+    --blocked review` (no `-s`) used to land in Ready and stay
+    invisible to `ap2 status`'s `review:` line, because the
+    review-pending counter only walks Backlog tasks. The default-to-
+    Backlog change closes that gap — the new task lands in Backlog
+    AND `ap2 status` (text + JSON) names its TB-N in the
+    pending-review list."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    rc = cmd_add(
+        cfg,
+        _add_args(
+            briefing_file=str(brief),
+            section="Backlog",  # default — TB-167
+            blocked="review",
+        ),
+    )
+    assert rc == 0
+    _drain(cfg)
+
+    board = Board.load(cfg.tasks_file)
+    found = next(
+        (t for t in board.iter_tasks() if t.title == "Add foo helper"),
+        None,
+    )
+    assert found is not None
+    # Lands in Backlog (the only section where review gating is
+    # surfaced + auto-promotion respects @blocked:review).
+    section, _ = board.find(found.id)
+    assert section == "Backlog"
+    # `@blocked:review` codespan made it onto the task line.
+    assert found.meta.get("blocked") == "review"
+    assert found.blocked_on == ["review"]
+
+    # Text branch of `ap2 status` names the TB-N on the `review:` line.
+    capsys.readouterr()  # drain anything cmd_add printed
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "review:" in out
+    assert found.id in out
+    assert "ap2 approve" in out
+
+    # JSON branch carries the same TB-N in `pending_review_ids`.
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert found.id in payload["pending_review_ids"]
+    assert payload["pending_review"] >= 1
+
+
+# ---------------------------------------------------------------------------
 # TB-139: ap2 --version embeds source-commit timestamp on editable installs
 # so an operator can confirm freshness without falling back to `git log`.
 # Format: `ap2 <base>(+<sha>.<ts>)?` per the briefing's pinned regex.
