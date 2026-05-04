@@ -173,3 +173,9 @@
 - **Summary:** Closed the gap from TB-154's first attempt: wired _validate_briefing_structure into the update-op branch of do_operator_queue_append (before the slug-stable briefing write) and added test_tb154_validate_briefing_structure_fires_for_update_op covering Acceptance-rename, missing-Verification, empty-Verification reject paths plus a canonical-accept sanity. Tightened the operator_queue_append docstring to name update alongside add_*. Full suite (814 tests) green; previous TB-154 work from 54a7f6e (validator + add_* wiring + check.py lint + prompts.py + init.py constant) remains in main.
 - **Files:** ap2/tools.py, ap2/tests/test_tools.py
 - **Tests:** pass
+
+## [2026-05-04] TB-151: Surface pending-review TB-Ns (not just count) in `ap2 status` and cron status-report
+- **Commit:** `65ccc76`
+- **Summary:** Added shared `_format_pending_review_line` (status_report.py) + `pending_review_ids` collection so `ap2 status` and the cron status-report both name the TB-Ns (truncated to 5 with "(+N more)"); injected a "Pending operator review (N): TB-..." line into the cron snapshot block via a new `state_extras` kwarg on `build_control_prompt` and updated STATUS_REPORT_PROMPT to forward it verbatim. Full ap2/tests/ gate passes (831).
+- **Files:** ap2/cli.py, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_cli.py, ap2/tests/test_status_report_skip.py, ap2/tests/test_tools.py, ap2/tests/e2e/test_tb144_status_report_chat_trigger.py
+- **Tests:** pass
