@@ -632,3 +632,227 @@ def test_status_report_prompt_instructs_forwarding_pending_review_line():
     assert "Pending operator review" in body
     # The forwarding rule is explicit (verbatim copy, not paraphrase).
     assert "verbatim" in body.lower() or "VERBATIM" in body
+
+
+# ---------------------------------------------------------------------------
+# TB-156: per-call-site effort knob for the status-report routine.
+#
+# Status-report is a pure summarization job (read events tail, render
+# markdown, post to Mattermost). It doesn't need the multi-step reasoning
+# budget that `xhigh` is sized for. The new env knob
+# `AP2_STATUS_REPORT_EFFORT` lets operators tune this site separately
+# from the rest of the agent fleet; the per-site default of `medium`
+# kicks in when neither it nor the global `AP2_AGENT_EFFORT` is set.
+#
+# Both cron and chat triggers route through the same code path so the
+# tests exercise both — same effort, regardless of who pulled the trigger.
+
+
+class _OptionsCapturingSDK:
+    """SDK stub that captures the kwargs handed to `ClaudeAgentOptions`
+    so the TB-156 effort tests can pin `extra_args["effort"]`. Mirrors
+    `_NoopSDK` above but exposes the captured kwargs to the test for
+    post-call assertions on `extra_args`."""
+
+    def __init__(self) -> None:
+        self.options_kw: dict | None = None
+        self.called = False
+        outer = self
+
+        class _OptionsBound:
+            def __init__(self, **kw):
+                outer.options_kw = kw
+
+        # Bind a per-instance options class so each SDK stub keeps its
+        # own captured kwargs (the daemon reads `sdk.ClaudeAgentOptions`
+        # off the instance, not the class).
+        self.ClaudeAgentOptions = _OptionsBound  # noqa: N803
+
+    def query(self, *, prompt, options):  # noqa: ARG002
+        self.called = True
+
+        async def _gen():
+            if False:
+                yield None
+
+        return _gen()
+
+
+def _run_status_report_capturing_effort(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    trigger: str = "cron",
+) -> str:
+    """Drive `run_status_report` once with the SDK captured and return the
+    `extra_args["effort"]` value handed to `ClaudeAgentOptions`. Seeds
+    enough event activity that the skip-gate doesn't fire."""
+    cfg = _cfg(tmp_path)
+    # Seed activity so the run path is exercised (skip-gate doesn't fire).
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(
+        cfg.events_file, "task_complete", task="TB-1",
+        status="complete", commit="abc1234",
+    )
+    monkeypatch.setattr(
+        "ap2.prompts.build_control_prompt",
+        lambda cfg, name, body, **_kw: "stub prompt",
+    )
+
+    sdk = _OptionsCapturingSDK()
+    asyncio.run(
+        run_status_report(
+            cfg, sdk, mcp_server=None,
+            trigger=trigger,
+            reason=("operator asked" if trigger == "chat" else None),
+        )
+    )
+
+    assert sdk.called, "skip-gate fired unexpectedly; effort not captured"
+    assert sdk.options_kw is not None
+    extra = sdk.options_kw.get("extra_args") or {}
+    assert "effort" in extra, (
+        f"extra_args missing 'effort' key: {sdk.options_kw!r}"
+    )
+    return extra["effort"]
+
+
+def test_status_report_default_effort_is_medium_when_no_env_set(
+    tmp_path, monkeypatch,
+):
+    """TB-156: with neither `AP2_STATUS_REPORT_EFFORT` nor `AP2_AGENT_EFFORT`
+    set, the per-site default kicks in and the SDK options carry
+    `extra_args["effort"] == "medium"` — NOT `xhigh` (the pre-TB-156
+    global default that this knob displaces for status-report
+    specifically). Pure summarization doesn't need the bigger reasoning
+    budget."""
+    monkeypatch.delenv("AP2_STATUS_REPORT_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+
+    effort = _run_status_report_capturing_effort(tmp_path, monkeypatch)
+    assert effort == "medium"
+
+
+def test_status_report_per_site_env_takes_precedence(tmp_path, monkeypatch):
+    """TB-156: `AP2_STATUS_REPORT_EFFORT` overrides the global
+    `AP2_AGENT_EFFORT`. With per-site=`high` and global=`xhigh`, the SDK
+    options carry `high` — operators can dial status-report separately
+    from the rest of the agent fleet."""
+    monkeypatch.setenv("AP2_STATUS_REPORT_EFFORT", "high")
+    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+
+    effort = _run_status_report_capturing_effort(tmp_path, monkeypatch)
+    assert effort == "high"
+
+
+def test_status_report_falls_through_to_global_when_per_site_unset(
+    tmp_path, monkeypatch,
+):
+    """TB-156: precedence chain — when `AP2_STATUS_REPORT_EFFORT` is unset
+    but `AP2_AGENT_EFFORT` is set, the global wins (and so status-report
+    inherits whatever global override the operator pinned). Only when
+    BOTH are unset does the per-site default of `medium` kick in."""
+    monkeypatch.delenv("AP2_STATUS_REPORT_EFFORT", raising=False)
+    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+
+    effort = _run_status_report_capturing_effort(tmp_path, monkeypatch)
+    assert effort == "xhigh"
+
+
+def test_status_report_chat_trigger_uses_same_effort_as_cron(
+    tmp_path, monkeypatch,
+):
+    """TB-156: cron and chat triggers share the same code path for the
+    SDK call, so the effort knob applies to both equally. Pin chat-trigger
+    behavior independently so a future divergence (e.g. someone wires
+    chat-trigger through a different SDK call site) can't quietly skip
+    the per-site lowering."""
+    monkeypatch.delenv("AP2_STATUS_REPORT_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+
+    effort = _run_status_report_capturing_effort(
+        tmp_path, monkeypatch, trigger="chat",
+    )
+    assert effort == "medium"
+
+
+def test_status_report_effort_env_knob_present_in_source():
+    """Source-level pin so a maintainer can't silently drop the
+    `AP2_STATUS_REPORT_EFFORT` env knob and revert status-report to the
+    global `AP2_AGENT_EFFORT`. The verification grep
+    (`AP2_STATUS_REPORT_EFFORT in ap2/`) backs this up at the daemon
+    level; this test catches the same regression in CI."""
+    import inspect
+
+    from ap2 import status_report
+
+    src = inspect.getsource(status_report.run_status_report)
+    assert "AP2_STATUS_REPORT_EFFORT" in src, (
+        "regression: TB-156's per-site effort knob is missing from "
+        "run_status_report"
+    )
+
+
+def test_run_control_agent_default_effort_unchanged_for_other_callers(
+    tmp_path, monkeypatch,
+):
+    """Anti-regression: `_run_control_agent` callers that DON'T pass an
+    explicit `effort=` (cron jobs other than status-report, ideation, the
+    MM handler — though MM handler uses its own SDK call site) keep
+    reading from `AP2_AGENT_EFFORT` and default to `xhigh`. TB-156
+    introduced the optional override; the existing call sites stay on
+    the pre-TB-156 default unless they opt in."""
+    import asyncio as _asyncio
+
+    from ap2 import daemon
+
+    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+
+    cfg = _cfg(tmp_path)
+    sdk = _OptionsCapturingSDK()
+
+    _asyncio.run(daemon._run_control_agent(
+        cfg, sdk, mcp_server=None,
+        label="unit-test",
+        prompt="hi",
+        allowed_tools=[],
+        max_turns=1,
+    ))
+
+    assert sdk.called, "default-path SDK call did not fire"
+    extra = (sdk.options_kw or {}).get("extra_args") or {}
+    assert extra.get("effort") == "xhigh", (
+        f"default effort drifted from xhigh; got {extra!r}"
+    )
+
+
+def test_run_control_agent_explicit_effort_overrides_env(
+    tmp_path, monkeypatch,
+):
+    """When a caller passes `effort="medium"` explicitly,
+    `_run_control_agent` honors it regardless of `AP2_AGENT_EFFORT`. This
+    is the contract `run_status_report` relies on — the per-site
+    computation lives in the caller; `_run_control_agent` is just the
+    plumbing."""
+    import asyncio as _asyncio
+
+    from ap2 import daemon
+
+    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+
+    cfg = _cfg(tmp_path)
+    sdk = _OptionsCapturingSDK()
+
+    _asyncio.run(daemon._run_control_agent(
+        cfg, sdk, mcp_server=None,
+        label="unit-test",
+        prompt="hi",
+        allowed_tools=[],
+        max_turns=1,
+        effort="medium",
+    ))
+
+    extra = (sdk.options_kw or {}).get("extra_args") or {}
+    assert extra.get("effort") == "medium", (
+        f"explicit effort=medium not honored over env xhigh; got {extra!r}"
+    )

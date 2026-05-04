@@ -662,3 +662,165 @@ def test_run_shell_bullet_call_site_pins_bin_bash_executable():
         "regression: TB-147's /bin/bash override is missing from "
         "_run_shell_bullet — bash-only bullets will fail under sh"
     )
+
+
+# ---------------------------------------------------------------------------
+# TB-156: per-call-site effort knob for the prose-bullet judge + diff
+# truncation cap lowered from 100KB to 30KB.
+#
+# The judge runs once per prose bullet — multiplied across every retry of
+# every task with prose criteria, the per-call cost adds up. Two tier-1
+# token-saving levers:
+#
+#   1. Trim the worst-case-defensive diff cap (100KB → 30KB). The judge has
+#      Read/Glob/Grep (TB-136) and the prompt tells it the working tree at
+#      HEAD is authoritative when the diff is ambiguous, so the cap is now a
+#      soft hint rather than a hard wall.
+#   2. Lower the judge's reasoning-effort budget from `xhigh` → `high`. The
+#      judge's job (read a diff, optionally Grep/Read for confirmation,
+#      emit a one-line JSON verdict) doesn't need multi-step reasoning.
+#
+# Both are pinned below. The effort knob is a per-site env var
+# (AP2_VERIFY_JUDGE_EFFORT) that takes precedence over the global
+# AP2_AGENT_EFFORT and falls through to a per-site default of `high` when
+# neither is set — task agents and the MM handler stay on the global
+# default (currently `xhigh`).
+# ---------------------------------------------------------------------------
+
+
+def _capture_judge_options(monkeypatch=None) -> dict:
+    """Run `_judge_prose_bullet` once with a fake SDK and return the
+    `{prompt, options}` dict captured from the SDK call. Used by the
+    TB-156 effort + truncation tests below."""
+    import asyncio
+
+    from ap2 import verify
+
+    captured: dict = {}
+
+    class _OptionsRecorder:
+        def __init__(self, **kw):
+            captured["options"] = kw
+
+    async def _gen(prompt, options):  # noqa: ARG001
+        captured["prompt"] = prompt
+        from ap2.tests.e2e._fakes import _FakeMsg
+        yield _FakeMsg('{"status": "pass", "rationale": "ok"}')
+
+    class _SDK:
+        ClaudeAgentOptions = _OptionsRecorder
+
+        @staticmethod
+        def query(*, prompt, options):
+            return _gen(prompt, options)
+
+    bullet = verify.VerifyBullet(kind="prose", text="some bullet")
+    asyncio.run(verify._judge_prose_bullet(
+        bullet,
+        project_root=Path("/tmp"),
+        sdk=_SDK,
+        diff_text="x" * 50_000,  # callers that don't care about the diff
+                                 # still see truncation behavior here
+    ))
+    return captured
+
+
+def test_judge_default_effort_is_high_when_no_env_set(monkeypatch):
+    """TB-156: with neither `AP2_VERIFY_JUDGE_EFFORT` nor `AP2_AGENT_EFFORT`
+    set, the per-site default kicks in and the SDK options carry
+    `extra_args["effort"] == "high"` — NOT `xhigh` (the pre-TB-156 global
+    default that this knob displaces for the judge specifically)."""
+    monkeypatch.delenv("AP2_VERIFY_JUDGE_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+
+    captured = _capture_judge_options()
+    extra = captured["options"]["extra_args"]
+    assert extra["effort"] == "high", extra
+
+
+def test_judge_effort_per_site_env_takes_precedence(monkeypatch):
+    """TB-156: `AP2_VERIFY_JUDGE_EFFORT` overrides the global
+    `AP2_AGENT_EFFORT`. With per-site=`medium` and global=`xhigh`, the SDK
+    options carry `medium` — operators can dial the judge separately from
+    the rest of the agent fleet."""
+    monkeypatch.setenv("AP2_VERIFY_JUDGE_EFFORT", "medium")
+    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+
+    captured = _capture_judge_options()
+    assert captured["options"]["extra_args"]["effort"] == "medium"
+
+
+def test_judge_effort_falls_through_to_global_when_per_site_unset(monkeypatch):
+    """TB-156: precedence chain — when `AP2_VERIFY_JUDGE_EFFORT` is unset
+    but `AP2_AGENT_EFFORT` is set, the global wins (and so the judge
+    inherits whatever global override the operator pinned). Only when
+    BOTH are unset does the per-site default of `high` kick in."""
+    monkeypatch.delenv("AP2_VERIFY_JUDGE_EFFORT", raising=False)
+    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+
+    captured = _capture_judge_options()
+    assert captured["options"]["extra_args"]["effort"] == "xhigh"
+
+
+def test_judge_diff_truncated_to_30kb_in_prompt(monkeypatch):
+    """TB-156: the prompt sent to the SDK contains at most 30,000 chars
+    of the cumulative diff. A synthetic 50KB diff is truncated to 30KB
+    before being interpolated; the remaining 20KB never reaches the SDK
+    (the judge can Grep/Read for what it needs — TB-136). This pins the
+    new cap; a regression that bumps it back to 100KB would re-introduce
+    the ~70KB-of-padding judge-token waste that motivated TB-156."""
+    monkeypatch.delenv("AP2_VERIFY_JUDGE_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+
+    captured = _capture_judge_options()
+    prompt = captured["prompt"]
+    # The diff is wrapped in a fenced ```...``` block in the prompt body.
+    # We don't pin the exact wrapping (the prompt may evolve); we just
+    # assert the truncated diff content (30K of 'x') lands and the rest
+    # does not. Use a counter on 'x' chars between the fences.
+    assert "x" * 30_000 in prompt, (
+        "the first 30,000 diff chars must reach the prompt"
+    )
+    assert "x" * 30_001 not in prompt, (
+        "diff truncation cap is no longer 30,000 — TB-156 regression"
+    )
+
+
+def test_judge_diff_truncation_cap_pinned_at_call_site():
+    """Defense in depth: pin the literal `diff_text[:30_000]` slice in
+    the source so a maintainer can't silently bump it back to 100,000
+    (`[:100_000]` is the pre-TB-156 cap) without a test failure. The
+    behavioral test above catches a bump on the synthetic 50K diff, but
+    a bump to e.g. 35,000 would silently pass it — pinning the literal
+    here closes that loophole."""
+    import inspect
+
+    from ap2 import verify
+
+    src = inspect.getsource(verify._judge_prose_bullet)
+    assert "diff_text[:30_000]" in src, (
+        "regression: TB-156's 30KB diff truncation cap is missing from "
+        "_judge_prose_bullet — judge tokens will balloon"
+    )
+    # Anti-regression: the previous 100KB cap must NOT reappear.
+    assert "diff_text[:100_000]" not in src, (
+        "regression: pre-TB-156 100KB diff cap is back in "
+        "_judge_prose_bullet — re-introduces ~70KB of padding tokens"
+    )
+
+
+def test_judge_effort_env_knob_present_in_source():
+    """Source-level pin so a maintainer can't silently drop the
+    `AP2_VERIFY_JUDGE_EFFORT` env knob and revert the judge to the
+    global `AP2_AGENT_EFFORT`. The verification grep
+    (`AP2_VERIFY_JUDGE_EFFORT in ap2/verify.py`) backs this up at the
+    daemon level; this test catches the same regression in CI."""
+    import inspect
+
+    from ap2 import verify
+
+    src = inspect.getsource(verify._judge_prose_bullet)
+    assert "AP2_VERIFY_JUDGE_EFFORT" in src, (
+        "regression: TB-156's per-site effort knob is missing from "
+        "_judge_prose_bullet"
+    )

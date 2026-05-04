@@ -362,6 +362,18 @@ async def run_status_report(
         start_payload["reason"] = reason
     events.append(cfg.events_file, "cron_start", **start_payload)
 
+    # TB-156: status-report is a pure summarization job (read events tail,
+    # render markdown, post to Mattermost). It doesn't need the multi-step
+    # reasoning budget that `xhigh` is sized for. Default to `medium` so
+    # cron + chat-trigger reports run cheaper than task agents (which
+    # stay on the global default, `xhigh`); operators can still pin a
+    # specific value via `AP2_STATUS_REPORT_EFFORT`, or globally via
+    # `AP2_AGENT_EFFORT`. Precedence: per-site env > global env > per-site
+    # default.
+    effort = os.environ.get(
+        "AP2_STATUS_REPORT_EFFORT",
+        os.environ.get("AP2_AGENT_EFFORT", "medium"),
+    )
     timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
         cfg,
         sdk,
@@ -370,6 +382,7 @@ async def run_status_report(
         prompt=prompt,
         allowed_tools=CONTROL_AGENT_TOOLS,
         max_turns=max_turns,
+        effort=effort,
     )
     if timed_out:
         events.append(

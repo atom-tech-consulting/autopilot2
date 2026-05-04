@@ -323,9 +323,30 @@ async def _judge_prose_bullet(
         "shape if needed), the bullet PASSES regardless of whether the "
         "diff makes that obvious.\n\n"
         f"Bullet:\n  {bullet.text}\n\n"
-        f"Cumulative diff:\n```\n{diff_text[:100_000]}\n```\n"
+        # TB-156: diff cap lowered from 100KB → 30KB. Most cumulative
+        # diffs land in the 5-30KB range; the prior 100KB worst-case-
+        # defensive cap was paying ~70KB of judge tokens per bullet for
+        # padding. The judge has Read/Glob/Grep (TB-136) and the prompt
+        # tells it the working tree at HEAD is authoritative — when the
+        # truncated tail matters, it can pull what it needs directly. So
+        # the cap is now a soft hint rather than a hard wall, traded
+        # against ~50% judge-token savings on average. Operators wanting
+        # a different cap can edit the source.
+        f"Cumulative diff:\n```\n{diff_text[:30_000]}\n```\n"
     )
     try:
+        # TB-156: per-call-site effort knob. The judge's job — read a diff,
+        # optionally Grep/Read for confirmation, emit a one-line JSON
+        # verdict — doesn't need the multi-step reasoning budget that
+        # `xhigh` is sized for. Default to `high` here so the judge runs
+        # cheaper than task agents (which stay on the global default,
+        # `xhigh`); operators can still pin a specific value via
+        # `AP2_VERIFY_JUDGE_EFFORT`, or globally via `AP2_AGENT_EFFORT`.
+        # Precedence: per-site env > global env > per-site default.
+        effort = os.environ.get(
+            "AP2_VERIFY_JUDGE_EFFORT",
+            os.environ.get("AP2_AGENT_EFFORT", "high"),
+        )
         # The judge can take a few tool roundtrips (Grep → Read) before
         # emitting its final verdict, so allow a handful of turns. The
         # tools are read-only and scoped to project_root via cwd.
@@ -336,7 +357,7 @@ async def _judge_prose_bullet(
             max_turns=int(os.environ.get("AP2_VERIFY_JUDGE_MAX_TURNS", 20)),
             setting_sources=["project"],
             model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
-            extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
+            extra_args={"effort": effort},
         )
         text = ""
         async for msg in sdk.query(prompt=prompt, options=options):

@@ -725,6 +725,7 @@ async def _run_control_agent(
     prompt: str,
     allowed_tools,
     max_turns: int,
+    effort: str | None = None,
 ) -> tuple[bool, str | None, str, Path]:
     """SDK plumbing for control-agent runs (cron jobs, ideation).
 
@@ -733,10 +734,22 @@ async def _run_control_agent(
     tail, path)``. On any other exception: ``(False, "<Type>: <msg>",
     tail, path)``. The caller owns the surrounding event vocabulary,
     cooldown bookkeeping, and state commit.
+
+    TB-156: ``effort`` lets a caller override the reasoning-effort budget
+    for this specific invocation. When ``None`` (the default) we fall back
+    to the global ``AP2_AGENT_EFFORT`` env (default ``xhigh``) so existing
+    callers keep their pre-TB-156 behavior. Per-call-site lowering (e.g.
+    status-report) is opt-in: the caller computes its own effort using
+    its own per-site env knob and passes it explicitly.
     """
     prompt_dump, _, _ = _prep_debug_dumps(cfg, label)
     prompt_dump.write_text(prompt)
     stderr_lines, stderr_sink = _make_stderr_sink()
+
+    resolved_effort = (
+        effort if effort is not None
+        else os.environ.get("AP2_AGENT_EFFORT", "xhigh")
+    )
 
     async def _consume() -> None:
         async for _ in sdk.query(
@@ -750,7 +763,7 @@ async def _run_control_agent(
                 setting_sources=["project"],
                 stderr=stderr_sink,
                 model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
-                extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
+                extra_args={"effort": resolved_effort},
             ),
         ):
             pass
