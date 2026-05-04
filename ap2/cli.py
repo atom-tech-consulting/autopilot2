@@ -823,6 +823,38 @@ def cmd_reject(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ideate(cfg: Config, args: argparse.Namespace) -> int:
+    """Manually trigger an ideation pass on the daemon's next tick (TB-159).
+
+    Bypasses the natural empty-board / cooldown / `AP2_IDEATION_DISABLED`
+    gates that govern `ideation._maybe_ideate`. Routed through the
+    operator queue rather than spinning up the SDK from the CLI process
+    so the daemon stays the single owner of the control-agent SDK slot
+    (same pattern as `ap2 add` / `approve` / `reject` / `unfreeze` /
+    `delete` / `update`).
+
+    `--force` overrides the Active-task refusal — by default `cmd_ideate`
+    refuses when a task is currently in flight (concurrent task-agent +
+    control-agent SDK runs share the same slot; TB-122 split
+    mattermost-handler vs task agent for exactly this reason). The
+    natural cooldown clock is still bumped after the forced run, so
+    repeated `ap2 ideate` invocations won't get lap the next natural
+    cron-driven fire.
+
+    The CLI is non-blocking: it returns immediately after the queue
+    append; the daemon picks up the signal in the next tick (≤30s by
+    default).
+    """
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "ideate", "force": bool(args.force)}
+    )
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print("queued ideate (will run at next tick — ≤30s)")
+    return 0
+
+
 def cmd_approve(cfg: Config, args: argparse.Namespace) -> int:
     """Strip the `(blocked on: review)` review-gate clause from a task
     (TB-121).
@@ -1283,6 +1315,29 @@ def build_parser() -> argparse.ArgumentParser:
              "placeholder, itself a signal to ideation.",
     )
     s.set_defaults(func=cmd_reject)
+
+    s = sub.add_parser(
+        "ideate",
+        help="manually trigger an ideation pass (TB-159): bypasses the "
+             "natural empty-board / cooldown / `AP2_IDEATION_DISABLED` "
+             "gates. Routed through the operator queue; the daemon "
+             "runs ideation on its next tick (≤30s). Refused when a "
+             "task is currently Active unless `--force` is passed "
+             "(concurrent task-agent + control-agent SDK runs share "
+             "the same slot). The natural cooldown clock still bumps "
+             "after the forced run, so back-to-back `ap2 ideate` "
+             "calls don't lap the next cron-driven fire.",
+    )
+    s.add_argument(
+        "--force",
+        action="store_true",
+        help="override the Active-task refusal — operator escape hatch "
+             "when you really need ideation to fire while a task is "
+             "in flight. The disable knob and cooldown are bypassed by "
+             "default (the verb's whole point); --force is purely for "
+             "the Active-section check.",
+    )
+    s.set_defaults(func=cmd_ideate)
 
     s = sub.add_parser(
         "rollback",

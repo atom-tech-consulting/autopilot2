@@ -94,50 +94,28 @@ def _trigger_task_count() -> int:
     return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
 
 
-async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
-    """Fire ideation when the working queue is shallow and the cooldown elapsed.
+async def _run_ideation(cfg: Config, sdk, mcp_server) -> None:
+    """Run the ideation control-agent unconditionally.
 
-    Gates (in order):
-    1. `AP2_IDEATION_DISABLED` opt-out (tests + manual-only projects).
-    2. Active hard gate — non-empty Active means a task is in flight and
-       sharing the SDK slot with a control agent is unsafe.
-    3. Ready+Backlog count below `AP2_IDEATION_TRIGGER_TASK_COUNT`
-       (default 3). Pipeline Pending and Frozen do not count.
-    4. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire.
+    All gating (disable knob, cooldown, queue-depth, Active hard gate)
+    is the caller's responsibility — this helper is the actual SDK
+    invocation, prompt-dump, event emission, cooldown bookkeeping, and
+    state-file commit. Both `_maybe_ideate` (natural cron-driven path)
+    and `force_ideate` (TB-159 manual operator trigger) reuse this
+    helper so they emit the same `ideation_empty_board` /
+    `ideation_timeout` / `ideation_error` event vocabulary, advance the
+    same cooldown clock, and produce the same state-file commit.
 
-    Reuses `daemon._run_control_agent` for SDK plumbing (prompt-dump,
-    stderr capture, MCP wiring) but owns its own event vocabulary —
-    `ideation_empty_board` on entry, `ideation_error` / `ideation_timeout`
-    on failure, and the agent's own `ideation_complete` log_event call as
-    the success-end marker. Cooldown is still tracked under the
-    `ideation` key in cron_state.json so the TB-95 migration from the
-    cron-yaml-driven design is unaffected.
-
-    Set `AP2_IDEATION_DISABLED=1` to opt out entirely (the tests use this
-    by default; it's also useful for projects that want to drive ideation
-    manually rather than on the natural gate).
+    Note: `ideation_empty_board` is the historical entry-marker name —
+    kept for backward compatibility even though forced runs may fire
+    on a non-empty board. Callers distinguish forced from natural via
+    the separate `ideation_forced` event the operator-queue drain
+    emits at queue-application time (TB-159).
     """
-    if os.environ.get("AP2_IDEATION_DISABLED", "").strip() in ("1", "true", "yes"):
-        return
-    board = Board.load(cfg.tasks_file)
-    # Active is a HARD gate independent of the threshold: a task agent and
-    # a control agent cannot share the SDK slot safely (TB-159 background).
-    # Skip whenever Active is non-empty regardless of how many Ready/Backlog
-    # items there are.
-    if next(board.iter_tasks(section="Active"), None) is not None:
-        return
-    queued = sum(
-        sum(1 for _ in board.iter_tasks(section=s))
-        for s in ("Ready", "Backlog")
-    )
-    if queued >= _trigger_task_count():
-        return
     state = load_state(cfg.cron_state_file)
     last = state.get(IDEATION_NAME, 0.0)
     cooldown = _cooldown_s()
     now = time.time()
-    if now - last < cooldown:
-        return
     events.append(
         cfg.events_file,
         "ideation_empty_board",
@@ -192,10 +170,75 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
             prompt_dump=str(prompt_dump),
         )
     # Always advance the cooldown — even on failure — so a broken
-    # ideation agent doesn't get hammered every tick.
+    # ideation agent doesn't get hammered every tick. For forced runs
+    # this is what makes back-to-back `ap2 ideate` calls still subject
+    # to the natural cooldown for the NEXT cron-driven fire (TB-159).
     mark_run(cfg.cron_state_file, IDEATION_NAME)
     touched = _daemon._changed_state_paths(
         pre_snapshot, _daemon._snapshot_state_paths(cfg)
     )
     if touched:
         _daemon._commit_state_files(cfg, "state: ideation", paths=touched)
+
+
+async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
+    """Fire ideation when the working queue is shallow and the cooldown elapsed.
+
+    Gates (in order):
+    1. `AP2_IDEATION_DISABLED` opt-out (tests + manual-only projects).
+    2. Active hard gate — non-empty Active means a task is in flight and
+       sharing the SDK slot with a control agent is unsafe.
+    3. Ready+Backlog count below `AP2_IDEATION_TRIGGER_TASK_COUNT`
+       (default 3). Pipeline Pending and Frozen do not count.
+    4. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire.
+
+    Delegates the actual SDK invocation + bookkeeping to `_run_ideation`
+    so the forced-run path (`force_ideate`, TB-159) shares the same
+    event vocabulary, cooldown writeback, and state-file commit.
+
+    Set `AP2_IDEATION_DISABLED=1` to opt out entirely (the tests use this
+    by default; it's also useful for projects that want to drive ideation
+    manually rather than on the natural gate).
+    """
+    if os.environ.get("AP2_IDEATION_DISABLED", "").strip() in ("1", "true", "yes"):
+        return
+    board = Board.load(cfg.tasks_file)
+    # Active is a HARD gate independent of the threshold: a task agent and
+    # a control agent cannot share the SDK slot safely (TB-159 background).
+    # Skip whenever Active is non-empty regardless of how many Ready/Backlog
+    # items there are.
+    if next(board.iter_tasks(section="Active"), None) is not None:
+        return
+    queued = sum(
+        sum(1 for _ in board.iter_tasks(section=s))
+        for s in ("Ready", "Backlog")
+    )
+    if queued >= _trigger_task_count():
+        return
+    state = load_state(cfg.cron_state_file)
+    last = state.get(IDEATION_NAME, 0.0)
+    cooldown = _cooldown_s()
+    now = time.time()
+    if now - last < cooldown:
+        return
+    await _run_ideation(cfg, sdk, mcp_server)
+
+
+async def force_ideate(cfg: Config, sdk, mcp_server) -> None:
+    """Run ideation unconditionally — manual operator trigger (TB-159).
+
+    Bypasses the `AP2_IDEATION_DISABLED` opt-out, the cooldown, and the
+    Ready+Backlog queue-depth gate. Does NOT bypass the Active hard
+    gate — that check lives at queue-append time in
+    `do_operator_queue_append({"op": "ideate", ...})` and at drain time
+    is implicit (the daemon won't dispatch the forced run while a task
+    agent is sharing the SDK slot).
+
+    Still calls `mark_run` (via `_run_ideation`) after the run so the
+    NEXT natural cooldown clock resets — i.e. running `ap2 ideate` ten
+    times in a row would still hit a real `AP2_IDEATION_COOLDOWN_S` gap
+    before the next cron-driven fire. The `ideation_forced`
+    audit event is emitted by the queue-drain side, not here, so this
+    helper stays the single SDK-invocation path shared with `_maybe_ideate`.
+    """
+    await _run_ideation(cfg, sdk, mcp_server)

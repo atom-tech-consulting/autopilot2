@@ -896,6 +896,19 @@ OPERATOR_QUEUE_OPS = (
     # Backlog + `@blocked:review` tasks (ideation proposals); other
     # sections route the operator at `ap2 delete`.
     "reject",
+    # TB-159: manual operator trigger for an ideation pass that bypasses
+    # the natural empty-board / cooldown / `AP2_IDEATION_DISABLED`
+    # gates. Routed through the queue (rather than CLI-spinning its own
+    # SDK) so the daemon stays the single owner of the control-agent
+    # SDK slot. The drain-side does NOT invoke ideation directly (that
+    # would block the board lock for minutes); instead it records an
+    # `ideation_forced` event and signals via `drain_operator_queue`'s
+    # return dict that the daemon should run `force_ideate` on this
+    # tick after the drain completes. Pre-validation in
+    # `do_operator_queue_append` refuses the op when Active is
+    # non-empty (concurrent task-agent + control-agent SDK runs are
+    # unsafe — same precedent as TB-122) unless `force=true` is set.
+    "ideate",
 )
 
 
@@ -1071,6 +1084,32 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             op=op,
             task_id=preallocated_task_id,
         )
+    elif op == "ideate":
+        # TB-159: manual ideation trigger. The op carries no task_id —
+        # snapshot validation is purely the Active hard gate (concurrent
+        # task-agent + control-agent SDK runs share the same in-process
+        # slot; TB-122 split mattermost-handler vs task agent for
+        # exactly this reason). `force=true` overrides the Active check
+        # — operator escape hatch. The drain side does NOT invoke
+        # ideation (that would hold the board lock for minutes); it
+        # only emits the `ideation_forced` audit event and signals the
+        # daemon to run `force_ideate` after the drain completes.
+        force = bool(args.get("force"))
+        if not force:
+            with board_file_lock(cfg.tasks_file):
+                board = Board.load(cfg.tasks_file)
+                active_present = (
+                    next(board.iter_tasks(section="Active"), None) is not None
+                )
+            if active_present:
+                return _err(
+                    "a task is currently Active — refusing forced ideate "
+                    "without --force (concurrent task-agent + control-"
+                    "agent SDK runs share the same slot). Pass --force "
+                    "to override at your own risk, or wait for the task "
+                    "to land."
+                )
+        rec_args = {"force": force}
     else:
         task_id = (args.get("task_id") or "").strip()
         if not task_id:
@@ -1354,14 +1393,16 @@ def drain_operator_queue(cfg: Config) -> dict:
     add. Drains that applied only move/unfreeze/delete ops leave
     CLAUDE.md untouched.
 
-    Returns a dict with `applied` (count) and `touched_paths` (state
-    files dirtied) so the daemon-side caller can pass them to
-    `_commit_state_files` for a coherent state-file commit.
+    Returns a dict with `applied` (count), `touched_paths` (state
+    files dirtied), and `force_ideate` (TB-159 — set to True if any
+    drained op was an `ideate` signal, telling the daemon to run
+    `ideation.force_ideate` on this same tick after the drain releases
+    the board lock).
     """
     queue_path = operator_queue_path(cfg)
     state_path = operator_queue_state_path(cfg)
     if not queue_path.exists() or queue_path.stat().st_size == 0:
-        return {"applied": 0, "touched_paths": []}
+        return {"applied": 0, "touched_paths": [], "force_ideate": False}
 
     applied = _load_operator_queue_applied(state_path)
     pending: list[dict] = []
@@ -1381,11 +1422,16 @@ def drain_operator_queue(cfg: Config) -> dict:
         # No new ops; opportunistically compact in case the queue file
         # has accumulated already-applied uuids.
         _compact_operator_queue(queue_path, applied)
-        return {"applied": 0, "touched_paths": []}
+        return {"applied": 0, "touched_paths": [], "force_ideate": False}
 
     applied_count = 0
     touched: set[str] = set()
     highest_alloc = 0
+    # TB-159: track whether any drained op was an `ideate` signal so the
+    # daemon can run the forced ideation pass on this same tick (after
+    # the drain releases the board lock). Consumed by `_tick` via the
+    # return dict's `force_ideate` key.
+    force_ideate_pending = False
     with board_file_lock(cfg.tasks_file):
         for rec in pending:
             try:
@@ -1394,6 +1440,8 @@ def drain_operator_queue(cfg: Config) -> dict:
                 board.save()
                 _append_operator_audit_line(cfg, rec)
                 applied_count += 1
+                if rec.get("op") == "ideate":
+                    force_ideate_pending = True
                 touched.update(
                     [
                         "TASKS.md",
@@ -1455,7 +1503,11 @@ def drain_operator_queue(cfg: Config) -> dict:
             "operator_queue_drained",
             applied=applied_count,
         )
-    return {"applied": applied_count, "touched_paths": sorted(touched)}
+    return {
+        "applied": applied_count,
+        "touched_paths": sorted(touched),
+        "force_ideate": force_ideate_pending,
+    }
 
 
 def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
@@ -1556,6 +1608,22 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             title=title,
         )
         return
+    if op == "ideate":
+        # TB-159: drain-side `ideate` is a signal, not an action. The
+        # actual ideation run is dispatched by the daemon's `_tick`
+        # AFTER the drain releases the board lock — running the SDK
+        # call here would hold `board_file_lock` for minutes and
+        # serialize every other operator op + the cron / task /
+        # status-report stages behind it. Emit the audit event so
+        # post-hoc inspection distinguishes manual fires from natural
+        # ones; the operator-queue-drain return dict ferries the
+        # `force_ideate` signal up to `_tick`.
+        events.append(
+            cfg.events_file,
+            "ideation_forced",
+            force=bool(args.get("force")),
+        )
+        return
     if op == "approve":
         # TB-142: drain-side approve. Shares `_approve_review_token` with
         # `do_board_edit({"action":"approve",...})` (the idle-path entry)
@@ -1626,6 +1694,13 @@ def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
         "%Y-%m-%dT%H:%M:%SZ"
     )
     arrow = f" → {task}" if task else ""
+    # TB-159: distinguish manual ideation fires from natural cron-driven
+    # ones in the operator log (`applied operator-queued ideate →
+    # (forced)` vs no log line at all for the natural path). Ideation
+    # Step 0 reads operator_log.md as ground truth on operator
+    # decisions; the `(forced)` decoration is the human-readable signal.
+    if op == "ideate":
+        arrow = " → (forced)"
     lines: list[str] = [f"- {ts} — applied operator-queued {op}{arrow}\n"]
     if op == "reject":
         # TB-152: in addition to the standard `applied operator-queued

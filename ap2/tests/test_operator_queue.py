@@ -1299,3 +1299,188 @@ def test_drain_reject_audit_line_distinct_from_delete(cfg: Config):
     # And the rejected-proposal line is ONLY emitted for the reject op.
     assert "rejected ideation proposal → TB-909" in log
     assert "rejected ideation proposal → TB-910" not in log
+
+
+# ---------------------------------------------------------------------------
+# TB-159: `ideate` op — manual operator trigger for an ideation pass that
+# bypasses the natural empty-board / cooldown / `AP2_IDEATION_DISABLED`
+# gates. The queue-append handler enforces the Active-task gate (refused
+# without `force=true`); the drain-side records an `ideation_forced`
+# audit event AND signals the daemon (via `force_ideate=True` in the
+# return dict) to run `ideation.force_ideate` after the drain releases
+# the board lock.
+
+
+def test_operator_queue_ops_includes_ideate():
+    """`ideate` is a registered queue op (the CLI / MM-handler entry
+    points reach it through `do_operator_queue_append`)."""
+    assert "ideate" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_queue_append_ideate_writes_record_with_force_false_default(cfg: Config):
+    """Default `ideate` invocation queues a record with `op="ideate"`
+    and `args.force=False`. No task_id is involved — the verb fires the
+    standard ideation prompt."""
+    res = tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    body = _unwrap(res)
+    assert body["op"] == "ideate"
+
+    queue_path = tools.operator_queue_path(cfg)
+    lines = [
+        json.loads(ln) for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 1
+    rec = lines[0]
+    assert rec["op"] == "ideate"
+    assert rec["args"] == {"force": False}
+    # No task_id allocation for ideate.
+    assert rec.get("preallocated_task_id") is None
+
+
+def test_queue_append_ideate_carries_force_flag(cfg: Config):
+    """`force=true` rides on the queue payload so the drain-side audit
+    event's `force` attribute can be inspected."""
+    res = tools.do_operator_queue_append(cfg, {"op": "ideate", "force": True})
+    _unwrap(res)
+    queue_path = tools.operator_queue_path(cfg)
+    rec = json.loads(queue_path.read_text().splitlines()[0])
+    assert rec["args"]["force"] is True
+
+
+def test_queue_append_ideate_refuses_when_active_present(cfg: Config):
+    """The Active hard gate is enforced at queue-append time (not just
+    in the CLI) so the chat-side `operator_queue_append({"op":"ideate"})`
+    surface gets the same refusal."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-2100", title="in flight")
+    board.save()
+
+    res = tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    assert res.get("isError")
+    text = res["content"][0]["text"]
+    assert "Active" in text
+    assert "force" in text.lower()
+    # No queue record should have been appended.
+    queue_path = tools.operator_queue_path(cfg)
+    if queue_path.exists():
+        lines = [ln for ln in queue_path.read_text().splitlines() if ln.strip()]
+        assert lines == []
+
+
+def test_queue_append_ideate_force_overrides_active_gate(cfg: Config):
+    """`force=true` lets the operator override the Active-task refusal
+    (escape hatch). The queue record still lands."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-2110", title="in flight, forced")
+    board.save()
+
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "ideate", "force": True}
+    )
+    body = _unwrap(res)
+    assert body["op"] == "ideate"
+    queue_path = tools.operator_queue_path(cfg)
+    rec = json.loads(queue_path.read_text().splitlines()[0])
+    assert rec["op"] == "ideate"
+    assert rec["args"]["force"] is True
+
+
+def test_drain_ideate_emits_ideation_forced_event(cfg: Config):
+    """Draining the `ideate` op writes an `ideation_forced` event to
+    events.jsonl — the audit signal that distinguishes manual fires
+    from natural cron-driven ones (`ideation_empty_board`)."""
+    tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    tools.drain_operator_queue(cfg)
+
+    evts = events.tail(cfg.events_file, 20)
+    forced = [e for e in evts if e["type"] == "ideation_forced"]
+    assert len(forced) == 1
+    assert forced[0]["force"] is False
+
+
+def test_drain_ideate_force_flag_on_event(cfg: Config):
+    """The `force` flag rides on the `ideation_forced` event."""
+    tools.do_operator_queue_append(cfg, {"op": "ideate", "force": True})
+    tools.drain_operator_queue(cfg)
+
+    evts = events.tail(cfg.events_file, 20)
+    forced = [e for e in evts if e["type"] == "ideation_forced"]
+    assert len(forced) == 1
+    assert forced[0]["force"] is True
+
+
+def test_drain_ideate_writes_forced_audit_line(cfg: Config):
+    """operator_log.md gets an `applied operator-queued ideate →
+    (forced)` line — consistent with the existing `applied operator-
+    queued <op> → ...` pattern for other queue ops, and the `(forced)`
+    decoration is the human-readable signal ideation Step 0 reads."""
+    tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "applied operator-queued ideate → (forced)" in log
+
+
+def test_drain_ideate_returns_force_ideate_signal(cfg: Config):
+    """`drain_operator_queue` returns `force_ideate=True` so the daemon's
+    `_tick` knows to run `ideation.force_ideate` on this same tick after
+    the board lock is released. A drain with no `ideate` op returns
+    `force_ideate=False`."""
+    # Baseline: empty drain returns False.
+    res = tools.drain_operator_queue(cfg)
+    assert res["force_ideate"] is False
+
+    # Stage an ideate op + a non-ideate op; the signal still fires
+    # regardless of co-drained ops.
+    tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "co-drained", "briefing": _BRIEFING}
+    )
+    res = tools.drain_operator_queue(cfg)
+    assert res["applied"] == 2
+    assert res["force_ideate"] is True
+
+    # After the drain, a no-op drain returns False again (signal is one-shot).
+    res = tools.drain_operator_queue(cfg)
+    assert res["force_ideate"] is False
+
+
+def test_drain_ideate_does_not_invoke_ideation_directly(cfg: Config):
+    """Critical: the drain-side handler MUST NOT call `force_ideate`
+    itself — it would hold the `board_file_lock` for minutes and serialize
+    every other op behind it. The drain returns the signal; the daemon's
+    `_tick` runs ideation AFTER the drain releases the lock."""
+    # The drain is synchronous (no event loop here); if the drain were
+    # invoking the SDK, it would either error out (no SDK available) or
+    # block. We assert it returns quickly with no side-effect on
+    # ideation_state.md or any control-agent prompt dump.
+    tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    res = tools.drain_operator_queue(cfg)
+    assert res["applied"] == 1
+    # No ideation_complete / ideation_empty_board events — the drain
+    # only emits `ideation_forced`.
+    evts = events.tail(cfg.events_file, 20)
+    kinds = [e["type"] for e in evts]
+    assert "ideation_forced" in kinds
+    assert "ideation_empty_board" not in kinds
+    assert "ideation_complete" not in kinds
+
+
+def test_drain_ideate_idempotent_via_uuid(cfg: Config):
+    """Replaying an already-applied `ideate` record (e.g. crash mid-drain)
+    does not double-fire — the second drain finds the uuid in
+    operator_queue_state.json and skips it. Same idempotency contract as
+    every other queue op."""
+    tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    r1 = tools.drain_operator_queue(cfg)
+    assert r1["applied"] == 1
+    assert r1["force_ideate"] is True
+
+    r2 = tools.drain_operator_queue(cfg)
+    assert r2["applied"] == 0
+    assert r2["force_ideate"] is False
+
+    # Exactly one `ideation_forced` event total.
+    evts = events.tail(cfg.events_file, 50)
+    forced = [e for e in evts if e["type"] == "ideation_forced"]
+    assert len(forced) == 1

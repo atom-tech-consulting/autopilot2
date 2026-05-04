@@ -24,6 +24,7 @@ from ap2.cli import (
     cmd_add,
     cmd_backlog,
     cmd_delete,
+    cmd_ideate,
     cmd_reject,
     cmd_start,
     cmd_unfreeze,
@@ -1796,4 +1797,110 @@ def test_cmd_logs_json_flag_bypasses_pretty_formatter(tmp_path: Path, capsys):
     assert any(c.get("status") == "fail" for c in e["criteria"])
     assert any(
         c.get("bullet") == "manual headline" for c in e["criteria"]
+    )
+
+
+# ---------------------------------------------------------------------------
+# cmd_ideate (TB-159) — manual ideation trigger that bypasses the natural
+# empty-board / cooldown / `AP2_IDEATION_DISABLED` gates by routing through
+# the operator queue. The actual SDK invocation lives on the daemon side
+# (`force_ideate` runs after `drain_operator_queue` returns
+# `force_ideate=True`); the CLI just appends the queue record and exits.
+
+
+def test_cmd_ideate_appends_queue_record_with_force_false_default(tmp_path: Path):
+    """Default invocation (`ap2 ideate`, no `--force`) writes one
+    `{"op":"ideate","force":false,...}` queue record and returns 0
+    immediately."""
+    cfg = _project(tmp_path)
+    rc = cmd_ideate(cfg, Namespace(force=False))
+    assert rc == 0
+
+    queue_path = tools.operator_queue_path(cfg)
+    lines = [
+        ln for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 1
+    import json as _json
+
+    rec = _json.loads(lines[0])
+    assert rec["op"] == "ideate"
+    assert rec["args"] == {"force": False}
+
+
+def test_cmd_ideate_refuses_when_active_task_present(tmp_path: Path, capsys):
+    """Default refusal: a non-empty Active section (task in flight) blocks
+    forced ideate. The error message names `--force`. No queue record is
+    appended."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-2000", title="in flight")
+    board.save()
+
+    rc = cmd_ideate(cfg, Namespace(force=False))
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Active" in err
+    assert "--force" in err
+
+    queue_path = tools.operator_queue_path(cfg)
+    if queue_path.exists():
+        lines = [ln for ln in queue_path.read_text().splitlines() if ln.strip()]
+        assert lines == [], "no queue record should have been appended"
+
+
+def test_cmd_ideate_force_overrides_active_refusal(tmp_path: Path):
+    """`ap2 ideate --force` bypasses the Active-task refusal and queues
+    the record. `force=true` rides on the queue payload."""
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-2010", title="forced through")
+    board.save()
+
+    rc = cmd_ideate(cfg, Namespace(force=True))
+    assert rc == 0
+
+    queue_path = tools.operator_queue_path(cfg)
+    import json as _json
+
+    lines = [ln for ln in queue_path.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    rec = _json.loads(lines[0])
+    assert rec["op"] == "ideate"
+    assert rec["args"]["force"] is True
+
+
+def test_cmd_ideate_is_non_blocking_no_sdk_invocation(
+    tmp_path: Path, monkeypatch
+):
+    """The CLI MUST NOT spin up the SDK / control-agent itself — the
+    daemon owns that. Pin the contract by stubbing `_run_control_agent`,
+    `force_ideate`, and `_maybe_ideate` to raise if invoked, then
+    asserting the call returns within a tight wallclock budget."""
+    import time as _time
+
+    cfg = _project(tmp_path)
+
+    from ap2 import daemon as _daemon
+    from ap2 import ideation as _ideation
+
+    def boom(*a, **kw):
+        raise AssertionError(
+            "cmd_ideate must NOT invoke the SDK / ideation directly — "
+            "the daemon picks up the queue signal on the next tick."
+        )
+
+    monkeypatch.setattr(_daemon, "_run_control_agent", boom)
+    monkeypatch.setattr(_ideation, "force_ideate", boom)
+    monkeypatch.setattr(_ideation, "_maybe_ideate", boom)
+    monkeypatch.setattr(_ideation, "_run_ideation", boom)
+
+    t0 = _time.monotonic()
+    rc = cmd_ideate(cfg, Namespace(force=False))
+    elapsed = _time.monotonic() - t0
+
+    assert rc == 0
+    # 2s is generous; in practice the queue append is sub-millisecond.
+    assert elapsed < 2.0, (
+        f"cmd_ideate should return immediately; took {elapsed:.3f}s"
     )

@@ -27,11 +27,13 @@ from ap2 import events
 from ap2 import ideation
 from ap2.board import Board
 from ap2.config import Config
-from ap2.cron import save_state
+from ap2.cron import load_state, save_state
 from ap2.ideation import (
+    IDEATION_NAME,
     IDEATION_TRIGGER_TASK_COUNT_DEFAULT,
     _maybe_ideate,
     _trigger_task_count,
+    force_ideate,
 )
 
 
@@ -245,3 +247,84 @@ def test_threshold_counts_ready_plus_backlog_not_pipeline_or_frozen(tmp_path, mo
         "ideation should fire — Pipeline Pending + Frozen do not count "
         "toward the Ready+Backlog threshold"
     )
+
+
+# ---------------------------------------------------------------------------
+# TB-159: `force_ideate` — manual operator trigger that bypasses the
+# natural empty-board / cooldown / `AP2_IDEATION_DISABLED` gates.
+
+
+def test_force_ideate_bypasses_disable_cooldown_and_backlog_gates(
+    tmp_path, monkeypatch
+):
+    """force_ideate fires even when ALL three of the natural gates would
+    have skipped:
+      - `AP2_IDEATION_DISABLED=1` is set
+      - cooldown is unmet (a `mark_run` happened recently)
+      - Backlog has more items than the trigger threshold
+
+    The Active hard gate is enforced at queue-append time, NOT inside
+    `force_ideate` itself — once the daemon dispatches the helper, it
+    runs unconditionally. The helper still calls `mark_run` after the
+    run so the next natural cooldown clock resets (back-to-back forced
+    fires don't lap the next cron-driven natural fire)."""
+    # Build a project with a Backlog that would otherwise skip the
+    # natural threshold (10 items >= default 3).
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={
+            "Backlog": [
+                (f"TB-{i}", f"existing backlog {i}") for i in range(1, 11)
+            ],
+        },
+    )
+
+    # Set ALL natural-skip conditions:
+    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    # Cooldown is unmet — last fire was 1s ago.
+    save_state(cfg.cron_state_file, {IDEATION_NAME: time.time() - 1})
+
+    # Sanity: `_maybe_ideate` would have skipped here.
+    natural_calls = _stub_run_control_agent(monkeypatch)
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+    assert natural_calls == [], (
+        "_maybe_ideate must skip with disabled=1 / cooldown unmet / "
+        "10 Backlog items — sanity check on the precondition"
+    )
+
+    # And now force_ideate runs the helper anyway.
+    asyncio.run(force_ideate(cfg, sdk=None, mcp_server=None))
+    assert len(natural_calls) == 1, (
+        "force_ideate must invoke the control agent unconditionally — "
+        "disabled / cooldown / backlog gates are bypassed"
+    )
+
+    # Cooldown clock was bumped — the helper called `mark_run` after the
+    # run so the next natural fire still has to wait
+    # AP2_IDEATION_COOLDOWN_S. Without this, repeated `ap2 ideate` calls
+    # could leave the natural cooldown stale and double-fire on the next
+    # cron tick.
+    state = load_state(cfg.cron_state_file)
+    assert state[IDEATION_NAME] > time.time() - 5, (
+        "force_ideate must call mark_run after the run so the natural "
+        "cooldown clock advances"
+    )
+
+
+def test_force_ideate_emits_ideation_empty_board_event(tmp_path, monkeypatch):
+    """The shared `_run_ideation` helper still emits
+    `ideation_empty_board` as the entry marker (the historical event
+    name). Forced runs are distinguished from natural ones by the
+    `ideation_forced` event the operator-queue drain emits — NOT by the
+    entry marker. Pin both behaviors here so a future rename is a
+    deliberate decision, not an accident."""
+    cfg = _make_project(tmp_path, monkeypatch, sections={})
+    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    _stub_run_control_agent(monkeypatch)
+
+    asyncio.run(force_ideate(cfg, sdk=None, mcp_server=None))
+
+    kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
+    assert "ideation_empty_board" in kinds

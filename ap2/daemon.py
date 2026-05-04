@@ -2134,6 +2134,7 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # single coherent commit. Idempotent via per-record uuid +
     # operator_queue_state.json so a crash mid-drain resumes without
     # double-applying.
+    drain_res: dict = {}
     try:
         drain_res = tools.drain_operator_queue(cfg)
         if drain_res.get("applied"):
@@ -2209,9 +2210,33 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "task_error", error=f"{type(e).__name__}: {e}")
 
-    # 4. Ideation: fire when the working board is fully empty, throttled by
-    # AP2_IDEATION_COOLDOWN_S (default 3600). Owned by `ap2.ideation`, not
-    # cron.yaml — see that module for the prompt + override mechanism.
+    # 4. Ideation. Two parallel triggers:
+    #
+    # (a) Natural empty-board path — `_maybe_ideate` fires when
+    #     AP2_IDEATION_DISABLED is unset, Active is empty, Ready+Backlog
+    #     count is below AP2_IDEATION_TRIGGER_TASK_COUNT, and the
+    #     AP2_IDEATION_COOLDOWN_S cooldown elapsed. Owned by
+    #     `ap2.ideation`; see that module for the prompt + override
+    #     mechanism.
+    #
+    # (b) Forced operator trigger (TB-159) — `force_ideate` fires when
+    #     `ap2 ideate` was queued and drained on this tick. Bypasses
+    #     the disable knob, the cooldown, AND the queue-depth gate (the
+    #     Active-task gate is enforced at queue-append time).
+    #
+    # We run BOTH if both fire on the same tick (rare: requires the
+    # operator to queue an `ap2 ideate` on the exact tick where the
+    # natural cooldown also unlatches). The forced path runs first so
+    # the natural path's `mark_run` doesn't reset the cooldown out from
+    # under it; the natural path then no-ops (cooldown is now fresh).
+    if drain_res.get("force_ideate"):
+        try:
+            await ideation.force_ideate(cfg, sdk, mcp_server)
+        except Exception as e:  # noqa: BLE001
+            events.append(
+                cfg.events_file, "ideation_error",
+                error=f"{type(e).__name__}: {e}",
+            )
     try:
         await ideation._maybe_ideate(cfg, sdk, mcp_server)
     except Exception as e:  # noqa: BLE001
