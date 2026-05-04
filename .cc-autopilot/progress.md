@@ -185,3 +185,9 @@
 - **Summary:** Closed both gaps from TB-153's first attempt (commit 9101007): made ap2/verify.py's mistune import lazy via _get_md() so `python3 -c "from ap2.tools import OPERATOR_QUEUE_OPS"` no longer trips on system-python's missing mistune (the chain became broken when TB-154 wired verify into tools.py); added task_updated `fields=[...]` event assertions to each per-field round-trip test (title/tags/blocked/description/briefing/clear_tags/clear_blocked) via a new `_last_task_updated` helper. Full ap2 test suite (831 tests) passes.
 - **Files:** ap2/verify.py, ap2/tests/test_operator_queue.py
 - **Tests:** pass
+
+## [2026-05-04] TB-155: Web port auto-enumerate on conflict
+- **Commit:** `9dcff0d`
+- **Summary:** Closed the single failing per-task verification criterion from TB-155's first attempt (649eca3): added focused `test_serve_async_no_conflict_binds_start_port` in test_web.py exercising `serve_async(start_port=X)` directly when X is free and asserting `on_bind` fires with bound==start_port, plus an `assert "requested_port" not in starts[0]` to test_web_loop_emits_start_and_stop in test_daemon_web.py so the no-conflict audit signal stays meaningful. No production-code changes — the daemon wrapper already omits requested_port on the happy path; this locks that behavior in tests. `uv run pytest -q ap2/tests/` → 845 passed.
+- **Files:** ap2/tests/test_web.py, ap2/tests/test_daemon_web.py
+- **Tests:** pass
