@@ -1519,3 +1519,135 @@ def test_cmd_update_argparse_supports_clear_flags(tmp_path: Path):
     )
     assert args.clear_tags is True
     assert args.clear_blocked is True
+
+
+# ---------------------------------------------------------------------------
+# TB-158: cmd_logs renders `verification_failed` rows with a counter +
+# failing-bullet headlines + judge notes. Passing / unverified bullets are
+# collapsed into the counter only — full payload still available via
+# `--json`. Pins both the pretty path AND the json regression so an
+# operator script depending on raw output keeps working.
+
+
+def _seed_verification_failed(
+    cfg: Config,
+    task: str = "TB-158",
+    *,
+    pass_n: int = 5,
+    fail_bullets: list[tuple[str, str, str]] | None = None,
+    unverified_n: int = 1,
+) -> None:
+    """Append one verification_failed event with the requested mix of
+    pass/fail/unverified criteria. Each fail entry is `(kind, bullet, notes)`."""
+    fails = fail_bullets or []
+    criteria = (
+        [
+            {"kind": "shell", "status": "pass", "bullet": f"pass#{i}", "notes": ""}
+            for i in range(pass_n)
+        ]
+        + [
+            {"kind": k, "status": "fail", "bullet": b, "notes": n}
+            for (k, b, n) in fails
+        ]
+        + [
+            {"kind": "prose", "status": "unverified",
+             "bullet": f"unv#{i}", "notes": "skipped"}
+            for i in range(unverified_n)
+        ]
+    )
+    events.append(
+        cfg.events_file, "verification_failed",
+        task=task, kind="per_task", overall="fail", criteria=criteria,
+    )
+
+
+def test_cmd_logs_pretty_renders_verification_failed(tmp_path: Path, capsys):
+    """5 pass + 2 fail + 1 unverified renders with a counter naming the
+    three buckets, both failing bullet headlines (truncated to ~120 in CLI),
+    and the judge's notes (truncated to ~200). Passing bullets are NOT
+    individually printed."""
+    from ap2.cli import cmd_logs
+
+    cfg = _project(tmp_path)
+    _seed_verification_failed(
+        cfg,
+        task="TB-1500",
+        pass_n=5,
+        fail_bullets=[
+            ("prose", "Manual: kick a long-running task on stoch and "
+                      "mention `@claude-bot status`",
+             "Manual verification bullet requires a live stoch deployment "
+             "test — no evidence such a manual run was performed"),
+            ("shell", "`grep -qE \"summarize_verification_failed\" "
+                      "ap2/events.py ap2/cli.py ap2/web.py`",
+             "ripgrep returned 1; symbol absent in cli.py"),
+        ],
+        unverified_n=1,
+    )
+
+    rc = cmd_logs(cfg, Namespace(n=10, json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # Counter names all three buckets — the briefing's "5/2 failed,
+    # 1 unverified (or equivalent counter)" pin.
+    assert "5/8 passed" in out
+    assert "2 failed" in out
+    assert "1 unverified" in out
+    # Both failing bullet headlines surface (truncated headlines, not
+    # the full text — the prefix is enough for the operator to locate
+    # the bullet).
+    assert "Manual: kick a long-running task on stoch" in out
+    assert "summarize_verification_failed" in out
+    # The judge's note for at least one fail surfaces (truncated).
+    assert "Manual verification bullet requires" in out
+    assert "ripgrep returned 1" in out
+    # Passing bullets are NOT individually rendered — only the counter
+    # carries them. None of the synthetic `pass#i` markers leak.
+    assert "pass#0" not in out
+    assert "pass#4" not in out
+    # Same for unverified — counter only.
+    assert "unv#0" not in out
+    # The fail-mark (✗) anchors each failed bullet headline.
+    assert "✗" in out
+
+
+def test_cmd_logs_json_flag_bypasses_pretty_formatter(tmp_path: Path, capsys):
+    """Regression pin: `--json` prints the raw event JSON unchanged so
+    operator scripts piping through `jq` or grep keep working. The pretty
+    formatter must NOT engage when --json is set."""
+    from ap2.cli import cmd_logs
+
+    cfg = _project(tmp_path)
+    _seed_verification_failed(
+        cfg,
+        task="TB-1501",
+        pass_n=2,
+        fail_bullets=[("prose", "manual headline", "judge note here")],
+        unverified_n=0,
+    )
+
+    rc = cmd_logs(cfg, Namespace(n=10, json=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # No pretty rendering markers — the multi-line bullet/note formatter
+    # uses ✗ and ↳ glyphs; in --json mode neither leaks.
+    assert "✗" not in out
+    assert "↳" not in out
+    assert "passed," not in out  # the counter line uses this template
+    # JSON shape preserved verbatim — the line is parseable and carries
+    # the full criteria list (no truncation, no field reflowing).
+    import json as _json
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    parsed = [_json.loads(ln) for ln in lines if "verification_failed" in ln]
+    assert parsed, out
+    e = parsed[-1]
+    assert e["type"] == "verification_failed"
+    assert e["task"] == "TB-1501"
+    # criteria array survives unmolested — same shape on disk and in --json.
+    assert isinstance(e["criteria"], list)
+    assert any(c.get("status") == "fail" for c in e["criteria"])
+    assert any(
+        c.get("bullet") == "manual headline" for c in e["criteria"]
+    )

@@ -390,6 +390,34 @@ _CSS = """<style>
   .run-status.success { background: #e0f5e0; color: #060 }
   .run-status.failure { background: #fde0e0; color: #c33 }
   .run-status.in-flight { background: #e0f0ff; color: #048 }
+  /* TB-158: verification-failed summary block + per-row failed-bullet
+     sub-list. The block sits at the top of `/task-run/<run-id>` when the
+     latest terminal verdict is `verification_failed`; the sub-list lives
+     inline in the `/events` and `/` row's `summary` cell so the failing
+     bullet headlines are visible without expanding the raw json `<details>`. */
+  .verif-summary { padding: 0.6rem 0.8rem; border-radius: 4px;
+                   margin: 0.5rem 0; background: #fffbea;
+                   border-left: 4px solid #b87000; font-size: 13px;
+                   line-height: 1.5 }
+  .verif-summary .counter { font-weight: 600; color: #8a5a00 }
+  .verif-summary ul.failed-bullets { list-style: none; padding: 0;
+                                     margin: 0.4rem 0 0 0 }
+  .verif-summary ul.failed-bullets li { padding: 0.2rem 0;
+                                        border-bottom: none }
+  .verif-summary .fail-mark { color: #c33; font-weight: 600;
+                              font-family: ui-monospace, monospace;
+                              margin-right: 0.25rem }
+  .verif-summary .bullet-kind { color: #888; font-family: ui-monospace, monospace;
+                                font-size: 11px; margin-right: 0.3rem }
+  .verif-summary .judge-note { color: #666; font-size: 12px;
+                               display: block; margin: 0.1rem 0 0 1.4rem }
+  ul.failed-bullets-inline { list-style: none; margin: 0.2rem 0 0 0;
+                             padding: 0 }
+  ul.failed-bullets-inline li { padding: 0.1rem 0; border-bottom: none;
+                                font-size: 12px; color: #555 }
+  ul.failed-bullets-inline li .fail-mark { color: #c33; font-weight: 600;
+                                           font-family: ui-monospace, monospace;
+                                           margin-right: 0.25rem }
 </style>"""
 
 
@@ -516,6 +544,165 @@ def _event_token_summary(e: dict) -> str:
     return " · ".join(bits)
 
 
+# TB-158: shared `verification_failed` rendering. The per-row inline
+# summary lives on the events table; the larger block sits at the top of
+# `/task-run/<run-id>` when the latest verdict was a verification fail.
+# Both consume the same `events.summarize_verification_failed` helper so
+# the formatting is in lockstep with `ap2 logs`.
+
+def _verification_failed_row_summary(e: dict) -> str:
+    """Inline `<td class="summary">` content for a `verification_failed` row.
+
+    Renders as:
+        5/8 passed · 2 failed · 1 unverified
+        ✗ Manual: kick a long-running task on stoch...
+        ✗ [shell] grep -qE "..." ap2/web.py — no match
+
+    Failing bullets only. Passing / unverified are summarized into the
+    counter to keep the row terse — the full criteria array is one click
+    away under the row's `<details>raw json</details>` footer.
+    """
+    summary = ev_mod.summarize_verification_failed(
+        e, max_bullet=240, max_note=400,
+    )
+    task = str(e.get("task") or "").strip()
+    counter = (
+        f'{summary["pass_count"]}/{summary["total"]} passed'
+        f' · {summary["fail_count"]} failed'
+        f' · {summary["unverified_count"]} unverified'
+    )
+    head = (
+        f'<span class="meta">task=</span>{html.escape(task)} · '
+        f'<strong>{html.escape(counter)}</strong>'
+    )
+    failed = summary["failed_bullets"]
+    if not failed:
+        return head
+    items = []
+    for fb in failed:
+        kind = fb.get("kind") or ""
+        bullet = fb.get("bullet") or ""
+        kind_html = (
+            f'<span class="bullet-kind">[{html.escape(kind)}]</span>'
+            if kind else ""
+        )
+        items.append(
+            f'<li><span class="fail-mark">✗</span>{kind_html}'
+            f'{html.escape(bullet)}</li>'
+        )
+    return (
+        f"{head}"
+        f'<ul class="failed-bullets-inline">'
+        + "".join(items)
+        + "</ul>"
+    )
+
+
+def _verification_summary_block(e: dict) -> str:
+    """Block-level summary for the top of `/task-run/<run-id>` when the
+    latest terminal verdict for the task is `verification_failed`.
+
+    Mirrors the row summary but renders bullet + note (truncated longer
+    than the row) so an operator arriving from a `task_complete` link
+    sees WHY the task failed without scrolling through the SDK stream.
+    """
+    summary = ev_mod.summarize_verification_failed(
+        e, max_bullet=400, max_note=600,
+    )
+    counter = (
+        f'{summary["pass_count"]}/{summary["total"]} passed'
+        f', {summary["fail_count"]} failed'
+        f', {summary["unverified_count"]} unverified'
+    )
+    items = []
+    for fb in summary["failed_bullets"]:
+        kind = fb.get("kind") or ""
+        bullet = fb.get("bullet") or ""
+        notes = fb.get("notes") or ""
+        kind_html = (
+            f'<span class="bullet-kind">[{html.escape(kind)}]</span>'
+            if kind else ""
+        )
+        note_html = (
+            f'<span class="judge-note">↳ {html.escape(notes)}</span>'
+            if notes else ""
+        )
+        items.append(
+            f'<li><span class="fail-mark">✗</span>{kind_html}'
+            f'{html.escape(bullet)}{note_html}</li>'
+        )
+    bullets_html = (
+        f'<ul class="failed-bullets">{"".join(items)}</ul>' if items else ""
+    )
+    return (
+        '<div class="verif-summary">'
+        f'<span class="counter">Verification: {html.escape(counter)}</span>'
+        f"{bullets_html}"
+        "</div>"
+    )
+
+
+def _is_verification_fail_terminal(terminal: dict | None) -> bool:
+    """True iff the terminal event for a run represents a verification
+    failure — either the literal `verification_failed` event or the
+    `task_complete` row whose status is `verification_failed`.
+    Both shapes land in `events.jsonl` for the same underlying outcome
+    (the daemon emits the structured `verification_failed` event AND
+    the lifecycle `task_complete` summary), so the verdict block must
+    fire on either.
+    """
+    if not terminal:
+        return False
+    typ = terminal.get("type")
+    if typ == "verification_failed":
+        return True
+    if typ == "task_complete":
+        status = str(terminal.get("status") or "").strip().lower()
+        return status == "verification_failed"
+    return False
+
+
+def _latest_verification_failed_for_task(
+    cfg: Config, task_id: str, *, run_ts_compact: str | None = None,
+) -> dict | None:
+    """Find the most recent `verification_failed` event for `task_id`.
+
+    When `run_ts_compact` is supplied, restricts the search to events
+    landing at-or-after that run's start (mirroring `_terminal_event_for_run`)
+    so a previous attempt's failure isn't attributed to a later run.
+    Returns the event dict or `None`.
+    """
+    if not task_id:
+        return None
+    cutoff_dt: _dt.datetime | None = None
+    if run_ts_compact:
+        try:
+            cutoff_dt = _dt.datetime.strptime(
+                run_ts_compact, "%Y%m%dT%H%M%SZ"
+            ).replace(tzinfo=_dt.timezone.utc)
+        except ValueError:
+            cutoff_dt = None
+    found: dict | None = None
+    for e in ev_mod.tail(cfg.events_file, n=5000):
+        if e.get("task") != task_id:
+            continue
+        if e.get("type") != "verification_failed":
+            continue
+        if cutoff_dt is not None:
+            try:
+                e_dt = _dt.datetime.strptime(
+                    e.get("ts", ""), "%Y-%m-%dT%H:%M:%SZ"
+                ).replace(tzinfo=_dt.timezone.utc)
+            except ValueError:
+                continue
+            if (e_dt - cutoff_dt).total_seconds() < -2:
+                continue
+        # `tail` returns oldest-first within the slice, so the last match
+        # is the most recent.
+        found = e
+    return found
+
+
 def _events_table(
     evts: list[dict],
     *,
@@ -567,6 +754,14 @@ def _events_table(
                     f'<span class="meta">tokens=</span>'
                     f'{html.escape(ts_html)} · {extra}'
                 )
+        # TB-158: replace the generic field dump with a pass/fail counter
+        # and an inline list of failing-bullet headlines for
+        # `verification_failed` rows. Passing / unverified bullets are
+        # collapsed into the counter only — operators wanting the raw
+        # criteria array still get it via the `<details>raw json</details>`
+        # footer below (unchanged).
+        if typ == "verification_failed":
+            extra = _verification_failed_row_summary(e)
         rows.append(
             f'<tr class="{cls}">'
             f'<td class="ts">{html.escape(ts)}</td>'
@@ -1171,6 +1366,18 @@ def _render_task_run(cfg: Config, run_id: str) -> str:
         )
         verdict_html = _render_run_verdict(terminal)
 
+    # TB-158: when the terminal verdict is a verification fail, surface a
+    # block at the top of the page calling out which bullets failed and
+    # the judge's notes. Operators arriving from a `task_complete` link
+    # see WHY immediately without scrolling through the SDK stream.
+    verif_summary_html = ""
+    if not in_flight and _is_verification_fail_terminal(terminal):
+        vf_event = _latest_verification_failed_for_task(
+            cfg, task_id, run_ts_compact=compact_ts,
+        )
+        if vf_event is not None:
+            verif_summary_html = _verification_summary_block(vf_event)
+
     # Prompt block (collapsed by default — full prompts are long)
     prompt_html = ""
     if prompt_p.exists():
@@ -1207,6 +1414,7 @@ def _render_task_run(cfg: Config, run_id: str) -> str:
         f"</div>"
         f"{live_banner}"
         f"{verdict_html}"
+        f"{verif_summary_html}"
         f"{prompt_html}"
         f"<h2>stream</h2>"
         f'<table id="stream-table"><thead>'

@@ -1378,3 +1378,243 @@ def test_serve_calls_through_to_enumeration(project: Config, monkeypatch):
         )
     finally:
         blocker.close()
+
+
+# ---------------------------------------------------------------------------
+# TB-158: surface bullet failures clearly in events logs (web).
+#
+# `/events` rows render verification_failed with a per-row pass/fail
+# counter and an inline list of failing-bullet headlines so the operator
+# can see WHICH bullet failed without expanding the raw json `<details>`.
+# `/task-run/<run-id>` adds a top-of-page block when the run's terminal
+# verdict is `verification_failed` (or `task_complete` with status set
+# to `verification_failed`).
+
+
+def _seed_vf_event(
+    project: Config,
+    *,
+    task: str = "TB-VF",
+    pass_n: int = 5,
+    fail_bullets: list[tuple[str, str, str]] | None = None,
+    unverified_n: int = 1,
+) -> None:
+    """Append a synthetic `verification_failed` event whose criteria list
+    matches the briefing's expected shape (kind, status, bullet, notes)."""
+    fails = fail_bullets or []
+    criteria = (
+        [
+            {"kind": "shell", "status": "pass", "bullet": f"shell pass #{i}",
+             "notes": ""}
+            for i in range(pass_n)
+        ]
+        + [
+            {"kind": k, "status": "fail", "bullet": b, "notes": n}
+            for (k, b, n) in fails
+        ]
+        + [
+            {"kind": "prose", "status": "unverified",
+             "bullet": f"prose unv #{i}", "notes": "skip"}
+            for i in range(unverified_n)
+        ]
+    )
+    ev_mod.append(
+        project.events_file, "verification_failed",
+        task=task, kind="per_task", overall="fail", criteria=criteria,
+    )
+
+
+def test_events_page_renders_verification_failed_inline(project: Config):
+    """`/events` rendering of a `verification_failed` event surfaces the
+    pass/fail counter and the failing-bullet headlines inline. Passing
+    bullets are NOT in the rendered HTML — only the counter carries
+    them, mirroring the CLI's noise-control rule."""
+    _seed_vf_event(
+        project,
+        task="TB-300",
+        pass_n=5,
+        fail_bullets=[
+            ("prose", "Manual: kick a long-running task on stoch and "
+                      "watch the mattermost reply",
+             "no live evidence captured"),
+            ("shell", "grep -qE 'NOT_THERE' ap2/foo.py",
+             "ripgrep exited 1"),
+        ],
+        unverified_n=1,
+    )
+    h = web._render_events(project, typ="verification_failed", n=10)
+    rows_block = h.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    # Strip the raw-json `<details>` body from each row before pinning
+    # the inline summary — the raw payload still carries every bullet
+    # (that's the point of the details fallback) but the briefing's
+    # contract is that passing bullets do NOT appear in the *rendered*
+    # row summary that shows by default.
+    summary_cells = []
+    for row in rows_block.split("<tr "):
+        if "verification_failed" not in row:
+            continue
+        before_details = row.split("<details>", 1)[0]
+        summary_cells.append(before_details)
+    summary_html = "\n".join(summary_cells)
+
+    # Counter naming all three buckets is on the row.
+    assert "5/8 passed" in summary_html
+    assert "2 failed" in summary_html
+    assert "1 unverified" in summary_html
+    # Failing-bullet headlines surface as an inline sub-list.
+    assert "failed-bullets-inline" in summary_html
+    assert "Manual: kick a long-running task on stoch" in summary_html
+    assert "NOT_THERE" in summary_html
+    # Passing-bullet text is NOT rendered (counter only) outside of the
+    # raw-json fallback, which lives behind a `<details>` toggle.
+    assert "shell pass #0" not in summary_html
+    assert "shell pass #4" not in summary_html
+    # Unverified-bullet text is NOT rendered either (also counter-only).
+    assert "prose unv #0" not in summary_html
+    # Row tinted as a failure-class event (red) — `verification_failed`
+    # lives in `diagnose.FAILURE_EVENT_TYPES`. The status-aware tinting
+    # is on `task_complete` rows; the structured `verification_failed`
+    # event itself stays uniformly red so the operator can spot it in
+    # the row stream.
+    assert 'class="failure"' in rows_block
+
+
+def test_task_run_page_shows_verification_summary_block(
+    project: Config, tmp_path: Path,
+):
+    """`/task-run/<run-id>` for a run whose terminal event is
+    `verification_failed` (per-task kind) renders a top-of-page block
+    naming the failing bullets and judge notes — operators arriving from
+    a `task_complete` link see WHY immediately."""
+    _seed_run(
+        project,
+        run_id="20260430T220000Z-TB-310",
+        rows=[{"seq": 0, "type": "SystemMessage", "subtype": "init"}],
+    )
+    # Append the structured verification_failed event AFTER the run start.
+    _seed_vf_event(
+        project,
+        task="TB-310",
+        pass_n=3,
+        fail_bullets=[
+            ("prose", "Manual: confirm the alpha decay claim against "
+                      "live regime X data",
+             "no live regime evidence captured in commit"),
+        ],
+        unverified_n=0,
+    )
+    # AND the lifecycle task_complete row the daemon also emits — both
+    # shapes must trigger the summary block.
+    ev_mod.append(
+        project.events_file, "task_complete",
+        task="TB-310", status="verification_failed", commit="abc12345",
+        summary="rolled to Backlog",
+    )
+    h = web._render_task_run(project, "20260430T220000Z-TB-310")
+    # The verification-summary block sits ABOVE the stream table.
+    # The raw substring `verif-summary` also appears in the page's CSS
+    # (stylesheet rule for the block); pin on the rendered <div> instead
+    # so a stylesheet-only match doesn't satisfy this gate.
+    body_html = h.split("</style>", 1)[1] if "</style>" in h else h
+    assert 'class="verif-summary"' in body_html
+    assert "Verification: 3/4 passed" in body_html
+    assert "1 failed" in body_html
+    assert "0 unverified" in body_html
+    # Failing-bullet headline + judge note both surface.
+    assert "Manual: confirm the alpha decay claim" in body_html
+    assert "no live regime evidence captured" in body_html
+    # Block ordering: the summary lives above the stream <h2>.
+    assert body_html.index('class="verif-summary"') < body_html.index("<h2>stream")
+
+
+def test_task_run_page_omits_verification_summary_on_success(
+    project: Config, tmp_path: Path,
+):
+    """A run that landed successfully — terminal event is `task_complete`
+    with `status=complete` — does NOT show the verification-summary
+    block. The block is failure-only signal; firing it on green runs
+    would be noise."""
+    _seed_run(
+        project,
+        run_id="20260430T230000Z-TB-311",
+        rows=[{"seq": 0, "type": "SystemMessage", "subtype": "init"}],
+    )
+    ev_mod.append(
+        project.events_file, "task_complete",
+        task="TB-311", status="complete", commit="cafe1234",
+        summary="all good",
+    )
+    h = web._render_task_run(project, "20260430T230000Z-TB-311")
+    # `verif-summary` appears in the page's stylesheet — strip the CSS
+    # block before asserting absence of the rendered <div>.
+    body_html = h.split("</style>", 1)[1] if "</style>" in h else h
+    assert 'class="verif-summary"' not in body_html
+    # Sanity: the regular verdict banner still renders.
+    assert "verdict success" in body_html
+
+
+def test_task_run_page_summary_uses_latest_verification_failed_event(
+    project: Config, tmp_path: Path,
+):
+    """When two `verification_failed` events exist for the same task
+    (older attempt followed by a fresh one in this run window), the
+    block must surface the LATEST — operators looking at the page after
+    a retry shouldn't see the previous run's failure."""
+    _seed_run(
+        project,
+        run_id="20260430T230500Z-TB-312",
+        rows=[{"seq": 0, "type": "SystemMessage", "subtype": "init"}],
+    )
+    # Stale failure from a prior attempt (before the run start) — must
+    # be excluded by the at-or-after window.
+    with project.events_file.open("a") as f:
+        f.write(_json.dumps({
+            "ts": "2026-04-30T22:00:00Z",
+            "type": "verification_failed",
+            "task": "TB-312",
+            "kind": "per_task",
+            "overall": "fail",
+            "criteria": [
+                {"kind": "shell", "status": "fail",
+                 "bullet": "OLD-FAILURE-bullet", "notes": "old-note"},
+            ],
+        }) + "\n")
+    # Newer failure that should win (post-run-start).
+    with project.events_file.open("a") as f:
+        f.write(_json.dumps({
+            "ts": "2026-04-30T23:06:00Z",
+            "type": "verification_failed",
+            "task": "TB-312",
+            "kind": "per_task",
+            "overall": "fail",
+            "criteria": [
+                {"kind": "prose", "status": "fail",
+                 "bullet": "NEW-FAILURE-bullet", "notes": "new-note"},
+            ],
+        }) + "\n")
+    ev_mod.append(
+        project.events_file, "task_complete",
+        task="TB-312", status="verification_failed", commit="",
+        summary="rolled",
+    )
+    h = web._render_task_run(project, "20260430T230500Z-TB-312")
+    body_html = h.split("</style>", 1)[1] if "</style>" in h else h
+    assert 'class="verif-summary"' in body_html
+    # Newer failure shown.
+    assert "NEW-FAILURE-bullet" in body_html
+    # Older failure excluded — prevents stale information confusing
+    # operators reviewing a retried task.
+    assert "OLD-FAILURE-bullet" not in body_html
+
+
+def test_summarize_verification_failed_shared_helper_is_grep_visible():
+    """TB-158 verification gate: `summarize_verification_failed` is
+    referenced by name in events.py, cli.py, AND web.py — the briefing's
+    `grep -qE` bullet pins this. A refactor that drops the call from
+    either surface would silently break the consistent rendering."""
+    from pathlib import Path as _P
+
+    root = _P(web.__file__).resolve().parent
+    for fname in ("events.py", "cli.py", "web.py"):
+        text = (root / fname).read_text()
+        assert "summarize_verification_failed" in text, fname

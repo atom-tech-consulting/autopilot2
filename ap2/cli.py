@@ -670,10 +670,46 @@ def cmd_logs(cfg: Config, args: argparse.Namespace) -> int:
     for e in evts:
         ts = e.get("ts", "")
         typ = e.get("type", "?")
+        # TB-158: dedicated rendering for `verification_failed` rows so the
+        # operator sees N/M passed + the failing bullet headlines without
+        # opening events.jsonl in an editor or expanding raw json.
+        if typ == "verification_failed":
+            print(_format_verification_failed_row(ts, e))
+            continue
         extras = {k: v for k, v in e.items() if k not in ("ts", "type")}
         extra = " ".join(f"{k}={_short(v)}" for k, v in extras.items())
         print(f"{ts} {typ:16s} {extra}")
     return 0
+
+
+def _format_verification_failed_row(ts: str, e: dict) -> str:
+    """TB-158: pretty-print a `verification_failed` event for `ap2 logs`.
+
+    Shape:
+        <ts>  verification_failed  <task>  <pass>/<total> passed, <f> failed, <u> unverified
+          ✗ [<kind>]  <bullet, truncated to ~120>
+                     ↳ <judge note, truncated to ~200>
+
+    Passing / unverified bullets are NOT individually rendered (they live
+    in the counter only) — the briefing's `## Out of scope` calls this out
+    explicitly to keep the noise/signal ratio in the operator's favor.
+    Operators wanting the raw payload pass `--json` (regression-pinned).
+    """
+    summary = events.summarize_verification_failed(
+        e, max_bullet=120, max_note=200,
+    )
+    task = str(e.get("task") or "").strip() or "?"
+    lines = [
+        f"{ts} verification_failed {task}  {summary['summary_line']}"
+    ]
+    for fb in summary["failed_bullets"]:
+        kind = fb.get("kind") or "?"
+        bullet = fb.get("bullet") or ""
+        notes = fb.get("notes") or ""
+        lines.append(f"  ✗ [{kind}]  {bullet}")
+        if notes:
+            lines.append(f"            ↳ {notes}")
+    return "\n".join(lines)
 
 
 def cmd_backlog(cfg: Config, args: argparse.Namespace) -> int:
