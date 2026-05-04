@@ -9,7 +9,6 @@
 ## Backlog
 
 - [ ] **TB-152** **`ap2 reject TB-N` (CLI + chat) — explicit rejection logged to operator_log.md** `#autopilot` `#review-gate` `#operator-queue` `#cli` `#mattermost` `@blocked:review` — Today operator deletes ideation proposals via `ap2 delete TB-N`, which doesn't communicate "decided against" to ideation. Add a `reject` verb (CLI + chat) that removes the task and appends a "rejected ideation proposal → TB-N" line to operator_log.md so future ideation cycles respect the decision. [→ brief](.cc-autopilot/tasks/ap2-reject-tb-n-cli-chat-explicit-reject.md)
-- [ ] **TB-156** **Tier-1 token tuning: diff trim + per-agent effort lowering** `#autopilot` `#verify` `#status-report` `#cost` [→ brief](.cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md)
 
 ## Pipeline Pending
 
@@ -49,6 +48,7 @@
 - [x] **TB-153** **`ap2 update` op for in-place task / briefing edits** `#ap2` `#operator` `#cli` `#queue` — Add an `update` op to the operator queue (and matching `ap2 update TB-N` CLI) for in-place edits to a task's `title` / `tags` / `description` / `@blocked` meta and/or its briefing file, routed through the same queue-append → drain path as `add_*` / `delete` / `unfreeze` / `approve` so it never lands inside a task agent's snapshot window. [→ brief](.cc-autopilot/tasks/ap2-update-op-for-in-place-task-briefing.md)
 - [x] **TB-155** **Web port auto-enumerate on conflict** `#autopilot` `#web` `#daemon` [→ brief](.cc-autopilot/tasks/web-port-auto-enumerate-on-conflict.md)
 - [x] **TB-157** **Token-usage instrumentation across all SDK call sites** `#autopilot` `#instrumentation` `#observability` `#cost` [→ brief](.cc-autopilot/tasks/token-usage-instrumentation-across-all-s.md)
+- [x] **TB-156** **Tier-1 token tuning: diff trim + per-agent effort lowering** `#autopilot` `#verify` `#status-report` `#cost` [→ brief](.cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md)
 
 ## Frozen
 

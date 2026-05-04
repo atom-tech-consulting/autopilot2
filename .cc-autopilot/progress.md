@@ -197,3 +197,9 @@
 - **Summary:** Captured usage/model_usage in _summarize_message + _serialize_message_full; wired judge_call event emission in verify._judge_prose_bullet (threaded events_file/task_id/bullet_idx through verify_task); added per-run usage totals footer + ?show=tokens opt-in column + inline judge_call token summary in web.py; built adhoc/token_breakdown.py aggregator (gitignored) grouping by agent-kind run-id pattern; new tests in test_daemon_message_log.py, e2e/test_verify_per_task.py, test_web.py — full ap2/tests/ suite passes (856 passed in 80.94s).
 - **Files:** ap2/daemon.py, ap2/verify.py, ap2/web.py, ap2/tests/test_daemon_message_log.py, ap2/tests/test_web.py, ap2/tests/e2e/test_verify_per_task.py, adhoc/token_breakdown.py
 - **Tests:** pass
+
+## [2026-05-04] TB-156: Tier-1 token tuning: diff trim + per-agent effort lowering
+- **Commit:** `60c60ff`
+- **Summary:** TB-156 implementation already landed in a4b085c (judge diff cap 100KB→30KB, AP2_VERIFY_JUDGE_EFFORT default high, AP2_STATUS_REPORT_EFFORT default medium, plus per-site precedence tests + 30KB diff-truncation test); first run failed verification only because briefing's `grep -qE "AP2_STATUS_REPORT_EFFORT" ap2/` was missing `-r` and exited 2 on the directory arg. New commit 60c60ff fixes the briefing typo (`-qE` → `-qrE`); all four shell bullets now exit 0 and `uv run pytest -q ap2/tests/` reports 856 passed.
+- **Files:** .cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md
+- **Tests:** pass
