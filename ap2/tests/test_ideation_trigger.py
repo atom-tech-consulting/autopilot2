@@ -407,3 +407,76 @@ def test_force_ideate_emits_ideation_empty_board_event(tmp_path, monkeypatch):
 
     kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
     assert "ideation_empty_board" in kinds
+
+
+# ---------------------------------------------------------------------------
+# TB-169: `_run_ideation` calls `build_control_prompt` with
+# `include_types=IDEATION_RELEVANT_EVENT_TYPES` so the rendered `## Recent
+# events` tail filters out observability/plumbing noise. Pin the captured
+# prompt's events-block contents — at least one allowlisted kind survives,
+# noise kinds (`judge_call` is the load-bearing example from the briefing)
+# do NOT appear inside the events block.
+
+
+def test_run_ideation_prompt_filters_events_block_to_relevant_kinds(
+    tmp_path, monkeypatch
+):
+    """End-to-end: drive `_maybe_ideate` with the standard stub harness
+    and a fixture seeding both relevant (`task_complete`) and noise
+    (`judge_call`) events. The captured prompt's `## Recent events`
+    block must contain `task_complete` and NOT `judge_call`.
+
+    This is the load-bearing TB-169 integration check — it's what the
+    daemon will actually do per ideation cycle. The unit-level filter
+    behavior is covered in `test_prompts.py`; this test pins the
+    wiring."""
+    monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={"Backlog": [("TB-1", "first"), ("TB-2", "second")]},
+    )
+    # Seed events.jsonl with a mix of relevant + noise kinds. The
+    # `_make_project` flow doesn't write events, so the file starts
+    # empty here (modulo whatever `_maybe_ideate` itself appends post-
+    # call — which lands AFTER the prompt is built and so isn't in the
+    # captured tail).
+    events.append(cfg.events_file, "task_complete", task="TB-99",
+                  status="complete", commit="abc1234")
+    events.append(cfg.events_file, "judge_call", task="TB-99",
+                  bullet_idx=0, verdict="pass")
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(cfg.events_file, "verification_failed", task="TB-98")
+
+    calls = _stub_run_control_agent(monkeypatch)
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    assert len(calls) == 1, "ideation should have fired (count=2 < default 3)"
+    prompt = calls[0]["prompt"]
+
+    # Anchor on the events-block heading — TB-N references can appear
+    # elsewhere in the prompt (e.g. inside a future board snapshot or
+    # operator-rejection block), but the TB-169 filter only governs the
+    # `## Recent events` tail.
+    events_start = prompt.find("## Recent events")
+    assert events_start != -1, "events block heading missing from prompt"
+    events_block = prompt[events_start:]
+
+    # Positive: at least one allowlisted kind survives the filter.
+    # `task_complete` is the briefing's load-bearing example.
+    assert " task_complete " in events_block, (
+        "expected `task_complete` line in filtered events block"
+    )
+    # And another lifecycle kind from the same allowlist.
+    assert " verification_failed " in events_block
+
+    # Negative: zero `judge_call` lines — this is the briefing's
+    # primary concrete failure mode (full token-usage payloads at ~2KB
+    # each blowing the 6KB budget).
+    assert " judge_call " not in events_block, (
+        "noise type `judge_call` should have been filtered out of the "
+        "ideation prompt's events block"
+    )
+    # And `cron_complete` (cron-lifecycle plumbing — explicit briefing
+    # callout).
+    assert " cron_complete " not in events_block

@@ -908,3 +908,166 @@ def test_build_control_prompt_default_kwargs_keep_status_report_shape(
     assert "- recent commits (HEAD~10):" in p
     # The board legend is intact.
     assert "(Active/Ready/Backlog/Pipeline-Pending/Complete/Frozen)" in p
+
+
+# ---------------------------------------------------------------------------
+# TB-169: `_events_block` accepts an `include_types` allowlist so ideation
+# can drop observability/plumbing events (full `judge_call` token-usage
+# payloads, `status_report`, `cron_*`, daemon-plumbing) BEFORE
+# `format_for_prompt`'s 6KB byte cap. Status-report cron (which
+# summarizes everything) keeps the unfiltered view by omitting the
+# kwarg.
+
+# Three "noise" event kinds the ideation allowlist must filter out.
+# Picked specifically to mirror the briefing's example (`judge_call`,
+# `status_report`, `cron_complete`) so this test reflects the empirical
+# motivation rather than abstract enumeration.
+_TB169_NOISE_TYPES = ("judge_call", "status_report", "cron_complete")
+
+
+def _seed_events(cfg: Config, types: list[str]) -> None:
+    """Append one event of each given type to the project's events.jsonl
+    so `events.tail(...)` can read them back. Order on disk = order
+    given. Each event carries a tiny `marker` field so the rendered
+    string is searchable by type unambiguously."""
+    from ap2 import events as _events
+
+    for t in types:
+        _events.append(cfg.events_file, t, marker=f"tb169-{t}")
+
+
+def test_events_block_filters_to_allowlist_when_include_types_given(tmp_path):
+    """TB-169: with a non-empty `include_types`, every allowlisted kind
+    in the tail renders and every noise kind is dropped. Pin both the
+    positive surface (every relevant kind appears as ` <type> ` in the
+    rendered block) and the negative surface (no noise kind's `type=`
+    rendering appears)."""
+    from ap2.ideation import IDEATION_RELEVANT_EVENT_TYPES
+    from ap2.prompts import _events_block
+
+    cfg = _cfg(tmp_path)
+    # Seed one event of each ideation-relevant kind PLUS three noise
+    # kinds. The interleaving is deliberate — proves the filter doesn't
+    # depend on contiguous-block layout on disk.
+    seed_order: list[str] = []
+    for relevant, noise in zip(
+        IDEATION_RELEVANT_EVENT_TYPES,
+        # cycle through noise kinds — gives us at least one of each
+        # interleaved with the relevant events.
+        list(_TB169_NOISE_TYPES) * 4,
+    ):
+        seed_order.append(relevant)
+        seed_order.append(noise)
+    # Top up with the trailing relevant kinds (allowlist is longer than
+    # the noise list; the zip above stops at the shorter one).
+    if len(seed_order) < 2 * len(IDEATION_RELEVANT_EVENT_TYPES):
+        for r in IDEATION_RELEVANT_EVENT_TYPES[
+            len(seed_order) // 2:
+        ]:
+            seed_order.append(r)
+    _seed_events(cfg, seed_order)
+
+    block = _events_block(cfg, include_types=IDEATION_RELEVANT_EVENT_TYPES)
+
+    # Positive: every allowlisted kind appears in the rendered block.
+    # The format is `<ts> <type> <extras>`, so anchor on the type name
+    # surrounded by spaces / line-start to avoid substring false-matches
+    # (e.g. `task_complete` is a substring of nothing else here, but
+    # explicit anchoring keeps the test robust to future renames).
+    for relevant in IDEATION_RELEVANT_EVENT_TYPES:
+        assert f" {relevant} " in block, (
+            f"expected allowlisted type {relevant!r} in rendered block"
+        )
+
+    # Negative: no noise kind appears as a rendered event line.
+    for noise in _TB169_NOISE_TYPES:
+        assert f" {noise} " not in block, (
+            f"noise type {noise!r} should have been filtered out"
+        )
+
+
+def test_events_block_default_no_kwarg_renders_all_events(tmp_path):
+    """TB-169: status-report-style backwards compat. With no `include_types`
+    kwarg, every event in the tail renders — both the relevant kinds AND
+    the noise kinds. This pins the unfiltered behavior the status-report
+    cron depends on."""
+    from ap2.ideation import IDEATION_RELEVANT_EVENT_TYPES
+    from ap2.prompts import _events_block
+
+    cfg = _cfg(tmp_path)
+    seed = list(IDEATION_RELEVANT_EVENT_TYPES) + list(_TB169_NOISE_TYPES)
+    _seed_events(cfg, seed)
+
+    block = _events_block(cfg)
+
+    # All seeded kinds — relevant and noise — appear in the rendered block.
+    for kind in seed:
+        assert f" {kind} " in block, (
+            f"default (no kwarg) rendering must include {kind!r}"
+        )
+
+
+def test_events_block_empty_after_filter_renders_none_yet_fallback(tmp_path):
+    """TB-169: when no events of relevant types exist in the tail, the
+    rendered block is the `## Recent events\\n(none yet)\\n` fallback —
+    same shape as a literally-empty events.jsonl. Anti-regression on a
+    bug where the filter would render a heading with no body."""
+    from ap2.ideation import IDEATION_RELEVANT_EVENT_TYPES
+    from ap2.prompts import _events_block
+
+    cfg = _cfg(tmp_path)
+    # All-noise tail — nothing in the allowlist.
+    _seed_events(cfg, list(_TB169_NOISE_TYPES) * 5)
+
+    block = _events_block(cfg, include_types=IDEATION_RELEVANT_EVENT_TYPES)
+    assert block == "## Recent events\n(none yet)\n", (
+        "empty-after-filter must render the same fallback as a literally-"
+        f"empty tail; got {block!r}"
+    )
+
+
+def test_build_control_prompt_forwards_include_types_to_events_block(tmp_path):
+    """TB-169: `build_control_prompt(..., include_types=...)` threads the
+    allowlist into `_events_block` so the rendered `## Recent events`
+    tail filters out noise kinds. Pin the integration boundary — a
+    refactor that drops the kwarg-forward would silently re-introduce
+    the noise."""
+    from ap2.ideation import IDEATION_RELEVANT_EVENT_TYPES
+
+    cfg = _cfg(tmp_path)
+    # Seed both a `task_complete` (relevant) and a `judge_call` (noise).
+    _seed_events(cfg, ["task_complete", "judge_call"])
+
+    p = build_control_prompt(
+        cfg, "ideation", "(ideation body)",
+        include_types=IDEATION_RELEVANT_EVENT_TYPES,
+    )
+
+    # The `## Recent events` heading appears (relevant kinds present →
+    # heading rendered, not the empty fallback).
+    assert "## Recent events (most recent last)" in p
+    # Anchor inside the events block so we don't false-match on
+    # `task_complete` text that might appear elsewhere in the prompt.
+    events_start = p.find("## Recent events")
+    events_block = p[events_start:]
+    assert " task_complete " in events_block
+    assert " judge_call " not in events_block
+
+
+def test_build_control_prompt_default_omits_filter_for_status_report(tmp_path):
+    """TB-169: status-report cron (job_name='status-report') called with
+    no `include_types` kwarg keeps the unfiltered view — every seeded
+    event kind appears in the rendered events block. This pins the
+    backwards-compat half of the change."""
+    cfg = _cfg(tmp_path)
+    _seed_events(cfg, ["task_complete", "judge_call", "cron_complete"])
+
+    p = build_control_prompt(cfg, "status-report", "post a status report")
+    events_start = p.find("## Recent events")
+    events_block = p[events_start:]
+
+    # All three kinds render — none are dropped without the kwarg.
+    for kind in ("task_complete", "judge_call", "cron_complete"):
+        assert f" {kind} " in events_block, (
+            f"status-report (default) must keep {kind!r} in the events tail"
+        )

@@ -354,8 +354,35 @@ adopts via `ap2 cron edit`.
 """
 
 
-def _events_block(cfg: Config) -> str:
+def _events_block(
+    cfg: Config,
+    *,
+    include_types: tuple[str, ...] | list[str] | None = None,
+) -> str:
+    """Render the `## Recent events` tail block prepended to control/task prompts.
+
+    TB-169: `include_types` is an optional allowlist of event `type` values.
+    When `None` (the default), no filter is applied — every event in the
+    tailed window is rendered. When a non-empty sequence, events whose
+    `type` field is NOT in the allowlist are dropped BEFORE
+    `events.format_for_prompt` runs, so the 6KB byte budget is spent on
+    the events the caller actually cares about.
+
+    The filter operates on the existing tailed window (n =
+    `cfg.event_context_size`); it does NOT walk further back to gather N
+    matches. Empty-after-filter renders the same `(none yet)` fallback as
+    a literally-empty tail — keeps the prompt shape stable for fresh
+    projects and for ideation runs where the recent tail is mostly
+    plumbing/observability noise.
+
+    Status-report cron (which summarizes ALL activity) keeps the
+    unfiltered view by omitting the kwarg. Ideation opts in via
+    `IDEATION_RELEVANT_EVENT_TYPES` to sharpen prompt signal density.
+    """
     evts = events.tail(cfg.events_file, n=cfg.event_context_size)
+    if include_types is not None:
+        allowed = set(include_types)
+        evts = [e for e in evts if e.get("type") in allowed]
     if not evts:
         return "## Recent events\n(none yet)\n"
     return "## Recent events (most recent last)\n" + events.format_for_prompt(evts) + "\n"
@@ -568,6 +595,7 @@ def build_control_prompt(
     state_extras: list[str] | None = None,
     include_board: bool = True,
     include_commits: bool = True,
+    include_types: tuple[str, ...] | list[str] | None = None,
 ) -> str:
     """Build the prompt for a control-agent run (cron job or ideation cycle).
 
@@ -592,6 +620,13 @@ def build_control_prompt(
     blocks that don't pay rent for them specifically. Defaults stay
     True for backwards compatibility with the status-report cron and
     any future control-agent callers.
+
+    TB-169: `include_types` is forwarded to `_events_block` as an
+    allowlist of event `type` values. When `None` (default), the events
+    block renders unchanged (status-report still summarizes everything).
+    Ideation opts in via `IDEATION_RELEVANT_EVENT_TYPES` so the 6KB
+    events-block byte budget isn't crowded out by `judge_call` /
+    `task_run_usage` / cron-lifecycle noise.
     """
     parts = [
         _CONTROL_HEADER,
@@ -614,5 +649,5 @@ def build_control_prompt(
     if job_name == "status-report":
         parts.append(_STATUS_REPORT_CONTRACT)
         parts.append("")
-    parts.append(_events_block(cfg))
+    parts.append(_events_block(cfg, include_types=include_types))
     return "\n".join(parts)

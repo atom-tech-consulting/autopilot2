@@ -51,6 +51,44 @@ IDEATION_COOLDOWN_DEFAULT_S = 7200  # 2h between fires when board stays empty
 # items" cap. Tunable via AP2_IDEATION_TRIGGER_TASK_COUNT.
 IDEATION_TRIGGER_TASK_COUNT_DEFAULT = 3
 
+# TB-169: allowlist of event `type` values ideation actually keys off.
+# `_run_ideation` passes this to `build_control_prompt` so the rendered
+# `## Recent events` tail filters out observability/plumbing noise (full
+# `judge_call` payloads with token-usage dumps, `status_report`,
+# `cron_*`, `mattermost_*`, `task_run_usage` / `control_run_usage`,
+# daemon lifecycle, etc.). The 6KB `format_for_prompt` byte budget then
+# carries lifecycle + operator-decision + cron-proposal signal instead
+# of being half-eaten by 2KB-each `judge_call` lines.
+#
+# Allowlist (not denylist) is intentional: new event types added in
+# future TBs default to *exclusion* unless someone consciously opts them
+# in. New event types are typically observability/plumbing
+# (`task_run_usage` / `control_run_usage` are exactly that pattern),
+# which is what we want excluded by default.
+#
+# See `ideation.default.md` for how each retained kind feeds the
+# agent's reasoning:
+# - `task_complete` / `verification_failed` / `verification_partial` /
+#   `retry_exhausted` / `task_state_violation` — Step 1 follow-up
+#   discovery + Step 1.5 failure review.
+# - `ideation_approved` / `task_deleted` / `task_updated` — operator
+#   decisions (cross-cycle "what was approved/rejected/edited" context).
+# - `cron_proposed` — explicit ideation.default.md surfacing rule.
+IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
+    # Task lifecycle — Step 1 follow-up discovery + Step 1.5 failure review.
+    "task_complete",
+    "verification_failed",
+    "verification_partial",
+    "retry_exhausted",
+    "task_state_violation",
+    # Operator decisions — cross-cycle context.
+    "ideation_approved",
+    "task_deleted",
+    "task_updated",
+    # Cron proposals — explicit ideation.default.md rule.
+    "cron_proposed",
+)
+
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
 _PROJECT_PROMPT_REL = ".cc-autopilot/ideation_prompt.md"
 
@@ -145,9 +183,20 @@ async def _run_ideation(cfg: Config, sdk, mcp_server) -> None:
     # (Step 5 of `ap2/ideation.default.md`). `now:` survives — it's
     # ideation's only deterministic clock for the `_Last updated:` line
     # in the `ideation_state.md` schema.
+    #
+    # TB-169: ideation also opts in to event-type filtering — the
+    # rendered `## Recent events` tail keeps only the kinds ideation
+    # actually keys off (lifecycle, operator decisions, cron
+    # proposals). `judge_call` / `task_run_usage` / `control_run_usage`
+    # / cron-lifecycle / mattermost / daemon-plumbing events are
+    # dropped before the 6KB `format_for_prompt` byte cap, so the
+    # signal density of the prompt doesn't degrade as observability
+    # event volume grows. See `IDEATION_RELEVANT_EVENT_TYPES` for the
+    # full list and rationale.
     full_prompt = prompts.build_control_prompt(
         cfg, IDEATION_NAME, load_prompt(cfg),
         include_board=False, include_commits=False,
+        include_types=IDEATION_RELEVANT_EVENT_TYPES,
     )
     max_turns = int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT))
     # TB-126: snapshot the state surface before ideation runs so the post-
