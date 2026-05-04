@@ -300,6 +300,11 @@ Set in shell, in `<project>/.cc-autopilot/env`, or in
 - `AP2_IDEATION_DISABLED` — set to `1`/`true` to opt out of empty-board
   ideation.
 - `AP2_IDEATION_COOLDOWN_S` (7200) — minimum gap between ideation runs.
+- `AP2_IDEATION_TRIGGER_TASK_COUNT` (3) — fire ideation when Ready+Backlog
+  count is BELOW this threshold (Active is still a hard gate). Set to
+  `1` for the legacy "fire only when the working queue is fully empty"
+  behavior; raise it (e.g. `5`) for projects with very fluid scope.
+  Invalid (non-int, non-positive) values fall back to the default.
 - `AP2_MM_CHANNELS` — comma-separated MM channel IDs to poll.
 
 Plus required: `CLAUDE_CODE_OAUTH_TOKEN`. Daemon refuses to start

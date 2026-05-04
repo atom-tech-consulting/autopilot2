@@ -24,7 +24,8 @@ _tick(cfg, sdk, mcp_server):
   2. Tasks      — board.next_ready, or auto-promote next_dispatchable("Backlog")
                   → run_task on the picked task
   3. Pipeline   — _sweep_pipeline_pending (no-op unless Pipeline Pending tasks exist)
-  4. Ideation   — _maybe_ideate (no-op unless board fully empty + cooldown)
+  4. Ideation   — _maybe_ideate (no-op unless Active is empty AND Ready+Backlog
+                  count < AP2_IDEATION_TRIGGER_TASK_COUNT (default 3) + cooldown)
   5. Watchdog   — _maybe_auto_diagnose (no-op unless idle threshold passed)
 ```
 

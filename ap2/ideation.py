@@ -1,9 +1,10 @@
 """Ideation: a first-class autopilot mechanism, not a cron job.
 
-Ideation fires when the working board (Active+Ready+Backlog) is fully empty,
-throttled by a per-project cooldown. Its prompt instructs the agent to
-propose new tasks based on goal.md, TASKS.md, progress.md, the insights
-index, and recent failures (see `ideation.default.md`).
+Ideation fires when the working queue (Ready+Backlog) has fewer than
+`AP2_IDEATION_TRIGGER_TASK_COUNT` items AND Active is empty, throttled
+by a per-project cooldown. Its prompt instructs the agent to propose new
+tasks based on goal.md, TASKS.md, progress.md, the insights index, and
+recent failures (see `ideation.default.md`).
 
 Why a dedicated module rather than a cron job: ideation is the only
 mechanism that creates new work, so it needs to evolve faster than the
@@ -17,9 +18,18 @@ Configuration:
 - Project override (optional): `.cc-autopilot/ideation_prompt.md` in the
   project root — when present, it replaces the default verbatim.
 - Cooldown: `AP2_IDEATION_COOLDOWN_S` (default 7200 — 2h).
+- Trigger threshold: `AP2_IDEATION_TRIGGER_TASK_COUNT` (default 3).
+  Ideation fires when the count of Ready+Backlog tasks is BELOW this
+  threshold (and Active is empty as a hard SDK-contention gate). The
+  default of 3 matches the prompt's "Propose new tasks ONLY if Backlog
+  has fewer than 3 workable items" cap. Set to 1 for the legacy "fire
+  only when the working queue is fully empty" behavior.
 - Max turns: `AP2_IDEATION_MAX_TURNS` (default 30 — bumped from the legacy
   cron-default 15 because the assessment + failure-review + proposal flow
   routinely needs ~10-15 turns and 15 was running close to the wire).
+- Disable: `AP2_IDEATION_DISABLED=1` opts out of empty-board ideation
+  entirely (used by the test suite by default; useful for projects that
+  want to drive ideation manually rather than on the natural gate).
 """
 from __future__ import annotations
 
@@ -36,6 +46,10 @@ from .cron import load_state, mark_run
 IDEATION_NAME = "ideation"
 IDEATION_MAX_TURNS_DEFAULT = 30
 IDEATION_COOLDOWN_DEFAULT_S = 7200  # 2h between fires when board stays empty
+# Trigger threshold: ideation fires when Ready+Backlog count is BELOW this
+# value (and Active is empty). Matches the prompt's "fewer than 3 workable
+# items" cap. Tunable via AP2_IDEATION_TRIGGER_TASK_COUNT.
+IDEATION_TRIGGER_TASK_COUNT_DEFAULT = 3
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
 _PROJECT_PROMPT_REL = ".cc-autopilot/ideation_prompt.md"
@@ -60,8 +74,36 @@ def _cooldown_s() -> int:
     return IDEATION_COOLDOWN_DEFAULT_S
 
 
+def _trigger_task_count() -> int:
+    """Effective Ready+Backlog trigger threshold, env-overridable.
+
+    Reads `AP2_IDEATION_TRIGGER_TASK_COUNT`. Same permissive parsing style
+    as `_cooldown_s`: invalid (non-int, non-positive, empty) values fall
+    back to the module default silently. A value <= 0 would make the gate
+    impossible to clear (every count >= 0 satisfies `count >= 0`), so we
+    treat that as invalid too.
+    """
+    v = os.environ.get("AP2_IDEATION_TRIGGER_TASK_COUNT")
+    if v:
+        try:
+            parsed = int(v)
+        except ValueError:
+            return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
+        if parsed > 0:
+            return parsed
+    return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
+
+
 async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
-    """Fire ideation when the board is fully empty and the cooldown elapsed.
+    """Fire ideation when the working queue is shallow and the cooldown elapsed.
+
+    Gates (in order):
+    1. `AP2_IDEATION_DISABLED` opt-out (tests + manual-only projects).
+    2. Active hard gate — non-empty Active means a task is in flight and
+       sharing the SDK slot with a control agent is unsafe.
+    3. Ready+Backlog count below `AP2_IDEATION_TRIGGER_TASK_COUNT`
+       (default 3). Pipeline Pending and Frozen do not count.
+    4. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire.
 
     Reuses `daemon._run_control_agent` for SDK plumbing (prompt-dump,
     stderr capture, MCP wiring) but owns its own event vocabulary —
@@ -73,16 +115,22 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
 
     Set `AP2_IDEATION_DISABLED=1` to opt out entirely (the tests use this
     by default; it's also useful for projects that want to drive ideation
-    manually rather than on empty-board).
+    manually rather than on the natural gate).
     """
     if os.environ.get("AP2_IDEATION_DISABLED", "").strip() in ("1", "true", "yes"):
         return
     board = Board.load(cfg.tasks_file)
-    has_work = any(
-        next(board.iter_tasks(section=s), None) is not None
-        for s in ("Active", "Ready", "Backlog")
+    # Active is a HARD gate independent of the threshold: a task agent and
+    # a control agent cannot share the SDK slot safely (TB-159 background).
+    # Skip whenever Active is non-empty regardless of how many Ready/Backlog
+    # items there are.
+    if next(board.iter_tasks(section="Active"), None) is not None:
+        return
+    queued = sum(
+        sum(1 for _ in board.iter_tasks(section=s))
+        for s in ("Ready", "Backlog")
     )
-    if has_work:
+    if queued >= _trigger_task_count():
         return
     state = load_state(cfg.cron_state_file)
     last = state.get(IDEATION_NAME, 0.0)
