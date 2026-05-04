@@ -1003,8 +1003,9 @@ def _summarize_message(msg) -> dict:
     """Compact per-envelope summary for `.stream.jsonl` (TB-85).
 
     Returns: `{type, text_preview?, tool_calls?, tool_results?, stop_reason?,
-    num_turns?, total_cost_usd?, subtype?}`. Optional fields are omitted when
-    absent so the dump stays scannable. `seq` is added by the caller.
+    num_turns?, total_cost_usd?, subtype?, usage?, model_usage?}`. Optional
+    fields are omitted when absent so the dump stays scannable. `seq` is
+    added by the caller.
     """
     out: dict = {"type": type(msg).__name__}
     out.update(_walk_blocks(msg, full=False))
@@ -1020,6 +1021,17 @@ def _summarize_message(msg) -> dict:
     sub = getattr(msg, "subtype", None)
     if sub is not None:
         out["subtype"] = sub
+    # TB-157: capture token / cache counters from ResultMessage. The `usage`
+    # dict shape is well-known (Anthropic API response): input_tokens,
+    # output_tokens, cache_creation_input_tokens, cache_read_input_tokens.
+    # `model_usage` carries the same fields broken down by model when the
+    # session spans multiple variants. Pass through verbatim — downstream
+    # aggregators (adhoc/token_breakdown.py, the web detail page) parse the
+    # nested dict directly.
+    for k in ("usage", "model_usage"):
+        v = getattr(msg, k, None)
+        if isinstance(v, dict) and v:
+            out[k] = v
     # Some ResultMessage variants carry text in `.result` rather than via
     # content blocks.
     if "text_preview" not in out:
@@ -1040,6 +1052,12 @@ def _serialize_message_full(msg) -> dict:
     for k in ("model", "stop_reason", "num_turns", "total_cost_usd", "subtype", "result"):
         v = getattr(msg, k, None)
         if v is not None:
+            out[k] = v
+    # TB-157: same usage / model_usage capture as the compact summary; the
+    # full-record file is the durable archive for cost-tradeoff analysis.
+    for k in ("usage", "model_usage"):
+        v = getattr(msg, k, None)
+        if isinstance(v, dict) and v:
             out[k] = v
     return out
 
@@ -1331,6 +1349,11 @@ async def _maybe_per_task_verify(cfg: Config, sdk, task) -> "verify.VerifyVerdic
         # commit; without `task_id` the prose judge sees only that and
         # hallucinates "no changes to file X".
         task_id=task.id,
+        # TB-157: thread events_file through so per-judge `judge_call`
+        # events land on the canonical aggregation surface. The judge
+        # path bypasses the daemon's `_log_message` (its own SDK loop),
+        # so this is the only capture point for prose-judge cost.
+        events_file=cfg.events_file,
     )
 
 

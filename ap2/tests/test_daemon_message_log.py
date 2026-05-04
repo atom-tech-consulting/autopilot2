@@ -180,6 +180,74 @@ def test_prep_debug_dumps_returns_three_paths(tmp_path):
     assert prompt.parent.name == "debug"
 
 
+# ---------------- TB-157: usage / model_usage capture ----------------
+
+
+def test_summarize_captures_usage_dict():
+    """ResultMessage's `usage` dict (input/output/cache tokens) must
+    round-trip through `_summarize_message` so the per-call stream dump
+    carries the data needed for cost-tradeoff aggregation.
+    """
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_read_input_tokens": 80,
+        "cache_creation_input_tokens": 0,
+    }
+    m = SimpleNamespace(usage=usage, total_cost_usd=0.001)
+    out = daemon._summarize_message(m)
+    assert out["usage"] == usage
+
+
+def test_summarize_captures_model_usage_dict():
+    """Per-model breakdown rides alongside the message-level usage dict
+    when the session spanned multiple Claude variants. Pass through
+    verbatim — downstream aggregators parse the nested shape directly.
+    """
+    model_usage = {
+        "claude-opus-4-7": {
+            "input_tokens": 500,
+            "output_tokens": 100,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+        }
+    }
+    m = SimpleNamespace(model_usage=model_usage)
+    out = daemon._summarize_message(m)
+    assert out["model_usage"] == model_usage
+
+
+def test_summarize_omits_usage_when_absent():
+    """Legacy ResultMessages (pre-TB-157, or transports that never carry
+    `usage`) must not gain a `usage: null` key — the dump stays scannable.
+    """
+    m = SimpleNamespace(stop_reason="end_turn", num_turns=1,
+                        total_cost_usd=0.01)
+    out = daemon._summarize_message(m)
+    assert "usage" not in out
+    assert "model_usage" not in out
+
+
+def test_summarize_omits_usage_when_empty_dict():
+    """An empty dict counts as "no data" — same outcome as missing entirely."""
+    m = SimpleNamespace(usage={}, model_usage={})
+    out = daemon._summarize_message(m)
+    assert "usage" not in out
+    assert "model_usage" not in out
+
+
+def test_full_captures_usage_dict():
+    """Same capture in the full-content serializer; the .messages.jsonl
+    file is the durable archive used for after-the-fact cost analysis.
+    """
+    usage = {"input_tokens": 7, "output_tokens": 3,
+             "cache_read_input_tokens": 0,
+             "cache_creation_input_tokens": 0}
+    m = SimpleNamespace(usage=usage)
+    out = daemon._serialize_message_full(m)
+    assert out["usage"] == usage
+
+
 # ---------------- regression for the actual TB-84-stoch bug ----------------
 
 

@@ -309,6 +309,127 @@ def test_add_backlog_rejects_missing_briefing():
         assert sorted(p.name for p in tasks_dir.iterdir()) == before_briefings
 
 
+# --------- TB-157: judge_call event emission ---------
+
+
+def test_judge_prose_bullet_emits_judge_call_event(tmp_path):
+    """TB-157: each `_judge_prose_bullet` SDK call must land exactly one
+    `judge_call` event on `events.jsonl` carrying task / bullet_idx /
+    verdict / the full `usage` dict.
+
+    The judge has its own SDK loop in `verify._judge_prose_bullet` —
+    it bypasses the daemon's `_log_message`, so this is the only
+    capture point for prose-judge cost. Without this event, cache
+    experiments (judge batching, prompt restructure) have no
+    measurement surface.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from ap2 import events
+    from ap2.verify import _judge_prose_bullet, VerifyBullet
+
+    events_file = tmp_path / "events.jsonl"
+
+    # Stub SDK that yields one assistant text envelope (the judge's
+    # JSON verdict) and one ResultMessage carrying `usage`.
+    class _StubSDK:
+        class ClaudeAgentOptions:
+            def __init__(self, **kw):
+                self.kw = kw
+
+        def query(self, *, prompt, options):  # noqa: ARG002
+            async def _gen():
+                # Assistant text — matches the parser's expectations.
+                yield SimpleNamespace(content=[
+                    SimpleNamespace(text='{"status": "pass", "rationale": "ok"}')
+                ])
+                # ResultMessage with the usage payload.
+                yield SimpleNamespace(
+                    content=None,
+                    model="claude-opus-4-7",
+                    num_turns=3,
+                    total_cost_usd=0.042,
+                    stop_reason="end_turn",
+                    usage={
+                        "input_tokens": 8200,
+                        "output_tokens": 90,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 7800,
+                    },
+                )
+            return _gen()
+
+    bullet = VerifyBullet(kind="prose", text="The diff adds foo.py")
+
+    asyncio.run(_judge_prose_bullet(
+        bullet,
+        project_root=tmp_path,
+        sdk=_StubSDK(),
+        diff_text="diff --git a/foo.py b/foo.py\n+def foo(): ...\n",
+        events_file=events_file,
+        task_id="TB-99",
+        bullet_idx=3,
+    ))
+
+    rows = events.tail(events_file, n=10)
+    judge_rows = [r for r in rows if r.get("type") == "judge_call"]
+    assert len(judge_rows) == 1, judge_rows
+    e = judge_rows[0]
+    assert e["task"] == "TB-99"
+    assert e["bullet_idx"] == 3
+    assert e["bullet_kind"] == "prose"
+    assert e["verdict"] == "pass"
+    # Full usage dict is on the event — downstream aggregators read
+    # the nested shape directly without re-deriving from individual
+    # field names.
+    assert e["usage"] == {
+        "input_tokens": 8200,
+        "output_tokens": 90,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 7800,
+    }
+    assert e["model"] == "claude-opus-4-7"
+    assert e["total_cost_usd"] == 0.042
+    assert e["num_turns"] == 3
+
+
+def test_judge_prose_bullet_no_event_when_events_file_omitted(tmp_path):
+    """Pre-TB-157 callers (no `events_file=` passed) must keep working —
+    the instrumentation is opt-in. Verifies no event-write attempts
+    happen at all when the file path isn't threaded through.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from ap2.verify import _judge_prose_bullet, VerifyBullet
+
+    class _StubSDK:
+        class ClaudeAgentOptions:
+            def __init__(self, **kw):
+                self.kw = kw
+
+        def query(self, *, prompt, options):  # noqa: ARG002
+            async def _gen():
+                yield SimpleNamespace(content=[
+                    SimpleNamespace(text='{"status": "pass", "rationale": "ok"}')
+                ])
+            return _gen()
+
+    bullet = VerifyBullet(kind="prose", text="x")
+
+    res = asyncio.run(_judge_prose_bullet(
+        bullet,
+        project_root=tmp_path,
+        sdk=_StubSDK(),
+        diff_text="",
+        # events_file omitted — backward-compat path.
+    ))
+    assert res.status == "pass"
+    # No events.jsonl was created by the judge.
+    assert not (tmp_path / "events.jsonl").exists()
+
+
 def test_add_backlog_preserves_explicit_briefing():
     """When the caller passes a briefing payload, the template is NOT injected
     — TB-69's auto-fill only kicks in when briefing is omitted/empty."""

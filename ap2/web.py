@@ -487,13 +487,51 @@ def _event_extra(e: dict) -> str:
     return " ".join(parts)
 
 
-def _events_table(evts: list[dict], *, cfg: Config | None = None) -> str:
+def _event_token_summary(e: dict) -> str:
+    """TB-157: compact token / cost summary cell for one event row.
+
+    Used when the events table is rendered with `?show=tokens` set, and
+    inside the row's details for `judge_call` events. Returns "" when
+    the event has no usage data.
+    """
+    u = e.get("usage")
+    cost = e.get("total_cost_usd")
+    if not isinstance(u, dict) and not isinstance(cost, (int, float)):
+        return ""
+    bits: list[str] = []
+    if isinstance(u, dict):
+        inp = int(u.get("input_tokens", 0) or 0)
+        outp = int(u.get("output_tokens", 0) or 0)
+        cc = int(u.get("cache_creation_input_tokens", 0) or 0)
+        cr = int(u.get("cache_read_input_tokens", 0) or 0)
+        denom = cr + cc + inp
+        hit = (cr / denom * 100.0) if denom else 0.0
+        bits.append(f"in={inp:,}")
+        bits.append(f"out={outp:,}")
+        bits.append(f"cc={cc:,}")
+        bits.append(f"cr={cr:,}")
+        bits.append(f"hit={hit:.1f}%")
+    if isinstance(cost, (int, float)):
+        bits.append(f"${float(cost):.4f}")
+    return " · ".join(bits)
+
+
+def _events_table(
+    evts: list[dict],
+    *,
+    cfg: Config | None = None,
+    show_tokens: bool = False,
+) -> str:
     """Render an events table; pass `cfg` to enable per-row debug-run links.
 
     With `cfg`, each `task_start` row gets a small `→ live` link to its
     `/task-run/<run-id>` view if the debug files survive on disk (TB-129).
     Without, the table renders plain — used by callers that already render
     a header pulled from the same dataset.
+
+    TB-157: when `show_tokens=True`, an extra `tokens` column surfaces
+    `usage` + `total_cost_usd` per row when present (mostly `judge_call`
+    rows today). Opt-in to keep the default rendering uncluttered.
     """
     if not evts:
         return "<p><em>no events</em></p>"
@@ -512,6 +550,23 @@ def _events_table(evts: list[dict], *, cfg: Config | None = None) -> str:
                     f' <a class="run-link" href="/task-run/{html.escape(rid)}" '
                     f'title="live SDK debug stream">→ live</a>'
                 )
+        # TB-157: surface judge_call usage on the row even when
+        # ?show=tokens isn't set — `judge_call` events are tiny and
+        # operators looking at the events page for one always want
+        # the cost. The opt-in flag adds the column for ALL rows.
+        token_cell = ""
+        if show_tokens:
+            token_cell = (
+                f'<td class="tokens">'
+                f'{html.escape(_event_token_summary(e))}</td>'
+            )
+        elif typ == "judge_call":
+            ts_html = _event_token_summary(e)
+            if ts_html:
+                extra = (
+                    f'<span class="meta">tokens=</span>'
+                    f'{html.escape(ts_html)} · {extra}'
+                )
         rows.append(
             f'<tr class="{cls}">'
             f'<td class="ts">{html.escape(ts)}</td>'
@@ -519,11 +574,16 @@ def _events_table(evts: list[dict], *, cfg: Config | None = None) -> str:
             f'<td class="summary">{extra}'
             f'<details><summary>raw json</summary>'
             f'<pre>{html.escape(full_json)}</pre></details></td>'
+            f"{token_cell}"
             f"</tr>"
         )
+    head = "<tr><th>ts</th><th>type</th><th>fields</th>"
+    if show_tokens:
+        head += "<th>tokens</th>"
+    head += "</tr>"
     return (
         "<table><thead>"
-        "<tr><th>ts</th><th>type</th><th>fields</th></tr>"
+        + head +
         "</thead><tbody>" + "".join(rows) + "</tbody></table>"
     )
 
@@ -618,7 +678,9 @@ def _render_home(cfg: Config) -> str:
     return _layout(cfg.project_root.name, body)
 
 
-def _render_events(cfg: Config, *, typ: str | None, n: int) -> str:
+def _render_events(
+    cfg: Config, *, typ: str | None, n: int, show_tokens: bool = False
+) -> str:
     # Pull a generous tail and post-filter so type-filter pages always show n
     # matches even when the type is rare in the recent window.
     pull = max(n * 20, n) if typ else n
@@ -629,10 +691,12 @@ def _render_events(cfg: Config, *, typ: str | None, n: int) -> str:
     evts.reverse()
 
     # Quick-filter buttons for the most common types.
+    # TB-157: include `judge_call` so operators can isolate prose-judge
+    # cost spikes without grepping events.jsonl by hand.
     quick = ["task_complete", "task_error", "cron_complete", "cron_error",
              "ideation_empty_board", "ideation_complete", "ideation_error",
              "verification_failed", "verification_partial",
-             "backlog_auto_promoted", "daemon_start"]
+             "backlog_auto_promoted", "daemon_start", "judge_call"]
     filt = '<div class="filter">filter:'
     filt += f' <a href="/events?n={n}" class="{"on" if not typ else ""}">all</a>'
     for k in quick:
@@ -661,7 +725,7 @@ def _render_events(cfg: Config, *, typ: str | None, n: int) -> str:
         f"— {len(evts)} shown{', filter: ' + html.escape(typ) if typ else ''}</span></h1>"
         f"{legend}"
         f"{filt}"
-        f"{_events_table(evts, cfg=cfg)}"
+        f"{_events_table(evts, cfg=cfg, show_tokens=show_tokens)}"
     )
     return _layout("events", body)
 
@@ -957,6 +1021,74 @@ def _row_full_body_html(row_full: dict | None) -> str:
     )
 
 
+def _compute_run_usage_totals(rows: list[dict]) -> dict:
+    """TB-157: aggregate token / cache / cost across a run's stream rows.
+
+    Walks every row carrying a `usage` dict (typically the trailing
+    ResultMessage; some sessions emit multiple ResultMessages on
+    multi-turn loops, so we sum across all of them). Returns
+    ``{total_messages_with_usage, input_tokens, output_tokens,
+    cache_creation, cache_read, hit_rate, total_cost_usd}``.
+
+    `hit_rate` is `cache_read / (cache_read + cache_creation +
+    input_tokens)` — the fraction of input that didn't pay the
+    fresh-prompt token rate. Returns an empty dict when no row has
+    usage data (legacy runs from before TB-157 capture).
+    """
+    inp = out = cc = cr = 0
+    cost = 0.0
+    n = 0
+    for r in rows:
+        u = r.get("usage")
+        if isinstance(u, dict):
+            n += 1
+            inp += int(u.get("input_tokens", 0) or 0)
+            out += int(u.get("output_tokens", 0) or 0)
+            cc += int(u.get("cache_creation_input_tokens", 0) or 0)
+            cr += int(u.get("cache_read_input_tokens", 0) or 0)
+        c = r.get("total_cost_usd")
+        if isinstance(c, (int, float)):
+            cost += float(c)
+    if n == 0:
+        return {}
+    denom = cr + cc + inp
+    hit_rate = (cr / denom) if denom else 0.0
+    return {
+        "total_messages_with_usage": n,
+        "input_tokens": inp,
+        "output_tokens": out,
+        "cache_creation": cc,
+        "cache_read": cr,
+        "hit_rate": hit_rate,
+        "total_cost_usd": cost,
+    }
+
+
+def _render_run_usage_footer(rows: list[dict]) -> str:
+    """Render the TB-157 token/usage totals footer for the per-task-run
+    detail page. Returns "" when no usage data is present (legacy runs).
+    """
+    t = _compute_run_usage_totals(rows)
+    if not t:
+        return ""
+    pct = f"{t['hit_rate'] * 100:.1f}%"
+    return (
+        '<h2>usage <span class="meta">— totals across this run\'s '
+        'ResultMessages</span></h2>'
+        '<table class="usage-totals"><tbody>'
+        f'<tr><th>messages with usage</th>'
+        f'<td>{t["total_messages_with_usage"]}</td></tr>'
+        f'<tr><th>input tokens</th><td>{t["input_tokens"]:,}</td></tr>'
+        f'<tr><th>output tokens</th><td>{t["output_tokens"]:,}</td></tr>'
+        f'<tr><th>cache creation</th><td>{t["cache_creation"]:,}</td></tr>'
+        f'<tr><th>cache read</th><td>{t["cache_read"]:,}</td></tr>'
+        f'<tr><th>cache hit rate</th><td>{html.escape(pct)}</td></tr>'
+        f'<tr><th>total cost (USD)</th>'
+        f'<td>${t["total_cost_usd"]:.4f}</td></tr>'
+        '</tbody></table>'
+    )
+
+
 def _render_run_rows_html(
     rows: list[dict], full_by_seq: dict[int, dict]
 ) -> str:
@@ -1054,6 +1186,9 @@ def _render_task_run(cfg: Config, run_id: str) -> str:
             prompt_html = f'<p class="meta">(prompt unreadable: {html.escape(str(e))})</p>'
 
     rows_html = _render_run_rows_html(rows, full_by_seq)
+    # TB-157: usage / token / cost totals footer. Empty string when no
+    # row carries `usage` (pre-TB-157 runs already on disk).
+    usage_footer = _render_run_usage_footer(rows)
 
     # Auto-refresh script: only emitted when in-flight. Polls the JSON
     # sub-endpoint with `since=<next_seq>`, appends new rows, and re-checks
@@ -1077,6 +1212,7 @@ def _render_task_run(cfg: Config, run_id: str) -> str:
         f'<table id="stream-table"><thead>'
         "<tr><th>seq</th><th>type</th><th>body</th></tr>"
         f'</thead><tbody id="stream-body">{rows_html}</tbody></table>'
+        f"{usage_footer}"
         f"{script}"
     )
     return _layout(f"run {run_id}", body)
@@ -1473,7 +1609,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 except ValueError:
                     n = 200
                 n = max(1, min(n, 5000))
-                body = _render_events(self.cfg, typ=typ, n=n)
+                # TB-157: ?show=tokens renders an extra column per row
+                # surfacing usage / cost for every event that carries it
+                # (chiefly judge_call rows today, and any future
+                # event types that grow a usage payload).
+                show_tokens = (
+                    qs.get("show", [""])[0] == "tokens"
+                )
+                body = _render_events(
+                    self.cfg, typ=typ, n=n, show_tokens=show_tokens,
+                )
             elif path == "/tasks":
                 # TB-121: ?filter=pending-review narrows to ideation
                 # proposals awaiting operator approval.

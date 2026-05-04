@@ -779,6 +779,124 @@ def test_task_page_runs_section_handles_no_disk_files(project: Config):
     assert "none on disk" in h
 
 
+# --------- TB-157: usage / token totals footer + show=tokens ---------
+
+
+def test_render_task_run_renders_usage_totals_footer(project: Config):
+    """When stream rows carry `usage`, the per-task-run detail page
+    renders a totals block (input/output/cache/cost) summed across all
+    ResultMessages in the run.
+    """
+    _seed_run(
+        project,
+        run_id="20260430T200000Z-TB-157",
+        rows=[
+            {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+            {"seq": 1, "type": "AssistantMessage",
+             "text_preview": "thinking", "model": "claude-opus-4-7"},
+            {"seq": 2, "type": "ResultMessage", "subtype": "success",
+             "stop_reason": "end_turn", "num_turns": 3,
+             "total_cost_usd": 0.1234,
+             "usage": {
+                 "input_tokens": 100,
+                 "output_tokens": 50,
+                 "cache_creation_input_tokens": 0,
+                 "cache_read_input_tokens": 80,
+             }},
+            {"seq": 3, "type": "ResultMessage", "subtype": "success",
+             "stop_reason": "end_turn", "num_turns": 1,
+             "total_cost_usd": 0.05,
+             "usage": {
+                 "input_tokens": 200,
+                 "output_tokens": 30,
+                 "cache_creation_input_tokens": 50,
+                 "cache_read_input_tokens": 0,
+             }},
+        ],
+    )
+    h = web._render_task_run(project, "20260430T200000Z-TB-157")
+    # Section header is present.
+    assert "usage" in h.lower()
+    # Sums across both ResultMessages: 100 + 200 = 300 input, 50 + 30 = 80
+    # output, 0 + 50 = 50 cache_creation, 80 + 0 = 80 cache_read.
+    assert "300" in h
+    assert "80" in h
+    # Total cost summed.
+    assert "0.1734" in h or "0.1734" in h.replace(",", "")
+    # Hit rate denominator = 80 + 50 + 300 = 430. cache_read = 80.
+    # 80 / 430 ≈ 18.6%
+    assert "18.6%" in h
+
+
+def test_render_task_run_omits_usage_footer_when_no_usage(project: Config):
+    """Legacy runs (pre-TB-157, no `usage` on any row) gracefully render
+    without the footer block — no empty section, no zero-padded totals.
+    """
+    _seed_run(
+        project,
+        run_id="20260430T210000Z-TB-LEGACY",
+        rows=[
+            {"seq": 0, "type": "SystemMessage", "subtype": "init"},
+            {"seq": 1, "type": "ResultMessage", "subtype": "success",
+             "stop_reason": "end_turn", "num_turns": 1,
+             "total_cost_usd": 0.01},
+        ],
+    )
+    h = web._render_task_run(project, "20260430T210000Z-TB-LEGACY")
+    # No usage-totals section header (the only `<h2>usage` rendering point).
+    assert "<h2>usage" not in h
+    assert "usage-totals" not in h
+
+
+def test_compute_run_usage_totals_hit_rate():
+    """White-box pin on the hit-rate formula: cache_read divided by the
+    full input footprint (cache_read + cache_creation + input_tokens).
+    """
+    rows = [
+        {"type": "ResultMessage", "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 100,
+        }, "total_cost_usd": 0.0},
+    ]
+    t = web._compute_run_usage_totals(rows)
+    # Pure cache hit: 100 / 100 = 1.0.
+    assert t["hit_rate"] == 1.0
+    assert t["cache_read"] == 100
+
+
+def test_events_table_show_tokens_adds_column(project: Config):
+    """`?show=tokens` opt-in surfaces token / cost per row (TB-157).
+    Defaults stay clean (no extra column) — the briefing's stated
+    contract is opt-in.
+    """
+    # Inject a judge_call with usage so the column has something to show.
+    with project.events_file.open("a") as f:
+        f.write(_json.dumps({
+            "ts": "2026-04-30T22:00:00Z", "type": "judge_call",
+            "task": "TB-99", "bullet_idx": 0, "verdict": "pass",
+            "model": "claude-opus-4-7", "total_cost_usd": 0.042,
+            "usage": {
+                "input_tokens": 8200,
+                "output_tokens": 90,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 7800,
+            },
+        }) + "\n")
+    # Default rendering: no `tokens` column header.
+    default_h = web._render_events(project, typ=None, n=50)
+    assert "<th>tokens</th>" not in default_h
+    # judge_call row's prepended summary still surfaces the in/out
+    # numbers inline (a friendlier rendering of the row's payload).
+    assert "judge_call" in default_h
+    # show_tokens=True: the explicit column appears.
+    show_h = web._render_events(project, typ=None, n=50, show_tokens=True)
+    assert "<th>tokens</th>" in show_h
+    assert "in=8,200" in show_h
+    assert "$0.0420" in show_h
+
+
 def test_classify_row_assigns_expected_classes():
     """White-box check on the row-class mapping. The CSS depends on these
     exact class strings; renaming one without updating the stylesheet would

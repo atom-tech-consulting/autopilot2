@@ -286,6 +286,9 @@ async def _judge_prose_bullet(
     project_root: Path,
     sdk,
     diff_text: str,
+    events_file: Path | None = None,
+    task_id: str | None = None,
+    bullet_idx: int | None = None,
 ) -> CriterionResult:
     """Ask the SDK whether `bullet.text` is satisfied by `diff_text` plus the
     working tree at HEAD.
@@ -303,6 +306,12 @@ async def _judge_prose_bullet(
     Asks for a structured one-line JSON response; falls back to ``unverified``
     on parse failure rather than failing the whole verification (the prose
     judge is best-effort).
+
+    TB-157: when ``events_file`` is provided, emits a ``judge_call`` event
+    on each judge SDK call carrying usage / model / cost / verdict so
+    cost-tradeoff experiments can aggregate per-judge token spend without
+    routing through the daemon's `_log_message` (the judge has its own
+    SDK loop that bypasses that capture path).
     """
     prompt = (
         "You are evaluating ONE acceptance bullet from a task's verification "
@@ -360,6 +369,12 @@ async def _judge_prose_bullet(
             extra_args={"effort": effort},
         )
         text = ""
+        # TB-157: capture usage / cost / model / num_turns from the
+        # ResultMessage(s) so the per-judge call can be costed independently
+        # of the daemon's `_log_message` path (which `_judge_prose_bullet`
+        # bypasses).
+        result_meta: dict = {}
+        t0 = time.monotonic()
         async for msg in sdk.query(prompt=prompt, options=options):
             content = getattr(msg, "content", None)
             if isinstance(content, list):
@@ -371,13 +386,51 @@ async def _judge_prose_bullet(
                 t = getattr(msg, "result", None)
                 if isinstance(t, str) and t.strip():
                     text = t.strip()
+            # ResultMessage carries the usage / cost / model fields. We
+            # accept ANY message that has them so a transport that buries
+            # the totals in a non-standard envelope doesn't lose data.
+            for k in ("model", "num_turns", "total_cost_usd", "stop_reason"):
+                v = getattr(msg, k, None)
+                if v is not None:
+                    result_meta[k] = v
+            for k in ("usage", "model_usage"):
+                v = getattr(msg, k, None)
+                if isinstance(v, dict) and v:
+                    result_meta[k] = v
+        duration_s = time.monotonic() - t0
     except Exception as e:  # noqa: BLE001
         return CriterionResult(
             bullet=bullet.text, kind="prose", status="unverified",
             notes=f"judge error: {type(e).__name__}: {e}",
         )
 
-    return _parse_judge_response(bullet.text, text)
+    verdict = _parse_judge_response(bullet.text, text)
+
+    # TB-157: emit `judge_call` so events.jsonl is the canonical aggregation
+    # surface for prose-judge cost. Composes with `events.tail`, the web
+    # events table, and the diagnose report — same envelope shape as
+    # `task_complete`, `verification_failed`, etc. Best-effort: a write
+    # failure here must not flip the judge's verdict.
+    if events_file is not None:
+        try:
+            from . import events as _events
+            payload = {
+                "task": task_id or "",
+                "bullet_idx": bullet_idx if bullet_idx is not None else -1,
+                "bullet_kind": bullet.kind,
+                "verdict": verdict.status,
+                "duration_s": round(duration_s, 3),
+            }
+            for k in ("model", "num_turns", "total_cost_usd",
+                      "stop_reason", "usage", "model_usage"):
+                if k in result_meta:
+                    payload[k] = result_meta[k]
+            _events.append(events_file, "judge_call", **payload)
+        except Exception:  # noqa: BLE001
+            # Instrumentation must never break verification. Swallow.
+            pass
+
+    return verdict
 
 
 def _parse_judge_response(bullet_text: str, response: str) -> CriterionResult:
@@ -564,6 +617,7 @@ async def verify_task(
     timeout_s: int = 300,
     sdk=None,
     task_id: str | None = None,
+    events_file: Path | None = None,
 ) -> VerifyVerdict | None:
     """Run the per-task verifier. Returns None when there's nothing to check.
 
@@ -592,7 +646,7 @@ async def verify_task(
     t0 = time.monotonic()
     results: list[CriterionResult] = []
     diff_text: str | None = None
-    for b in bullets:
+    for idx, b in enumerate(bullets):
         if b.kind == "shell":
             results.append(_run_shell_bullet(
                 b, project_root=project_root, timeout_s=timeout_s,
@@ -608,6 +662,7 @@ async def verify_task(
                 diff_text = _cumulative_task_diff(project_root, task_id)
             results.append(await _judge_prose_bullet(
                 b, project_root=project_root, sdk=sdk, diff_text=diff_text,
+                events_file=events_file, task_id=task_id, bullet_idx=idx,
             ))
 
     return VerifyVerdict(
