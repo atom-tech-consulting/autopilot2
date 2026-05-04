@@ -60,6 +60,27 @@ BRIEFING_REQUIRED_SECTIONS: tuple[str, ...] = (
     "Out of scope",
 )
 
+# TB-161: goal.md heading prefixes the briefing's `## Goal` body must cite
+# (as a substring) for the goal-anchor check. Single source of truth — used
+# by:
+#   - `ap2/tools.py::_goal_md_anchors` (queue-append-time hard gate inside
+#     `_validate_briefing_structure`).
+#   - `ap2/check.py::_check_briefing_structure` (warning-level lint for
+#     legacy on-disk briefings).
+#   - `ap2/prompts.py` MM handler instructions + `operator_queue_append`
+#     docstring + `ap2/ideation.default.md` so the briefing-author agent
+#     reads the requirement before authoring.
+# Default headings are `Current focus` and `Done when`. Prefix match is
+# case-insensitive on a `##`-level heading title — `## Current focus:
+# ideation quality` and `## Done when` both qualify. Bullet anchors are
+# only mined from `Done when` sections; for `Current focus` only the full
+# heading title is used (the body is typically prose, not enumerable
+# anchors). Extension is allowed but explicitly out-of-scope this cycle.
+GOAL_ANCHOR_HEADINGS: tuple[str, ...] = (
+    "Current focus",
+    "Done when",
+)
+
 BRIEFING_TEMPLATE = (
     "# {task_id} — {title}\n\n"
     "Tags: \n\n"

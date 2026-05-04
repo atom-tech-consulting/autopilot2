@@ -27,8 +27,13 @@ from pathlib import Path
 from .board import Board, SECTIONS
 from .config import Config
 from .cron import load_jobs
-from .init import BRIEFING_REQUIRED_SECTIONS
+from .init import BRIEFING_REQUIRED_SECTIONS, GOAL_ANCHOR_HEADINGS
 from .insights import _parse_front_matter
+from .tools import (
+    _briefing_section_body,
+    _goal_md_anchors,
+    _normalize_anchor,
+)
 
 
 @dataclass
@@ -212,6 +217,13 @@ def _check_briefing_structure(cfg: Config) -> list[Issue]:
     if not tasks_dir.exists():
         return issues
     required = set(BRIEFING_REQUIRED_SECTIONS)
+    # TB-161: derive goal anchors once per `ap2 check` invocation. When
+    # goal.md is missing or all-placeholder, `_goal_md_anchors` returns
+    # an empty set and the goal-anchor lint short-circuits per file.
+    # Same heading source as the queue-append validator
+    # (`_validate_briefing_structure`) — single source of truth via
+    # `GOAL_ANCHOR_HEADINGS`.
+    goal_anchors = _goal_md_anchors(cfg.project_root / "goal.md")
     for f in sorted(tasks_dir.iterdir()):
         if not f.is_file() or f.suffix != ".md":
             continue
@@ -230,17 +242,48 @@ def _check_briefing_structure(cfg: Config) -> list[Issue]:
             for m in _BRIEFING_STRUCTURE_HEADER_RE.finditer(text)
         }
         missing = sorted(required - found)
-        if not missing:
+        if missing:
+            missing_str = ", ".join(f"`## {s}`" for s in missing)
+            issues.append(Issue(
+                "warning", f.name,
+                f"briefing structure non-canonical (TB-154): missing "
+                f"{missing_str}. Canonical sections: "
+                f"{', '.join('## ' + s for s in BRIEFING_REQUIRED_SECTIONS)}. "
+                "The queue-append validator rejects new briefings with "
+                "this shape; legacy on-disk briefings are flagged "
+                "(non-fatal) so they can be opportunistically fixed.",
+            ))
+            # Don't double-warn: a briefing missing `## Goal` already
+            # surfaced its main fix-up; the goal-anchor lint below would
+            # just repeat the operator-action signal.
             continue
-        missing_str = ", ".join(f"`## {s}`" for s in missing)
+        # TB-161: goal-anchor lint. Warning-level companion to the
+        # queue-append-time hard gate — surfaces legacy briefings whose
+        # `## Goal` body cites no goal.md anchor without blocking
+        # `ap2 check` (bulk migration is explicitly out of scope; the
+        # operator decides whether to rewrite or leave). Only fires
+        # when goal.md actually exposes anchors — a fresh project with
+        # an all-placeholder goal.md gets no spurious warnings.
+        if not goal_anchors:
+            continue
+        goal_body = _briefing_section_body(text, "Goal")
+        if not goal_body.strip():
+            continue
+        norm = _normalize_anchor(goal_body)
+        if any(a in norm for a in goal_anchors):
+            continue
+        anchor_heading_list = ", ".join(
+            f"`## {h}`" for h in GOAL_ANCHOR_HEADINGS
+        )
         issues.append(Issue(
             "warning", f.name,
-            f"briefing structure non-canonical (TB-154): missing "
-            f"{missing_str}. Canonical sections: "
-            f"{', '.join('## ' + s for s in BRIEFING_REQUIRED_SECTIONS)}. "
-            "The queue-append validator rejects new briefings with "
-            "this shape; legacy on-disk briefings are flagged "
-            "(non-fatal) so they can be opportunistically fixed.",
+            "briefing `## Goal` body cites no goal.md anchor "
+            "(TB-161): no substring matches any "
+            f"{anchor_heading_list} heading title or Done-when bullet "
+            "from goal.md. The queue-append validator rejects new "
+            "briefings with this shape; legacy on-disk briefings are "
+            "flagged (non-fatal) so they can be opportunistically "
+            "rewritten or moved to ap2-meta-polish out-of-scope.",
         ))
     return issues
 

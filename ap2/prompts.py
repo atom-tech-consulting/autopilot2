@@ -448,6 +448,14 @@ def build_mattermost_prompt(
         # any other section names; keep this list in sync with
         # `ap2/init.py::BRIEFING_REQUIRED_SECTIONS`.
         "- **Briefing structure (TB-154):** when you author a briefing payload for `operator_queue_append({\"op\": \"add_*\", ...})`, it MUST use exactly these section names (case-sensitive, any order): `## Goal`, `## Scope`, `## Design`, `## Verification`, `## Out of scope`. The queue-append validator will reject any other section names (e.g. `## Acceptance` instead of `## Verification`, or a top-level `## Files to touch` block) with a structural-error message before allocating a TB-N. Extra `##`-level sections (e.g. `## Decision log`, `## Why`) are fine — extension is allowed, omission/rename is not. The `## Verification` section needs at least one auto-verifiable bullet (backticked shell command, test name, or judge-checkable prose claim).",
+        # TB-161: pinned phrasing — `tests/test_prompts.py` asserts the
+        # rule appears in the prompt body. Same single-source-of-truth
+        # tie as TB-154: `ap2/init.py::GOAL_ANCHOR_HEADINGS` lists the
+        # headings the validator scans. Without this rule landing in the
+        # prompt, the MM handler can author a structurally-canonical but
+        # ap2-meta-polish-drift `## Goal` body and trip the queue-append
+        # validator on submit (re-prompt cost) instead of the first try.
+        "- **Briefing goal-anchor (TB-161):** the `## Goal` body MUST cite (as a substring) one of `goal.md`'s `## Current focus` / `## Done when` heading titles or a Done-when bullet. The queue-append validator rejects briefings whose Goal body cites no anchor — closes the \"gap-covering without drift\" failure mode (a structurally-canonical proposal whose value is only \"make ap2 itself nicer\", unconnected to any focus item). When in doubt, quote the focus-item heading verbatim or paste 4-6 words of a Done-when bullet into the Goal text.",
         "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining the request needs an operator CLI action.",
         "- If the user asks to pause/resume the daemon: use `daemon_control`.",
         "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",

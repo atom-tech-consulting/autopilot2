@@ -382,6 +382,97 @@ def test_tb154_check_briefing_structure_silent_on_canonical_with_extras(cfg):
     )
 
 
+# ---------------------------------------------------------------------------
+# TB-161: goal-anchor lint — warning-level companion to the queue-append-time
+# hard gate in `_validate_briefing_structure`. Surfaces legacy on-disk
+# briefings whose `## Goal` body cites no goal.md anchor without blocking
+# `ap2 check` (operator decides whether to rewrite or leave).
+
+_TB161_GOAL_MD = (
+    "# Project Goals\n\n"
+    "## Mission\nOne-sentence statement.\n\n"
+    "## Done when\n"
+    "- Operators can run the full pipeline without intervention.\n\n"
+    "## Current focus: ideation quality\n"
+    "Folding goal-relevance into proposals.\n"
+)
+
+
+def test_check_briefing_emits_goal_off_anchor_warning(cfg):
+    """A canonical-shaped briefing whose `## Goal` body cites no
+    goal.md anchor surfaces as a warning in `ap2 check`. The lint
+    is non-fatal (warning, not error) so legacy briefings don't
+    block check usage."""
+    # Replace the placeholder template goal.md with a real one so
+    # `_goal_md_anchors` returns a non-empty set.
+    (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
+    brief = cfg.tasks_dir / "tb-300-off-anchor.md"
+    brief.write_text(
+        "# TB-300 — off-anchor briefing\n\n"
+        "## Goal\n\nPolish ap2's internal logging shape — make daemon.log nicer.\n\n"
+        "## Scope\n\n- daemon.py\n\n"
+        "## Design\n\nRework logs.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    # Warning, not error — the lint is non-fatal.
+    assert report.ok, [(i.severity, i.file, i.message) for i in report.issues]
+    matching = [
+        i for i in report.warnings
+        if i.file == "tb-300-off-anchor.md"
+        and "goal.md anchor" in i.message
+        and "TB-161" in i.message
+    ]
+    assert matching, [(i.severity, i.file, i.message) for i in report.issues]
+
+
+def test_check_briefing_no_goal_anchor_warning_when_briefing_cites_anchor(cfg):
+    """A canonical briefing whose `## Goal` body quotes a Done-when
+    bullet emits zero TB-161 warnings. Pins the lint stays quiet for
+    well-anchored briefings."""
+    (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
+    brief = cfg.tasks_dir / "tb-301-anchored.md"
+    brief.write_text(
+        "# TB-301 — well-anchored briefing\n\n"
+        "## Goal\n\nReinforces the Done-when bullet that operators can "
+        "run the full pipeline without intervention.\n\n"
+        "## Scope\n\n- ap2/verify.py\n\n"
+        "## Design\n\nDo the thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    assert not any(
+        i.file == "tb-301-anchored.md" and "TB-161" in i.message
+        for i in report.issues
+    ), [(i.severity, i.file, i.message) for i in report.issues]
+
+
+def test_check_briefing_anchor_lint_skipped_when_goal_md_all_placeholder(cfg):
+    """The default `init_project` goal.md template has no Done-when
+    section and a bare `## Current focus` heading — `_goal_md_anchors`
+    returns an empty set, so the goal-anchor lint stays silent. Pins
+    that day-one project state doesn't fire spurious warnings on
+    legacy or fresh-init briefings.
+    """
+    # cfg's goal.md is already the placeholder template from init_project.
+    brief = cfg.tasks_dir / "tb-302-day-one.md"
+    brief.write_text(
+        "# TB-302 — day-one briefing\n\n"
+        "## Goal\n\nGeneric meta-polish prose.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    assert not any(
+        i.file == "tb-302-day-one.md" and "TB-161" in i.message
+        for i in report.issues
+    ), [(i.severity, i.file, i.message) for i in report.issues]
+
+
 def test_render_text_clean_path(cfg):
     text = check.render_text(check.check_project(cfg))
     assert "ap2 check: clean" in text

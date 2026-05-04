@@ -27,7 +27,7 @@ from . import events, retry
 from .board import Board, board_file_lock, locked_board, parse_task_line
 from .config import Config, bump_next_task_id
 from .cron import update_job
-from .init import BRIEFING_REQUIRED_SECTIONS
+from .init import BRIEFING_REQUIRED_SECTIONS, GOAL_ANCHOR_HEADINGS
 from .verify import parse_verification_section
 
 
@@ -166,8 +166,138 @@ _BRIEFING_STRUCTURE_HINT = (
 )
 
 
-def _validate_briefing_structure(briefing_text: str) -> str | None:
-    """TB-154: structural gate for a freshly-authored briefing.
+# TB-161: extract the body text under a `##` heading (between the heading
+# line and the next `##` heading or EOF). Returns "" when the heading is
+# absent. Tolerates trailing content after the section name in the same
+# shape as `_BRIEFING_SECTION_RE` so the validator and the body-extractor
+# accept the same author shapes.
+def _briefing_section_body(text: str, heading: str) -> str:
+    """Return the body text of a `##`-level briefing section, or ''.
+
+    Used by the TB-161 goal-anchor check (lifts the `## Goal` body out
+    of the briefing for substring matching). The shared helper exists so
+    `tools.py` and `check.py` agree on the slice boundaries — a future
+    "Goal section is suspiciously short" lint can reuse it.
+    """
+    pattern = re.compile(
+        rf"^##\s+{re.escape(heading)}(?:\s*[(\-—:].*)?\s*$",
+        re.M,
+    )
+    m = pattern.search(text)
+    if not m:
+        return ""
+    body_start = m.end()
+    next_m = re.search(r"^##\s+", text[body_start:], re.M)
+    if next_m is None:
+        return text[body_start:]
+    return text[body_start: body_start + next_m.start()]
+
+
+# TB-161: punctuation strip + lowercase + whitespace collapse. Used to
+# compare goal.md anchor phrases against the briefing's `## Goal` body —
+# both sides go through this so trivial differences (`'goal.md'` vs
+# `goal md`, capitalization, em-dashes vs hyphens, multiple spaces) don't
+# cause a false-reject.
+_ANCHOR_NORMALIZE_RE = re.compile(r"[^a-z0-9\s]+")
+
+
+def _normalize_anchor(text: str) -> str:
+    lowered = text.lower()
+    stripped = _ANCHOR_NORMALIZE_RE.sub(" ", lowered)
+    return " ".join(stripped.split())
+
+
+# TB-161: pull a candidate anchor phrase out of a `## Done when` bullet
+# line. Returns the first `words` (default 6) of the bullet body
+# normalized, or None if the line isn't a list bullet. Anchors shorter
+# than 3 words are rejected — too generic to discriminate between a
+# briefing that quotes the bullet and one that incidentally shares a
+# common phrase ("the operator", "this is", etc.).
+_BULLET_LINE_RE = re.compile(r"^\s*[-*]\s+(.*)$")
+
+
+def _bullet_anchor_phrase(line: str, *, words: int = 6) -> str | None:
+    m = _BULLET_LINE_RE.match(line)
+    if not m:
+        return None
+    body = m.group(1).strip()
+    if not body:
+        return None
+    norm = _normalize_anchor(body)
+    if not norm:
+        return None
+    parts = norm.split()
+    phrase = " ".join(parts[:words]).strip()
+    if not phrase or len(phrase.split()) < 3:
+        return None
+    return phrase
+
+
+_GOAL_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.M)
+
+
+def _goal_md_anchors(goal_md_path: "Path | None") -> set[str]:
+    """Derive substring anchors from `goal.md`.
+
+    Walks `##` headings; for each whose title starts with one of
+    `GOAL_ANCHOR_HEADINGS` (case-insensitive prefix match), the
+    normalized full heading title becomes an anchor. For `Done when`
+    sections only, each bullet's first 3-6 words become an additional
+    anchor — the briefing's `## Goal` body can cite either the heading
+    name (e.g. "current focus: ideation quality") or quote a Done-when
+    bullet ("an operator can point ap2 at"). Returns an empty set when
+    the file is missing, unreadable, all-placeholder, or contributes no
+    anchors — the validator falls back to "skip the check" in that case
+    so a fresh project without a real `goal.md` doesn't get its briefings
+    rejected.
+    """
+    if goal_md_path is None or not goal_md_path.exists():
+        return set()
+    try:
+        text = goal_md_path.read_text()
+    except OSError:
+        return set()
+    anchors: set[str] = set()
+    # Bare-prefix titles (e.g. `## Current focus` with no topic suffix)
+    # are dropped — they're the `init_project` template defaults and
+    # signal an unfilled goal.md. A real anchor must be more specific
+    # than just the heading prefix (`## Current focus: ideation quality`,
+    # or any Done-when bullet). This is the "all-placeholder skip"
+    # path the design calls out.
+    bare_prefixes = {h.lower() for h in GOAL_ANCHOR_HEADINGS}
+    matches = list(_GOAL_HEADING_RE.finditer(text))
+    for i, m in enumerate(matches):
+        title = m.group(1).strip()
+        title_lower = title.lower()
+        matched_prefix: str | None = None
+        for h in GOAL_ANCHOR_HEADINGS:
+            if title_lower.startswith(h.lower()):
+                matched_prefix = h
+                break
+        if matched_prefix is None:
+            continue
+        norm_title = _normalize_anchor(title)
+        if norm_title and norm_title not in bare_prefixes:
+            anchors.add(norm_title)
+        if matched_prefix.lower() == "done when":
+            body_start = m.end()
+            body_end = (
+                matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            )
+            body = text[body_start:body_end]
+            for line in body.splitlines():
+                phrase = _bullet_anchor_phrase(line, words=6)
+                if phrase is not None:
+                    anchors.add(phrase)
+    return anchors
+
+
+def _validate_briefing_structure(
+    briefing_text: str,
+    *,
+    goal_md_path: "Path | None" = None,
+) -> str | None:
+    """TB-154 + TB-161: structural gate for a freshly-authored briefing.
 
     A briefing is structurally valid when:
       1. It contains every section in `BRIEFING_REQUIRED_SECTIONS` at
@@ -182,6 +312,18 @@ def _validate_briefing_structure(briefing_text: str) -> str | None:
       3. `## Verification` carries at least one bullet — an empty
          section is structurally valid markdown but produces zero
          criteria for the per-task verifier to score against.
+      4. (TB-161) When `goal_md_path` is supplied AND `goal.md` exposes
+         derivable anchors (a `## Current focus` / `## Done when`
+         heading and/or any Done-when bullet), the briefing's `## Goal`
+         body must contain at least one anchor as a substring (after
+         lowercase + punctuation-strip + whitespace collapse on both
+         sides). Closes goal.md's "Gap-covering without drift" failure
+         mode (lines 50-59) at queue-append time — proposals whose
+         "Goal" is pure ap2-meta-polish unconnected to any focus item
+         get rejected before TB-N is allocated. Falls back to "skip the
+         check" when goal.md is missing or all-placeholder so a fresh
+         project without a real `goal.md` doesn't get its briefings
+         rejected.
 
     Returns `None` when the briefing passes; an error-message string
     naming the missing/misnamed/empty section otherwise. The message
@@ -195,7 +337,10 @@ def _validate_briefing_structure(briefing_text: str) -> str | None:
     plus a top-level `## Files to touch` block. `parse_verification_section`
     silently returned `None` and the per-task verifier then skipped the
     task entirely — the briefing-required gate (TB-135) only checked
-    "non-empty", not "shape matches what the verifier can read".
+    "non-empty", not "shape matches what the verifier can read". TB-161
+    extends the gate to goal-relevance: a briefing that passes (1)-(3)
+    but whose Goal body cites nothing in `goal.md` is the next failure
+    mode (ap2-meta-polish drift slipping past the structural check).
     """
     text = briefing_text or ""
     if not text.strip():
@@ -231,6 +376,27 @@ def _validate_briefing_structure(briefing_text: str) -> str | None:
             "prose) to score against the agent's diff. "
             f"{_BRIEFING_STRUCTURE_HINT}"
         )
+    # TB-161: goal-anchor check. Runs only when goal.md is parseable and
+    # contributes derivable anchors — a fresh project whose goal.md is
+    # still the all-placeholder template short-circuits to "skip" so we
+    # don't reject every proposal on day-one of a new project.
+    goal_anchors = _goal_md_anchors(goal_md_path)
+    if goal_anchors:
+        goal_body = _briefing_section_body(briefing_text, "Goal")
+        goal_norm = _normalize_anchor(goal_body)
+        if not any(a in goal_norm for a in goal_anchors):
+            preview = sorted(goal_anchors)[:5]
+            preview_str = ", ".join(f"`{a}`" for a in preview)
+            return (
+                "briefing structure invalid: `## Goal` body cites no "
+                "anchor from goal.md — every proposal must reduce to a "
+                "visible step toward the declared project goal "
+                "(reject-ap2-meta-polish-drift, TB-161). Reword the "
+                "Goal section to quote or reference one of `goal.md`'s "
+                "`## Current focus` / `## Done when` headings or a "
+                "Done-when bullet. Available anchors include: "
+                f"{preview_str}."
+            )
     return None
 
 
@@ -429,7 +595,10 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
     # write a briefing file to disk. Mirrors the placement of TB-134's
     # single-line check above.
     if action in add_map:
-        struct_err = _validate_briefing_structure(briefing or "")
+        struct_err = _validate_briefing_structure(
+            briefing or "",
+            goal_md_path=cfg.project_root / "goal.md",
+        )
         if struct_err:
             return _err(struct_err)
 
@@ -1005,7 +1174,12 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         # TB-154: structural gate. Runs before `_allocate_id` /
         # briefing-file write — a rejected add must not leak a TB-N
         # nor materialize an orphan briefing under `.cc-autopilot/tasks/`.
-        struct_err = _validate_briefing_structure(briefing_content or "")
+        # TB-161: also passes `goal_md_path` so the goal-anchor check
+        # fires here (queue-append-time hard gate).
+        struct_err = _validate_briefing_structure(
+            briefing_content or "",
+            goal_md_path=cfg.project_root / "goal.md",
+        )
         if struct_err:
             return _err(struct_err)
 
@@ -1246,7 +1420,8 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             # `add_*` paths now enforce.
             if has_briefing_edit:
                 struct_err = _validate_briefing_structure(
-                    str(briefing_content)
+                    str(briefing_content),
+                    goal_md_path=cfg.project_root / "goal.md",
                 )
                 if struct_err:
                     return _err(struct_err)
@@ -2229,6 +2404,16 @@ def build_mcp_server(cfg: Config):
         "(e.g. `## Decision log`, `## Why`) are fine; the "
         "`## Verification` section needs at least one bullet (backticked "
         "shell command, test name, or judge-checkable prose claim). "
+        "TB-161 GOAL ANCHOR — the `## Goal` body MUST cite (as a "
+        "substring) one of `goal.md`'s `## Current focus` / `## Done "
+        "when` heading titles or a Done-when bullet. The validator "
+        "rejects briefings whose Goal body cites no anchor, so quote "
+        "the focus-item heading verbatim or paste 4-6 words of a "
+        "Done-when bullet into the Goal text. Closes the gap-covering-"
+        "without-drift failure mode (a structurally-canonical briefing "
+        "whose value is only ap2-meta-polish, unconnected to any "
+        "operator-stated focus item). Skipped when goal.md is missing "
+        "or all-placeholder. "
         "Args: op (one of add_ready, "
         "add_backlog, add_frozen, move_to_backlog, unfreeze, delete, "
         "approve, update); task_id (TB-N for non-add ops); title / tags "

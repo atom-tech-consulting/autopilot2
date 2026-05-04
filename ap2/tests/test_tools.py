@@ -1891,6 +1891,212 @@ def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
     assert body_ok["op"] == "update"
 
 
+# ---------------------------------------------------------------------------
+# TB-161: goal-anchor extension to the structural validator. The hard gate
+# rejects briefings whose `## Goal` body cites no token from a derived
+# `goal_anchors` set (Current focus heading title or Done-when bullet).
+# Closes the "gap-covering without drift" failure mode (goal.md lines
+# 50-59) — proposals whose Goal is pure ap2-meta-polish, unconnected to
+# any operator-stated focus item, get refused before TB-N is allocated.
+
+_TB161_GOAL_MD = (
+    "# Project Goals\n\n"
+    "## Mission\nOne-sentence statement of project purpose.\n\n"
+    "## Done when\n"
+    "- Operators can run the full pipeline without intervention.\n"
+    "- Verification gates fire on every committed change.\n\n"
+    "## Current focus: ideation quality\n"
+    "Folding goal-relevance into proposals before TB-N allocation.\n"
+)
+
+
+def _write_goal_md(tmp_path: Path, body: str = _TB161_GOAL_MD) -> Path:
+    p = tmp_path / "goal.md"
+    p.write_text(body)
+    return p
+
+
+def test_validate_briefing_rejects_goal_section_without_anchor(tmp_path):
+    """Briefing's `## Goal` body cites no anchor from goal.md → reject
+    with an error that names the goal.md anchor source so the operator
+    knows what to fix. Closes goal.md's "gap-covering without drift"
+    failure mode at queue-append time."""
+    goal_md = _write_goal_md(tmp_path)
+    body = (
+        "# off-anchor\n\n"
+        "## Goal\n\n"
+        "Polish ap2's internal logging shape — make daemon.log prettier.\n\n"
+        "## Scope\n\n- daemon.py\n\n"
+        "## Design\n\nRework the log format.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body, goal_md_path=goal_md)
+    assert err is not None, "expected non-None error string"
+    # Error message names goal.md and the anchor concept so the
+    # operator can find the fix without re-reading the validator source.
+    assert "goal.md" in err.lower() or "anchor" in err.lower()
+
+
+def test_validate_briefing_accepts_goal_section_with_done_when_quote(tmp_path):
+    """Briefing's `## Goal` body quotes the leading words of a
+    `## Done when` bullet → accepted. The validator returns None — the
+    proposal has demonstrated goal-relevance via direct citation."""
+    goal_md = _write_goal_md(tmp_path)
+    body = (
+        "# done-when-quote\n\n"
+        "## Goal\n\n"
+        "Closes the failure mode where operators can run the full "
+        "pipeline but verification silently skips. Reinforces the "
+        "Done-when bullet about pipeline-without-intervention.\n\n"
+        "## Scope\n\n- ap2/verify.py\n\n"
+        "## Design\n\nGate on verifier invocation count per task.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body, goal_md_path=goal_md)
+    assert err is None, f"expected None, got: {err!r}"
+
+
+def test_validate_briefing_accepts_goal_section_with_current_focus_heading(tmp_path):
+    """Citing the `## Current focus: ideation quality` heading verbatim
+    is also a valid anchor — pin so the heading-title path stays
+    accepted alongside the Done-when bullet path."""
+    goal_md = _write_goal_md(tmp_path)
+    body = (
+        "# current-focus-quote\n\n"
+        "## Goal\n\n"
+        "Advances goal.md's Current focus: ideation quality — folds "
+        "goal-anchor checking into the queue-append validator.\n\n"
+        "## Scope\n\n- ap2/tools.py\n\n"
+        "## Design\n\nExtend the validator.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body, goal_md_path=goal_md)
+    assert err is None, f"expected None, got: {err!r}"
+
+
+def test_validate_briefing_skips_anchor_check_when_goal_md_missing(tmp_path):
+    """A nonexistent / unreadable goal.md → skip the anchor check
+    entirely. The validator falls back to the TB-154 structural-only
+    pass so a fresh project (or one without a real goal.md) doesn't
+    get every proposal rejected."""
+    missing = tmp_path / "no-goal-here.md"
+    assert not missing.exists()
+    body = (
+        "# off-anchor\n\n"
+        "## Goal\n\nPolish ap2's internal logging shape.\n\n"
+        "## Scope\n\n- daemon.py\n\n"
+        "## Design\n\nRework logs.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body, goal_md_path=missing)
+    assert err is None, f"expected None (skip), got: {err!r}"
+
+
+def test_validate_briefing_skips_anchor_check_when_goal_md_all_placeholder(tmp_path):
+    """A goal.md that's still the `init_project` template — bare
+    `## Current focus` heading with no topic suffix and no `## Done
+    when` section — contributes no anchors and the validator skips the
+    goal-anchor check. Pins that day-one project state doesn't fire
+    spurious rejections.
+    """
+    placeholder = tmp_path / "goal.md"
+    placeholder.write_text(
+        "# Project Goals\n\n"
+        "## Mission\n(one-sentence statement of what this project is FOR)\n\n"
+        "## Current focus\n- (area or theme actively in flight now)\n\n"
+        "## Non-goals\n- (explicit non-goals)\n\n"
+        "## Constraints\n- (hard constraints)\n"
+    )
+    body = (
+        "# placeholder-friendly\n\n"
+        "## Goal\n\nGenerically polish ap2.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(
+        body, goal_md_path=placeholder,
+    )
+    assert err is None, (
+        f"all-placeholder goal.md should not trip the anchor check; got: {err!r}"
+    )
+
+
+def test_validate_briefing_anchor_check_unit_function_default_is_skip():
+    """Direct call to `_validate_briefing_structure` with no goal_md_path
+    keyword arg → backward-compat: skips the goal-anchor check. Pins
+    that callers that haven't been updated to pass the path don't
+    accidentally start rejecting briefings they used to accept."""
+    body = (
+        "# no-goal-md-arg\n\n"
+        "## Goal\n\nMeta-polish only.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    assert tools._validate_briefing_structure(body) is None
+
+
+def test_validate_briefing_anchor_check_fires_via_operator_queue_append(
+    cfg, tmp_path,
+):
+    """End-to-end at the queue-append boundary: a goal-anchor-missing
+    briefing routed through `do_operator_queue_append` is rejected and
+    no queue line / briefing file is written. Mirrors the
+    TB-154-style "no leak on reject" pin."""
+    _write_goal_md(tmp_path)
+    body = (
+        "# off-anchor via queue\n\n"
+        "## Goal\n\nPolish ap2 logs for nicer terminal output.\n\n"
+        "## Scope\n\n- daemon.py\n\n"
+        "## Design\n\nRework logs.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "off-anchor via queue", "briefing": body},
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "briefing structure invalid" in text
+    assert "goal.md" in text.lower() or "anchor" in text.lower()
+    # No briefing file leaked to disk.
+    post_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    assert post_tasks_dir == pre_tasks_dir
+    # No queue line written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_goal_md_anchors_extracts_done_when_bullets_and_focus_titles(tmp_path):
+    """Direct unit test on `_goal_md_anchors` — pins the phrase shapes
+    so a future tweak (e.g. word-count window) doesn't silently change
+    which goal.md content survives normalization. The anchor set should
+    include the Current focus heading title and Done-when bullet
+    leading-words; bare `## Done when` heading title is dropped (it's a
+    GOAL_ANCHOR_HEADINGS prefix on its own — too generic)."""
+    goal_md = _write_goal_md(tmp_path)
+    anchors = tools._goal_md_anchors(goal_md)
+    assert anchors, "expected non-empty anchor set"
+    # Focus-item heading title survives normalization.
+    assert "current focus ideation quality" in anchors
+    # At least one Done-when bullet's leading words survive.
+    assert any(
+        a.startswith("operators can run the full") for a in anchors
+    ), anchors
+    # Bare prefix words are dropped — they'd false-positive too easily.
+    assert "current focus" not in anchors
+    assert "done when" not in anchors
+
+
 def test_tb154_operator_queue_append_docstring_carries_canonical_template():
     """Pinned phrasing — the MCP tool docstring tells the agent the
     same thing as the validator's error message. Future edits that

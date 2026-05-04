@@ -266,6 +266,19 @@ across every proposal you emit. List the tasks awaiting review in
 your `ideation_state.md` "Open questions for operator" section so the
 operator can find them quickly.
 
+## Goal-anchor requirement (TB-161 — load-bearing)
+Every briefing you propose MUST have its `## Goal` body cite, as a
+substring, either a `goal.md` `## Current focus` heading title (e.g.
+`Current focus: ideation quality`), a `## Done when` heading title, or
+4-6 words from any `## Done when` bullet. The queue-append validator
+rejects briefings whose `## Goal` body matches no anchor — closes the
+"gap-covering without drift" failure mode (a structurally-canonical
+proposal whose value is only "make ap2 itself nicer", unconnected to
+any operator-stated focus item). When in doubt, quote the focus-item
+heading verbatim or paste a Done-when bullet's leading words into the
+Goal text. The check is skipped when goal.md is missing or
+all-placeholder, but for a real `goal.md` this is a hard gate.
+
 ## Briefing requirements (load-bearing — TB-69 verifier reads these)
 Every briefing you write MUST include a `## Verification` section with
 concrete acceptance bullets that the per-task verifier can evaluate:
