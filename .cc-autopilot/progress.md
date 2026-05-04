@@ -203,3 +203,9 @@
 - **Summary:** TB-156 implementation already landed in a4b085c (judge diff cap 100KB→30KB, AP2_VERIFY_JUDGE_EFFORT default high, AP2_STATUS_REPORT_EFFORT default medium, plus per-site precedence tests + 30KB diff-truncation test); first run failed verification only because briefing's `grep -qE "AP2_STATUS_REPORT_EFFORT" ap2/` was missing `-r` and exited 2 on the directory arg. New commit 60c60ff fixes the briefing typo (`-qE` → `-qrE`); all four shell bullets now exit 0 and `uv run pytest -q ap2/tests/` reports 856 passed.
 - **Files:** .cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md
 - **Tests:** pass
+
+## [2026-05-04] TB-158: Surface bullet failures clearly in events logs (CLI + web)
+- **Commit:** `cad5404`
+- **Summary:** Added shared `events.summarize_verification_failed` helper and wired it into `ap2 logs` (cmd_logs renders counter + failing-bullet headlines + judge notes for verification_failed rows; --json path unchanged), `/events` (inline counter + failed-bullet sub-list, passes/unverified collapsed into the counter), and `/task-run/<run-id>` (top-of-page verification summary block when terminal verdict is verification_failed, fires on the latest matching event so retries don't surface stale failures). 868 ap2 tests pass; new tests in test_events.py / test_cli.py / test_web.py pin shape, sort, truncation, fallback, --json regression, inline rendering, summary block, and cross-file grep visibility.
+- **Files:** ap2/events.py, ap2/cli.py, ap2/web.py, ap2/tests/test_events.py, ap2/tests/test_cli.py, ap2/tests/test_web.py
+- **Tests:** pass
