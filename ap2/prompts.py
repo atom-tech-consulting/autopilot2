@@ -15,7 +15,14 @@ from pathlib import Path
 from . import events
 from .board import Board, Task
 from .config import Config
+from .operator_log import tail_rejections
 from .tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS
+
+
+# TB-163: max chars per rendered rejection bullet. Operator reasons are
+# usually short (≤120 chars) but a careless paste can balloon the line;
+# truncate so a single noisy entry can't dominate the snapshot block.
+_REJECTION_LINE_MAX_CHARS = 200
 
 
 # TB-128: status-report cron was emitting reports with stale headline
@@ -70,6 +77,34 @@ def _current_state_block(
     if extras:
         extras_block = "\n" + "\n".join(extras) + "\n"
 
+    # TB-163: pattern-level operator-veto signal for ideation. The
+    # ideation prompt's Step 0 already treats per-line operator_log.md
+    # entries as authoritative ("won't re-propose decisions logged
+    # here"), but that's per-line shadowing — pattern-level signal
+    # ("operator keeps rejecting feature-additions framed as 'might be
+    # useful later'") was invisible at proposal-authoring time because
+    # the rendered prompt only exposed the daemon's recent-events tail.
+    # Render up to 5 of the most recent `rejected ideation proposal`
+    # lines as a sibling subsection here. Skip the heading entirely
+    # when there are no rejections — keeps the prompt clean for fresh
+    # projects.
+    rejections_block = ""
+    try:
+        rejections = tail_rejections(cfg, limit=5)
+    except Exception:  # noqa: BLE001 - defensive; never break the prompt
+        rejections = []
+    if rejections:
+        truncated: list[str] = []
+        for line in rejections:
+            if len(line) > _REJECTION_LINE_MAX_CHARS:
+                line = line[: _REJECTION_LINE_MAX_CHARS - 3] + "..."
+            truncated.append(f"- {line}")
+        rejections_block = (
+            f"\n## Recent operator rejections (last {len(rejections)})\n"
+            + "\n".join(truncated)
+            + "\n"
+        )
+
     return (
         "## Current state (rendered just before this prompt was sent)\n"
         f"- now: {now}\n"
@@ -78,6 +113,7 @@ def _current_state_block(
         + "\n".join(f"  {ln}" for ln in commits.splitlines())
         + "\n"
         + extras_block
+        + rejections_block
     )
 
 

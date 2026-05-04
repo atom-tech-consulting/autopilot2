@@ -548,6 +548,123 @@ def test_mattermost_prompt_top_level_message_skips_thread_read(tmp_path):
     assert "this message is a thread reply" not in p.lower()
 
 
+# ---------------------------------------------------------------------------
+# TB-163: pattern-level operator-veto signal at proposal-authoring time.
+# The ideation prompt's `## Current state` header must surface the most
+# recent `rejected ideation proposal` lines from operator_log.md as a
+# "Recent operator rejections" block, so the ideator can spot patterns
+# (recurring framing the operator keeps vetoing) without having to
+# manually walk operator_log.md line-by-line.
+
+
+def _seed_operator_log(cfg: Config, lines: list[str]) -> None:
+    """Write a fixture operator_log.md at `cfg.project_root /
+    .cc-autopilot/operator_log.md` with the given body lines (one per
+    list item, no trailing newline). The file's header matches what
+    `tools.py::do_operator_log_append` writes on first append — keeping
+    the fixture realistic so future readers can't accidentally couple
+    to a stripped-down shape."""
+    log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    header = (
+        "# Operator log\n\n"
+        "_Operator decisions and action acknowledgements. Append-only.\n"
+        "Ideation reads this in Step 0; logged items are authoritative —\n"
+        "ideation won't re-propose decisions logged here._\n\n"
+    )
+    log_path.write_text(header + "\n".join(lines) + "\n")
+
+
+def test_build_control_prompt_renders_rejection_block_when_present(tmp_path):
+    """3 rejection lines + unrelated audit lines → block heading appears,
+    all 3 TB-Ns appear in newest-last (chronological) order."""
+    cfg = _cfg(tmp_path)
+    _seed_operator_log(
+        cfg,
+        [
+            # Unrelated audit lines from `_append_operator_audit_line` —
+            # the reader must skip these.
+            "- 2026-05-01T08:00:00Z — applied operator-queued add_backlog → TB-100",
+            "- 2026-05-02T09:00:00Z — applied operator-queued approve → TB-101",
+            # Rejection lines (oldest first in the file — newest last is
+            # the rendered convention).
+            "- 2026-05-03T10:00:00Z — rejected ideation proposal → TB-200 (oldest reject): scope drift",
+            "- 2026-05-03T11:00:00Z — applied operator-queued reject → TB-200",
+            "- 2026-05-04T12:00:00Z — rejected ideation proposal → TB-201 (middle reject): no signal",
+            "- 2026-05-04T13:00:00Z — rejected ideation proposal → TB-202 (newest reject): superseded",
+        ],
+    )
+    p = build_control_prompt(cfg, "ideation", "ideate")
+
+    assert "## Recent operator rejections" in p
+    # All 3 TB-Ns appear, in chronological order (oldest first, newest last).
+    idx_200 = p.find("TB-200")
+    idx_201 = p.find("TB-201")
+    idx_202 = p.find("TB-202")
+    assert idx_200 != -1 and idx_201 != -1 and idx_202 != -1
+    assert idx_200 < idx_201 < idx_202, (
+        "rejection block must be chronological (newest last) to match the "
+        "events-block convention"
+    )
+    # The redundant `applied operator-queued reject → TB-200` audit line
+    # is not what we want to render — only the richer
+    # `rejected ideation proposal` lines reach the block. (Negative-pin:
+    # if we ever start matching the audit verb too, this test fails.)
+    block_start = p.find("## Recent operator rejections")
+    block = p[block_start: block_start + 2000]
+    assert "applied operator-queued" not in block
+
+
+def test_build_control_prompt_skips_rejection_block_when_empty(tmp_path):
+    """No operator_log.md / no matching lines → no heading rendered.
+    Important: we don't want an empty `## Recent operator rejections (last 0)`
+    heading polluting fresh-project prompts."""
+    cfg = _cfg(tmp_path)
+    # No operator_log.md at all — first branch.
+    p_no_file = build_control_prompt(cfg, "ideation", "ideate")
+    assert "Recent operator rejections" not in p_no_file
+
+    # File exists but has no rejection lines — second branch.
+    _seed_operator_log(
+        cfg,
+        [
+            "- 2026-05-01T08:00:00Z — applied operator-queued add_backlog → TB-100",
+            "- 2026-05-02T09:00:00Z [TB-101] — decided to keep TB-x as reference",
+        ],
+    )
+    p_no_match = build_control_prompt(cfg, "ideation", "ideate")
+    assert "Recent operator rejections" not in p_no_match
+
+
+def test_build_control_prompt_truncates_rejection_block_to_default_limit(tmp_path):
+    """7 rejection lines on disk → only the 5 most recent appear in the
+    rendered block. Pins both the cap (5) and that "most recent" means
+    last-in-the-file (since lines are appended chronologically by
+    `_append_operator_audit_line`)."""
+    cfg = _cfg(tmp_path)
+    rejection_lines = [
+        f"- 2026-05-04T{hour:02d}:00:00Z — rejected ideation proposal → TB-{300 + i} (proposal {i}): reason {i}"
+        for i, hour in enumerate(range(7))
+    ]
+    _seed_operator_log(cfg, rejection_lines)
+
+    p = build_control_prompt(cfg, "ideation", "ideate")
+    assert "## Recent operator rejections (last 5)" in p
+    # Most recent 5 = TB-302..TB-306; oldest two (TB-300, TB-301) drop.
+    assert "TB-300" not in p
+    assert "TB-301" not in p
+    for tid in ("TB-302", "TB-303", "TB-304", "TB-305", "TB-306"):
+        assert tid in p, f"expected most-recent rejection {tid} in prompt"
+    # Chronological order preserved within the surviving 5.
+    assert (
+        p.find("TB-302")
+        < p.find("TB-303")
+        < p.find("TB-304")
+        < p.find("TB-305")
+        < p.find("TB-306")
+    )
+
+
 def test_status_report_run_in_mm_handler_toolset():
     """TB-144 + TB-145: the MCP tool must be available to the MM
     handler — operators ask for status whether a task is running or not.

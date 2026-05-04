@@ -10,7 +10,13 @@ Read these files in order:
    NOT re-propose actions or decisions logged here, even if your
    prior assessment surfaced them as "Open questions for operator".
    Treat this file as the operator-owned ground truth on what's been
-   done, abandoned, or decided.
+   done, abandoned, or decided. The `## Recent operator rejections`
+   block in this prompt's `## Current state` header (TB-163) is a
+   pre-extracted view of the most recent `rejected ideation proposal`
+   lines from the same file — consult it BEFORE ranking and call out
+   any pattern (recurring topic, framing, or scope shape the operator
+   keeps vetoing) in your `## Considered & deferred` section so the
+   pattern compounds across cycles instead of getting re-discovered.
 3. goal.md — project mission, current focus, non-goals, constraints.
    If absent OR all sections are still placeholders, infer goals from
    CLAUDE.md + progress.md instead.
