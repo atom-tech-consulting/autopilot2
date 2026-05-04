@@ -87,3 +87,10 @@ A misconfigured port range or a port-scanning environment shouldn't let the daem
 - Different `max_attempts` per surface (daemon vs standalone) beyond the single 10-port window. If a real use case for asymmetric ranges shows up, file separately.
 - IPv6 / dual-stack binding — keep the existing 127.0.0.1 IPv4 behavior; multi-bind is a different problem.
 - Surfacing the resolved port in the web UI itself (page footer or similar) — the URL the operator typed already reflects it.
+## Attempts
+
+### 2026-05-04 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] New unit test: with no conflicts, `serve_async(start_port=8729)` binds 8729 (resolved port equals requested port; no `re
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260504T062956Z-TB-155.prompt.md`, `stream: .cc-autopilot/debug/20260504T062956Z-TB-155.stream.jsonl`, `messages: .cc-autopilot/debug/20260504T062956Z-TB-155.messages.jsonl`
