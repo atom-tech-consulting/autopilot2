@@ -421,6 +421,100 @@ def test_status_omits_web_url_when_daemon_stopped(tmp_path: Path, monkeypatch, c
     assert "web:" not in out
 
 
+def test_status_prints_web_url_from_web_start_event(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """TB-155: `cmd_status` reads the most recent `web_start` event from
+    `events.jsonl` so the printed URL reflects the auto-enumerated port
+    (e.g. 8731 when 8729 was busy at daemon start). Pre-TB-155 the URL
+    came from `AP2_WEB_PORT` env, which doesn't reflect the actual bind
+    after enumeration — the operator could click a URL pointing at
+    nothing.
+
+    Setup: pre-seed events.jsonl with `web_start` carrying port 8731 and
+    `requested_port` 8729; set `AP2_WEB_PORT=9999` (a different port to
+    prove env is NOT consulted). Status must print `:8731`, not `:9999`.
+    """
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    cfg.pid_file.write_text(str(os.getpid()))
+    # Env knob points at a port we did NOT bind — proves we read the
+    # event log, not env, post-TB-155.
+    monkeypatch.setenv("AP2_WEB_PORT", "9999")
+    monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
+    events.append(
+        cfg.events_file, "web_start",
+        host="127.0.0.1", port=8731, url="http://127.0.0.1:8731/",
+        requested_port=8729,
+    )
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "web:" in out
+    assert "http://127.0.0.1:8731/" in out, out
+    # Belt-and-suspenders: env-derived URL must NOT bleed through.
+    assert ":9999" not in out, out
+
+
+def test_status_falls_back_to_env_when_no_web_start_event(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """Compatibility safety net: if the daemon's `web_start` hasn't been
+    written yet (brief window between `ap2 start` and the first bind, or
+    older events.jsonl predating TB-130 wiring), fall back to env-derived
+    resolution. Otherwise `cmd_status` would silently swallow the URL
+    line during normal operation right after a daemon restart."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    cfg.pid_file.write_text(str(os.getpid()))
+    monkeypatch.setenv("AP2_WEB_PORT", "9123")
+    monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
+    # Seed an unrelated event so events.jsonl exists but has no `web_start`.
+    events.append(cfg.events_file, "daemon_start")
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["web_url"] == "http://127.0.0.1:9123/"
+
+
+def test_status_prefers_recent_web_start_over_older_one(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """When the daemon has restarted (e.g. operator killed and
+    re-started), events.jsonl contains multiple `web_start` events. Status
+    must reflect the MOST RECENT one — otherwise a URL from a previous
+    daemon lifecycle (different port, possibly different enumeration)
+    bleeds through and confuses the operator."""
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    cfg.pid_file.write_text(str(os.getpid()))
+    monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
+
+    # Older lifecycle: bound 8729, then stopped.
+    events.append(
+        cfg.events_file, "web_start",
+        host="127.0.0.1", port=8729, url="http://127.0.0.1:8729/",
+    )
+    events.append(cfg.events_file, "web_stop", host="127.0.0.1", port=8729)
+    # Current lifecycle: enumerated to 8730 because someone else grabbed 8729.
+    events.append(
+        cfg.events_file, "web_start",
+        host="127.0.0.1", port=8730, url="http://127.0.0.1:8730/",
+        requested_port=8729,
+    )
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "http://127.0.0.1:8730/" in out, out
+
+
 # ---------------------------------------------------------------------------
 # TB-135: ap2 add requires --briefing-file. Title and tags are parsed from
 # the briefing's H1 and an optional `Tags:` line; -t/-d are repurposed (-t

@@ -1858,33 +1858,65 @@ async def _web_loop_for_daemon(cfg: Config) -> None:
     `web_error` event so a clash (e.g. an `ap2 web` already listening on
     the port) can't take the rest of the daemon down. The web UI is a
     convenience — its absence shouldn't impact task dispatch.
+
+    TB-155: when the configured `start_port` is already bound (typically a
+    stale daemon, an `ap2 web` standalone, or another project's daemon),
+    `web.serve_async` walks forward up to `DEFAULT_WEB_PORT_MAX_ATTEMPTS`
+    ports before giving up. The `web_start` event records the actually-
+    bound port; `requested_port` is added when it differs from the bound
+    one so post-mortem can spot the silent enumeration.
     """
     host = "127.0.0.1"
-    port = web.daemon_web_port()
-    url = f"http://{host}:{port}/"
+    start_port = web.daemon_web_port()
+    # Captured by `_on_bind` so the `web_stop` event in the finally block
+    # reflects the actual bound port even after auto-enumeration. If the
+    # bind itself fails (range exhausted), these stay at the requested
+    # values — symmetric with the pre-TB-155 behavior.
+    bound_port = start_port
+    bound_host = host
     try:
-        events.append(
-            cfg.events_file, "web_start",
-            host=host, port=port, url=url,
+        def _on_bind(h: str, p: int) -> None:
+            nonlocal bound_host, bound_port
+            bound_host, bound_port = h, p
+            payload = {
+                "host": h,
+                "port": p,
+                "url": f"http://{h}:{p}/",
+            }
+            if p != start_port:
+                # Surface the silent enumeration: operators grepping for
+                # `requested_port` see exactly which conflicts the daemon
+                # papered over.
+                payload["requested_port"] = start_port
+            events.append(cfg.events_file, "web_start", **payload)
+
+        await web.serve_async(
+            cfg,
+            host=host,
+            start_port=start_port,
+            max_attempts=web.DEFAULT_WEB_PORT_MAX_ATTEMPTS,
+            on_bind=_on_bind,
         )
-        await web.serve_async(cfg, host=host, port=port)
     except asyncio.CancelledError:
         # Normal shutdown path — main_loop's finally cancelled us.
         raise
     except OSError as e:
         events.append(
             cfg.events_file, "web_error",
-            host=host, port=port,
+            host=host, port=start_port,
+            max_attempts=web.DEFAULT_WEB_PORT_MAX_ATTEMPTS,
             error=f"{type(e).__name__}: {e}",
         )
     except Exception as e:  # noqa: BLE001
         events.append(
             cfg.events_file, "web_error",
-            host=host, port=port,
+            host=host, port=start_port,
             error=f"{type(e).__name__}: {e}",
         )
     finally:
-        events.append(cfg.events_file, "web_stop", host=host, port=port)
+        events.append(
+            cfg.events_file, "web_stop", host=bound_host, port=bound_port,
+        )
 
 
 async def _main_tick_loop(cfg: Config, sdk, mcp_server) -> None:

@@ -25,15 +25,18 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import errno
 import html
 import http.server
 import json
 import os
 import re
+import socket
 import socketserver
 import subprocess
 import threading
 from pathlib import Path
+from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from . import diagnose, events as ev_mod, insights as ins_mod
@@ -47,6 +50,15 @@ from .config import Config
 # don't have to rebookmark. Override either with `AP2_WEB_PORT`.
 DEFAULT_DAEMON_WEB_PORT = 8729
 DEFAULT_STANDALONE_WEB_PORT = 7820
+
+# TB-155: when the configured start_port is already bound (typically a stale
+# daemon, an `ap2 web` standalone, or another project's daemon on the same
+# box), `_bind_with_enumeration` walks forward up to this many ports before
+# giving up. Bounded so a misconfigured port range can't degenerate into an
+# unbounded probe that climbs into the ephemeral range. 10 is enough for the
+# realistic conflict case (operator has 1-2 stale processes); beyond that the
+# operator should investigate the conflict, not let the daemon paper over it.
+DEFAULT_WEB_PORT_MAX_ATTEMPTS = 10
 
 
 def is_web_disabled() -> bool:
@@ -1546,24 +1558,107 @@ class _ThreadingTCPServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
+def _bind_with_enumeration(
+    host: str, start_port: int, max_attempts: int,
+) -> tuple[socket.socket, int]:
+    """Bind a TCP listening socket on `host`, walking forward from `start_port`.
+
+    TB-155: silently retry the next port (start_port+1, start_port+2, ..., up
+    to `start_port + max_attempts - 1`) when the configured `start_port` is
+    already bound — typically by a stale daemon, an `ap2 web` standalone, or
+    another project's daemon on the same machine. Returns the bound socket
+    and the actually-bound port; callers include the resolved port in their
+    `web_start` event payload so post-mortem can pair "requested 8729, bound
+    8730" with the conflict.
+
+    `EADDRINUSE` is the only error treated as "try the next port" — any other
+    `OSError` (permissions, bad host, etc.) propagates immediately because
+    walking forward wouldn't help. After exhausting `max_attempts`, raises a
+    single `OSError(EADDRINUSE, ...)` whose message names the range tried so
+    the operator's hunt for the offending pid is one log line away.
+    """
+    if max_attempts < 1:
+        raise ValueError(f"max_attempts must be >= 1 (got {max_attempts})")
+    last_err: OSError | None = None
+    for offset in range(max_attempts):
+        port = start_port + offset
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+            return sock, port
+        except OSError as e:
+            sock.close()
+            if e.errno != errno.EADDRINUSE:
+                raise
+            last_err = e
+    end_port = start_port + max_attempts - 1
+    raise OSError(
+        errno.EADDRINUSE,
+        f"no free port in range {start_port}..{end_port} "
+        f"(tried {max_attempts}); investigate with "
+        f"`lsof -iTCP:{start_port} -sTCP:LISTEN`"
+        + (f" — last EADDRINUSE: {last_err}" if last_err else ""),
+    )
+
+
 def _build_server(
-    cfg: Config, host: str, port: int
-) -> _ThreadingTCPServer:
-    """Bind the read-only HTTP server. Subclass of TCPServer so `_Handler`'s
-    base class assumptions still hold."""
+    cfg: Config,
+    host: str,
+    start_port: int,
+    max_attempts: int = DEFAULT_WEB_PORT_MAX_ATTEMPTS,
+) -> tuple[_ThreadingTCPServer, int]:
+    """Bind the read-only HTTP server with TB-155 port enumeration.
+
+    Returns `(srv, bound_port)` so callers can log the actually-bound port
+    rather than the one they asked for. The HTTP server uses our pre-bound
+    socket (`bind_and_activate=False` skips TCPServer's own bind) so we
+    don't double-bind and the enumeration result is authoritative.
+    """
+    sock, bound_port = _bind_with_enumeration(host, start_port, max_attempts)
     handler_cls = type("Handler", (_Handler,), {"cfg": cfg})
-    return _ThreadingTCPServer((host, port), handler_cls)
+    srv = _ThreadingTCPServer(
+        (host, bound_port), handler_cls, bind_and_activate=False,
+    )
+    # Replace the unbound socket TCPServer just allocated with our pre-bound
+    # one, then call `server_activate()` so the kernel starts queuing
+    # connections. `socketserver` keeps a reference to `srv.socket` for
+    # `server_close()`, so swapping it here is the supported path.
+    srv.socket.close()
+    srv.socket = sock
+    srv.server_activate()
+    return srv, bound_port
 
 
-def serve(cfg: Config, host: str = "127.0.0.1", port: int = DEFAULT_STANDALONE_WEB_PORT) -> None:
+def serve(
+    cfg: Config,
+    host: str = "127.0.0.1",
+    port: int = DEFAULT_STANDALONE_WEB_PORT,
+    *,
+    max_attempts: int = DEFAULT_WEB_PORT_MAX_ATTEMPTS,
+) -> None:
     """Start the read-only web UI. Blocks until SIGINT.
 
     Default bind is 127.0.0.1 deliberately — there's no auth and the page
     surfaces full event payloads (briefing text, prompt dump paths,
     Mattermost message bodies, etc.) that should never leave the box.
+
+    TB-155: when `port` is already bound, walks forward up to `max_attempts`
+    times before giving up. The "bound on" line printed below reflects the
+    resolved port so the operator can copy/paste the URL even after a
+    silent enumeration. `port` keeps its argparse-friendly name (so the CLI
+    flag stays `--port`) but functions as the ENUMERATION START.
     """
-    with _build_server(cfg, host, port) as srv:
-        print(f"ap2 web: http://{host}:{port}/  (project={cfg.project_root})")
+    srv, bound_port = _build_server(cfg, host, port, max_attempts=max_attempts)
+    with srv:
+        if bound_port != port:
+            print(
+                f"ap2 web: port {port} busy; bound to {bound_port} instead "
+                f"(range {port}..{port + max_attempts - 1})"
+            )
+        print(
+            f"ap2 web: http://{host}:{bound_port}/  (project={cfg.project_root})"
+        )
         try:
             srv.serve_forever()
         except KeyboardInterrupt:
@@ -1574,7 +1669,10 @@ async def serve_async(
     cfg: Config,
     *,
     host: str = "127.0.0.1",
-    port: int = DEFAULT_DAEMON_WEB_PORT,
+    start_port: int = DEFAULT_DAEMON_WEB_PORT,
+    max_attempts: int = DEFAULT_WEB_PORT_MAX_ATTEMPTS,
+    on_bind: "Callable[[str, int], None] | None" = None,
+    port: int | None = None,
 ) -> None:
     """Run the read-only web UI as an awaitable, cooperatively cancellable.
 
@@ -1585,16 +1683,32 @@ async def serve_async(
     daemon was restarted (TB-130).
 
     Lifecycle:
-      - Bind the server on the calling event loop's thread, then run
+      - Bind the server on the calling event loop's thread (with TB-155
+        port enumeration starting at `start_port`), then run
         `serve_forever` in a background daemon thread (the stdlib HTTP
         handler is sync; `serve_forever` blocks).
-      - Block this coroutine indefinitely on a sleep loop. Cancellation
+      - If provided, fire `on_bind(host, bound_port)` synchronously before
+        parking — that's how `_web_loop_for_daemon` learns the resolved
+        port for its `web_start` event payload.
+      - Block this coroutine indefinitely on `Event.wait()`. Cancellation
         (the daemon's teardown path) lands as `CancelledError`, which
         triggers `srv.shutdown()` to wake `serve_forever`.
       - Re-raises the bind `OSError` so the caller can decide whether
         `EADDRINUSE` means "already running" (skip) or "real error" (log).
+
+    `port=` is accepted as a backwards-compatible alias for `start_port=`
+    so callers (and tests) written before TB-155 keep working.
     """
-    srv = _build_server(cfg, host, port)
+    if port is not None:
+        # Pre-TB-155 callers passed `port=`; treat it as `start_port=` so
+        # the auto-enumeration shape is opt-in via the new keyword without
+        # silently breaking existing kwargs.
+        start_port = port
+    srv, _bound_port = _build_server(
+        cfg, host, start_port, max_attempts=max_attempts,
+    )
+    if on_bind is not None:
+        on_bind(host, _bound_port)
     server_thread = threading.Thread(
         target=srv.serve_forever, name="ap2-web", daemon=True,
     )

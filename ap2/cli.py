@@ -202,16 +202,54 @@ def _resolve_web_url(cfg: Config) -> str | None:
     """The URL the daemon-spawned web UI is serving on, or `None` when off.
 
     Returns `None` when `AP2_WEB_DISABLED` is set (the operator opted out
-    of the bundled UI for this daemon process). Otherwise resolves
-    host/port the same way `ap2.daemon._web_loop_for_daemon` does, so the
-    printed URL matches reality. We don't grep events.jsonl for a
-    `web_start` line — the daemon writes the same URL we'd compute, and
-    spinning up file IO for status is wasteful.
+    of the bundled UI for this daemon process).
+
+    TB-155: prefers the most recent `web_start` event in `events.jsonl`
+    over recomputing from env, so the URL we print reflects the
+    auto-enumerated port (e.g. 8730 when 8729 was busy at daemon start).
+    Falls back to the env-based default when no `web_start` event has
+    been written yet — covers the brief window between `ap2 start` and
+    the daemon's first bind, and any older events.jsonl that predates
+    the daemon's web lifecycle wiring.
     """
+    from . import events as _events
     from . import web as _web
 
     if _web.is_web_disabled():
         return None
+
+    # Walk events.jsonl backward looking for the most recent web lifecycle
+    # signal. A `web_stop` newer than the last `web_start` means the web
+    # UI shut down (orderly cancel or post-error fall-through); we still
+    # print the env-derived URL because the daemon being `running`
+    # implies it's about to re-bind on the next loop iteration. A
+    # `web_start` newer than (or with no) `web_stop` is canonical.
+    if cfg.events_file.exists():
+        # 200 events is a comfortable window — `web_start`/`web_stop` fire
+        # at most twice per daemon lifecycle, so anything older is safely
+        # superseded by current state.
+        recent = _events.tail(cfg.events_file, n=200)
+        last_start: dict | None = None
+        last_stop_ts: str | None = None
+        for evt in recent:
+            t = evt.get("type")
+            if t == "web_start":
+                last_start = evt
+            elif t == "web_stop":
+                last_stop_ts = evt.get("ts") or last_stop_ts
+        if last_start is not None and (
+            last_stop_ts is None
+            or (last_start.get("ts") or "") >= last_stop_ts
+        ):
+            url = last_start.get("url")
+            if url:
+                return url
+            # Older events without a pre-built URL — synthesize from host/port.
+            host = last_start.get("host") or "127.0.0.1"
+            port = last_start.get("port")
+            if port:
+                return f"http://{host}:{port}/"
+
     port = _web.daemon_web_port()
     return f"http://127.0.0.1:{port}/"
 
@@ -907,6 +945,10 @@ def cmd_web(cfg: Config, args: argparse.Namespace) -> int:
     Defaults to 127.0.0.1 so the (no-auth) page can't leak full event
     payloads — briefings, prompt-dump paths, Mattermost message bodies —
     off the box. Override with --host at your own risk.
+
+    TB-155: `--port` is now an enumeration START — when busy (typically a
+    stale `ap2 web` from this or another project), `web.serve` walks
+    forward up to `web.DEFAULT_WEB_PORT_MAX_ATTEMPTS` before giving up.
     """
     from . import web
 
@@ -1184,7 +1226,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--host", default="127.0.0.1",
                    help="bind address (default: 127.0.0.1)")
     s.add_argument("--port", type=int, default=7820,
-                   help="bind port (default: 7820)")
+                   help="bind port (default: 7820); enumeration start — "
+                        "if busy, walks forward up to 10 ports (TB-155)")
     s.set_defaults(func=cmd_web)
 
     s = sub.add_parser("cron", help="cron utilities")

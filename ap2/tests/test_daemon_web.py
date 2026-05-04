@@ -84,33 +84,98 @@ def test_web_loop_emits_start_and_stop(tmp_path: Path, monkeypatch):
     assert _events_of_type(cfg, "web_error") == []
 
 
-def test_web_loop_logs_bind_clash_without_raising(tmp_path: Path, monkeypatch):
-    """A port collision (e.g. an `ap2 web` already running on the same
-    port) must NOT propagate out of `_web_loop_for_daemon` — the web UI
-    is a convenience, the rest of the daemon (tick loop, MM loop) has
-    to keep running. The collision lands as a `web_error` event."""
+def test_web_loop_auto_enumerates_on_single_port_clash(
+    tmp_path: Path, monkeypatch,
+):
+    """TB-155: a single-port collision is no longer fatal. When the
+    requested port is bound (typically a stale daemon or an `ap2 web`
+    standalone), `_web_loop_for_daemon` quietly walks forward to the
+    next free port and emits a `web_start` carrying both `port` (the
+    bound one) and `requested_port` (the one we asked for). No
+    `web_error` — the UI is up, just on a different port."""
     cfg = _project(tmp_path)
-    port = _free_port()
+    requested = _free_port()
     blocker = socket.socket()
     blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    blocker.bind(("127.0.0.1", port))
+    blocker.bind(("127.0.0.1", requested))
     blocker.listen(1)
-    monkeypatch.setenv("AP2_WEB_PORT", str(port))
+    monkeypatch.setenv("AP2_WEB_PORT", str(requested))
     monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
 
     async def _go() -> None:
-        # Should return cleanly — NOT raise OSError out to the caller.
-        await _web_loop_for_daemon(cfg)
+        task = asyncio.create_task(_web_loop_for_daemon(cfg))
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            if _events_of_type(cfg, "web_start"):
+                break
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     try:
         asyncio.run(_go())
     finally:
         blocker.close()
 
+    starts = _events_of_type(cfg, "web_start")
+    assert len(starts) == 1, starts
+    bound = starts[0]["port"]
+    assert bound != requested, "should have enumerated past the busy port"
+    assert starts[0]["requested_port"] == requested, (
+        "the audit field naming the silent enumeration must be present"
+    )
+    # URL must reflect the BOUND port, not the requested one — otherwise
+    # the operator clicks through to a port nothing is listening on.
+    assert starts[0]["url"] == f"http://127.0.0.1:{bound}/"
+    # No web_error: a single-port collision is now a routine startup
+    # condition the daemon papers over.
+    assert _events_of_type(cfg, "web_error") == []
+    # `web_stop` records the bound port (matches `web_start`'s `port`)
+    # so paired-grep lookups stay consistent.
+    stops = _events_of_type(cfg, "web_stop")
+    assert len(stops) == 1
+    assert stops[0]["port"] == bound
+
+
+def test_web_loop_logs_web_error_when_range_exhausted(
+    tmp_path: Path, monkeypatch,
+):
+    """TB-155: when all 10 candidate ports in the enumeration range are
+    bound, the daemon falls back to the pre-TB-155 behavior: log a
+    `web_error` naming the range and return cleanly so the rest of the
+    daemon (tick loop, MM loop) keeps running. The web UI is a
+    convenience — its absence still must not take the daemon down."""
+    cfg = _project(tmp_path)
+    start = _free_port()
+    n = web.DEFAULT_WEB_PORT_MAX_ATTEMPTS  # 10
+    blockers = []
+    try:
+        for offset in range(n):
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("127.0.0.1", start + offset))
+            except OSError:
+                pytest.skip("contiguous port range unavailable")
+            s.listen(1)
+            blockers.append(s)
+        monkeypatch.setenv("AP2_WEB_PORT", str(start))
+        monkeypatch.delenv("AP2_WEB_DISABLED", raising=False)
+
+        async def _go() -> None:
+            # Should return cleanly — NOT raise OSError out to the caller.
+            await _web_loop_for_daemon(cfg)
+
+        asyncio.run(_go())
+    finally:
+        for s in blockers:
+            s.close()
+
     errs = _events_of_type(cfg, "web_error")
     assert len(errs) == 1, errs
-    assert errs[0]["port"] == port
-    assert "OSError" in errs[0]["error"] or "Address" in errs[0]["error"]
+    assert errs[0]["port"] == start
+    # The range must be in the error message — that's the operator's
+    # only audit trail when post-mortem'ing a bind failure.
+    assert f"{start}..{start + n - 1}" in errs[0]["error"], errs[0]["error"]
     # `web_stop` still fires for symmetry — operators grepping for
     # `web_start.*web_stop` don't need a special case for the failed bind.
     assert _events_of_type(cfg, "web_stop")
