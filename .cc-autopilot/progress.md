@@ -263,3 +263,9 @@
 - **Summary:** Added "Recent operator rejections (last K)" subsection to build_control_prompt's snapshot header, backed by new ap2/operator_log.py::tail_rejections helper; ideation prompt directive added; full ap2 test suite (952 tests) passes.
 - **Files:** ap2/operator_log.py, ap2/prompts.py, ap2/ideation.default.md, ap2/tests/test_prompts.py
 - **Tests:** pass
+
+## [2026-05-04] TB-164: Briefing validator: require non-empty "Why now" rationale within Goal section
+- **Commit:** `2ce0b9f`
+- **Summary:** Extended _validate_briefing_structure with a line-anchored Why-now rationale check (≥40 chars after marker via new WHY_NOW_MIN_CHARS constant); added matching warning-level lint in check.py, extended BRIEFING_TEMPLATE / operator_queue_append docstring / MM prompt / ideation.default.md, plus 11 new tests across test_tools.py + test_check.py and Why-now lines added to existing test fixtures across 17 files. Full regression: 963 passed.
+- **Files:** ap2/init.py, ap2/tools.py, ap2/check.py, ap2/prompts.py, ap2/ideation.default.md, ap2/tests/test_tools.py, ap2/tests/test_check.py, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_rollback.py, ap2/tests/test_tb132_verification.py, ap2/tests/test_tb135_verification.py, ap2/tests/e2e/test_mattermost_cron.py, ap2/tests/e2e/test_operator_queue_tick.py, ap2/tests/e2e/test_review_gate.py, ap2/tests/e2e/test_tb142_mm_queue_routing.py, ap2/tests/e2e/test_verify.py, ap2/tests/e2e/test_verify_per_task.py
+- **Tests:** pass
