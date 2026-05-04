@@ -227,3 +227,9 @@
 - **Summary:** Made ideation trigger threshold configurable via AP2_IDEATION_TRIGGER_TASK_COUNT (default 3). Replaced boolean has_work gate with Active hard-gate + Ready+Backlog count comparison; added _trigger_task_count() helper mirroring _cooldown_s; updated header docstring + architecture.md + howto.md; added 10 new tests in test_ideation_trigger.py covering default constant, env parsing fallback, threshold semantics, Active hard-gate independence, >= boundary, and Pipeline-Pending/Frozen exclusion. Full ap2 suite (901 tests) passes.
 - **Files:** ap2/ideation.py, ap2/architecture.md, ap2/howto.md, ap2/tests/test_ideation_trigger.py
 - **Tests:** pass
+
+## [2026-05-04] TB-159: `ap2 ideate` CLI for manual ideation trigger that bypasses the natural gates
+- **Commit:** `987c5cf`
+- **Summary:** Added `ap2 ideate [--force]` — a manual operator trigger for an ideation pass that bypasses the natural empty-board / cooldown / `AP2_IDEATION_DISABLED` gates. Routed through the operator queue (registered `ideate` in OPERATOR_QUEUE_OPS); drain emits `ideation_forced` event + `(forced)` operator_log.md audit line and signals `_tick` via a new `force_ideate` key in `drain_operator_queue`'s return dict. Default refuses on Active-task; `--force` overrides. Refactored `_maybe_ideate` to share `_run_ideation` with new `force_ideate` helper that still calls `mark_run` so back-to-back forced fires don't lap the next natural cooldown. Full ap2/tests/ suite (923 tests) passes.
+- **Files:** ap2/cli.py, ap2/daemon.py, ap2/ideation.py, ap2/tools.py, ap2/tests/test_cli.py, ap2/tests/test_ideation_trigger.py, ap2/tests/test_operator_queue.py
+- **Tests:** pass

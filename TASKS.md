@@ -5,7 +5,6 @@
 
 ## Ready
 
-- [ ] **TB-159** **`ap2 ideate` CLI for manual ideation trigger that bypasses the natural gates** [→ brief](.cc-autopilot/tasks/ap2-ideate-cli-for-manual-ideation-trigg.md)
 
 ## Backlog
 
@@ -57,6 +56,7 @@
 - [x] **TB-152** **`ap2 reject TB-N` (CLI + chat) — capture rejection reasons in operator_log.md for ideation learning** `#autopilot` `#review-gate` `#operator-queue` `#cli` `#mattermost` — Today `ap2 delete TB-N` records the rejection action without a reason field, so ideation has no signal to avoid re-proposing the same idea next cycle. Add a `reject TB-N [--reason ...]` verb (CLI + chat) that writes `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` to operator_log.md (already read by ideation Step 0). [→ brief](.cc-autopilot/tasks/ap2-reject-tb-n-cli-chat-explicit-reject.md)
 - [x] **TB-162** **Surface pending operator queue ops in the web view** [→ brief](.cc-autopilot/tasks/surface-pending-operator-queue-ops-in-th.md)
 - [x] **TB-160** **Make ideation trigger threshold configurable via `AP2_IDEATION_TRIGGER_TASK_COUNT` (default 3)** [→ brief](.cc-autopilot/tasks/make-ideation-trigger-threshold-configur.md)
+- [x] **TB-159** **`ap2 ideate` CLI for manual ideation trigger that bypasses the natural gates** [→ brief](.cc-autopilot/tasks/ap2-ideate-cli-for-manual-ideation-trigg.md)
 
 ## Frozen
 
