@@ -1804,6 +1804,93 @@ def test_tb154_validate_briefing_structure_unit_function():
     assert tools._validate_briefing_structure(empty_briefing) is None
 
 
+def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
+    """TB-153's `update` op also routes a `briefing` payload through
+    the queue, slug-stable overwriting the existing briefing file. Without
+    the structural gate on this branch, an operator (or MM-handler) could
+    replace a canonical briefing with a `## Acceptance`-shaped one and
+    re-introduce TB-153's exact failure mode — the per-task verifier
+    silently skipping. Pin: the update path rejects the same shapes as
+    the add_* path.
+    """
+    # cfg's TB-5 lives in Backlog (idle section, fence doesn't fire).
+    # Briefing is None on the seeded task — the legacy / pre-TB-135
+    # branch exercises the same validator before allocating a slug.
+    bad_acceptance = (
+        "# tb-153 reprised\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Acceptance\n\n- `pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    pre_tasks_dir = sorted(
+        p.name for p in (cfg.tasks_dir).glob("*.md")
+    ) if cfg.tasks_dir.exists() else []
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-5", "briefing": bad_acceptance},
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "briefing structure invalid" in text
+    assert "## Verification" in text
+    # No briefing file leaked to disk: tasks_dir contents unchanged.
+    post_tasks_dir = sorted(
+        p.name for p in (cfg.tasks_dir).glob("*.md")
+    ) if cfg.tasks_dir.exists() else []
+    assert post_tasks_dir == pre_tasks_dir
+    # No queue line written either.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+    # The same gate covers a missing-Verification briefing on `update`.
+    missing_verif = (
+        "# missing-verif via update\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    res2 = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-5", "briefing": missing_verif},
+    )
+    assert res2.get("isError"), res2
+    assert "briefing structure invalid" in res2["content"][0]["text"]
+    assert "## Verification" in res2["content"][0]["text"]
+
+    # Empty-Verification (heading present, zero bullets) is rejected too.
+    empty_verif = (
+        "# empty-verif via update\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Verification\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    res3 = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-5", "briefing": empty_verif},
+    )
+    assert res3.get("isError"), res3
+    assert "empty" in res3["content"][0]["text"].lower()
+
+    # Sanity check: a canonical briefing on the same `update` call is
+    # accepted and queued — pins that we didn't accidentally turn the
+    # update op into "always rejects briefing".
+    res_ok = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update",
+            "task_id": "TB-5",
+            "briefing": _TB154_CANONICAL_BRIEFING,
+        },
+    )
+    body_ok = _unwrap(res_ok)
+    assert body_ok["op"] == "update"
+
+
 def test_tb154_operator_queue_append_docstring_carries_canonical_template():
     """Pinned phrasing — the MCP tool docstring tells the agent the
     same thing as the validator's error message. Future edits that

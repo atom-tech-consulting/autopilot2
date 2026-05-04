@@ -1137,6 +1137,25 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                         f"refused."
                     )
 
+            # TB-154: structural gate on briefing-content edits. Runs
+            # before the briefing file is written below so a rejected
+            # update doesn't materialize a partial / invalid briefing
+            # on disk (the slug-stable write would otherwise overwrite
+            # the prior good briefing with the rejected payload). Same
+            # rule as the `add_*` boundary — `## Goal`, `## Scope`,
+            # `## Design`, `## Verification`, `## Out of scope`, plus a
+            # parseable & non-empty Verification section. Closes the
+            # symmetric hole flagged by the per-task verifier on
+            # TB-154's first attempt: a briefing replaced via `update`
+            # could otherwise still slip past the structural check the
+            # `add_*` paths now enforce.
+            if has_briefing_edit:
+                struct_err = _validate_briefing_structure(
+                    str(briefing_content)
+                )
+                if struct_err:
+                    return _err(struct_err)
+
             # Build the update payload + the `fields=[...]` diff list
             # the drain emits on the `task_updated` event.
             fields: list[str] = []
@@ -2012,18 +2031,20 @@ def build_mcp_server(cfg: Config):
         "TB-N ID is pre-allocated synchronously (so you can mention it "
         "in your reply) and the briefing file is pre-written; only the "
         "TASKS.md insertion is deferred. "
-        "TB-154 BRIEFING STRUCTURE — for `add_*` ops the `briefing` arg "
+        "TB-154 BRIEFING STRUCTURE — for `add_*` ops AND for `update` "
+        "ops that include a `briefing` payload, the `briefing` arg "
         "MUST use exactly these `##`-level section names (case-sensitive, "
         "any order): `## Goal`, `## Scope`, `## Design`, `## Verification`, "
         "`## Out of scope`. The validator rejects any other section names "
         "(e.g. `## Acceptance` instead of `## Verification`, or a "
-        "top-level `## Files to touch` block) before allocating a TB-N — "
-        "the per-task verifier (TB-69) parses the briefing's "
-        "`## Verification` section literally, so the structural shape is "
-        "load-bearing. Extra `##`-level sections (e.g. `## Decision log`, "
-        "`## Why`) are fine; the `## Verification` section needs at "
-        "least one bullet (backticked shell command, test name, or "
-        "judge-checkable prose claim). "
+        "top-level `## Files to touch` block) before allocating a TB-N "
+        "(for adds) or before overwriting the slug-stable briefing file "
+        "(for updates) — the per-task verifier (TB-69) parses the "
+        "briefing's `## Verification` section literally, so the "
+        "structural shape is load-bearing. Extra `##`-level sections "
+        "(e.g. `## Decision log`, `## Why`) are fine; the "
+        "`## Verification` section needs at least one bullet (backticked "
+        "shell command, test name, or judge-checkable prose claim). "
         "Args: op (one of add_ready, "
         "add_backlog, add_frozen, move_to_backlog, unfreeze, delete, "
         "approve, update); task_id (TB-N for non-add ops); title / tags "
