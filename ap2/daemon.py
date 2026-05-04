@@ -83,6 +83,9 @@ signal.signal(signal.SIGINT, _handle_signal)
 
 async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     """Execute a single Ready task in an isolated SDK query()."""
+    # TB-165: wall-clock baseline so the per-run `task_run_usage` event can
+    # report `duration_s` regardless of which terminal path the run takes.
+    run_t0 = time.monotonic()
     prompt = prompts.build_task_prompt(cfg, task)
     events.append(cfg.events_file, "task_start", task=task.id, title=task.title)
     # TB-110 rollback boundary: capture HEAD BEFORE the daemon writes
@@ -109,6 +112,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     # the same `seq` ordering with FULL content. Diagnose by scanning the
     # stream, then `jq 'select(.seq==N)'` on messages.jsonl for the full body.
     prompt_dump, stream_dump, messages_dump = _prep_debug_dumps(cfg, task.id)
+    # TB-165: stable per-run identifier shared with the debug-dump filenames
+    # (`<compact_ts>-<task_id>`). Lets `task_run_usage` events grep-link to
+    # `.cc-autopilot/debug/<run_id>.*` artifacts.
+    run_id = prompt_dump.name.removesuffix(".prompt.md")
     prompt_dump.write_text(prompt)
 
     stderr_lines, _stderr_sink = _make_stderr_sink()
@@ -343,6 +350,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             commit="",
             summary="(state-file violation; agent run reverted)",
         )
+        _emit_task_run_usage(
+            cfg, task,
+            run_id=run_id,
+            status="state_violation",
+            duration_s=time.monotonic() - run_t0,
+            stream_log=stream_log,
+        )
         board_after = Board.load(cfg.tasks_file)
         loc = board_after.find(task.id)
         dest = loc[0] if loc else "?"
@@ -366,6 +380,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 "messages": str(messages_dump),
             },
             extras=early_failure_extras,
+        )
+        _emit_task_run_usage(
+            cfg, task,
+            run_id=run_id,
+            status=early_failure_status,
+            duration_s=time.monotonic() - run_t0,
+            stream_log=stream_log,
         )
         return
 
@@ -434,6 +455,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             status="pipeline_pending",
             commit=parsed.commit,
             summary=parsed.summary[:300],
+        )
+        _emit_task_run_usage(
+            cfg, task,
+            run_id=run_id,
+            status="pipeline_pending",
+            duration_s=time.monotonic() - run_t0,
+            stream_log=stream_log,
         )
         board_after = Board.load(cfg.tasks_file)
         loc = board_after.find(task.id)
@@ -536,13 +564,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 # `cron_propose` MCP tool. `cron_proposed` events fire from
                 # `do_cron_propose` during the SDK query (with `proposed_by_task`
                 # set via the contextvar above). No post-run dispatch step.
-                # Delete the per-run debug dumps on success — only keep evidence for
-                # failures (parsed.status in {incomplete, blocked, failed}) or crashes.
-                for p in (prompt_dump, stream_dump, messages_dump):
-                    try:
-                        p.unlink()
-                    except FileNotFoundError:
-                        pass
+                # TB-165: per-run debug dumps (prompt.md / stream.jsonl /
+                # messages.jsonl) are now retained on success too, so
+                # cross-run cost / cache analysis (`adhoc/token_breakdown.py`,
+                # `/task-run/<run-id>` web detail) covers clean runs. Pre-
+                # TB-165 the success branch unlinked all three; the
+                # `task_run_usage` event below additionally persists run-
+                # level totals to events.jsonl for cheap aggregation.
     else:
         _handle_failure(
             cfg, task,
@@ -557,6 +585,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 "commit": (parsed.commit or "")[:8] or "(no commit)",
             } if parsed.commit else None,
         )
+    _emit_task_run_usage(
+        cfg, task,
+        run_id=run_id,
+        status=final_status,
+        duration_s=time.monotonic() - run_t0,
+        stream_log=stream_log,
+    )
     events.append(
         cfg.events_file,
         "task_complete",
@@ -1357,13 +1392,74 @@ async def _maybe_per_task_verify(cfg: Config, sdk, task) -> "verify.VerifyVerdic
     )
 
 
+def _emit_task_run_usage(
+    cfg: Config,
+    task,
+    *,
+    run_id: str,
+    status: str,
+    duration_s: float,
+    stream_log: list[dict],
+) -> None:
+    """TB-165: emit a `task_run_usage` event capturing run-level totals.
+
+    Persists token / cache / cost / turn counts to events.jsonl on every
+    terminal path (success, verification failure, pipeline pending, state
+    violation, timeout, SDK crash) so cross-run aggregation surfaces
+    (`adhoc/token_breakdown.py`, ad-hoc `jq` queries) survive regardless
+    of debug-dump retention. Pre-TB-165 only `judge_call` events landed
+    in events.jsonl; task-agent token cost was recoverable only from the
+    `.stream.jsonl` archive — and successful runs had theirs deleted.
+
+    Source of usage data: the trailing `ResultMessage` envelope already
+    captured by `_summarize_message` and recorded in `stream_log`. We
+    walk the in-memory list backwards to find the LAST entry carrying
+    `usage` / `total_cost_usd` (defensive against the unlikely case of
+    multiple ResultMessages in a single run). If no ResultMessage was
+    captured (SDK error before stream end), the event still fires with
+    empty usage and `note=stream_incomplete` — so cross-run aggregators
+    don't silently drop the run.
+
+    `run_id` matches the `<compact_ts>-<task_id>` filename prefix of the
+    debug dumps, so an operator can `ls .cc-autopilot/debug/<run_id>.*`
+    after grepping for the event.
+    """
+    last_result: dict | None = None
+    for s in reversed(stream_log):
+        if "usage" in s or "total_cost_usd" in s:
+            last_result = s
+            break
+    payload: dict = {
+        "task": task.id,
+        "run_id": run_id,
+        "status": status,
+        "duration_s": round(duration_s, 3),
+    }
+    if last_result is None:
+        payload["usage"] = {}
+        payload["model_usage"] = {}
+        payload["total_cost_usd"] = 0.0
+        payload["num_turns"] = 0
+        payload["model"] = ""
+        payload["note"] = "stream_incomplete"
+    else:
+        payload["usage"] = last_result.get("usage") or {}
+        payload["model_usage"] = last_result.get("model_usage") or {}
+        payload["total_cost_usd"] = last_result.get("total_cost_usd") or 0.0
+        payload["num_turns"] = last_result.get("num_turns") or 0
+        payload["model"] = last_result.get("model") or ""
+    events.append(cfg.events_file, "task_run_usage", **payload)
+
+
 def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path, Path]:
     """Build paths for the per-run prompt + stream + messages dumps (TB-85).
 
     `.cc-autopilot/debug/` isn't tracked. Files named with UTC timestamp +
     task id so concurrent tasks (if ever allowed) don't clobber each other.
-    Failures keep all three files; `run_task` deletes them on successful
-    complete.
+    All three files survive both successful and failed runs (TB-165 — the
+    pre-TB-165 success path deleted them via `run_task`'s `unlink` block,
+    which made post-hoc cost / cache analysis impossible for clean runs).
+    Pruning is operator-managed; see briefing for `find -mtime` cleanup.
 
     Files:
       - <ts>-<task>.prompt.md     full prompt sent to the SDK

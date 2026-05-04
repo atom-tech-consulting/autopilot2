@@ -615,3 +615,249 @@ def test_task_disallowed_tools_blocks_operator_queue_jsonl_writes():
     # helper — this is what `run_task` actually passes to the SDK.
     assert "Edit(.cc-autopilot/operator_queue.jsonl)" in _TASK_DISALLOWED_TOOLS
     assert "Write(.cc-autopilot/operator_queue.jsonl)" in _TASK_DISALLOWED_TOOLS
+
+
+# ---------------------------------------------------------------------------
+# TB-165: persist task-run token usage in events.jsonl + retain debug dumps
+# on success. Pre-TB-165 the success branch unlinked prompt.md / stream.jsonl
+# / messages.jsonl AND only `judge_call` events landed token data in
+# events.jsonl, so cleanly-successful task-agent runs left no recoverable
+# cost record. These tests pin both halves of the fix.
+
+
+def _result_msg(
+    *,
+    usage: dict | None = None,
+    model_usage: dict | None = None,
+    total_cost_usd: float = 0.0,
+    num_turns: int = 0,
+    model: str = "",
+    stop_reason: str = "end_turn",
+) -> SimpleNamespace:
+    """ResultMessage-shaped envelope for the FakeSDK. `_summarize_message`
+    reads `.usage` / `.model_usage` / `.total_cost_usd` / `.num_turns` /
+    `.model` directly off the message, so a SimpleNamespace with those
+    attributes round-trips through the daemon's stream-log path verbatim.
+
+    No `.content` on a real ResultMessage either — `_walk_blocks` returns
+    an empty dict for it. We add an empty `content` list so the daemon's
+    `_log_message` walker doesn't choke on the missing attribute.
+    """
+    return SimpleNamespace(
+        content=[],
+        usage=usage or {},
+        model_usage=model_usage or {},
+        total_cost_usd=total_cost_usd,
+        num_turns=num_turns,
+        model=model,
+        stop_reason=stop_reason,
+    )
+
+
+def _sdk_yielding_report_with_usage(
+    args: dict,
+    *,
+    usage: dict,
+    total_cost_usd: float,
+    num_turns: int = 1,
+    model: str = "claude-opus-4-7",
+    model_usage: dict | None = None,
+):
+    """SDK stub that yields a `report_result` tool call followed by a
+    trailing ResultMessage envelope carrying `usage` / `total_cost_usd` /
+    `num_turns` / `model`. Mirrors what the real SDK delivers at end of
+    stream — the daemon's `_summarize_message` captures the totals into
+    `stream_log`, and `_emit_task_run_usage` reads the last entry."""
+    async def gen():
+        yield _FakeToolMsg("report_result", args)
+        yield _result_msg(
+            usage=usage,
+            model_usage=model_usage,
+            total_cost_usd=total_cost_usd,
+            num_turns=num_turns,
+            model=model,
+        )
+
+    return _make_sdk(gen)
+
+
+def test_task_run_usage_event_emitted_on_successful_complete(cfg):
+    """A clean successful run emits exactly one `task_run_usage` event in
+    events.jsonl with non-zero token / cost fields drawn from the trailing
+    ResultMessage. Pre-TB-165 the success branch deleted the stream.jsonl
+    archive and emitted no event, so cleanly-successful runs left no
+    on-disk record of task-agent token cost.
+    """
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+
+    usage = {
+        "input_tokens": 12,
+        "output_tokens": 34,
+        "cache_creation_input_tokens": 56,
+        "cache_read_input_tokens": 78,
+    }
+    sdk = _sdk_yielding_report_with_usage(
+        {"status": "complete", "commit": "deadbeef", "summary": "done"},
+        usage=usage,
+        total_cost_usd=0.0987,
+        num_turns=3,
+        model="claude-opus-4-7",
+        model_usage={"claude-opus-4-7": dict(usage)},
+    )
+    asyncio.run(run_task(cfg, sdk, None, task))
+
+    evts = events.tail(cfg.events_file, 20)
+    runs = [e for e in evts if e["type"] == "task_run_usage"]
+    assert len(runs) == 1, runs
+    e = runs[0]
+    assert e["task"] == "TB-5"
+    assert e["status"] == "complete"
+    assert e["usage"]["input_tokens"] == 12
+    assert e["usage"]["output_tokens"] == 34
+    assert e["usage"]["cache_creation_input_tokens"] == 56
+    assert e["usage"]["cache_read_input_tokens"] == 78
+    assert e["total_cost_usd"] == pytest.approx(0.0987)
+    assert e["num_turns"] == 3
+    assert e["model"] == "claude-opus-4-7"
+    assert e["model_usage"]["claude-opus-4-7"]["input_tokens"] == 12
+    # `note=stream_incomplete` is reserved for crash paths; a clean run
+    # carries the real ResultMessage so this field MUST be absent.
+    assert "note" not in e
+
+
+def test_task_run_usage_keeps_debug_dumps_on_success(cfg):
+    """TB-165 retention pin: after `run_task` returns, the per-run
+    prompt.md / stream.jsonl / messages.jsonl must all still be on disk
+    on a clean successful complete. Pre-TB-165 these were unlinked at
+    `daemon.py:539-545`; the new behavior matches the failure-path
+    retention so cross-run cost analysis covers ALL runs.
+    """
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+
+    sdk = _sdk_yielding_report_with_usage(
+        {"status": "complete", "commit": "deadbeef", "summary": "done"},
+        usage={"input_tokens": 1, "output_tokens": 1,
+               "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        total_cost_usd=0.001,
+    )
+    asyncio.run(run_task(cfg, sdk, None, task))
+
+    debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
+    prompt_dumps = list(debug_dir.glob("*TB-5.prompt.md"))
+    stream_dumps = list(debug_dir.glob("*TB-5.stream.jsonl"))
+    messages_dumps = list(debug_dir.glob("*TB-5.messages.jsonl"))
+    assert len(prompt_dumps) == 1
+    assert len(stream_dumps) == 1
+    assert len(messages_dumps) == 1
+
+
+def test_task_run_usage_run_id_matches_debug_filename_prefix(cfg):
+    """Run-id format pin: the `task_run_usage.run_id` field equals the
+    `<compact_ts>-<task_id>` filename prefix of the debug dumps. An
+    operator can grep `events.jsonl` for the event then `ls` the
+    matching debug archive without renaming or stripping suffixes.
+    """
+    board = Board.load(cfg.tasks_file)
+    task = board.get("TB-5")
+
+    sdk = _sdk_yielding_report_with_usage(
+        {"status": "complete", "commit": "abcd1234", "summary": "ok"},
+        usage={"input_tokens": 5, "output_tokens": 2,
+               "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        total_cost_usd=0.002,
+    )
+    asyncio.run(run_task(cfg, sdk, None, task))
+
+    evts = events.tail(cfg.events_file, 20)
+    runs = [e for e in evts if e["type"] == "task_run_usage"]
+    assert len(runs) == 1
+    run_id = runs[0]["run_id"]
+
+    debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
+    # Each debug file's name is `<run_id>.<suffix>` — the suffix-strip
+    # round-trips back to the run_id field.
+    prompt_dumps = list(debug_dir.glob(f"{run_id}.prompt.md"))
+    stream_dumps = list(debug_dir.glob(f"{run_id}.stream.jsonl"))
+    messages_dumps = list(debug_dir.glob(f"{run_id}.messages.jsonl"))
+    assert len(prompt_dumps) == 1, (run_id, list(debug_dir.iterdir()))
+    assert len(stream_dumps) == 1
+    assert len(messages_dumps) == 1
+    # And the shape itself is the documented `<compact_ts>-<task_id>`.
+    import re
+    assert re.match(r"^\d{8}T\d{6}Z-TB-5$", run_id), run_id
+
+
+def test_task_run_usage_event_emitted_on_verification_failed(cfg, tmp_path, monkeypatch):
+    """Failure-path parity: a project-wide-verifier failure routes
+    through `_handle_failure(status="verification_failed")` AND emits
+    `task_run_usage` with the same usage fields populated. Pre-TB-165
+    the event didn't exist; TB-165 wires it on every terminal path so
+    cross-run aggregators see failure cost too.
+    """
+    monkeypatch.setenv("AP2_VERIFY_CMD", "false")  # forces verify failure
+    # Re-load so the env var lands on cfg.verify_cmd.
+    cfg2 = Config.load(cfg.project_root)
+    board = Board.load(cfg2.tasks_file)
+    task = board.get("TB-5")
+
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
+    sdk = _sdk_yielding_report_with_usage(
+        {"status": "complete", "commit": "feedface", "summary": "I think I did it"},
+        usage=usage,
+        total_cost_usd=0.05,
+        num_turns=2,
+        model="claude-opus-4-7",
+    )
+    asyncio.run(run_task(cfg2, sdk, None, task))
+
+    evts = events.tail(cfg2.events_file, 30)
+    # Verifier should have failed → status=verification_failed in BOTH
+    # the task_complete event and the task_run_usage event.
+    completes = [e for e in evts if e["type"] == "task_complete"]
+    assert completes and completes[-1]["status"] == "verification_failed"
+
+    runs = [e for e in evts if e["type"] == "task_run_usage"]
+    assert len(runs) == 1, runs
+    assert runs[0]["status"] == "verification_failed"
+    assert runs[0]["usage"]["input_tokens"] == 100
+    assert runs[0]["usage"]["output_tokens"] == 50
+    assert runs[0]["total_cost_usd"] == pytest.approx(0.05)
+    assert runs[0]["num_turns"] == 2
+
+    # Failure-path retention is pre-existing behavior; pin it here too so
+    # the new event coexists with the old debug-dump retention.
+    debug_dir = cfg2.project_root / ".cc-autopilot" / "debug"
+    assert list(debug_dir.glob("*TB-5.prompt.md"))
+    assert list(debug_dir.glob("*TB-5.stream.jsonl"))
+    assert list(debug_dir.glob("*TB-5.messages.jsonl"))
+
+
+def test_task_run_usage_event_on_timeout_uses_stream_incomplete_note(cfg, monkeypatch):
+    """When the SDK times out before any ResultMessage arrives, the
+    event still fires with empty usage and `note=stream_incomplete`.
+    Cross-run aggregators reading events.jsonl don't silently drop the
+    run; the briefing leaves crash-path emission optional but we
+    chose the always-emit variant for symmetry.
+    """
+    monkeypatch.setenv("AP2_TASK_TIMEOUT_S", "1")
+    cfg2 = Config.load(cfg.project_root)
+    board = Board.load(cfg2.tasks_file)
+    task = board.get("TB-5")
+
+    sdk = _sdk_hanging(sleep_s=5.0)
+    asyncio.run(run_task(cfg2, sdk, None, task))
+
+    evts = events.tail(cfg2.events_file, 30)
+    runs = [e for e in evts if e["type"] == "task_run_usage"]
+    assert len(runs) == 1, runs
+    assert runs[0]["status"] == "timeout"
+    assert runs[0]["usage"] == {}
+    assert runs[0]["total_cost_usd"] == 0.0
+    assert runs[0].get("note") == "stream_incomplete"

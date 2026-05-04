@@ -336,7 +336,14 @@ def test_tick_state_commit_reflects_backlog_on_blocked_task(e2e_project):
 # ---------------------------------------------------------------------------
 # Per-task debug dumps (instrumentation for "empty stderr_tail" crashes)
 
-def test_successful_task_cleans_up_debug_dumps(e2e_project):
+def test_successful_task_keeps_debug_dumps(e2e_project):
+    """TB-165: successful runs now retain prompt.md / stream.jsonl /
+    messages.jsonl alongside failures. Pre-TB-165 the success branch's
+    `unlink` block deleted all three so cost / cache analysis could only
+    inspect failure-tinted runs; the new behavior keeps every run's
+    debug archive on disk for `adhoc/token_breakdown.py`, the
+    `/task-run/<run-id>` web detail, and prompt-iteration retros.
+    """
     cfg = e2e_project(ready_task=("TB-5", "t"))
 
     sdk = FakeSDK()
@@ -349,8 +356,15 @@ def test_successful_task_cleans_up_debug_dumps(e2e_project):
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
     debug_dir = cfg.project_root / ".cc-autopilot" / "debug"
-    leftover = list(debug_dir.glob("*TB-5*")) if debug_dir.exists() else []
-    assert leftover == []
+    prompt_dumps = list(debug_dir.glob("*TB-5.prompt.md"))
+    stream_dumps = list(debug_dir.glob("*TB-5.stream.jsonl"))
+    messages_dumps = list(debug_dir.glob("*TB-5.messages.jsonl"))
+    assert len(prompt_dumps) == 1
+    assert len(stream_dumps) == 1
+    assert len(messages_dumps) == 1
+    # The prompt content actually mentions the task — pin we kept the right
+    # file rather than e.g. an ideation prompt.
+    assert "TB-5" in prompt_dumps[0].read_text()
 
 
 def test_implicit_commit_recovery_on_unknown_status(e2e_project):
