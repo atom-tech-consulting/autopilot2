@@ -245,3 +245,9 @@
 - **Summary:** Defaulted `ap2 add`'s `-s/--section` to Backlog (was Ready) so operator-filed adds match ideation proposals' triage semantics and `--blocked review` surfaces in `ap2 status`. Explicit `-s Ready`/`-s Frozen` still route through `add_ready`/`add_frozen`. Added 5 regression tests (argparse default, default-routes-to-add_backlog, explicit Ready/Frozen, and default+--blocked review surfaces in cmd_status pending_review_ids); full ap2 suite passes (928 tests).
 - **Files:** ap2/cli.py, ap2/README.md, ap2/tests/test_cli.py
 - **Tests:** pass
+
+## [2026-05-04] TB-166: Persist control-agent token usage + stream/messages dumps for ideation, cron, MM handler
+- **Commit:** `efe1996`
+- **Summary:** Followup to 7131e71 (substance unchanged). Fixed the verification grep typo in the briefing (`grep -nE` → `grep -rnE` on `ap2/tests/`, same fix TB-165 needed) and added `test_ideation_error_emits_both_events` which routes a raising SDK stub through `_run_ideation` and asserts BOTH `control_run_usage` (status=error) AND the pre-existing `ideation_error` event fire — pinning the additive-event contract that the prose error-path bullet required end-to-end. `uv run pytest -q ap2/tests/` → 938 passed.
+- **Files:** .cc-autopilot/tasks/persist-control-agent-token-usage-stream.md, ap2/tests/test_control_run_usage.py
+- **Tests:** pass
