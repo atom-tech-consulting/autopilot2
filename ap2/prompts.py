@@ -422,6 +422,13 @@ def build_mattermost_prompt(
     ])
     parts.extend([
         "- If the user asks to add / approve / delete / backlog / unfreeze a task: use `operator_queue_append` (NOT `board_edit` — it's disabled, TB-142/TB-145). The daemon drains the queue between tick stages, so your op lands at the next tick boundary without racing any running task's snapshot window. **Approving an ideation-proposed task** (TB-121) is `op=\"approve\"` with `task_id=TB-N` — the drain-side handler strips the `@blocked:review` codespan (and any legacy `(blocked on: review)` description prose) so the task dispatches at the next tick.",
+        # TB-154: pinned phrasing — `tests/test_prompts.py` asserts every
+        # canonical section name appears in the prompt body so future
+        # edits can't silently drop the briefing-shape contract. The
+        # validator at `do_operator_queue_append`'s boundary rejects
+        # any other section names; keep this list in sync with
+        # `ap2/init.py::BRIEFING_REQUIRED_SECTIONS`.
+        "- **Briefing structure (TB-154):** when you author a briefing payload for `operator_queue_append({\"op\": \"add_*\", ...})`, it MUST use exactly these section names (case-sensitive, any order): `## Goal`, `## Scope`, `## Design`, `## Verification`, `## Out of scope`. The queue-append validator will reject any other section names (e.g. `## Acceptance` instead of `## Verification`, or a top-level `## Files to touch` block) with a structural-error message before allocating a TB-N. Extra `##`-level sections (e.g. `## Decision log`, `## Why`) are fine — extension is allowed, omission/rename is not. The `## Verification` section needs at least one auto-verifiable bullet (backticked shell command, test name, or judge-checkable prose claim).",
         "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining the request needs an operator CLI action.",
         "- If the user asks to pause/resume the daemon: use `daemon_control`.",
         "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",

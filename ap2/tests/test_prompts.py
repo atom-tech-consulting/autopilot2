@@ -212,6 +212,36 @@ def test_mattermost_prompt_restriction_note_is_unconditional(tmp_path):
     assert "operator_log_append" in p
 
 
+def test_tb154_mattermost_prompt_carries_canonical_briefing_section_list(tmp_path):
+    """TB-154: the MM handler authors briefing payloads when the
+    operator types `@claude-bot add ...`. The prompt must spell out
+    the canonical `##`-section names so the agent's first attempt
+    passes the queue-append-time validator. Closes the TB-153 failure
+    mode where the handler used `## Acceptance` instead of
+    `## Verification` and the per-task verifier silently skipped.
+
+    Pinned phrasing — every canonical section name appears verbatim,
+    so future prompt edits can't drop one without this test failing.
+    """
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "dev",
+        "user": "alice",
+        "text": "@claude-bot add a task to do X",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Every canonical section name must appear in the prompt so the
+    # handler doesn't author `## Acceptance` / `## Approach` / etc.
+    for section in ("## Goal", "## Scope", "## Design",
+                    "## Verification", "## Out of scope"):
+        assert section in p, f"prompt missing canonical section {section!r}"
+    # The cross-ref so a future reader can trace the rule's origin.
+    assert "TB-154" in p
+
+
 def test_mattermost_prompt_routes_board_ops_through_queue(tmp_path):
     """TB-142 + TB-145 (load-bearing): the "Your job" rubric must direct
     the agent at `operator_queue_append` for board mutations and

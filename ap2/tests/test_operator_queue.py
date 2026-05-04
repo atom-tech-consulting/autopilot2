@@ -46,7 +46,11 @@ def _unwrap(res: dict) -> dict:
 # new gate. Helper to keep the call sites short.
 _BRIEFING = (
     "# Test briefing\n\n"
-    "## Verification\n- `uv run pytest -q` — gates pass\n"
+    "## Goal\n\nA thing happens.\n\n"
+    "## Scope\n\n- foo.py\n\n"
+    "## Design\n\nDirect edit.\n\n"
+    "## Verification\n- `uv run pytest -q` — gates pass\n\n"
+    "## Out of scope\n\n- nothing\n"
 )
 
 
@@ -417,7 +421,11 @@ def test_cmd_add_prints_queued_message(cfg: Config, capsys, tmp_path: Path):
     brief = tmp_path / "brief.md"
     brief.write_text(
         "# hello world\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
     )
 
     rc = cmd_add(

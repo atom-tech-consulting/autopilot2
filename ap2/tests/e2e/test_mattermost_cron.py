@@ -51,15 +51,21 @@ def _mm_handler_adds_pipeline(cfg):
                 "tags": ["#pipeline"],
                 # TB-135: briefing is required for every add_*; the MM
                 # handler in production builds one before calling the
-                # tool, so the test stand-in does the same. We omit
-                # `## Verification` so the per-task verifier returns
-                # None (skip) — this test is about the
-                # mm-add → cron-unfreeze → pipeline-complete chain,
-                # not the verifier, and the e2e fixture's working tree
-                # has no real pytest target for a shell bullet to score.
+                # tool, so the test stand-in does the same.
+                # TB-154: structurally canonical briefing — `## Goal`,
+                # `## Scope`, `## Design`, `## Verification`, `## Out of
+                # scope`. `- `true`` is a no-op shell bullet so the
+                # per-task verifier scores trivially without needing
+                # the e2e fixture's working tree to carry a real pytest
+                # target. This test is about the mm-add → cron-unfreeze
+                # → pipeline-complete chain, not the verifier itself.
                 "briefing": (
                     "# Pipeline\n\n"
-                    "## Goal\nKick the pipeline.\n"
+                    "## Goal\nKick the pipeline.\n\n"
+                    "## Scope\n- pipeline\n\n"
+                    "## Design\nStub.\n\n"
+                    "## Verification\n- `true` — trivially passes\n\n"
+                    "## Out of scope\n- nothing\n"
                 ),
             },
         )

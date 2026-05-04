@@ -272,12 +272,20 @@ def test_manual_bullet_outside_verification_section_not_flagged(cfg):
     don't flag it. The lint scopes to the `## Verification` slice only.
     """
     brief = cfg.tasks_dir / "tb-102-design.md"
+    # TB-154: structurally canonical briefing so the new
+    # `_check_briefing_structure` lint stays quiet — that lint emits a
+    # warning for any briefing missing one of the canonical sections,
+    # which would otherwise drown out the test's actual claim (that the
+    # `Manual:` lint scopes correctly).
     brief.write_text(
         "# TB-102 — example\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
         "## Design\n\n"
         "- Manual: this prose-bullet is fine in design notes\n\n"
         "## Verification\n\n"
-        "- `uv run pytest -q`\n"
+        "- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
     )
     report = check.check_project(cfg)
     assert not any(
@@ -298,6 +306,80 @@ def test_briefing_template_carries_auto_verifiable_rule():
     assert "Manual:" in text or "manual:" in lower
     # The escape hatch (move to `## Out of scope`) is named.
     assert "Out of scope" in text
+
+
+# ---------------------------------------------------------------------------
+# TB-154: on-disk briefing structure lint (warning-level companion to the
+# queue-append-time hard gate in `ap2/tools.py`). The hard gate refuses
+# new non-canonical briefings; this lint surfaces legacy entries the
+# operator can opportunistically fix.
+
+_TB154_CANONICAL_BRIEFING = (
+    "# TB-X — example\n\n"
+    "## Goal\n\nstub\n\n"
+    "## Scope\n\n- foo.py\n\n"
+    "## Design\n\nstub\n\n"
+    "## Verification\n\n- `uv run pytest -q`\n\n"
+    "## Out of scope\n\n- nothing\n"
+)
+
+
+def test_tb154_check_briefing_structure_warns_on_missing_section(cfg):
+    """An on-disk briefing missing a canonical section emits a
+    warning-level Issue (not an error). Mirrors `_check_briefing_links`'s
+    warning shape so the operator can fix opportunistically without
+    `ap2 check` going red."""
+    brief = cfg.tasks_dir / "tb-200-no-verification.md"
+    brief.write_text(
+        "# TB-200 — no verification\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    # Warning, not error — non-fatal so legacy briefings don't block
+    # other check usage.
+    assert report.ok
+    matching = [
+        i for i in report.warnings
+        if i.file == "tb-200-no-verification.md"
+        and "non-canonical" in i.message.lower()
+    ]
+    assert matching, [(i.severity, i.file, i.message) for i in report.issues]
+    assert "## Verification" in matching[0].message
+
+
+def test_tb154_check_briefing_structure_silent_on_canonical(cfg):
+    """A canonical on-disk briefing emits zero structure warnings — the
+    lint stays quiet for the normal case."""
+    brief = cfg.tasks_dir / "tb-201-canonical.md"
+    brief.write_text(_TB154_CANONICAL_BRIEFING)
+    report = check.check_project(cfg)
+    assert not any(
+        i.file == "tb-201-canonical.md" and "non-canonical" in i.message.lower()
+        for i in report.issues
+    ), [(i.severity, i.file, i.message) for i in report.issues]
+
+
+def test_tb154_check_briefing_structure_silent_on_canonical_with_extras(cfg):
+    """Extra `##`-level sections on disk are fine — extension is
+    explicitly allowed (mirrors the queue-append validator's behavior)."""
+    brief = cfg.tasks_dir / "tb-202-extras.md"
+    brief.write_text(
+        "# TB-202 — example\n\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Decision log\n\n- decided X\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    assert not any(
+        i.file == "tb-202-extras.md" and "non-canonical" in i.message.lower()
+        for i in report.issues
+    )
 
 
 def test_render_text_clean_path(cfg):

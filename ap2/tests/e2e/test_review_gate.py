@@ -155,9 +155,13 @@ def _ideation_proposes_n_gated(cfg, n: int):
                     "tags": ["proposed"],
                     "briefing": (
                         f"# Ideation proposal {i + 1}\n\n"
+                        "## Goal\n\nstub\n\n"
+                        "## Scope\n\n- foo.py\n\n"
+                        "## Design\n\nstub\n\n"
                         "## Verification\n\n"
                         "- `true` — placeholder shell bullet so the briefing "
-                        "satisfies TB-135 / TB-138 (auto-verifiable).\n"
+                        "satisfies TB-135 / TB-138 (auto-verifiable).\n\n"
+                        "## Out of scope\n\n- nothing\n"
                     ),
                     # Load-bearing: the prompt's TB-121 gate instructs
                     # every add_backlog call to set blocked_on="review".

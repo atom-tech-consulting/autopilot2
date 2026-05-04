@@ -92,8 +92,13 @@ def test_mm_handler_queue_routes_around_state_violation(e2e_project):
                     "op": "add_backlog",
                     "title": "queued by MM handler",
                     "briefing": (
-                        "# brief\n\n## Verification\n"
-                        "- `uv run pytest -q` — gates pass\n"
+                        "# brief\n\n"
+                        "## Goal\n\nstub\n\n"
+                        "## Scope\n\n- foo.py\n\n"
+                        "## Design\n\nstub\n\n"
+                        "## Verification\n"
+                        "- `uv run pytest -q` — gates pass\n\n"
+                        "## Out of scope\n\n- nothing\n"
                     ),
                 },
             )

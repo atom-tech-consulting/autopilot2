@@ -132,7 +132,10 @@ _TB135_BRIEFING = (
     "# TB-135 anchor briefing\n\n"
     "Tags: #autopilot #verification\n\n"
     "## Goal\n\nPins TB-135 acceptance.\n\n"
-    "## Verification\n- `uv run pytest -q` — gates pass\n"
+    "## Scope\n\n- ap2/tools.py\n\n"
+    "## Design\n\nGate the queue-append boundary.\n\n"
+    "## Verification\n- `uv run pytest -q` — gates pass\n\n"
+    "## Out of scope\n\n- nothing\n"
 )
 
 
@@ -274,7 +277,11 @@ def test_tb135_tools_do_board_edit_non_empty_briefing_payload_still_succeeds(
     every add_* action — only empty/missing briefings are rejected."""
     body = (
         "# Daemon-built briefing\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
     )
     for action, expected_section in (
         ("add_ready", "Ready"),
@@ -396,7 +403,11 @@ def _write_editor_script(
             "cat > \"$1\" <<'EOF'\n"
             "# Editor-authored TB-135 anchor\n\n"
             "Tags: #editor\n\n"
-            "## Verification\n- `uv run pytest -q` — gates pass\n"
+            "## Goal\n\nstub\n\n"
+            "## Scope\n\n- foo.py\n\n"
+            "## Design\n\nstub\n\n"
+            "## Verification\n- `uv run pytest -q` — gates pass\n\n"
+            "## Out of scope\n\n- nothing\n"
             "EOF\n"
         )
     elif mode == "empty":

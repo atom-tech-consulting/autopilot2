@@ -459,7 +459,10 @@ _GOOD_BRIEFING = (
     "# Add foo helper\n\n"
     "Tags: #cli #helpers\n\n"
     "## Goal\n\nReal goal text.\n\n"
-    "## Verification\n- `uv run pytest -q` — gates pass\n"
+    "## Scope\n\n- foo.py\n\n"
+    "## Design\n\nStraightforward add.\n\n"
+    "## Verification\n- `uv run pytest -q` — gates pass\n\n"
+    "## Out of scope\n\n- nothing\n"
 )
 
 
@@ -584,7 +587,11 @@ def test_add_strips_tbn_prefix_from_h1(tmp_path: Path):
     brief = tmp_path / "prefixed.md"
     brief.write_text(
         "# TB-99 — Real title here\n\n"
-        "## Verification\n- `uv run pytest -q` — passes\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nedit\n\n"
+        "## Verification\n- `uv run pytest -q` — passes\n\n"
+        "## Out of scope\n\n- nothing\n"
     )
 
     rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))

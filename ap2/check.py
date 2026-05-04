@@ -27,6 +27,7 @@ from pathlib import Path
 from .board import Board, SECTIONS
 from .config import Config
 from .cron import load_jobs
+from .init import BRIEFING_REQUIRED_SECTIONS
 from .insights import _parse_front_matter
 
 
@@ -60,6 +61,7 @@ def check_project(cfg: Config) -> CheckReport:
     issues.extend(_check_tasks_md(cfg))
     issues.extend(_check_briefing_links(cfg))
     issues.extend(_check_briefings_manual_bullets(cfg))
+    issues.extend(_check_briefing_structure(cfg))
     issues.extend(_check_cron_yaml(cfg))
     issues.extend(_check_json_state(cfg))
     issues.extend(_check_insights(cfg))
@@ -175,6 +177,71 @@ def _check_briefings_manual_bullets(cfg: Config) -> list[Issue]:
                     "move to `## Out of scope`",
                 ))
                 break  # one warning per file is enough
+    return issues
+
+
+# TB-154: top-level (`##`) section header pattern. Same shape as
+# `ap2/tools.py::_BRIEFING_SECTION_RE` — kept in sync deliberately.
+# Tolerates trailing content after the section name (e.g.
+# `## Verification (launch-task — ...)`) so the lint mirrors the
+# queue-append-time validator's acceptance set rather than its own.
+_BRIEFING_STRUCTURE_HEADER_RE = re.compile(
+    r"^##\s+([A-Za-z][A-Za-z ]*?)(?:\s*[(\-—:].*)?\s*$", re.M,
+)
+
+
+def _check_briefing_structure(cfg: Config) -> list[Issue]:
+    """TB-154 lint: warn on on-disk briefings whose `##`-level section
+    structure isn't canonical.
+
+    The hard gate at queue-append time (`do_operator_queue_append` /
+    `do_board_edit`) refuses non-canonical briefings before they land
+    on disk; this lint is the operator-facing safety net for legacy or
+    operator-edited briefings already in `.cc-autopilot/tasks/`.
+    Warning-level (not error) so the operator can opportunistically
+    fix the legacy entry without `ap2 check` going red — bulk
+    migration is explicitly out of scope (per the briefing's own
+    Out-of-scope list).
+
+    Mirrors `_check_briefing_links`'s warning shape and per-file
+    iteration so the report's UX stays consistent across the
+    briefing-quality lints.
+    """
+    issues: list[Issue] = []
+    tasks_dir = cfg.project_root / ".cc-autopilot" / "tasks"
+    if not tasks_dir.exists():
+        return issues
+    required = set(BRIEFING_REQUIRED_SECTIONS)
+    for f in sorted(tasks_dir.iterdir()):
+        if not f.is_file() or f.suffix != ".md":
+            continue
+        try:
+            text = f.read_text()
+        except OSError:
+            continue
+        if not text.strip():
+            # Empty briefing on disk is its own anomaly but `_check_briefing_links`
+            # already surfaces missing/broken target paths, and an empty file
+            # would never have been queue-appended post-TB-135. Skip silently
+            # so we don't double-report the same operator-attention candidate.
+            continue
+        found = {
+            m.group(1).strip()
+            for m in _BRIEFING_STRUCTURE_HEADER_RE.finditer(text)
+        }
+        missing = sorted(required - found)
+        if not missing:
+            continue
+        missing_str = ", ".join(f"`## {s}`" for s in missing)
+        issues.append(Issue(
+            "warning", f.name,
+            f"briefing structure non-canonical (TB-154): missing "
+            f"{missing_str}. Canonical sections: "
+            f"{', '.join('## ' + s for s in BRIEFING_REQUIRED_SECTIONS)}. "
+            "The queue-append validator rejects new briefings with "
+            "this shape; legacy on-disk briefings are flagged "
+            "(non-fatal) so they can be opportunistically fixed.",
+        ))
     return issues
 
 

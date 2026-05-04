@@ -27,6 +27,8 @@ from . import events, retry
 from .board import Board, board_file_lock, locked_board, parse_task_line
 from .config import Config, bump_next_task_id
 from .cron import update_job
+from .init import BRIEFING_REQUIRED_SECTIONS
+from .verify import parse_verification_section
 
 
 # TB-123: contextvar plumb so `do_cron_propose` can stamp the calling task's
@@ -96,6 +98,105 @@ def _validate_single_line(field: str, value: str | None) -> str | None:
         return None
     if "\n" in value or "\r" in value:
         return SINGLE_LINE_ERR.format(field=field)
+    return None
+
+
+# TB-154: top-level (`##`) section header pattern. Anchors at start-of-line,
+# tolerates trailing content after the section name (e.g. `## Verification
+# (launch-task — ...)`), and captures the bare section name verbatim. Same
+# tolerance as `verify._is_verification_heading` so both surfaces accept
+# the same author shapes.
+_BRIEFING_SECTION_RE = re.compile(r"^##\s+([A-Za-z][A-Za-z ]*?)(?:\s*[(\-—:].*)?\s*$", re.M)
+
+
+def _briefing_section_names(briefing_text: str) -> set[str]:
+    """Return the set of `##`-level section names present in `briefing_text`.
+
+    Parses by line-anchored regex (mirrors `check.py::_SECTION_ORDER_RE`'s
+    shape) rather than mistune AST — a fenced code block whose contents
+    include `## Foo` would not be a real section, but for structural
+    validation false-positives only weaken the gate's reach (we'd accept
+    a briefing whose author put the canonical sections in a code block);
+    we don't false-reject. The empty-Verification check uses the proper
+    AST-driven `parse_verification_section` so the gate's correctness
+    side stays tight.
+    """
+    return {m.group(1).strip() for m in _BRIEFING_SECTION_RE.finditer(briefing_text)}
+
+
+_BRIEFING_STRUCTURE_HINT = (
+    "The briefing must contain `## Goal`, `## Scope`, `## Design`, "
+    "`## Verification`, and `## Out of scope` headings (case-sensitive). "
+    "See ap2/init.py BRIEFING_TEMPLATE for the canonical shape, or copy "
+    "from any in-flight briefing in `.cc-autopilot/tasks/`."
+)
+
+
+def _validate_briefing_structure(briefing_text: str) -> str | None:
+    """TB-154: structural gate for a freshly-authored briefing.
+
+    A briefing is structurally valid when:
+      1. It contains every section in `BRIEFING_REQUIRED_SECTIONS` at
+         the `##` level (case-sensitive, any order). Extra `##`-level
+         sections (e.g. `## Decision log`) are allowed — extension is
+         fine, omission/rename is not.
+      2. The `## Verification` section is parseable by
+         `verify.parse_verification_section` (i.e. the heading is
+         actually parsed by the verifier — defends against rendering
+         quirks that the structural-pass `_BRIEFING_SECTION_RE` accepts
+         but the AST-driven verifier silently drops).
+      3. `## Verification` carries at least one bullet — an empty
+         section is structurally valid markdown but produces zero
+         criteria for the per-task verifier to score against.
+
+    Returns `None` when the briefing passes; an error-message string
+    naming the missing/misnamed/empty section otherwise. The message
+    is plumbed verbatim into `_err(...)` by the calling validator
+    boundary (`do_operator_queue_append` and `do_board_edit`'s add_*
+    paths), so it has to be specific enough that the operator knows
+    what to fix without re-reading the validator source.
+
+    History: closes the gap exposed by TB-153, where the MM handler
+    authored a briefing using `## Acceptance` instead of `## Verification`
+    plus a top-level `## Files to touch` block. `parse_verification_section`
+    silently returned `None` and the per-task verifier then skipped the
+    task entirely — the briefing-required gate (TB-135) only checked
+    "non-empty", not "shape matches what the verifier can read".
+    """
+    text = briefing_text or ""
+    if not text.strip():
+        # Defer to TB-135's "briefing is required" gate — that one names
+        # the right error for an empty payload.
+        return None
+    found = _briefing_section_names(text)
+    missing = [s for s in BRIEFING_REQUIRED_SECTIONS if s not in found]
+    if missing:
+        first = missing[0]
+        return (
+            f"briefing structure invalid: missing section "
+            f"`## {first}`. {_BRIEFING_STRUCTURE_HINT}"
+        )
+    bullets = parse_verification_section(text)
+    if bullets is None:
+        # `## Verification` heading is present per the structural pass,
+        # but `parse_verification_section` couldn't find it via mistune
+        # AST. This shouldn't happen given the regex tolerance lines up
+        # with `_is_verification_heading`, but if a future briefing
+        # quirk slips past one and not the other, refuse rather than
+        # ship a briefing the verifier will silently skip.
+        return (
+            "briefing structure invalid: `## Verification` heading is "
+            "present but the verifier can't parse it. "
+            f"{_BRIEFING_STRUCTURE_HINT}"
+        )
+    if not bullets:
+        return (
+            "briefing structure invalid: `## Verification` section is "
+            "empty — the per-task verifier needs at least one bullet "
+            "(backticked shell command, test name, or judge-checkable "
+            "prose) to score against the agent's diff. "
+            f"{_BRIEFING_STRUCTURE_HINT}"
+        )
     return None
 
 
@@ -288,6 +389,15 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
             "`## Verification` section and pass it as the "
             "`briefing` arg."
         )
+
+    # TB-154: structural validation runs after TB-135's non-empty gate
+    # and before `_allocate_id`. A rejected add must not leak a TB-N or
+    # write a briefing file to disk. Mirrors the placement of TB-134's
+    # single-line check above.
+    if action in add_map:
+        struct_err = _validate_briefing_structure(briefing or "")
+        if struct_err:
+            return _err(struct_err)
 
     try:
         with locked_board(cfg.tasks_file) as board:
@@ -823,6 +933,13 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                 "briefing markdown with a real `## Verification` "
                 "section and pass it as the `briefing` arg."
             )
+
+        # TB-154: structural gate. Runs before `_allocate_id` /
+        # briefing-file write — a rejected add must not leak a TB-N
+        # nor materialize an orphan briefing under `.cc-autopilot/tasks/`.
+        struct_err = _validate_briefing_structure(briefing_content or "")
+        if struct_err:
+            return _err(struct_err)
 
         # TB-132: blocked_on rides on the task line as a `@blocked:<csv>`
         # codespan, not as `(blocked on: ...)` in the description. The
@@ -1707,7 +1824,20 @@ def build_mcp_server(cfg: Config):
         "the ONLY board-mutation surface mid-task.) For `add_*` ops, the "
         "TB-N ID is pre-allocated synchronously (so you can mention it "
         "in your reply) and the briefing file is pre-written; only the "
-        "TASKS.md insertion is deferred. Args: op (one of add_ready, "
+        "TASKS.md insertion is deferred. "
+        "TB-154 BRIEFING STRUCTURE — for `add_*` ops the `briefing` arg "
+        "MUST use exactly these `##`-level section names (case-sensitive, "
+        "any order): `## Goal`, `## Scope`, `## Design`, `## Verification`, "
+        "`## Out of scope`. The validator rejects any other section names "
+        "(e.g. `## Acceptance` instead of `## Verification`, or a "
+        "top-level `## Files to touch` block) before allocating a TB-N — "
+        "the per-task verifier (TB-69) parses the briefing's "
+        "`## Verification` section literally, so the structural shape is "
+        "load-bearing. Extra `##`-level sections (e.g. `## Decision log`, "
+        "`## Why`) are fine; the `## Verification` section needs at "
+        "least one bullet (backticked shell command, test name, or "
+        "judge-checkable prose claim). "
+        "Args: op (one of add_ready, "
         "add_backlog, add_frozen, move_to_backlog, unfreeze, delete, "
         "approve); task_id (TB-N for non-add ops); title / tags "
         "(comma-separated string) / description / briefing / blocked_on "

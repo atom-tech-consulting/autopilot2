@@ -143,8 +143,13 @@ def test_detect_violations_ignores_operator_queue_append_between_snapshots(tmp_p
             "op": "add_backlog",
             "title": "queued mid-run",
             "briefing": (
-                "# brief\n\n## Verification\n"
-                "- `uv run pytest -q` — gates pass\n"
+                "# brief\n\n"
+                "## Goal\n\nstub\n\n"
+                "## Scope\n\n- foo.py\n\n"
+                "## Design\n\nedit foo\n\n"
+                "## Verification\n"
+                "- `uv run pytest -q` — gates pass\n\n"
+                "## Out of scope\n\n- nothing\n"
             ),
         },
     )

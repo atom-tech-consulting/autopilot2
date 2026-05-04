@@ -42,6 +42,24 @@ CLAUDE_AUTOPILOT_TEMPLATE = (
 # template is intentionally short — humans fill it in. Empty/skeleton values
 # are tolerated by the ideation prompt, which falls back to inferring goals
 # from CLAUDE.md + progress.md when the file is missing or all-placeholder.
+
+# TB-154: canonical `##`-level section names every briefing must carry.
+# Single source of truth — used by:
+#   - `BRIEFING_TEMPLATE` below (the empty-add scaffold and editor-mode buffer).
+#   - `ap2/tools.py::_validate_briefing_structure` (queue-append-time hard gate).
+#   - `ap2/check.py::_check_briefing_structure` (on-disk lint, warning-level).
+#   - `ap2/prompts.py` MM handler instructions + `operator_queue_append`
+#     docstring (so the agent reads the requirement before authoring).
+# Order is rendered order in the template; the validator only checks
+# presence, not order — extension is fine, omission/rename is not.
+BRIEFING_REQUIRED_SECTIONS: tuple[str, ...] = (
+    "Goal",
+    "Scope",
+    "Design",
+    "Verification",
+    "Out of scope",
+)
+
 BRIEFING_TEMPLATE = (
     "# {task_id} — {title}\n\n"
     "Tags: \n\n"

@@ -324,7 +324,20 @@ def test_add_backlog_preserves_explicit_briefing():
         cfg = Config.load(root)
         cfg.ensure_dirs()
 
-        custom = "# Custom\n\nNo verification section.\n"
+        # TB-154: structurally canonical briefing — every add_* path
+        # now rejects briefings missing one of the canonical
+        # `##`-level sections. The original test claim (explicit
+        # briefing payload is preserved on disk verbatim, NOT
+        # auto-filled with the template) survives — we just need
+        # canonical-shape input for the gate to let the call through.
+        custom = (
+            "# Custom\n\n"
+            "## Goal\n\nstub\n\n"
+            "## Scope\n\n- foo.py\n\n"
+            "## Design\n\nstub\n\n"
+            "## Verification\n- `uv run pytest -q`\n\n"
+            "## Out of scope\n\n- nothing\n"
+        )
         res = do_board_edit(cfg, {
             "action": "add_backlog",
             "title": "explicit briefing",

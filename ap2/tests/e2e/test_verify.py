@@ -176,7 +176,11 @@ def test_cli_no_verify_flag_writes_tag(e2e_project):
     brief = cfg.project_root / "_test_brief.md"
     brief.write_text(
         "# docs-only change\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n"
+        "## Goal\n\nstub\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
     )
     args = Namespace(
         section="Backlog",
