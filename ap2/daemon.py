@@ -699,36 +699,36 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
         toolset="restricted",
     )
 
-    async def _consume() -> None:
-        async for _ in sdk.query(
-            prompt=prompt,
-            options=sdk.ClaudeAgentOptions(
-                cwd=str(cfg.project_root),
-                mcp_servers={"autopilot": mcp_server},
-                allowed_tools=MM_HANDLER_TOOLS,
-                permission_mode="bypassPermissions",
-                max_turns=int(os.environ.get("AP2_CONTROL_MAX_TURNS", 15)),
-                setting_sources=["project"],
-                model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
-                extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
-            ),
-        ):
-            pass
-
-    try:
-        await asyncio.wait_for(_consume(), timeout=cfg.control_timeout_s)
-    except asyncio.TimeoutError:
+    # TB-166: route MM handler runs through the shared control-agent helper
+    # so the SDK stream gets dumped to disk (`stream.jsonl` + `messages.jsonl`)
+    # and a `control_run_usage` event lands per fire — same instrumentation
+    # ideation and status-report now get. Label encodes the triggering
+    # post id so `adhoc/token_breakdown.py`'s `classify_label` (`MM-<post-id>`
+    # → `mm-handler`) keeps grouping these runs correctly. Existing
+    # `mattermost_timeout` / `mattermost_error` events still fire from
+    # this caller — the new event is purely additive.
+    post_id = (msg.get("id") or "").strip() or "unknown"
+    timed_out, error, _stderr_tail, _prompt_dump = await _run_control_agent(
+        cfg,
+        sdk,
+        mcp_server,
+        label=f"MM-{post_id}",
+        prompt=prompt,
+        allowed_tools=MM_HANDLER_TOOLS,
+        max_turns=int(os.environ.get("AP2_CONTROL_MAX_TURNS", 15)),
+    )
+    if timed_out:
         events.append(
             cfg.events_file,
             "mattermost_timeout",
             timeout_s=cfg.control_timeout_s,
             thread_id=msg.get("thread_id"),
         )
-    except Exception as e:  # noqa: BLE001
+    elif error is not None:
         events.append(
             cfg.events_file,
             "mattermost_error",
-            error=f"{type(e).__name__}: {e}",
+            error=error,
         )
 
 
@@ -762,13 +762,14 @@ async def _run_control_agent(
     max_turns: int,
     effort: str | None = None,
 ) -> tuple[bool, str | None, str, Path]:
-    """SDK plumbing for control-agent runs (cron jobs, ideation).
+    """SDK plumbing for control-agent runs (cron jobs, ideation, MM handler).
 
     Returns ``(timed_out, error, stderr_tail, prompt_dump_path)``. On
     success: ``(False, None, "", path)``. On timeout: ``(True, None,
     tail, path)``. On any other exception: ``(False, "<Type>: <msg>",
-    tail, path)``. The caller owns the surrounding event vocabulary,
-    cooldown bookkeeping, and state commit.
+    tail, path)``. The caller owns the surrounding event vocabulary
+    (``ideation_timeout`` / ``cron_error`` / ``mattermost_timeout`` /
+    etc.), cooldown bookkeeping, and state commit.
 
     TB-156: ``effort`` lets a caller override the reasoning-effort budget
     for this specific invocation. When ``None`` (the default) we fall back
@@ -776,9 +777,33 @@ async def _run_control_agent(
     callers keep their pre-TB-156 behavior. Per-call-site lowering (e.g.
     status-report) is opt-in: the caller computes its own effort using
     its own per-site env knob and passes it explicitly.
+
+    TB-166: every envelope from the SDK stream is now captured to
+    ``<run_id>.stream.jsonl`` + ``<run_id>.messages.jsonl`` (parity with
+    ``run_task``), and a ``control_run_usage`` event is emitted on every
+    terminal path (success / timeout / error). Pre-TB-166 only the prompt
+    was dumped and the stream was discarded via
+    ``async for _ in sdk.query(...): pass`` — per-message detail and
+    token cost were unrecoverable for ideation, status-report, and MM.
+    The label-specific events (``ideation_timeout`` / ``cron_error`` /
+    ``mattermost_error`` / etc.) keep firing from the caller; the new
+    event is purely additive so ``events.jsonl`` greps for the existing
+    vocabulary stay valid.
     """
-    prompt_dump, _, _ = _prep_debug_dumps(cfg, label)
+    run_t0 = time.monotonic()
+    prompt_dump, stream_dump, messages_dump = _prep_debug_dumps(cfg, label)
+    # TB-166: stable per-run identifier shared with the debug-dump filenames
+    # (`<compact_ts>-<label>`). Lets `control_run_usage` events grep-link to
+    # `.cc-autopilot/debug/<run_id>.*` artifacts.
+    run_id = prompt_dump.name.removesuffix(".prompt.md")
     prompt_dump.write_text(prompt)
+    # TB-166: touch the stream + messages files up front so they exist on
+    # disk even when the SDK errors / times out before yielding a single
+    # envelope. Without this, an operator who greps a `control_run_usage`
+    # event for `<run_id>` and then `ls .cc-autopilot/debug/<run_id>.*`
+    # would see only the prompt — confusing for forensic inspection.
+    stream_dump.touch()
+    messages_dump.touch()
     stderr_lines, stderr_sink = _make_stderr_sink()
 
     resolved_effort = (
@@ -786,8 +811,29 @@ async def _run_control_agent(
         else os.environ.get("AP2_AGENT_EFFORT", "xhigh")
     )
 
+    # TB-166: same two-layer message log as `run_task`. `.stream.jsonl`
+    # holds compact per-envelope summaries (preview + tool calls + tool
+    # results); `.messages.jsonl` mirrors the same `seq` ordering with
+    # FULL content. Diagnose by scanning the stream, then `jq
+    # 'select(.seq==N)'` on messages.jsonl for the full body.
+    stream_log: list[dict] = []
+    seq = [0]
+
+    def _log_message(msg) -> None:
+        idx = seq[0]
+        seq[0] += 1
+        summary = {"seq": idx, **_summarize_message(msg)}
+        stream_log.append(summary)
+        if len(stream_log) > 200:
+            del stream_log[: len(stream_log) - 200]
+        with stream_dump.open("a") as f:
+            f.write(json.dumps(summary, default=str) + "\n")
+        with messages_dump.open("a") as f:
+            full = {"seq": idx, **_serialize_message_full(msg)}
+            f.write(json.dumps(full, default=str) + "\n")
+
     async def _consume() -> None:
-        async for _ in sdk.query(
+        async for msg in sdk.query(
             prompt=prompt,
             options=sdk.ClaudeAgentOptions(
                 cwd=str(cfg.project_root),
@@ -801,14 +847,41 @@ async def _run_control_agent(
                 extra_args={"effort": resolved_effort},
             ),
         ):
-            pass
+            _log_message(msg)
 
+    timed_out = False
+    error: str | None = None
     try:
         await asyncio.wait_for(_consume(), timeout=cfg.control_timeout_s)
     except asyncio.TimeoutError:
-        return True, None, "\n".join(stderr_lines[-30:]), prompt_dump
+        timed_out = True
     except Exception as e:  # noqa: BLE001
-        return False, f"{type(e).__name__}: {e}", "\n".join(stderr_lines[-30:]), prompt_dump
+        error = f"{type(e).__name__}: {e}"
+
+    stderr_tail = "\n".join(stderr_lines[-30:])
+    if timed_out:
+        status = "timeout"
+    elif error is not None:
+        status = "error"
+    else:
+        status = "complete"
+
+    _emit_control_run_usage(
+        cfg,
+        label=label,
+        run_id=run_id,
+        status=status,
+        duration_s=time.monotonic() - run_t0,
+        stream_log=stream_log,
+        error=error,
+        stderr_tail=stderr_tail if (timed_out or error is not None) else "",
+    )
+
+    if timed_out:
+        return True, None, stderr_tail, prompt_dump
+    if error is not None:
+        return False, error, stderr_tail, prompt_dump
+    # Success: preserve the pre-TB-166 contract of returning "" for stderr_tail.
     return False, None, "", prompt_dump
 
 
@@ -1449,6 +1522,71 @@ def _emit_task_run_usage(
         payload["num_turns"] = last_result.get("num_turns") or 0
         payload["model"] = last_result.get("model") or ""
     events.append(cfg.events_file, "task_run_usage", **payload)
+
+
+def _emit_control_run_usage(
+    cfg: Config,
+    *,
+    label: str,
+    run_id: str,
+    status: str,
+    duration_s: float,
+    stream_log: list[dict],
+    error: str | None = None,
+    stderr_tail: str = "",
+) -> None:
+    """TB-166: emit a `control_run_usage` event capturing run-level
+    totals for non-task SDK runs (ideation, cron jobs, MM handler).
+
+    Parallel to TB-165's `_emit_task_run_usage` but with a `label`
+    field instead of `task` (control runs aren't bound to a board task)
+    and optional `error` / `stderr_tail` fields for non-success paths.
+    Persists token / cache / cost / turn counts to events.jsonl on every
+    terminal path so cross-run aggregation surfaces (`adhoc/token_breakdown.py`,
+    ad-hoc `jq` queries) survive regardless of debug-dump retention.
+
+    Source of usage data: the trailing `ResultMessage` envelope already
+    captured by `_summarize_message` and recorded in `stream_log`. Walks
+    the in-memory list backwards to find the LAST entry carrying `usage`
+    / `total_cost_usd` (defensive against the unlikely case of multiple
+    ResultMessages in a single run). If no ResultMessage was captured
+    (SDK error / timeout before stream end), the event still fires with
+    empty usage and `note=stream_incomplete` — same pattern TB-165 used
+    for crash paths so cross-run aggregators don't silently drop the run.
+
+    `run_id` matches the `<compact_ts>-<label>` filename prefix of the
+    debug dumps, so an operator can `ls .cc-autopilot/debug/<run_id>.*`
+    after grepping for the event.
+    """
+    last_result: dict | None = None
+    for s in reversed(stream_log):
+        if "usage" in s or "total_cost_usd" in s:
+            last_result = s
+            break
+    payload: dict = {
+        "label": label,
+        "run_id": run_id,
+        "status": status,
+        "duration_s": round(duration_s, 3),
+    }
+    if last_result is None:
+        payload["usage"] = {}
+        payload["model_usage"] = {}
+        payload["total_cost_usd"] = 0.0
+        payload["num_turns"] = 0
+        payload["model"] = ""
+        payload["note"] = "stream_incomplete"
+    else:
+        payload["usage"] = last_result.get("usage") or {}
+        payload["model_usage"] = last_result.get("model_usage") or {}
+        payload["total_cost_usd"] = last_result.get("total_cost_usd") or 0.0
+        payload["num_turns"] = last_result.get("num_turns") or 0
+        payload["model"] = last_result.get("model") or ""
+    if error is not None:
+        payload["error"] = error
+    if stderr_tail:
+        payload["stderr_tail"] = stderr_tail
+    events.append(cfg.events_file, "control_run_usage", **payload)
 
 
 def _prep_debug_dumps(cfg: Config, task_id: str) -> tuple[Path, Path, Path]:
