@@ -12,6 +12,7 @@
 - [ ] **TB-163** **Inject "Recent operator rejections (last 5)" block into ideation prompt header** `#autopilot` `#ideation` `#prompts` `#operator-log` `#review-gate` `@blocked:review` — TB-152 captures rejection reasons in operator_log.md but ideation only reads them per-line. Render a "Recent operator rejections" block in build_control_prompt's snapshot header so pattern-level signal reaches the ideator at proposal time. [→ brief](.cc-autopilot/tasks/inject-recent-operator-rejections-last-5.md)
 - [ ] **TB-164** **Briefing validator: require non-empty "Why now" rationale within Goal section** `#autopilot` `#ideation` `#briefing` `#validation` `#scope-creep` `@blocked:review` — Extend TB-154's _validate_briefing_structure to require an explicit "Why now" rationale paragraph within ## Goal answering goal.md's delete-test ("if we delete this and the goal still ships, was it useful?") — closes the scope-creep guard gap mechanically. [→ brief](.cc-autopilot/tasks/briefing-validator-require-non-empty-why.md)
 - [ ] **TB-166** **Persist control-agent token usage + stream/messages dumps for ideation, cron, MM handler** `@blocked:review` [→ brief](.cc-autopilot/tasks/persist-control-agent-token-usage-stream.md)
+- [ ] **TB-167** **Default `ap2 add` section to Backlog (was Ready)** [→ brief](.cc-autopilot/tasks/default-ap2-add-section-to-backlog-was-r.md)
 
 ## Pipeline Pending
 
