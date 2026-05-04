@@ -14,6 +14,7 @@
 - [ ] **TB-154** **Validate briefing structure at queue-append time** `#autopilot` `#briefing` `#validation` [→ brief](.cc-autopilot/tasks/validate-briefing-structure-at-queue-app.md)
 - [ ] **TB-155** **Web port auto-enumerate on conflict** `#autopilot` `#web` `#daemon` [→ brief](.cc-autopilot/tasks/web-port-auto-enumerate-on-conflict.md)
 - [ ] **TB-153** **`ap2 update` op for in-place task / briefing edits** `#ap2` `#operator` `#cli` `#queue` — Add an `update` op to the operator queue (and matching `ap2 update TB-N` CLI) for in-place edits to a task's `title` / `tags` / `description` / `@blocked` meta and/or its briefing file, routed through the same queue-append → drain path as `add_*` / `delete` / `unfreeze` / `approve` so it never lands inside a task agent's snapshot window. [→ brief](.cc-autopilot/tasks/ap2-update-op-for-in-place-task-briefing.md)
+- [ ] **TB-156** **Tier-1 token tuning: diff trim + per-agent effort lowering** `#autopilot` `#verify` `#status-report` `#cost` [→ brief](.cc-autopilot/tasks/tier-1-token-tuning-diff-trim-per-agent.md)
 
 ## Pipeline Pending
 
