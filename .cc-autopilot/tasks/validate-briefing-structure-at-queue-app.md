@@ -78,3 +78,10 @@ For briefings already on disk (legacy or operator-edited): walk `.cc-autopilot/t
 - Allowing operator-defined section sets (e.g. a project that wants `## Risks` instead of `## Out of scope`). Single canonical shape simplifies the verifier and the briefing-authoring guidance; if a future use case demands flexibility, file separately.
 - Auto-fixing renamed sections (`## Acceptance` → `## Verification`) at queue-append. Reject and force the author to fix; auto-fix hides authorship mistakes from the operator and complicates the validator's failure mode taxonomy.
 - Migrating existing on-disk briefings whose structure doesn't match. The `ap2 check` warning lets the operator opportunistically fix; bulk migration is out of scope.
+## Attempts
+
+### 2026-05-04 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] New unit test in `test_tools.py`: same checks fire on the `update` op when the update payload includes a `briefing` fiel
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260504T054118Z-TB-154.prompt.md`, `stream: .cc-autopilot/debug/20260504T054118Z-TB-154.stream.jsonl`, `messages: .cc-autopilot/debug/20260504T054118Z-TB-154.messages.jsonl`
