@@ -221,3 +221,9 @@
 - **Summary:** Added `_render_pending_queue(cfg)` helper + `.pending-queue` CSS in `ap2/web.py`, wired into `_render_home` above the events table; reads `operator_queue.jsonl`, filters against `operator_queue_state.json`'s applied-set, omits the card server-side when empty, renders op badge + task_id + HH:MM:SSZ ts + 8-char uuid prefix + per-op-kind summary (`title="..."` for add_*, `fields=<csv>` for update, none for approve/etc.); 5 new tests in `ap2/tests/test_web.py` cover three-op rendering, empty-state omission, uuid truncation, drained-entry filter, grep-visibility; full gate `uv run pytest -q ap2/tests/` 891 passed.
 - **Files:** ap2/web.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-04] TB-160: Make ideation trigger threshold configurable via `AP2_IDEATION_TRIGGER_TASK_COUNT` (default 3)
+- **Commit:** `7701a1c`
+- **Summary:** Made ideation trigger threshold configurable via AP2_IDEATION_TRIGGER_TASK_COUNT (default 3). Replaced boolean has_work gate with Active hard-gate + Ready+Backlog count comparison; added _trigger_task_count() helper mirroring _cooldown_s; updated header docstring + architecture.md + howto.md; added 10 new tests in test_ideation_trigger.py covering default constant, env parsing fallback, threshold semantics, Active hard-gate independence, >= boundary, and Pipeline-Pending/Frozen exclusion. Full ap2 suite (901 tests) passes.
+- **Files:** ap2/ideation.py, ap2/architecture.md, ap2/howto.md, ap2/tests/test_ideation_trigger.py
+- **Tests:** pass
