@@ -1,100 +1,60 @@
-# TB-152 — `ap2 reject TB-N` (CLI + chat) with explicit operator_log.md entry
+# TB-152 — `ap2 reject TB-N` (CLI + chat) — capture rejection reasons in operator_log.md for ideation learning
 
-## Why
-The ideation prompt treats `.cc-autopilot/operator_log.md` as
-authoritative on operator decisions: "Each line is authoritative:
-do NOT re-propose actions or decisions logged here, even if your
-prior assessment surfaced them as 'Open questions for operator'."
+## Goal
 
-Today the only way to dispose of an ideation proposal the operator
-disagrees with is `ap2 delete TB-N` (or chat-routed delete via the
-operator queue). That removes the briefing + the TASKS.md row but
-writes nothing to operator_log.md beyond a generic
-`applied operator-queued delete → TB-N` audit line — there's no
-"this proposal was rejected on its merits" signal. Result:
-ideation can re-propose the same idea next cycle if the project
-state still motivates it.
+Capture the operator's REASON for rejecting an ideation-proposed task, not just the action. Today the only disposal path is `ap2 delete TB-N`, which writes `applied operator-queued delete → TB-N` to operator_log.md — the action is captured but the *why* isn't, and ideation has no signal to avoid re-proposing the same idea next cycle when project state still motivates it.
 
-A dedicated `reject` verb closes the feedback loop: the line
-"`<ts>` — rejected ideation proposal → TB-N (<title>): <reason>"
-is grep-able by the next ideation cycle and serves as a permanent
-"don't re-propose" record alongside the existing
-`applied operator-queued ...` lines.
+This task adds a dedicated `reject` verb (CLI + chat) that mirrors `delete`'s removal semantics but takes an `--reason "..."` argument and writes a richer audit line:
+
+    <ts> — rejected ideation proposal → TB-N (<title>): <reason>
+
+Ideation Step 0 already reads operator_log.md as authoritative ground truth on operator decisions — these new lines surface there alongside the existing `applied operator-queued ...` audit trail, so the next cycle's "what's still uncovered" pass learns from both the approve side (already captured today) and the reject side (the gap this task closes).
+
+This is the load-bearing prompt-iteration enabler called out in goal.md's "Current focus: ideation quality" section — the approve side of operator decisions is already pinned to disk in a way ideation reads back; the reject side isn't, and without REASONS the prompt has no signal to calibrate against.
 
 ## Scope
-1. New op `reject` in `ap2/tools.py` `OPERATOR_QUEUE_OPS`:
-   - Operator-side: `ap2 reject TB-N [--reason "..."]` appends a
-     queued op `{op: "reject", task_id: TB-N, reason: "..."}` to
-     `.cc-autopilot/operator_queue.jsonl`.
-   - Drain-side: `drain_operator_queue` handles `reject` by (a)
-     calling the same removal codepath as `delete` (move to a
-     deleted state + remove the briefing file, exactly mirroring
-     today's delete behavior — no scope creep) and (b) appending
-     to `operator_log.md` a one-line entry of the shape
-     `<ts> — rejected ideation proposal → TB-N (<title>): <reason>`.
-     Reason defaults to `(no reason given)` when --reason is
-     omitted.
-   - The standard `applied operator-queued delete → TB-N` audit
-     line is replaced by `applied operator-queued reject → TB-N`
-     for reject ops, so the audit trail distinguishes the two
-     verbs.
-2. New CLI subcommand `cmd_reject` in `ap2/cli.py`:
-   - Args: `task_id` (positional, required), `--reason` (optional
-     freeform string; rejected if it contains `\n` or `\r` per the
-     TB-134 single-line rule).
-   - Pre-validates the task exists and is currently in Backlog
-     with `@blocked:review`. If not, exits non-zero with a clear
-     message ("TB-N is not a pending-review proposal — use
-     `ap2 delete TB-N` to remove tasks not awaiting review").
-3. New chat verb in the MM-handler prompt (`ap2/prompts.py`):
-   add `reject TB-N [reason: ...]` to the supported verb list with
-   the same routing as `approve` — the handler calls
-   `mcp__autopilot__operator_queue_append({"op": "reject", ...})`
-   so the existing queue path applies.
-4. Update `skills/ap2/SKILL.md` and `ap2/README.md` with the new
-   verb, including the "for ideation proposals only; use delete
-   for everything else" guidance.
-5. Tests:
-   - `ap2/tests/test_cli.py`: `test_reject_appends_operator_log`
-     (synthetic Backlog with one review-gated task → run
-     `cmd_reject` → drain queue → assert TASKS.md no longer
-     contains the row, briefing file is gone, operator_log.md
-     contains the rejected-proposal line with the supplied
-     reason).
-   - Same file: `test_reject_rejects_non_review_task` (Active task
-     → cmd_reject exits non-zero, no queue append).
-   - `ap2/tests/test_operator_queue.py`: pin that the drain
-     handler distinguishes the audit line shape (delete vs reject).
-   - `ap2/tests/test_prompts.py`: pin the MM-handler prompt
-     contains the `reject TB-N` verb description.
+
+- `ap2/tools.py` — register `reject` in `OPERATOR_QUEUE_OPS`; the drain handler removes the task (same removal codepath as `delete` — no scope creep on removal semantics) AND writes the `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` line to operator_log.md. The standard `applied operator-queued reject → TB-N` audit line replaces the `delete` variant for reject ops so the audit trail distinguishes the verbs.
+- `ap2/cli.py` — new `cmd_reject` subcommand; takes `task_id` (positional) and optional `--reason` (single-line per TB-134; defaults to `(no reason given)` when omitted). Pre-validates the task is in Backlog with `@blocked:review`; refuses with a helpful message ("not a pending-review proposal — use `ap2 delete TB-N`") otherwise.
+- `ap2/prompts.py` — add `reject TB-N [reason: ...]` to the MM-handler verb list, routed through `mcp__autopilot__operator_queue_append({"op": "reject", ...})`.
+- `skills/ap2/SKILL.md`, `ap2/README.md` — document the new verb with the "ideation proposals only; use delete for everything else" guidance.
+- Tests in `ap2/tests/test_cli.py`, `ap2/tests/test_operator_queue.py`, `ap2/tests/test_prompts.py`.
+
+## Design
+
+### Why a separate verb (not `--reason` on `delete`)
+
+A `delete --reason` flag would muddy the verb's semantic — `delete` covers "remove a task that was a typo / no-longer-relevant / superseded," not specifically "I considered this ideation proposal and decided against it on its merits." The audit-line distinction (`reject` vs `delete`) is what the next ideation cycle keys off; collapsing both into one verb forces the prompt to disambiguate intent from prose.
+
+Reasons stay optional (operator may want to reject quickly) but the placeholder `(no reason given)` is itself signal — ideation can spot the difference between "rejected, no reason" and "rejected because X" and decide whether to re-propose.
+
+### Drain-path implementation
+
+The reject op shares ~all of `delete`'s removal logic: locate the task, drop the row from TASKS.md, remove the briefing file, emit the `task_deleted` event. The added work is:
+
+- Build the title-aware operator_log.md line BEFORE removal (need the title before TASKS.md mutation).
+- Use the `reject`-flavored `applied operator-queued reject → TB-N` audit line in place of the `delete` one.
+
+### Pre-validation in `cmd_reject`
+
+`cmd_reject` only fires the queue-append if the task is currently Backlog + `@blocked:review`. If not, exit non-zero with the message above. This keeps the verb specific to ideation proposals; the chat path mirrors via the prompt's verb description ("for ideation proposals only").
 
 ## Verification
+
 - `uv run pytest -q ap2/tests/` — full regression gate passes.
-- `grep -nE "\"reject\"" ap2/tools.py` — `reject` is registered in
-  `OPERATOR_QUEUE_OPS`.
-- `grep -nE "def cmd_reject" ap2/cli.py` — CLI command is wired.
-- `grep -q "rejected ideation proposal" ap2/tools.py` — the
-  operator_log.md line shape is emitted from the drain path.
-- `grep -q "reject TB-N" ap2/prompts.py` — the MM-handler prompt
-  documents the new verb.
-- prose: `cmd_reject` in `ap2/cli.py` validates the task is in
-  Backlog with `@blocked:review`, exits non-zero with a clear
-  message otherwise, and on the success path appends a queued
-  `reject` op to `operator_queue.jsonl` rather than mutating
-  TASKS.md directly.
-- prose: the drain handler in `ap2/tools.py` (or wherever
-  `drain_operator_queue` lives) writes a
-  `<ts> — rejected ideation proposal → TB-N (<title>): <reason>`
-  line to `operator_log.md` when applying a `reject` op, so the
-  next ideation cycle sees the decision in its authoritative
-  source.
+- `python3 -c "from ap2.tools import OPERATOR_QUEUE_OPS; assert 'reject' in OPERATOR_QUEUE_OPS"` — op registered in the queue.
+- `grep -nE "def cmd_reject" ap2/cli.py` — CLI command wired.
+- `grep -q "rejected ideation proposal" ap2/tools.py` — drain path emits the operator_log.md line shape.
+- `grep -q "reject TB-N" ap2/prompts.py` — MM-handler prompt documents the verb.
+- prose: `cmd_reject` validates the task is Backlog + `@blocked:review` before queueing; for non-review tasks (Active, no review token, etc.) it exits non-zero with a message pointing the operator to `ap2 delete`.
+- prose: the drain handler in `ap2/tools.py` writes a `<ts> — rejected ideation proposal → TB-N (<title>): <reason>` line to `operator_log.md`. The line uses the operator's `--reason` value, OR `(no reason given)` when omitted — both flavours pinned in tests.
+- prose: a test in `test_cli.py` exercises the end-to-end flow — synthesize a Backlog with a `@blocked:review` task, run `cmd_reject` with a reason, drain the queue, assert TASKS.md no longer contains the row, the briefing file is gone, AND operator_log.md contains the rejected-proposal line with the supplied reason text (not just the action verb).
+- prose: a test pins the audit-line distinction — applying a `reject` op writes `applied operator-queued reject → TB-N`, applying a `delete` op writes `applied operator-queued delete → TB-N`; the two are not collapsed.
 
 ## Out of scope
-- Auto-rejecting tasks based on heuristics — `reject` is operator-
-  driven only.
-- Renaming or removing `ap2 delete` — both verbs coexist; reject
-  is the explicit "decided against an ideation proposal" path,
-  delete remains the generic remove.
-- Bulk `reject TB-X TB-Y TB-Z` — single-task only this round;
-  defer until friction observed.
-- Web UI button — chat + CLI is enough surface for v1.
+
+- Auto-rejecting tasks based on heuristics. `reject` is operator-driven only.
+- Renaming or removing `ap2 delete`. Both verbs coexist; `reject` is the explicit "decided against an ideation proposal" path, `delete` remains the generic remove.
+- Bulk `reject TB-X TB-Y TB-Z`. Single-task only this round; defer until friction observed.
+- Web UI button. Chat + CLI is enough surface for v1.
+- Updating ideation's prompt to *use* the new lines beyond what's already there. The existing prompt already reads operator_log.md as ground truth (Step 0); the new lines surface there automatically. Any further prompt tuning to weight rejection reasons is a separate task.
