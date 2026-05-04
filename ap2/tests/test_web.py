@@ -1618,3 +1618,181 @@ def test_summarize_verification_failed_shared_helper_is_grep_visible():
     for fname in ("events.py", "cli.py", "web.py"):
         text = (root / fname).read_text()
         assert "summarize_verification_failed" in text, fname
+
+
+# --------- TB-162: pending operator-queue card on `/` ---------
+
+
+import json as _json
+
+
+def _seed_queue_entry(
+    cfg: Config,
+    *,
+    uuid: str,
+    op: str,
+    args: dict,
+    ts: str = "2026-05-04T17:15:30Z",
+) -> None:
+    """Append one operator-queue record to `.cc-autopilot/operator_queue.jsonl`.
+
+    Mirrors the shape `tools.do_operator_queue_append` writes — uuid + op
+    + args + ts is the contract `_render_pending_queue` reads.
+    """
+    queue_path = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    rec = {"uuid": uuid, "op": op, "args": args, "ts": ts}
+    with queue_path.open("a") as f:
+        f.write(_json.dumps(rec) + "\n")
+
+
+def _seed_queue_state_applied(cfg: Config, uuids: list[str]) -> None:
+    """Mirror `tools._save_operator_queue_applied` — the state file the
+    drain handler keeps in sync with the queue."""
+    state_path = cfg.project_root / ".cc-autopilot" / "operator_queue_state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(_json.dumps({"applied": list(uuids)}, indent=2))
+
+
+def test_pending_queue_card_renders_three_op_kinds(project: Config):
+    """Three undrained ops (add_backlog with title, update with fields,
+    approve) all appear in the rendered HTML on `/`, AND each carries
+    its per-op-kind summary shape: `title="..."` for add_backlog,
+    `fields=...` for update, no extra arg for approve."""
+    _seed_queue_entry(
+        project,
+        uuid="aaaaaaaa-1111-2222-3333-444444444444",
+        op="add_backlog",
+        args={"task_id": "TB-200", "title": "Surface pending operator queue"},
+        ts="2026-05-04T17:18:02Z",
+    )
+    _seed_queue_entry(
+        project,
+        uuid="bbbbbbbb-1111-2222-3333-444444444444",
+        op="update",
+        args={
+            "task_id": "TB-152",
+            "title": "rev",
+            "fields": ["title", "description", "briefing"],
+        },
+        ts="2026-05-04T17:15:30Z",
+    )
+    _seed_queue_entry(
+        project,
+        uuid="cccccccc-1111-2222-3333-444444444444",
+        op="approve",
+        args={"task_id": "TB-152"},
+        ts="2026-05-04T17:18:09Z",
+    )
+    page = web._render_home(project)
+    # Card present.
+    assert "pending-queue" in page
+    # All three op kinds rendered.
+    assert "[add_backlog]" in page
+    assert "[update]" in page
+    assert "[approve]" in page
+    # All three task_ids rendered.
+    assert "TB-200" in page
+    assert "TB-152" in page
+    # Per-op-kind summaries.
+    assert 'title="Surface pending operator queue"' in page
+    assert "fields=title,description,briefing" in page
+    # `approve` carries no per-op extra (no fields=, no title=, no
+    # force=) — the task_id pill alone is the load-bearing signal.
+    li_approve = next(
+        chunk for chunk in page.split("<li>") if "[approve]" in chunk
+    )
+    li_approve = li_approve.split("</li>", 1)[0]
+    assert "title=" not in li_approve
+    assert "fields=" not in li_approve
+    assert "force=" not in li_approve
+
+
+def test_pending_queue_card_omitted_when_queue_empty(project: Config):
+    """Empty (or missing) queue file → card is omitted entirely from `/`,
+    not just CSS-hidden. The `pending-queue` selector lives in the page
+    `<style>` so we scope the assertion to the post-`</style>` body —
+    that's where a rendered card would land if one were emitted."""
+    # Case 1: file does not exist.
+    page = web._render_home(project)
+    body = page.split("</style>", 1)[1]
+    assert 'class="pending-queue"' not in body
+    assert "operator op" not in body  # header text only fires when card renders
+    # Case 2: file exists but is empty.
+    queue_path = project.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    queue_path.write_text("")
+    page = web._render_home(project)
+    body = page.split("</style>", 1)[1]
+    assert 'class="pending-queue"' not in body
+    assert "operator op" not in body
+
+
+def test_pending_queue_uuid_is_truncated(project: Config):
+    """UUIDs render as a short prefix (≤16 chars), not the full 36-char
+    canonical form — avoids horizontal overflow on narrow viewports."""
+    long_uuid = "deadbeef-1234-5678-9abc-def012345678"
+    _seed_queue_entry(
+        project,
+        uuid=long_uuid,
+        op="approve",
+        args={"task_id": "TB-99"},
+    )
+    page = web._render_home(project)
+    # The header label "uuid=" is followed by an 8-char prefix; the full
+    # 36-char form must NOT appear inside the entry's `<li>` body
+    # (the raw json `<details>` carries it, which is fine).
+    li = next(chunk for chunk in page.split("<li>") if "TB-99" in chunk)
+    # Cut the body at the `<details>raw json</details>` boundary so the
+    # raw JSON dump (which legitimately carries the full uuid) doesn't
+    # falsely satisfy the assertion.
+    body, _, _ = li.partition("<details>")
+    assert "uuid=deadbeef" in body
+    assert long_uuid not in body, (
+        f"full uuid leaked into rendered body (should be ≤8 char prefix): "
+        f"{body!r}"
+    )
+
+
+def test_pending_queue_filters_out_drained_entries(project: Config):
+    """An entry whose uuid is in `operator_queue_state.json`'s applied-set
+    is treated as drained-but-not-yet-compacted and omitted from the
+    rendered card. Pins the brief window between drain (state file
+    updated) and `_compact_operator_queue` (queue file rewritten)."""
+    drained_uuid = "11111111-1111-1111-1111-111111111111"
+    pending_uuid = "22222222-2222-2222-2222-222222222222"
+    _seed_queue_entry(
+        project,
+        uuid=drained_uuid,
+        op="approve",
+        args={"task_id": "TB-DRAINED"},
+    )
+    _seed_queue_entry(
+        project,
+        uuid=pending_uuid,
+        op="approve",
+        args={"task_id": "TB-PENDING"},
+    )
+    _seed_queue_state_applied(project, [drained_uuid])
+    page = web._render_home(project)
+    assert "pending-queue" in page  # card still rendered (one pending)
+    assert "TB-PENDING" in page
+    # Drained entry must not appear in the rendered card. Limit the
+    # check to the card's own slice so unrelated TB-DRAINED references
+    # elsewhere on the page (none today, but defensive) couldn't
+    # falsely satisfy the assertion.
+    card = page.split('<div class="pending-queue">', 1)[1].split("</div>", 1)[0]
+    assert "TB-DRAINED" not in card
+    assert "11111111" not in card
+
+
+def test_pending_queue_helper_is_grep_visible():
+    """The briefing's `grep -nE "def _render_pending_queue"` and
+    `grep -qE "pending-queue"` verification bullets pin both the helper
+    name and the CSS class name to web.py source. A refactor that
+    drops either would silently break the operator-facing card."""
+    from pathlib import Path as _P
+
+    text = (_P(web.__file__)).read_text()
+    assert "def _render_pending_queue" in text
+    assert "pending-queue" in text

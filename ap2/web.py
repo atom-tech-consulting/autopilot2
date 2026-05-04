@@ -418,6 +418,32 @@ _CSS = """<style>
   ul.failed-bullets-inline li .fail-mark { color: #c33; font-weight: 600;
                                            font-family: ui-monospace, monospace;
                                            margin-right: 0.25rem }
+  /* TB-162: yellow-tinted card for the pending-operator-queue preamble on
+     `/`. Sits above the events table when at least one queued op hasn't
+     drained yet; omitted entirely when the queue is empty so the UI never
+     shows perpetual `0 pending` noise. The amber palette mirrors the
+     existing `.verif-summary` (warning-tier, not failure) since pending
+     ops are an "about to happen" signal, not an error. */
+  .pending-queue { padding: 0.6rem 0.8rem; border-radius: 4px;
+                   margin: 0.5rem 0; background: #fffbea;
+                   border-left: 4px solid #b87000; font-size: 13px;
+                   line-height: 1.5 }
+  .pending-queue .pq-header { font-weight: 600; color: #8a5a00;
+                              margin-bottom: 0.3rem }
+  .pending-queue ul.pq-entries { list-style: none; padding: 0; margin: 0 }
+  .pending-queue ul.pq-entries li { padding: 0.15rem 0;
+                                    border-bottom: none;
+                                    font-family: ui-monospace, monospace;
+                                    font-size: 12px; color: #444 }
+  .pending-queue .pq-op { display: inline-block; padding: 0 0.35rem;
+                          background: #f5e0b3; color: #6b4400;
+                          border-radius: 3px; margin-right: 0.4rem;
+                          font-weight: 600 }
+  .pending-queue .pq-task { font-weight: 600; color: #06c;
+                            margin-right: 0.4rem }
+  .pending-queue .pq-meta { color: #888; margin-right: 0.4rem }
+  .pending-queue .pq-extra { color: #444 }
+  .pending-queue details summary { color: #8a5a00; font-size: 11px }
 </style>"""
 
 
@@ -832,6 +858,173 @@ def _tasks_list(
     return f'<ul class="tasks">{"".join(items)}</ul>'
 
 
+# ------------- TB-162: pending operator-queue preamble -------------
+
+
+def _load_pending_queue_entries(cfg: Config) -> list[dict]:
+    """Read `.cc-autopilot/operator_queue.jsonl` and return undrained ops.
+
+    The daemon's drain handler (`tools._compact_operator_queue`) rewrites
+    the queue file at end-of-drain to drop fully-applied uuids, so in
+    steady state any line on disk is genuinely pending. But there's a
+    brief window (between an op landing in `operator_queue_state.json`'s
+    applied-set and the compaction running) where an applied uuid can
+    still appear in the queue file. Filtering against the applied-set —
+    the same shape `tools.operator_queue_pending_count` uses — keeps the
+    web view honest in that window.
+
+    Tolerates a missing queue file (return `[]`), a missing/corrupt
+    state file (treat applied-set as empty), and individual malformed
+    JSON lines (skip them — same defensive parse the events table uses).
+    """
+    queue_path = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    state_path = cfg.project_root / ".cc-autopilot" / "operator_queue_state.json"
+    if not queue_path.exists():
+        return []
+    applied: set[str] = set()
+    if state_path.exists():
+        try:
+            data = json.loads(state_path.read_text())
+            if isinstance(data, dict):
+                items = data.get("applied")
+                if isinstance(items, list):
+                    applied = {str(x) for x in items}
+        except (OSError, json.JSONDecodeError):
+            applied = set()
+    out: list[dict] = []
+    try:
+        text = queue_path.read_text()
+    except OSError:
+        return []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("uuid") in applied:
+            continue
+        out.append(rec)
+    return out
+
+
+def _format_pending_queue_extra(op: str, args: dict) -> str:
+    """Per-op compact summary of the most operationally relevant arg field.
+
+    Only renders the one bit that the operator actually scans for at-a-
+    glance — full payloads belong under the `<details>raw json</details>`
+    footer. Returns ready-to-emit HTML — values are escaped here so the
+    `title="..."` / `fields=...` wrapper text remains literal in the
+    rendered page (rather than getting wrapped-and-escaped at the call
+    site, which would mangle the `=` and `"` punctuation).
+
+      add_backlog / add_ready / add_frozen → `title="..."` (≤80 chars)
+      update                               → `fields=<csv>`
+      ideate                               → `force=<bool>` (TB-159)
+      approve / unfreeze / delete /        → "" (task_id is the load-
+        move_to_backlog / reject              bearing signal already)
+    """
+    if op in ("add_backlog", "add_ready", "add_frozen"):
+        title = str(args.get("title") or "")
+        if not title:
+            return ""
+        if len(title) > 80:
+            title = title[:79] + "…"
+        return f'title="{html.escape(title)}"'
+    if op == "update":
+        fields = args.get("fields") or []
+        if isinstance(fields, list) and fields:
+            return (
+                "fields="
+                + html.escape(",".join(str(f) for f in fields))
+            )
+        return ""
+    if op == "ideate":
+        # TB-159 hasn't landed yet (no `ideate` op in OPERATOR_QUEUE_OPS
+        # at TB-162's time of writing) but the queue handler is generic
+        # — if/when an `ideate` op arrives carrying a `force` flag, we
+        # render it without needing a follow-up edit here.
+        if "force" in args:
+            return f"force={bool(args.get('force'))}"
+        return ""
+    return ""
+
+
+# Compact `HH:MM:SSZ` from the queue record's full ISO ts. The full
+# date is implied (queue typically drains within a tick, ~30s) so the
+# hour/minute/second is the part that distinguishes entries.
+_QUEUE_TS_RE = re.compile(r"T(\d{2}:\d{2}:\d{2}Z)")
+
+
+def _format_pending_queue_ts(ts: str) -> str:
+    if not ts:
+        return ""
+    m = _QUEUE_TS_RE.search(str(ts))
+    return m.group(1) if m else str(ts)
+
+
+def _render_pending_queue(cfg: Config) -> str:
+    """Render the pending-operator-queue card for the `/` index page.
+
+    Returns the empty string when the queue has no undrained ops so the
+    home renderer can omit the card entirely (server-side omission, not
+    CSS-hidden — fewer bytes, no flicker). When at least one op is
+    pending, renders an amber `.pending-queue` card listing each entry
+    with op kind, task_id, ts, uuid prefix, and the per-op-kind summary
+    from `_format_pending_queue_extra`.
+    """
+    entries = _load_pending_queue_entries(cfg)
+    if not entries:
+        return ""
+    rows: list[str] = []
+    for rec in entries:
+        op = str(rec.get("op") or "?")
+        args = rec.get("args") if isinstance(rec.get("args"), dict) else {}
+        task_id = str(args.get("task_id") or "TB-N/A")
+        ts = _format_pending_queue_ts(str(rec.get("ts") or ""))
+        # 8-char uuid prefix matches the typical git-short-sha display
+        # (briefing scope item) and avoids horizontal overflow on narrow
+        # viewports — the full uuid lives one click away in the raw json.
+        uuid_str = str(rec.get("uuid") or "")
+        uuid_prefix = uuid_str[:8] if uuid_str else ""
+        extra = _format_pending_queue_extra(op, args)
+        full_json = json.dumps(rec, indent=2, default=str)
+        ts_html = (
+            f'<span class="pq-meta">ts={html.escape(ts)}</span>' if ts else ""
+        )
+        uuid_html = (
+            f'<span class="pq-meta">uuid={html.escape(uuid_prefix)}</span>'
+            if uuid_prefix else ""
+        )
+        # `extra` is already HTML (escaped values inside literal label
+        # text — see `_format_pending_queue_extra`). Don't double-escape.
+        extra_html = (
+            f'<span class="pq-extra">{extra}</span>' if extra else ""
+        )
+        rows.append(
+            f"<li>"
+            f'<span class="pq-op">[{html.escape(op)}]</span>'
+            f'<span class="pq-task">{html.escape(task_id)}</span>'
+            f'{ts_html}{uuid_html}{extra_html}'
+            f'<details><summary>raw json</summary>'
+            f'<pre>{html.escape(full_json)}</pre></details>'
+            f"</li>"
+        )
+    plural = "" if len(entries) == 1 else "s"
+    return (
+        '<div class="pending-queue">'
+        f'<div class="pq-header">'
+        f'{len(entries)} operator op{plural} pending — '
+        f'awaiting daemon drain (next tick)</div>'
+        f'<ul class="pq-entries">{"".join(rows)}</ul>'
+        '</div>'
+    )
+
+
 # ------------- page renderers -------------
 
 
@@ -853,6 +1046,12 @@ def _render_home(cfg: Config) -> str:
     if paused:
         status += ' <span class="paused">[paused]</span>'
 
+    # TB-162: pending-operator-queue preamble. The helper returns "" when
+    # the queue file is empty / fully drained, so the card is omitted
+    # entirely on the steady-state happy path; non-empty queues get a
+    # yellow card listing each pending op above the events table.
+    pending_html = _render_pending_queue(cfg)
+
     body = (
         f"<h1>ap2 — {html.escape(cfg.project_root.name)}</h1>"
         f'<div class="meta">{html.escape(str(cfg.project_root))}</div>'
@@ -866,6 +1065,7 @@ def _render_home(cfg: Config) -> str:
                       "Complete", "Frozen")
         )
         + "</div>"
+        f"{pending_html}"
         f'<h2>events <span class="meta">— last 30, newest first '
         f'(<a href="/events">all</a>)</span></h2>'
         f"{_events_table(evts, cfg=cfg)}"
