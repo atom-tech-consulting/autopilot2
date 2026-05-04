@@ -179,3 +179,9 @@
 - **Summary:** Added shared `_format_pending_review_line` (status_report.py) + `pending_review_ids` collection so `ap2 status` and the cron status-report both name the TB-Ns (truncated to 5 with "(+N more)"); injected a "Pending operator review (N): TB-..." line into the cron snapshot block via a new `state_extras` kwarg on `build_control_prompt` and updated STATUS_REPORT_PROMPT to forward it verbatim. Full ap2/tests/ gate passes (831).
 - **Files:** ap2/cli.py, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_cli.py, ap2/tests/test_status_report_skip.py, ap2/tests/test_tools.py, ap2/tests/e2e/test_tb144_status_report_chat_trigger.py
 - **Tests:** pass
+
+## [2026-05-04] TB-153: `ap2 update` op for in-place task / briefing edits
+- **Commit:** `aa27bd1`
+- **Summary:** Closed both gaps from TB-153's first attempt (commit 9101007): made ap2/verify.py's mistune import lazy via _get_md() so `python3 -c "from ap2.tools import OPERATOR_QUEUE_OPS"` no longer trips on system-python's missing mistune (the chain became broken when TB-154 wired verify into tools.py); added task_updated `fields=[...]` event assertions to each per-field round-trip test (title/tags/blocked/description/briefing/clear_tags/clear_blocked) via a new `_last_task_updated` helper. Full ap2 test suite (831 tests) passes.
+- **Files:** ap2/verify.py, ap2/tests/test_operator_queue.py
+- **Tests:** pass
