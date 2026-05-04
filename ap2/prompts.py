@@ -492,6 +492,14 @@ def build_mattermost_prompt(
         # ap2-meta-polish-drift `## Goal` body and trip the queue-append
         # validator on submit (re-prompt cost) instead of the first try.
         "- **Briefing goal-anchor (TB-161):** the `## Goal` body MUST cite (as a substring) one of `goal.md`'s `## Current focus` / `## Done when` heading titles or a Done-when bullet. The queue-append validator rejects briefings whose Goal body cites no anchor — closes the \"gap-covering without drift\" failure mode (a structurally-canonical proposal whose value is only \"make ap2 itself nicer\", unconnected to any focus item). When in doubt, quote the focus-item heading verbatim or paste 4-6 words of a Done-when bullet into the Goal text.",
+        # TB-164: pinned phrasing — `tests/test_prompts.py` asserts the
+        # rule appears in the prompt body. Same single-source-of-truth
+        # tie as TB-154/TB-161: `ap2/init.py::WHY_NOW_MIN_CHARS` pins
+        # the threshold. Without this rule landing in the prompt, the
+        # MM handler can author a structurally-canonical / goal-
+        # anchored briefing that still trips the delete-test guard at
+        # queue-append time (re-prompt cost) instead of the first try.
+        "- **Briefing 'Why now' rationale (TB-164 — delete-test):** the `## Goal` body MUST include a line-anchored `Why now:` paragraph (≥40 chars after the marker) answering goal.md's delete-test (\"if we delete this and the goal still ships, was it useful?\"). Name the failure mode this closes or the gap it fills, not just \"this would be nice to have\" or \"might be useful later.\" The queue-append validator rejects briefings whose Goal body has no `Why now` marker OR a trivial one (e.g. `Why now: yes`) — closes the \"push for progress without scope creep\" failure mode (goal.md lines 61-70).",
         "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining the request needs an operator CLI action.",
         "- If the user asks to pause/resume the daemon: use `daemon_control`.",
         "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",

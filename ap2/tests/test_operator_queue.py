@@ -47,6 +47,7 @@ def _unwrap(res: dict) -> dict:
 _BRIEFING = (
     "# Test briefing\n\n"
     "## Goal\n\nA thing happens.\n\n"
+    "Why now: closes the missing-thing failure mode the briefing names.\n\n"
     "## Scope\n\n- foo.py\n\n"
     "## Design\n\nDirect edit.\n\n"
     "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -421,7 +422,7 @@ def test_cmd_add_prints_queued_message(cfg: Config, capsys, tmp_path: Path):
     brief = tmp_path / "brief.md"
     brief.write_text(
         "# hello world\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -794,6 +795,7 @@ def test_update_briefing_round_trips(cfg: Config):
     new_briefing = (
         "# Updated\n\n"
         "## Goal\n\nBetter goal.\n\n"
+        "Why now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nedit\n\n"
         "## Verification\n- `pytest -q`\n\n"
@@ -1052,7 +1054,7 @@ def test_update_briefing_for_legacy_task_allocates_slug(cfg: Config):
 
     new_briefing = (
         "# Legacy briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nedit\n\n"
         "## Verification\n- `pytest`\n\n"

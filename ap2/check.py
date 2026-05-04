@@ -27,12 +27,17 @@ from pathlib import Path
 from .board import Board, SECTIONS
 from .config import Config
 from .cron import load_jobs
-from .init import BRIEFING_REQUIRED_SECTIONS, GOAL_ANCHOR_HEADINGS
+from .init import (
+    BRIEFING_REQUIRED_SECTIONS,
+    GOAL_ANCHOR_HEADINGS,
+    WHY_NOW_MIN_CHARS,
+)
 from .insights import _parse_front_matter
 from .tools import (
     _briefing_section_body,
     _goal_md_anchors,
     _normalize_anchor,
+    _why_now_paragraph,
 )
 
 
@@ -264,27 +269,63 @@ def _check_briefing_structure(cfg: Config) -> list[Issue]:
         # operator decides whether to rewrite or leave). Only fires
         # when goal.md actually exposes anchors — a fresh project with
         # an all-placeholder goal.md gets no spurious warnings.
-        if not goal_anchors:
-            continue
         goal_body = _briefing_section_body(text, "Goal")
+        if goal_anchors and goal_body.strip():
+            norm = _normalize_anchor(goal_body)
+            if not any(a in norm for a in goal_anchors):
+                anchor_heading_list = ", ".join(
+                    f"`## {h}`" for h in GOAL_ANCHOR_HEADINGS
+                )
+                issues.append(Issue(
+                    "warning", f.name,
+                    "briefing `## Goal` body cites no goal.md anchor "
+                    "(TB-161): no substring matches any "
+                    f"{anchor_heading_list} heading title or Done-when "
+                    "bullet from goal.md. The queue-append validator "
+                    "rejects new briefings with this shape; legacy "
+                    "on-disk briefings are flagged (non-fatal) so they "
+                    "can be opportunistically rewritten or moved to "
+                    "ap2-meta-polish out-of-scope.",
+                ))
+                # Don't double-warn: a Goal that fails the anchor check
+                # already names the operator-action signal; the why-now
+                # lint below is a separate failure mode but stacking
+                # both warnings on one briefing just adds noise.
+                continue
+        # TB-164: "why now" rationale lint. Warning-level companion to
+        # the queue-append-time hard gate — surfaces legacy briefings
+        # whose `## Goal` body lacks a "Why now" delete-test rationale
+        # (or whose marker is present but the paragraph is shorter than
+        # `WHY_NOW_MIN_CHARS`). Non-fatal; the operator decides whether
+        # to rewrite. Same skip logic as the lint above: empty `## Goal`
+        # body short-circuits (the missing-section warning already
+        # covers it).
         if not goal_body.strip():
             continue
-        norm = _normalize_anchor(goal_body)
-        if any(a in norm for a in goal_anchors):
-            continue
-        anchor_heading_list = ", ".join(
-            f"`## {h}`" for h in GOAL_ANCHOR_HEADINGS
-        )
-        issues.append(Issue(
-            "warning", f.name,
-            "briefing `## Goal` body cites no goal.md anchor "
-            "(TB-161): no substring matches any "
-            f"{anchor_heading_list} heading title or Done-when bullet "
-            "from goal.md. The queue-append validator rejects new "
-            "briefings with this shape; legacy on-disk briefings are "
-            "flagged (non-fatal) so they can be opportunistically "
-            "rewritten or moved to ap2-meta-polish out-of-scope.",
-        ))
+        rationale = _why_now_paragraph(goal_body)
+        if rationale is None:
+            issues.append(Issue(
+                "warning", f.name,
+                "briefing `## Goal` body lacks a 'Why now' rationale "
+                "(TB-164 — goal.md's delete-test): no line-anchored "
+                "`Why now` marker found. Add a line like `Why now: "
+                "<one sentence answering 'if we delete this and the "
+                "goal still ships, was it useful?'>` inside the Goal "
+                "body so the delete-test is articulated in writing. "
+                "The queue-append validator rejects new briefings "
+                "with this shape; legacy on-disk briefings are flagged "
+                "(non-fatal) so they can be opportunistically fixed.",
+            ))
+        elif len(rationale) < WHY_NOW_MIN_CHARS:
+            issues.append(Issue(
+                "warning", f.name,
+                "briefing `## Goal` body has a 'Why now' marker but "
+                f"the rationale is only {len(rationale)} chars "
+                f"(min {WHY_NOW_MIN_CHARS}; TB-164 — goal.md's "
+                "delete-test). Trivial rationales like `Why now: yes` "
+                "fail the queue-append validator; flesh out the "
+                "delete-test answer in writing.",
+            ))
     return issues
 
 

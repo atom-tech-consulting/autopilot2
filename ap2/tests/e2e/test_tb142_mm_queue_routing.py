@@ -93,7 +93,7 @@ def test_mm_handler_queue_routes_around_state_violation(e2e_project):
                     "title": "queued by MM handler",
                     "briefing": (
                         "# brief\n\n"
-                        "## Goal\n\nstub\n\n"
+                        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
                         "## Scope\n\n- foo.py\n\n"
                         "## Design\n\nstub\n\n"
                         "## Verification\n"

@@ -155,7 +155,7 @@ def _ideation_proposes_n_gated(cfg, n: int):
                     "tags": ["proposed"],
                     "briefing": (
                         f"# Ideation proposal {i + 1}\n\n"
-                        "## Goal\n\nstub\n\n"
+                        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
                         "## Scope\n\n- foo.py\n\n"
                         "## Design\n\nstub\n\n"
                         "## Verification\n\n"

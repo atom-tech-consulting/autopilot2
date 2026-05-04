@@ -36,6 +36,7 @@ def _unwrap(res: dict) -> dict:
 _DEFAULT_BRIEFING = (
     "# Brand new\n\n"
     "## Goal\n\nDoes a thing.\n\n"
+    "Why now: closes the missing-thing failure mode the briefing names.\n\n"
     "## Scope\n\n- foo.py\n\n"
     "## Design\n\nStraightforward edit.\n\n"
     "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -977,7 +978,7 @@ def test_board_edit_add_with_briefing_text_succeeds(cfg, tmp_path):
     """
     body = (
         "# Real briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -1009,7 +1010,7 @@ def test_board_edit_non_empty_briefing_payload_unaffected_for_daemon_callers(cfg
     """
     body = (
         "# Daemon-built briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -1047,7 +1048,7 @@ def test_operator_queue_append_non_empty_briefing_payload_succeeds(cfg, tmp_path
     materializes the briefing under .cc-autopilot/tasks/."""
     body = (
         "# MM-style briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -1120,7 +1121,7 @@ def test_operator_queue_append_add_with_briefing_text_succeeds(cfg, tmp_path):
     on disk under .cc-autopilot/tasks/."""
     body = (
         "# MM-handler briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -1183,7 +1184,7 @@ def test_operator_queue_append_does_not_write_claude_md(cfg, tmp_path):
 
     body = (
         "# briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -1213,7 +1214,7 @@ def test_two_back_to_back_queue_appends_allocate_sequential_ids(cfg, tmp_path):
 
     body = (
         "# briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -1241,7 +1242,7 @@ def test_drain_bumps_claude_md_once_to_highest_allocated_plus_one(cfg, tmp_path)
     """
     body = (
         "# briefing\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -1607,7 +1608,7 @@ def test_cron_edit_handler_still_callable_from_python(cfg):
 
 _TB154_CANONICAL_BRIEFING = (
     "# TB-154 anchor briefing\n\n"
-    "## Goal\n\nstub\n\n"
+    "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
     "## Scope\n\n- foo.py\n\n"
     "## Design\n\nstub\n\n"
     "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
@@ -1649,7 +1650,7 @@ def test_tb154_validate_briefing_structure_rejects_missing_verification(
 
     body = (
         "# no-verification\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Out of scope\n\n- nothing\n"
@@ -1678,7 +1679,7 @@ def test_tb154_validate_briefing_structure_rejects_acceptance_for_verification(
     before_claude = (tmp_path / "CLAUDE.md").read_text()
     body = (
         "# acceptance-renamed\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Acceptance\n\n- `uv run pytest -q` — gates pass\n\n"
@@ -1703,7 +1704,7 @@ def test_tb154_validate_briefing_structure_rejects_empty_verification(cfg):
     verifier silently skip."""
     body = (
         "# empty-verification\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n\n"
@@ -1745,7 +1746,7 @@ def test_tb154_validate_briefing_structure_extra_sections_allowed(cfg):
     accidentally start rejecting authoring extensions."""
     body = (
         "# canonical + extras\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Decision log\n\n- decided X\n\n"
@@ -1769,7 +1770,7 @@ def test_tb154_validate_briefing_structure_fires_for_do_board_edit(cfg, tmp_path
     before_claude = (tmp_path / "CLAUDE.md").read_text()
     body = (
         "# no-verification via board_edit\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Out of scope\n\n- nothing\n"
@@ -1818,7 +1819,7 @@ def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
     # branch exercises the same validator before allocating a slug.
     bad_acceptance = (
         "# tb-153 reprised\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Acceptance\n\n- `pytest -q`\n\n"
@@ -1847,7 +1848,7 @@ def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
     # The same gate covers a missing-Verification briefing on `update`.
     missing_verif = (
         "# missing-verif via update\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Out of scope\n\n- nothing\n"
@@ -1863,7 +1864,7 @@ def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
     # Empty-Verification (heading present, zero bullets) is rejected too.
     empty_verif = (
         "# empty-verif via update\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n\n"
@@ -1949,6 +1950,8 @@ def test_validate_briefing_accepts_goal_section_with_done_when_quote(tmp_path):
         "Closes the failure mode where operators can run the full "
         "pipeline but verification silently skips. Reinforces the "
         "Done-when bullet about pipeline-without-intervention.\n\n"
+        "Why now: the verifier-skip is silent, so without this gate "
+        "operators only catch it after the fact (TB-164).\n\n"
         "## Scope\n\n- ap2/verify.py\n\n"
         "## Design\n\nGate on verifier invocation count per task.\n\n"
         "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
@@ -1968,6 +1971,8 @@ def test_validate_briefing_accepts_goal_section_with_current_focus_heading(tmp_p
         "## Goal\n\n"
         "Advances goal.md's Current focus: ideation quality — folds "
         "goal-anchor checking into the queue-append validator.\n\n"
+        "Why now: closes the silent-bypass failure mode the briefing "
+        "scope names (TB-164).\n\n"
         "## Scope\n\n- ap2/tools.py\n\n"
         "## Design\n\nExtend the validator.\n\n"
         "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
@@ -1987,6 +1992,8 @@ def test_validate_briefing_skips_anchor_check_when_goal_md_missing(tmp_path):
     body = (
         "# off-anchor\n\n"
         "## Goal\n\nPolish ap2's internal logging shape.\n\n"
+        "Why now: closes the missing-X failure mode the briefing "
+        "scope names (TB-164).\n\n"
         "## Scope\n\n- daemon.py\n\n"
         "## Design\n\nRework logs.\n\n"
         "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
@@ -2014,6 +2021,8 @@ def test_validate_briefing_skips_anchor_check_when_goal_md_all_placeholder(tmp_p
     body = (
         "# placeholder-friendly\n\n"
         "## Goal\n\nGenerically polish ap2.\n\n"
+        "Why now: closes the failure mode the briefing scope names "
+        "(TB-164).\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nA thing.\n\n"
         "## Verification\n\n- `uv run pytest -q`\n\n"
@@ -2035,6 +2044,8 @@ def test_validate_briefing_anchor_check_unit_function_default_is_skip():
     body = (
         "# no-goal-md-arg\n\n"
         "## Goal\n\nMeta-polish only.\n\n"
+        "Why now: closes the failure mode the briefing scope names "
+        "(TB-164).\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nA thing.\n\n"
         "## Verification\n\n- `uv run pytest -q`\n\n"
@@ -2095,6 +2106,174 @@ def test_goal_md_anchors_extracts_done_when_bullets_and_focus_titles(tmp_path):
     # Bare prefix words are dropped — they'd false-positive too easily.
     assert "current focus" not in anchors
     assert "done when" not in anchors
+
+
+# ---------------------------------------------------------------------------
+# TB-164: "Why now" rationale extension to the structural validator. The
+# hard gate rejects briefings whose `## Goal` body lacks a line-anchored
+# `Why now` marker OR whose marker is present but the rationale paragraph
+# is shorter than `WHY_NOW_MIN_CHARS`. Closes goal.md's "push for progress
+# without scope creep" failure mode (goal.md lines 61-70) at queue-append
+# time — every proposal must articulate goal.md's delete-test ("if we
+# delete this and the goal still ships, was it useful?") in writing.
+
+from ap2.init import WHY_NOW_MIN_CHARS as _WHY_NOW_MIN_CHARS
+
+
+def test_validate_briefing_rejects_goal_without_why_now():
+    """A `## Goal` body that doesn't contain a `Why now` marker → reject
+    with an error string that names `Why now` and TB-164 so the operator
+    knows what to fix. The rule fires regardless of whether goal.md is
+    supplied — the delete-test is intrinsic to the briefing contract,
+    distinct from the TB-161 anchor-skip path."""
+    body = (
+        "# no-why-now\n\n"
+        "## Goal\n\nA prose-only goal that never says the magic words.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None, "expected non-None error string"
+    assert "Why now" in err, err
+    assert "TB-164" in err, err
+
+
+def test_validate_briefing_rejects_why_now_below_min_chars():
+    """`Why now: yes` is structurally present but the rationale (3 chars)
+    is below `WHY_NOW_MIN_CHARS` — reject. Pins the floor: trivial passes
+    don't satisfy the delete-test."""
+    body = (
+        "# trivial-why-now\n\n"
+        "## Goal\n\nA goal.\n\nWhy now: yes\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None
+    assert "Why now" in err, err
+    assert str(_WHY_NOW_MIN_CHARS) in err, err
+    assert "TB-164" in err, err
+
+
+def test_validate_briefing_accepts_goal_with_why_now_paragraph():
+    """A `## Goal` body whose `Why now` paragraph is ≥`WHY_NOW_MIN_CHARS`
+    chars passes the delete-test gate. Pin the accept-side so the rule
+    doesn't quietly inflate the threshold without test coverage."""
+    body = (
+        "# good-why-now\n\n"
+        "## Goal\n\nA goal that names the failure mode.\n\n"
+        "Why now: closes the silent-skip failure mode operators can't "
+        "catch in time without a queue-append-time guard (TB-164).\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is None, f"expected None, got: {err!r}"
+
+
+def test_validate_briefing_why_now_check_is_line_anchored():
+    """`why now` mid-prose (no leading line break, no trailing
+    `:`/whitespace-only-after-marker delimiter) does NOT satisfy the
+    gate. Pins the line-anchor: a Goal body that incidentally contains
+    "the question of why now is hard…" inline should still be rejected."""
+    body = (
+        "# inline-why-now\n\n"
+        "## Goal\n\n"
+        "Some prose that mentions the question of why now is hard "
+        "to answer in the abstract — but that's just narrative text, "
+        "not a delete-test rationale paragraph.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None, (
+        "mid-prose 'why now' must NOT satisfy the line-anchored marker"
+    )
+    assert "Why now" in err
+    assert "TB-164" in err
+
+
+def test_validate_briefing_why_now_marker_tolerates_template_parenthetical():
+    """The `BRIEFING_TEMPLATE` ships with `Why now (delete-test):` —
+    the validator must accept that exact shape. Strips the
+    `(delete-test)` parenthetical before measuring the rationale
+    length, so a real rationale isn't double-counted against itself.
+    """
+    body = (
+        "# template-shape\n\n"
+        "## Goal\n\nA real goal.\n\n"
+        "Why now (delete-test): closes the failure mode the briefing "
+        "scope names (TB-164).\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is None, f"expected None, got: {err!r}"
+
+
+def test_validate_briefing_why_now_check_fires_via_operator_queue_append(
+    cfg, tmp_path,
+):
+    """End-to-end at the queue-append boundary: a why-now-missing
+    briefing routed through `do_operator_queue_append` is rejected and
+    no queue line / briefing file is written. Mirrors the
+    TB-154/TB-161-style "no leak on reject" pin."""
+    body = (
+        "# off-rationale via queue\n\n"
+        "## Goal\n\nA prose-only goal that never names Why now.\n\n"
+        "## Scope\n\n- daemon.py\n\n"
+        "## Design\n\nRework logs.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "no rationale", "briefing": body},
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "Why now" in text
+    assert "TB-164" in text
+    # No briefing file leaked to disk.
+    post_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    assert post_tasks_dir == pre_tasks_dir
+    # No queue line written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_why_now_paragraph_helper_returns_none_when_no_marker():
+    """Direct unit test on `_why_now_paragraph` — pins the contract that
+    a missing marker returns `None` (distinct from "" so the validator
+    can render distinct error messages for missing-marker vs
+    too-short-rationale)."""
+    assert tools._why_now_paragraph("Just a paragraph.\n") is None
+    # Mid-prose mention also returns None (line-anchor).
+    assert tools._why_now_paragraph(
+        "Some prose mentioning why now is hard.\n"
+    ) is None
+
+
+def test_tb164_operator_queue_append_docstring_names_requirement():
+    """Pinned phrasing — the MCP tool docstring spells out the TB-164
+    requirement so the MM handler / control agent reads it before
+    authoring a briefing payload."""
+    import inspect
+    src = inspect.getsource(tools.build_mcp_server)
+    assert "TB-164" in src, "operator_queue_append docstring missing TB-164"
+    # Either the marker name or the delete-test phrasing is enough.
+    assert "Why now" in src or "delete-test" in src, src
 
 
 def test_tb154_operator_queue_append_docstring_carries_canonical_template():

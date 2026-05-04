@@ -144,7 +144,7 @@ def test_detect_violations_ignores_operator_queue_append_between_snapshots(tmp_p
             "title": "queued mid-run",
             "briefing": (
                 "# brief\n\n"
-                "## Goal\n\nstub\n\n"
+                "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
                 "## Scope\n\n- foo.py\n\n"
                 "## Design\n\nedit foo\n\n"
                 "## Verification\n"

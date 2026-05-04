@@ -176,6 +176,7 @@ def test_ap2_add_blocked_csv_writes_codespan_not_description(tmp_path):
         "# Add foo helper\n\n"
         "Tags: #cli #helpers\n\n"
         "## Goal\n\nReal goal text.\n\n"
+        "Why now: closes the missing-helper failure mode TB-132 names.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Verification\n- `uv run pytest -q` — gates pass\n\n"

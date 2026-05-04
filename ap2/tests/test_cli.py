@@ -785,6 +785,7 @@ _GOOD_BRIEFING = (
     "# Add foo helper\n\n"
     "Tags: #cli #helpers\n\n"
     "## Goal\n\nReal goal text.\n\n"
+    "Why now: closes the missing-helper failure mode TB-X named.\n\n"
     "## Scope\n\n- foo.py\n\n"
     "## Design\n\nStraightforward add.\n\n"
     "## Verification\n- `uv run pytest -q` — gates pass\n\n"
@@ -913,7 +914,7 @@ def test_add_strips_tbn_prefix_from_h1(tmp_path: Path):
     brief = tmp_path / "prefixed.md"
     brief.write_text(
         "# TB-99 — Real title here\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nedit\n\n"
         "## Verification\n- `uv run pytest -q` — passes\n\n"
@@ -1658,6 +1659,7 @@ def test_cmd_update_briefing_file_round_trips(tmp_path: Path):
     new_brief.write_text(
         "# Updated\n\n"
         "## Goal\n\nbetter\n\n"
+        "Why now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nedit\n\n"
         "## Verification\n- `pytest`\n\n"
@@ -1688,6 +1690,7 @@ def test_cmd_update_briefing_file_stdin(tmp_path: Path, monkeypatch):
     new_briefing = (
         "# Stdin briefing\n\n"
         "## Goal\n\ng\n\n"
+        "Why now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- f\n\n"
         "## Design\n\nd\n\n"
         "## Verification\n- `t`\n\n"

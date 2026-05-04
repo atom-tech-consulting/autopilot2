@@ -62,6 +62,8 @@ def _mm_handler_adds_pipeline(cfg):
                 "briefing": (
                     "# Pipeline\n\n"
                     "## Goal\nKick the pipeline.\n\n"
+                    "Why now: closes the failure mode the briefing "
+                    "scope names (TB-164).\n\n"
                     "## Scope\n- pipeline\n\n"
                     "## Design\nStub.\n\n"
                     "## Verification\n- `true` — trivially passes\n\n"

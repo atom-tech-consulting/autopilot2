@@ -31,7 +31,7 @@ def test_tick_drains_operator_queue_before_task(e2e_project):
             # passes the buffer it read from --briefing-file.
             "briefing": (
                 "# queued by operator\n\n"
-                "## Goal\n\nstub\n\n"
+                "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
                 "## Scope\n\n- foo.py\n\n"
                 "## Design\n\nstub\n\n"
                 "## Verification\n"
@@ -121,7 +121,7 @@ def test_operator_queue_append_does_not_appear_in_fenced_snapshot(e2e_project):
             "title": "queued during run",
             "briefing": (
                 "# brief\n\n"
-                "## Goal\n\nstub\n\n"
+                "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
                 "## Scope\n\n- foo.py\n\n"
                 "## Design\n\nstub\n\n"
                 "## Verification\n"
@@ -184,7 +184,7 @@ def test_tb139_scenario_mid_run_ap2_add_does_not_trip_violation(e2e_project):
                     "title": "operator typed this mid-run",
                     "briefing": (
                         "# operator brief\n\n"
-                        "## Goal\n\nstub\n\n"
+                        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
                         "## Scope\n\n- foo.py\n\n"
                         "## Design\n\nstub\n\n"
                         "## Verification\n"

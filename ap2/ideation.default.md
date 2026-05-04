@@ -285,6 +285,36 @@ heading verbatim or paste a Done-when bullet's leading words into the
 Goal text. The check is skipped when goal.md is missing or
 all-placeholder, but for a real `goal.md` this is a hard gate.
 
+## Why-now requirement (TB-164 — load-bearing — goal.md's delete-test)
+Every briefing you propose MUST also include a line-anchored
+`Why now:` paragraph inside its `## Goal` body, ≥40 chars after the
+marker, answering goal.md's delete-test (lines 61-70):
+
+> if we delete this and the goal still ships, was it useful?
+
+Render it as its own paragraph inside `## Goal`, on a line whose
+first non-whitespace token is `Why now`:
+
+    ## Goal
+
+    <one paragraph framing the proposal in goal-anchored terms>
+
+    Why now: <one sentence naming the specific failure mode this
+    closes, or the gap it fills, in goal-aligned language>
+
+The queue-append validator (`_validate_briefing_structure`) rejects
+briefings whose `## Goal` body has no `Why now` marker OR a trivial
+one (e.g. `Why now: yes` is too short). The marker check is
+line-anchored — `why now` appearing mid-prose ("the question of why
+now is hard…") does NOT satisfy the gate.
+
+This closes the "push for progress without scope creep" failure mode
+(goal.md lines 61-70): every proposal needs to pass the delete-test
+articulated in writing rather than hand-waved. Reject ideas whose
+only justification is "this would be cool" or "it might be useful
+later" — the Why-now sentence is the place that justification gets
+written down (and refused, if it's that thin).
+
 ## Briefing requirements (load-bearing — TB-69 verifier reads these)
 Every briefing you write MUST include a `## Verification` section with
 concrete acceptance bullets that the per-task verifier can evaluate:

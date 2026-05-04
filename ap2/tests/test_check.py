@@ -208,7 +208,7 @@ def test_briefing_with_manual_verification_bullet_is_warning(cfg):
     brief = cfg.tasks_dir / "tb-99-manual.md"
     brief.write_text(
         "# TB-99 — example\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Verification\n\n"
         "- `uv run pytest -q` — full suite passes\n"
         "- Manual: kick a long-running task and observe handler reply\n\n"
@@ -279,7 +279,7 @@ def test_manual_bullet_outside_verification_section_not_flagged(cfg):
     # `Manual:` lint scopes correctly).
     brief.write_text(
         "# TB-102 — example\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\n"
         "- Manual: this prose-bullet is fine in design notes\n\n"
@@ -316,7 +316,7 @@ def test_briefing_template_carries_auto_verifiable_rule():
 
 _TB154_CANONICAL_BRIEFING = (
     "# TB-X — example\n\n"
-    "## Goal\n\nstub\n\n"
+    "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
     "## Scope\n\n- foo.py\n\n"
     "## Design\n\nstub\n\n"
     "## Verification\n\n- `uv run pytest -q`\n\n"
@@ -332,7 +332,7 @@ def test_tb154_check_briefing_structure_warns_on_missing_section(cfg):
     brief = cfg.tasks_dir / "tb-200-no-verification.md"
     brief.write_text(
         "# TB-200 — no verification\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Out of scope\n\n- nothing\n"
@@ -368,7 +368,7 @@ def test_tb154_check_briefing_structure_silent_on_canonical_with_extras(cfg):
     brief = cfg.tasks_dir / "tb-202-extras.md"
     brief.write_text(
         "# TB-202 — example\n\n"
-        "## Goal\n\nstub\n\n"
+        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
         "## Scope\n\n- foo.py\n\n"
         "## Design\n\nstub\n\n"
         "## Decision log\n\n- decided X\n\n"
@@ -469,6 +469,95 @@ def test_check_briefing_anchor_lint_skipped_when_goal_md_all_placeholder(cfg):
     report = check.check_project(cfg)
     assert not any(
         i.file == "tb-302-day-one.md" and "TB-161" in i.message
+        for i in report.issues
+    ), [(i.severity, i.file, i.message) for i in report.issues]
+
+
+# ---------------------------------------------------------------------------
+# TB-164: "Why now" rationale lint — warning-level companion to the queue-
+# append-time hard gate in `_validate_briefing_structure`. Surfaces legacy
+# on-disk briefings whose `## Goal` body lacks a `Why now` delete-test
+# rationale (or whose marker is present but the paragraph is shorter than
+# `WHY_NOW_MIN_CHARS`). Non-fatal; the operator decides whether to rewrite.
+
+
+def test_check_briefing_emits_why_now_warning(cfg):
+    """A canonical-shaped briefing with a goal-anchor citation but no
+    `Why now` rationale paragraph emits a TB-164 warning. The lint is
+    non-fatal (warning, not error) so legacy briefings don't block
+    `ap2 check` usage."""
+    # Use the TB-161 goal.md so the goal-anchor lint stays quiet — we
+    # want to isolate the TB-164 warning here. The Goal body cites the
+    # Done-when bullet so the TB-161 lint doesn't fire.
+    (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
+    brief = cfg.tasks_dir / "tb-400-no-why-now.md"
+    brief.write_text(
+        "# TB-400 — no why-now rationale\n\n"
+        "## Goal\n\nReinforces the Done-when bullet that operators "
+        "can run the full pipeline without intervention.\n\n"
+        "## Scope\n\n- daemon.py\n\n"
+        "## Design\n\nRework logs.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    # Warning, not error — the lint is non-fatal.
+    assert report.ok, [(i.severity, i.file, i.message) for i in report.issues]
+    matching = [
+        i for i in report.warnings
+        if i.file == "tb-400-no-why-now.md"
+        and "TB-164" in i.message
+        and "Why now" in i.message
+    ]
+    assert matching, [(i.severity, i.file, i.message) for i in report.issues]
+
+
+def test_check_briefing_emits_why_now_too_short_warning(cfg):
+    """A briefing whose `Why now:` paragraph is shorter than
+    `WHY_NOW_MIN_CHARS` emits a TB-164 warning that names the actual
+    char count. Pins the second branch of the lint."""
+    (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
+    brief = cfg.tasks_dir / "tb-401-trivial-why-now.md"
+    brief.write_text(
+        "# TB-401 — trivial why-now\n\n"
+        "## Goal\n\nReinforces the Done-when bullet that operators "
+        "can run the full pipeline without intervention.\n\n"
+        "Why now: yes\n\n"
+        "## Scope\n\n- daemon.py\n\n"
+        "## Design\n\nRework logs.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    assert report.ok
+    matching = [
+        i for i in report.warnings
+        if i.file == "tb-401-trivial-why-now.md" and "TB-164" in i.message
+    ]
+    assert matching, [(i.severity, i.file, i.message) for i in report.issues]
+
+
+def test_check_briefing_no_why_now_warning_when_rationale_present(cfg):
+    """A canonical briefing with both a goal-anchor citation AND a
+    valid `Why now` paragraph emits zero TB-164 warnings. Pins the
+    lint stays quiet for well-formed briefings."""
+    (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
+    brief = cfg.tasks_dir / "tb-402-well-formed.md"
+    brief.write_text(
+        "# TB-402 — well-formed briefing\n\n"
+        "## Goal\n\nReinforces the Done-when bullet that operators "
+        "can run the full pipeline without intervention.\n\n"
+        "Why now: closes the silent-skip failure mode operators "
+        "can't catch in time without a queue-append-time guard "
+        "(TB-164).\n\n"
+        "## Scope\n\n- ap2/verify.py\n\n"
+        "## Design\n\nDo the thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    report = check.check_project(cfg)
+    assert not any(
+        i.file == "tb-402-well-formed.md" and "TB-164" in i.message
         for i in report.issues
     ), [(i.severity, i.file, i.message) for i in report.issues]
 

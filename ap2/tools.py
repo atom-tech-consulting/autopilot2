@@ -27,7 +27,11 @@ from . import events, retry
 from .board import Board, board_file_lock, locked_board, parse_task_line
 from .config import Config, bump_next_task_id
 from .cron import update_job
-from .init import BRIEFING_REQUIRED_SECTIONS, GOAL_ANCHOR_HEADINGS
+from .init import (
+    BRIEFING_REQUIRED_SECTIONS,
+    GOAL_ANCHOR_HEADINGS,
+    WHY_NOW_MIN_CHARS,
+)
 from .verify import parse_verification_section
 
 
@@ -236,6 +240,52 @@ def _bullet_anchor_phrase(line: str, *, words: int = 6) -> str | None:
 _GOAL_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.M)
 
 
+# TB-164: line-anchored marker for the "Why now" rationale paragraph the
+# briefing's `## Goal` body must include. The marker must appear at the
+# start of a line (modulo leading whitespace) and be followed by a
+# whitespace or `:` separator, so the rule isn't matched mid-prose
+# ("the question of why now is hard…" inside a Goal sentence is not a
+# rationale paragraph). Case-insensitive to tolerate "Why Now" / "WHY
+# NOW" stylings, and `(?m)` so `^` lines up with each line of the body.
+_WHY_NOW_MARKER_RE = re.compile(r"(?im)^\s*why\s+now(?=[\s:])")
+
+
+def _why_now_paragraph(goal_body: str) -> str | None:
+    """Return the trailing paragraph attached to a line-anchored
+    "Why now" marker inside `goal_body`, or None when no marker matches.
+
+    The "paragraph" is everything from the marker line through to the
+    next blank line (or the end of the body), with the marker token and
+    its trailing punctuation stripped. The minimum-length check in the
+    validator runs on this stripped text so trivial passes like
+    `Why now: yes` (whose leftover is 3 chars) are rejected even though
+    the marker itself is present. Returns None — distinct from "" — when
+    no marker appears, so the caller can distinguish "missing entirely"
+    from "marker present but rationale too short."
+    """
+    m = _WHY_NOW_MARKER_RE.search(goal_body)
+    if m is None:
+        return None
+    # Slice from the end of the marker through the next blank line (or
+    # EOF). A blank line is `\n\s*\n` — anything tighter would split a
+    # multi-line rationale across two physical lines.
+    rest = goal_body[m.end():]
+    blank = re.search(r"\n\s*\n", rest)
+    paragraph = rest if blank is None else rest[: blank.start()]
+    # Drop the leading separator (`:`, `—`, `-`, etc.) and any
+    # parenthetical (e.g. `(delete-test)`) so the length check runs on
+    # the actual rationale text. Leading whitespace too.
+    stripped = paragraph.lstrip(" \t")
+    # Strip a parenthetical immediately after the marker (e.g.
+    # "Why now (delete-test): ..." → drop "(delete-test)").
+    paren_m = re.match(r"^\([^)]*\)", stripped)
+    if paren_m:
+        stripped = stripped[paren_m.end():].lstrip(" \t")
+    # Strip a leading punctuation separator.
+    stripped = stripped.lstrip(":—-–").lstrip()
+    return stripped
+
+
 def _goal_md_anchors(goal_md_path: "Path | None") -> set[str]:
     """Derive substring anchors from `goal.md`.
 
@@ -297,7 +347,7 @@ def _validate_briefing_structure(
     *,
     goal_md_path: "Path | None" = None,
 ) -> str | None:
-    """TB-154 + TB-161: structural gate for a freshly-authored briefing.
+    """TB-154 + TB-161 + TB-164: structural gate for a freshly-authored briefing.
 
     A briefing is structurally valid when:
       1. It contains every section in `BRIEFING_REQUIRED_SECTIONS` at
@@ -324,6 +374,16 @@ def _validate_briefing_structure(
          check" when goal.md is missing or all-placeholder so a fresh
          project without a real `goal.md` doesn't get its briefings
          rejected.
+      5. (TB-164) The `## Goal` body must include a non-empty "Why now"
+         rationale paragraph — a line-anchored `Why now` marker
+         followed by at least `WHY_NOW_MIN_CHARS` chars of rationale
+         (post-marker, post-parenthetical, post-separator). Closes
+         goal.md's "push for progress without scope creep" failure
+         mode (lines 61-70) at queue-append time: every proposal must
+         pass the delete-test ("if we delete this and the goal still
+         ships, was it useful?"), and the author must articulate that
+         test in writing. Skipped when the briefing text is empty (the
+         TB-135 non-empty gate handles that case with a clearer error).
 
     Returns `None` when the briefing passes; an error-message string
     naming the missing/misnamed/empty section otherwise. The message
@@ -381,8 +441,8 @@ def _validate_briefing_structure(
     # still the all-placeholder template short-circuits to "skip" so we
     # don't reject every proposal on day-one of a new project.
     goal_anchors = _goal_md_anchors(goal_md_path)
+    goal_body = _briefing_section_body(briefing_text, "Goal")
     if goal_anchors:
-        goal_body = _briefing_section_body(briefing_text, "Goal")
         goal_norm = _normalize_anchor(goal_body)
         if not any(a in goal_norm for a in goal_anchors):
             preview = sorted(goal_anchors)[:5]
@@ -397,6 +457,35 @@ def _validate_briefing_structure(
                 "Done-when bullet. Available anchors include: "
                 f"{preview_str}."
             )
+    # TB-164: "Why now" rationale check. Line-anchored marker plus a
+    # minimum-length rationale so the author articulates goal.md's
+    # delete-test ("if we delete this and the goal still ships, was
+    # it useful?") in writing. Runs even when goal.md is missing /
+    # all-placeholder — the delete-test is intrinsic to the briefing
+    # contract, not a goal-relevance check, so it doesn't share the
+    # TB-161 anchor-skip fallback.
+    rationale = _why_now_paragraph(goal_body)
+    if rationale is None:
+        return (
+            "## Goal section must include a non-empty 'Why now' "
+            "rationale (goal.md's delete-test). Add a line beginning "
+            "with `Why now` (e.g. `Why now: <one sentence answering "
+            "\"if we delete this and the goal still ships, was it "
+            "useful?\">`) inside the `## Goal` body. The marker must "
+            "start a line — mid-sentence \"why now\" inside arbitrary "
+            f"prose doesn't count. Min {WHY_NOW_MIN_CHARS} chars after "
+            "the marker (TB-164)."
+        )
+    if len(rationale) < WHY_NOW_MIN_CHARS:
+        return (
+            "## Goal section must include a non-empty 'Why now' "
+            "rationale (goal.md's delete-test). The `Why now` "
+            f"paragraph is only {len(rationale)} chars after the "
+            f"marker; minimum is {WHY_NOW_MIN_CHARS}. Articulate the "
+            "delete-test answer in writing — name the failure mode "
+            "this closes or the gap it fills, not just \"this would "
+            "be nice to have\" (TB-164)."
+        )
     return None
 
 
@@ -2414,6 +2503,15 @@ def build_mcp_server(cfg: Config):
         "whose value is only ap2-meta-polish, unconnected to any "
         "operator-stated focus item). Skipped when goal.md is missing "
         "or all-placeholder. "
+        "TB-164 WHY-NOW RATIONALE — the `## Goal` body MUST include a "
+        "line-anchored `Why now:` paragraph (≥40 chars after the "
+        "marker) answering goal.md's delete-test (\"if we delete this "
+        "and the goal still ships, was it useful?\"). The validator "
+        "rejects briefings whose Goal body has no `Why now` marker OR "
+        "a trivial one (e.g. `Why now: yes`). Name the failure mode "
+        "this closes or the gap it fills, not just \"this would be "
+        "nice to have\". Closes the push-for-progress-without-scope-"
+        "creep failure mode (goal.md lines 61-70). "
         "Args: op (one of add_ready, "
         "add_backlog, add_frozen, move_to_backlog, unfreeze, delete, "
         "approve, update); task_id (TB-N for non-add ops); title / tags "

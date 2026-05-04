@@ -81,11 +81,27 @@ GOAL_ANCHOR_HEADINGS: tuple[str, ...] = (
     "Done when",
 )
 
+# TB-164: minimum non-marker character count for the "Why now" rationale
+# that every briefing's `## Goal` body must include. Pulled out as a
+# named constant so the validator (`ap2/tools.py`), the lint
+# (`ap2/check.py`), and the unit tests pin against the same number; a
+# future tweak to the threshold flows from one place. 40 chars rejects
+# trivial passes like `Why now: yes` while staying short enough that
+# templates don't feel padded — the briefing's "if we delete this and
+# the goal still ships, was it useful?" delete-test (goal.md lines
+# 61-70) needs a sentence, not an essay. The marker check itself is
+# line-anchored so the rule isn't matched mid-prose.
+WHY_NOW_MIN_CHARS: int = 40
+
 BRIEFING_TEMPLATE = (
     "# {task_id} — {title}\n\n"
     "Tags: \n\n"
     "## Goal\n\n"
     "{description}\n\n"
+    "Why now (delete-test): (one sentence answering goal.md's "
+    "delete-test — \"if we delete this and the goal still ships, was "
+    "it useful?\" — name the failure mode this closes or the gap it "
+    "fills, not just \"this would be nice to have\")\n\n"
     "## Scope\n\n"
     "- (file / module to change)\n\n"
     "## Design\n\n"
