@@ -275,3 +275,9 @@
 - **Summary:** Added include_board/include_commits kwargs to _current_state_block, forwarded through build_control_prompt, and opted ideation._run_ideation out of both sub-blocks; defaults stay True so status-report cron rendering is byte-identical. Full ap2/tests/ gate (969) passes.
 - **Files:** ap2/prompts.py, ap2/ideation.py, ap2/tests/test_prompts.py, ap2/tests/test_ideation_trigger.py
 - **Tests:** pass
+
+## [2026-05-04] TB-169: Trim ideation's `_events_block` to a curated allowlist of event types
+- **Commit:** `0d4fd53`
+- **Summary:** Added include_types allowlist kwarg to _events_block and build_control_prompt (default None preserves status-report behavior); defined IDEATION_RELEVANT_EVENT_TYPES (9 entries: task lifecycle, operator decisions, cron_proposed); wired _run_ideation to pass it; added unit tests (filter positive/negative, empty-after-filter fallback, default-no-kwarg backwards-compat, build_control_prompt forwarding) and an end-to-end ideation test asserting captured prompt has task_complete but not judge_call/cron_complete; full pytest suite (975 tests) passes.
+- **Files:** ap2/ideation.py, ap2/prompts.py, ap2/tests/test_prompts.py, ap2/tests/test_ideation_trigger.py
+- **Tests:** pass
