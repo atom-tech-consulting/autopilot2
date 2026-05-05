@@ -1,10 +1,10 @@
 # Ideation State
 
-_Last updated: 2026-05-05T11:19:37Z by ideation cron_
+_Last updated: 2026-05-05T13:21:36Z by ideation cron_
 
 ## Mission alignment
 
-No change since prior cycles (09:17Z, 07:15Z, 02:02Z). Recent 5
+No change since prior cycles (07:15Z, 09:17Z, 11:19Z). Recent 5
 completes unchanged and still all serve the meta-mission of making
 the ideation→approve→dispatch loop trustworthy:
 
@@ -18,9 +18,10 @@ the ideation→approve→dispatch loop trustworthy:
 - TB-169 (0d4fd53) — trim ideation `_events_block` to curated allowlist.
 - TB-168 (c113f4c) — trim ideation `_current_state_block`.
 
-No drift; no new completes between 01:09Z and 11:19Z. **Three
-consecutive no-op ideation ticks now (07:15Z, 09:17Z, 11:19Z)** —
-each one TB-174 would have suppressed cleanly via auto-skip.
+No drift; no new completes between 01:09Z and 13:21Z. **FOUR
+consecutive no-op ideation ticks now (07:15Z, 09:17Z, 11:19Z,
+13:21Z)** — each one TB-174 would have suppressed cleanly via
+auto-skip. TB-174/TB-175 still pending review (~12h+).
 
 ## Current focus assessment
 
@@ -36,16 +37,16 @@ goal.md "Current focus: ideation quality" is the sole declared focus.
     surfacing). TB-170 is the operator escape hatch.
   - Gaps:
     (1) `parse_focus_statuses` + auto-skip wiring is **proposed** as
-    TB-174 and awaiting `ap2 approve` since 2026-05-05T01:09Z (~10h
-    pending review). This cycle (11:19Z) is the THIRD consecutive
+    TB-174 and awaiting `ap2 approve` since 2026-05-05T01:09Z (~12h
+    pending review). This cycle (13:21Z) is the FOURTH consecutive
     no-op tick TB-174 would have suppressed — cost evidence is
-    compounding (3 SDK roundtrips spent per cycle restating "Backlog
+    compounding (4 SDK roundtrips spent per cycle restating "Backlog
     already populated; no proposals this cycle").
     (2) Shell-bullet pitfall enumeration: rejected by operator on
     2026-05-05T00:45Z (TB-172) — accepted residual risk. Not
     re-proposed.
     (3) Ideation acceptance-rate insight is **proposed** as TB-175
-    and awaiting `ap2 approve` (~10h pending review). Until it
+    and awaiting `ap2 approve` (~12h pending review). Until it
     lands, no quantitative signal on whether the structural-gate
     cascade moved acceptance rate vs the pre-gate baseline.
   - Status: `in-progress`
@@ -65,7 +66,7 @@ None. No in-flight work; nothing strays into goal.md's Non-goals.
 ## Considered & deferred this cycle
 
 - **Re-proposing anything covered by TB-174/TB-175**: both still in
-  Backlog, blocked on review since ~10h. A third proposal addressing
+  Backlog, blocked on review since ~12h. A third proposal addressing
   the same gaps would be drift (and would compete with the existing
   proposals for operator attention without adding signal).
 - **Shell-bullet pitfall validator (any flavor)**: operator rejected
@@ -80,14 +81,14 @@ None. No in-flight work; nothing strays into goal.md's Non-goals.
   violates Non-goal "Replacing operator judgment on goal definition."
   Operator owns focus rotation.
 - **Cross-cycle deferral aging tracker / "stale deferral" event**:
-  carried; THREE consecutive no-op cycles now; still no signal that
+  carried; FOUR consecutive no-op cycles now; still no signal that
   long-stale deferrals are a problem in themselves. Defer.
 - **Greenfield follow-ups on TB-168/169/170/171/173**: each just
   shipped a focused improvement; no edge case or natural extension
   surfaces yet that isn't already covered by the two pending
   proposals.
 - **"Ideation cron self-throttle on no-op streak" task**: tempting
-  given three consecutive no-op ticks, but TB-174 is exactly that
+  given four consecutive no-op ticks, but TB-174 is exactly that
   mechanism. A separate no-op-streak counter would duplicate the
   gate without adding signal — wait for TB-174 first.
 - **Force-propose a third item just to fill Backlog to ≥3**: the
@@ -100,9 +101,9 @@ None. No in-flight work; nothing strays into goal.md's Non-goals.
 
 - **Tasks awaiting review (`ap2 approve` / `ap2 reject`)**: TB-174,
   TB-175. Both gated `@blocked:review` per TB-121 and pending since
-  2026-05-05T01:09Z (~10h). **THREE consecutive no-op ideation ticks
-  (07:15Z, 09:17Z, 11:19Z)** since they were proposed — TB-174 is
-  the exact fix for that wasted-tick shape and gets more
+  2026-05-05T01:09Z (~12h). **FOUR consecutive no-op ideation ticks
+  (07:15Z, 09:17Z, 11:19Z, 13:21Z)** since they were proposed —
+  TB-174 is the exact fix for that wasted-tick shape and gets more
   cost-justified each cycle it sits unreviewed.
 - **Focus-rotation candidate** (carried from prior cycle): after
   TB-174/TB-175 land + approve, "Current focus: ideation quality" is
