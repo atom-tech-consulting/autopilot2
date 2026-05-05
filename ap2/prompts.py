@@ -472,9 +472,15 @@ def build_mattermost_prompt(
         "`<reason>` in operator_log.md so ideation Step 0 stops "
         "re-proposing it; route via `operator_queue_append({\"op\": "
         "\"reject\", \"task_id\": \"TB-N\", \"reason\": \"...\"})`; for "
-        "non-proposal removals use `delete`). For `add_*` ops the TB-N "
-        "is allocated synchronously and you can mention it in your "
-        "reply.\n"
+        "non-proposal removals use `delete`) / `ideate [force]` (TB-176 — "
+        "manual ideation trigger, parity with the `ap2 ideate [--force]` "
+        "CLI added in TB-159; bypasses the cooldown / "
+        "`AP2_IDEATION_DISABLED` / non-empty-Ready-or-Backlog gates that "
+        "normally suppress an ideation pass; refuses if a task is "
+        "currently Active unless `force=true`; route via "
+        "`operator_queue_append({\"op\": \"ideate\", \"force\": <bool>})`)."
+        " For `add_*` ops the TB-N is allocated synchronously and you "
+        "can mention it in your reply.\n"
         "\n"
         "Still available directly: `daemon_control` (pause / resume — "
         "pause takes effect on the **next** tick; any running task "
@@ -556,6 +562,14 @@ def build_mattermost_prompt(
         # anchored briefing that still trips the delete-test guard at
         # queue-append time (re-prompt cost) instead of the first try.
         "- **Briefing 'Why now' rationale (TB-164 — delete-test):** the `## Goal` body MUST include a line-anchored `Why now:` paragraph (≥40 chars after the marker) answering goal.md's delete-test (\"if we delete this and the goal still ships, was it useful?\"). Name the failure mode this closes or the gap it fills, not just \"this would be nice to have\" or \"might be useful later.\" The queue-append validator rejects briefings whose Goal body has no `Why now` marker OR a trivial one (e.g. `Why now: yes`) — closes the \"push for progress without scope creep\" failure mode (goal.md lines 61-70).",
+        # TB-176: pinned phrasing — `tests/test_prompts.py` asserts the
+        # verb description appears in the prompt body so future edits
+        # can't silently drop chat parity with the `ap2 ideate [--force]`
+        # CLI added in TB-159. The queue op (`OPERATOR_QUEUE_OPS` in
+        # `ap2/tools.py`) and the drain-side handler are already in
+        # place; this bullet is the prompt-side teaching that routes a
+        # chat mention through to a queued `ideate` op.
+        "- **Manual ideation trigger** (TB-176, parity with `ap2 ideate [--force]` from TB-159): if the user asks to trigger an ideation pass (recognize: \"@claude-bot ideate\" / \"@claude-bot ideate force\" / \"@claude-bot ideate --force\" / paraphrases like \"trigger ideation now\" / \"run ideation\"), route via `operator_queue_append({\"op\": \"ideate\", \"force\": false})` for the unforced form OR `operator_queue_append({\"op\": \"ideate\", \"force\": true})` when the operator says `force` / `--force`. The verb is a manual ideation trigger that bypasses the natural cooldown / `AP2_IDEATION_DISABLED` / non-empty-Ready-or-Backlog gates; the drain-side handler refuses the unforced op if Active is non-empty (concurrent task-agent + control-agent SDK runs share the same slot — same precedent as TB-122). Don't pre-empt the refusal in your reply (the drain-side error is the source of truth); just queue the op and let the next-tick `operator_queue_drained` / `operator_queue_error` event tell the operator what happened.",
         "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining the request needs an operator CLI action.",
         "- If the user asks to pause/resume the daemon: use `daemon_control`.",
         "- If the user is acknowledging a decision (\"ack: …\" / \"done: …\" / \"decided: …\"): use `operator_log_append`.",

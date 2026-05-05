@@ -485,6 +485,81 @@ def test_mattermost_prompt_pins_approve_tb_n_recognition(tmp_path):
     assert "@blocked:review" in p
 
 
+def test_mattermost_prompt_pins_ideate_verb_recognition(tmp_path):
+    """TB-176: the MM handler agent must recognize "ideate" / "ideate force"
+    as an operator command (chat parity with the `ap2 ideate [--force]`
+    CLI added in TB-159) and route it through `operator_queue_append`
+    with `op="ideate"` and the appropriate `force` flag. Pin the cross-
+    reference, the recognized phrasing, and the queue-routing instruction
+    so a future prompt rewrite can't silently drop the chat surface
+    (which would force operators back to the CLI for a chat-natural
+    action — exactly the friction TB-176 closes).
+    """
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot ideate",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Cross-refs to both the parent CLI work (TB-159) and this task (TB-176).
+    assert "TB-176" in p
+    assert "TB-159" in p
+    # The verb itself is named (briefing's grep check: ≥1 occurrence).
+    assert "ideate" in p
+    # The op-name routing pin — same form as the approve / reject pins.
+    assert '"ideate"' in p or "op=\"ideate\"" in p
+    # The queue is the routing channel (no separate MCP tool).
+    assert "operator_queue_append" in p
+    # The verb description marker (briefing's prose pin: catches accidental
+    # removal of the description even if the bare token survives).
+    assert "manual ideation trigger" in p.lower()
+    # Both the unforced and forced shapes are taught — the prompt has to
+    # surface BOTH so the agent picks the right `force` value from the
+    # message's literal phrasing.
+    assert '"force": false' in p.lower() or "force=false" in p.lower()
+    assert '"force": true' in p.lower() or "force=true" in p.lower()
+
+
+def test_mattermost_prompt_ideate_recognizes_force_phrasing(tmp_path):
+    """TB-176: the prompt must teach the agent to recognize the `force`
+    syntactic variants the CLI accepts (`force` / `--force`) so the
+    routed `force` flag matches the operator's intent. Pin the literal
+    phrases the prompt advertises — if a future edit drops them the
+    handler would silently default to `force=False` for a "force"
+    request and the operator would have to retry with different wording.
+    """
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot ideate force",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Both syntactic variants taught — `force` (bare) and `--force`
+    # (CLI-style flag). The agent picks the right `force=true` routing
+    # regardless of which the operator types.
+    assert "ideate force" in p
+    assert "--force" in p
+    # The "why" — the verb's gate-bypass behavior is named so the agent
+    # can correctly explain what it's doing in its mattermost_reply, AND
+    # so a future edit that silently strips the rationale (turning the
+    # bullet into "just call ideate") trips this test. Match any of the
+    # three gates the CLI bypasses.
+    p_lower = p.lower()
+    assert "cooldown" in p_lower or "ap2_ideation_disabled" in p_lower
+    # The Active-task refusal is named so the agent doesn't misinterpret
+    # a drain-side error as a bug. The drain-side error message uses
+    # "Active" — pin that substring.
+    assert "Active" in p
+
+
 # ---------------------------------------------------------------------------
 # TB-149: thread-reply context. When the incoming MM message has a
 # non-empty thread_id, the prompt instructs the handler to call
