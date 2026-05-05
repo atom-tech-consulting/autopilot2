@@ -1,12 +1,12 @@
 # Ideation State
 
-_Last updated: 2026-05-05T07:15:33Z by ideation cron_
+_Last updated: 2026-05-05T09:17:42Z by ideation cron_
 
 ## Mission alignment
 
-No change since prior cycle (02:02Z, ~5h ago). Recent 5 completes
-unchanged and still all serve the meta-mission of making the
-ideation→approve→dispatch loop trustworthy:
+No change since prior cycle (07:15Z, ~2h ago) and the cycle before
+that (02:02Z). Recent 5 completes unchanged and still all serve the
+meta-mission of making the ideation→approve→dispatch loop trustworthy:
 
 - TB-173 (aee515e) — surface ideation_state.md "Open questions for
   operator" in `ap2 status` text + JSON + web home + cron
@@ -18,7 +18,8 @@ ideation→approve→dispatch loop trustworthy:
 - TB-169 — trim ideation `_events_block` to a curated allowlist.
 - TB-168 — trim ideation `_current_state_block`.
 
-No drift; no new completes between 01:09Z and 07:15Z.
+No drift; no new completes between 01:09Z and 09:17Z (two consecutive
+no-op ideation ticks now: 07:15Z and 09:17Z).
 
 ## Current focus assessment
 
@@ -35,26 +36,26 @@ goal.md "Current focus: ideation quality" is the sole declared focus.
     TB-170 is the operator escape hatch.
   - Gaps:
     (1) `parse_focus_statuses` + auto-skip wiring is **proposed** as
-    TB-174 and awaiting `ap2 approve` since 2026-05-05T01:09Z.
-    Until it lands, the natural ideation cron keeps firing on the
-    backlog<3 + cooldown trigger even when prior assessment says
-    no actionable gaps remain (this cycle is exactly that pattern —
-    woke at 07:15Z, prior cycle 02:02Z, nothing new to propose).
+    TB-174 and awaiting `ap2 approve` since 2026-05-05T01:09Z
+    (~8h pending review). This cycle (09:17Z) is the SECOND
+    consecutive no-op tick that TB-174 would have suppressed —
+    cost evidence is now compounding for the auto-skip wiring.
     (2) Shell-bullet pitfall enumeration: rejected by operator on
     2026-05-05T00:45Z (TB-172) — accepted residual risk. Not
     re-proposed.
     (3) Ideation acceptance-rate insight is **proposed** as TB-175
-    and awaiting `ap2 approve`. Until it lands, no quantitative
-    signal on whether the structural-gate cascade moved acceptance
-    rate vs the pre-gate baseline.
+    and awaiting `ap2 approve` (~8h pending review). Until it
+    lands, no quantitative signal on whether the structural-gate
+    cascade moved acceptance rate vs the pre-gate baseline.
   - Status: `in-progress`
   - Reasoning: gaps #1 and #3 are addressed by tasks already in
-    Backlog; both are blocked on operator review. Without the
-    operator approving (or rejecting), this focus item neither
-    progresses nor exhausts. Status stays `in-progress` rather
-    than `exhausted-needs-operator` because the actionable next
+    Backlog; both blocked on operator review. The actionable next
     step is operator review of pending proposals, not a fresh
-    proposal from ideation.
+    proposal from ideation. Status stays `in-progress` rather than
+    `exhausted-needs-operator` because TB-174's auto-skip is
+    exactly the mechanism that would let this focus item surface
+    `exhausted-needs-operator` cleanly — until it lands, the
+    distinction is fuzzy and ideation keeps firing on cooldown.
 
 ## Non-goal risk check
 
@@ -63,9 +64,10 @@ None. No in-flight work; nothing strays into goal.md's Non-goals.
 ## Considered & deferred this cycle
 
 - **Re-proposing anything covered by TB-174/TB-175**: both still
-  in Backlog, blocked on review. A third proposal addressing the
-  same gaps would be drift (and would compete with the existing
-  proposals for operator attention without adding signal).
+  in Backlog, blocked on review since ~8h. A third proposal
+  addressing the same gaps would be drift (and would compete with
+  the existing proposals for operator attention without adding
+  signal).
 - **Shell-bullet pitfall validator (any flavor)**: operator
   rejected TB-172 on 2026-05-05 with "wack-a-mole … generalizes
   poorly." Authoritative — including `bash -n` / shellcheck /
@@ -77,21 +79,28 @@ None. No in-flight work; nothing strays into goal.md's Non-goals.
 - **Auto-rotate goal.md `## Current focus` when exhausted**:
   violates Non-goal "Replacing operator judgment on goal
   definition." Operator owns focus rotation.
-- **Cross-cycle deferral aging tracker**: no signal that
-  long-stale deferrals are a problem; defer.
+- **Cross-cycle deferral aging tracker / "stale deferral" event**:
+  carried from prior cycle. Two consecutive no-op cycles now;
+  still no signal that long-stale deferrals are a problem in
+  themselves. Defer.
 - **Greenfield follow-ups on TB-168/169/170/171/173**: each just
   shipped a focused improvement; no edge case or natural
   extension surfaces yet that isn't already covered by the two
   pending proposals.
+- **"Ideation cron self-throttle on no-op streak" task**: tempting
+  given two consecutive no-op ticks, but TB-174 is exactly that
+  mechanism (auto-skip when focus statuses say so). A separate
+  no-op-streak counter would duplicate the gate without adding
+  signal — wait for TB-174 first.
 
 ## Open questions for operator
 
 - **Tasks awaiting review (`ap2 approve` / `ap2 reject`)**:
   TB-174, TB-175. Both gated `@blocked:review` per TB-121 and
-  pending since 2026-05-05T01:09Z. Until operator acts, ideation
-  cron will keep firing and producing "no proposals this cycle"
-  assessments (the no-op pattern this cycle exhibits) — TB-174
-  is exactly the fix for that wasted-tick shape.
+  pending since 2026-05-05T01:09Z (~8h). Two consecutive no-op
+  ideation ticks (07:15Z, 09:17Z) since they were proposed —
+  TB-174 is the exact fix for that wasted-tick shape and gets
+  more cost-justified each cycle it sits unreviewed.
 - **Focus-rotation candidate** (carried from prior cycle): after
   TB-174/TB-175 land + approve, "Current focus: ideation
   quality" is plausibly `exhausted-needs-operator`. Operator may
@@ -113,4 +122,6 @@ None. No in-flight work; nothing strays into goal.md's Non-goals.
 Backlog already populated with the proposals that address every
 actionable gap (TB-174, TB-175, both awaiting review). No new
 proposals this cycle — adding a third would be drift relative to
-goal.md's "push for progress without scope creep" guard.
+goal.md's "push for progress without scope creep" guard, and
+would compete for operator attention with the two already
+queued.
