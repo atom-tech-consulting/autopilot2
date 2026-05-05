@@ -1,4 +1,4 @@
-# Project Goals
+# Project Goals (draft — propose into goal.md)
 
 ## Mission
 
@@ -129,3 +129,48 @@ filtered, not just gated after the fact.
   changes are operator-CLI-only (TB-146 — landed; `cron_edit` is
   hidden from every agent toolset, mutation goes through
   `ap2 cron edit`), git pushes are not automated.
+
+## Design decisions for the ideation iteration
+
+With TB-121 (review gate), TB-138 (auto-verifiable bullets), and TB-154
+(canonical-structure validator) landed, the design questions for the
+next ideation prompt iteration have been resolved as follows:
+
+- **Done-signal lives in `goal.md`.** Every project's `goal.md` carries
+  an explicit `## Done when` section (see this file's section above for
+  ap2's own version); ideation reads it each cycle and treats all-met
+  criteria as "stop proposing here." Without it the only done-signal is
+  manual operator intervention, which defeats the walk-away promise.
+
+- **Cadence is already per-project tunable — no change needed.**
+  `AP2_IDEATION_COOLDOWN_S` (default 7200s = 2h) lets an operator set
+  responsive or conservative cadence per project via the daemon env;
+  no global-default rework required.
+
+- **Ideation calibrates from prior-cycle outcomes — both approvals and
+  rejections.** Approvals AND deletions of ideation-proposed tasks
+  already land in `.cc-autopilot/operator_log.md` (every queued op
+  writes an audit line — `applied operator-queued approve → TB-N`,
+  `applied operator-queued delete → TB-N`), and ideation Step 0 reads
+  that file as authoritative ground truth on what's been decided.
+  Re-proposal of decided items isn't the live gap. The narrower
+  load-bearing work is **capturing operator REASONS for rejection**:
+  today `delete` records the action without a reason field, so
+  ideation can't learn from "why this proposal didn't fly." TB-152
+  (in Backlog, awaiting approval) addresses this with a dedicated
+  `reject` verb that writes
+  `<ts> — rejected ideation proposal → TB-N (<title>): <reason>`
+  lines that ideation will pick up alongside the existing
+  operator-decision audit trail.
+
+- **Multi-task plans are allowed.** Nothing in the current prompt forbids
+  a coherent N-task arc toward a milestone — the prompt's "top 3" framing
+  reads as independent ranking, and the per-cycle cap (3 proposals when
+  Backlog<3) is set in the prompt, not in code, so there's no hard
+  numeric limit beyond what the prompt requests. The real friction is
+  TB-121's per-task review gate: each task in an arc lands
+  `@blocked:review` and needs its own `ap2 approve TB-N`, which costs
+  arc cohesion. The prompt iteration should either accept that cost
+  (each task in the arc must justify itself standalone) or design a
+  plan-level approve flow — capturing that decision is part of the
+  prompt-iteration work, not blocking it.
