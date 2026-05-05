@@ -54,3 +54,10 @@ Adding a new verb is purely additive. Existing chat verbs unchanged. CLI's `ap2 
 - Pre-flight refusing when Active is non-empty inside the MM handler itself. The drain's refusal is sufficient; teaching the handler to second-guess board state risks staleness.
 - Web UI button for manual ideation trigger. Out of band; chat + CLI is enough surface.
 - Renaming the `ideate` op or changing the underlying daemon path. Pure prompt extension.
+## Attempts
+
+### 2026-05-05 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] prose: a test pins the chat-routing — synthesize an "@claude-bot ideate" mention through the MM handler test harness wit
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260505T230301Z-TB-176.prompt.md`, `stream: .cc-autopilot/debug/20260505T230301Z-TB-176.stream.jsonl`, `messages: .cc-autopilot/debug/20260505T230301Z-TB-176.messages.jsonl`
