@@ -363,6 +363,12 @@ of scope` instead. Do not invent a separate `## Manual checklist`
 section: if you can't write a test for it, the daemon can't gate
 on it, and it's out of scope.
 
+The validator now also rejects this at queue-append time (TB-171):
+`_validate_briefing_structure` scans the `## Verification` body for
+`Manual:` / `[manual]` bullets and refuses the briefing before a
+TB-N is allocated, mirroring the operator-facing `ap2 check`
+warning into the pre-allocation gate.
+
 ## Long-running work
 If a proposed task plausibly takes more than ~5 minutes wall-clock
 (parameter sweeps, multi-day backtests, full-history data fetches

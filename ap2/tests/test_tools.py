@@ -2621,3 +2621,200 @@ def test_validate_briefing_skip_goal_alignment_unit_function_pure():
     # With the kwarg → accept.
     err2 = tools._validate_briefing_structure(body, skip_goal_alignment=True)
     assert err2 is None
+
+
+# ---------------------------------------------------------------------------
+# TB-171: `Manual:` / `[manual]` bullets in `## Verification` are rejected
+# at queue-append time. Mirrors the TB-138 prompt rule + the
+# `_check_briefings_manual_bullets` operator-facing warning into the
+# pre-allocation gate so a Manual bullet can't slip into a queued briefing
+# and re-run the TB-122 retry_exhausted failure mode.
+
+_TB171_CANONICAL_GOAL = (
+    "## Goal\n\nCloses an enforcement gap in the briefing validator.\n\n"
+    "Why now: closes the last documented auto-verifiable-bullets "
+    "enforcement gap so a Manual bullet can't cost a TB-N + a task-agent "
+    "run before being caught (TB-171).\n\n"
+)
+
+
+def _tb171_brief_with_verification(verification_body: str,
+                                   out_of_scope: str = "- nothing\n") -> str:
+    """Helper: assemble a canonical-shape briefing whose `## Verification`
+    body is the caller-supplied string. Saves the per-test boilerplate."""
+    return (
+        "# TB-171 manual-bullet test\n\n"
+        + _TB171_CANONICAL_GOAL
+        + "## Scope\n\n- ap2/tools.py\n\n"
+        + "## Design\n\nstub\n\n"
+        + "## Verification\n\n" + verification_body + "\n"
+        + "## Out of scope\n\n" + out_of_scope
+    )
+
+
+def test_validate_briefing_structure_rejects_manual_bullet_in_verification():
+    """TB-171 core unit: a `## Verification` bullet starting with
+    `Manual:` is rejected at the queue-append boundary with an error
+    string that names the offending bullet plus the auto-verifiable
+    rationale."""
+    body = _tb171_brief_with_verification(
+        "- Manual: operator runs the daemon and observes Mattermost\n"
+        "- `uv run pytest -q` — gates pass\n",
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None, "expected non-None error for Manual: bullet"
+    # Error message names the rule + cross-references TB-171 + TB-138.
+    assert "Manual" in err or "auto-verifiable" in err.lower(), err
+    assert "TB-171" in err, err
+
+
+def test_validate_briefing_structure_accepts_manual_bullet_in_out_of_scope():
+    """TB-171 scope pin: the validator only scans `## Verification`. A
+    `Manual:` bullet under `## Out of scope` is fine — that's exactly
+    where the rule says manual procedures belong. The `## Verification`
+    body must still carry at least one auto-verifiable bullet."""
+    body = _tb171_brief_with_verification(
+        "- `uv run pytest -q` — gates pass\n",
+        out_of_scope=(
+            "- Manual: operator-only smoke test (out of validator scope)\n"
+        ),
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is None, f"expected None, got: {err!r}"
+
+
+def test_validate_briefing_structure_rejects_manual_bullet_case_insensitive():
+    """TB-171 case-insensitive pin: `manual:`, `[Manual]`, and `[manual]`
+    all match. Mirrors `ap2/check.py::_MANUAL_BULLET_RE`'s tolerance so
+    the queue-append gate doesn't false-pass an alternate spelling that
+    the operator-facing lint catches."""
+    variants = (
+        "- manual: lowercase operator runs X\n",
+        "- [Manual] bracketed form, capitalized\n",
+        "- [manual] bracketed form, lowercase\n",
+        "- MANUAL: shouted form\n",
+        "* Manual: asterisk bullet marker, not dash\n",
+    )
+    for variant in variants:
+        body = _tb171_brief_with_verification(
+            variant + "- `uv run pytest -q`\n",
+        )
+        err = tools._validate_briefing_structure(body)
+        assert err is not None, (
+            f"expected reject for variant: {variant!r}, got None"
+        )
+        assert "TB-171" in err, err
+
+
+def test_validate_briefing_structure_does_not_false_positive_on_inline_manual():
+    """TB-171 anchor pin: prose that incidentally mentions the word
+    `manual` inline (no bullet marker, no `Manual:` / `[manual]` token
+    starting the bullet) does NOT trigger the gate. Mirrors the
+    `_MANUAL_BULLET_RE` line-anchor on the bullet marker."""
+    body = _tb171_brief_with_verification(
+        "- `uv run pytest -q` — also covers the manual-fallback path\n"
+        "- `grep -q manual ap2/check.py` — pins the lint regex name\n",
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is None, f"expected None for inline 'manual' prose, got: {err!r}"
+
+
+def test_tb171_validate_briefing_manual_bullet_fires_via_queue_append(
+    cfg, tmp_path,
+):
+    """End-to-end at the queue-append boundary: a Manual-bullet briefing
+    routed through `do_operator_queue_append` is rejected, no TB-N is
+    leaked into CLAUDE.md, and no queue line / briefing file is written.
+    Mirrors the TB-154 / TB-164 "no leak on reject" pin."""
+    before_claude = (tmp_path / "CLAUDE.md").read_text()
+    body = _tb171_brief_with_verification(
+        "- Manual: operator runs the daemon and watches Mattermost\n"
+        "- `uv run pytest -q`\n",
+    )
+    pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "manual bullet", "briefing": body},
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "TB-171" in text
+    assert "Manual" in text or "auto-verifiable" in text.lower()
+    # CLAUDE.md untouched — no TB-N leaked.
+    assert (tmp_path / "CLAUDE.md").read_text() == before_claude
+    # No briefing file leaked to disk.
+    post_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    assert post_tasks_dir == pre_tasks_dir
+    # No queue line written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_tb171_validate_briefing_manual_bullet_fires_for_update_op(
+    cfg, tmp_path,
+):
+    """TB-153/154-style update-op coverage: the same gate fires when the
+    Manual-bullet briefing is routed through `op="update"`. Without this,
+    an operator could overwrite a clean briefing with a Manual-bullet
+    one and re-introduce the TB-122 failure mode. Mirrors
+    `test_tb154_validate_briefing_structure_fires_for_update_op`."""
+    bad = _tb171_brief_with_verification(
+        "- Manual: operator runs the daemon and watches Mattermost\n"
+        "- `uv run pytest -q`\n",
+    )
+    pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-5", "briefing": bad},
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "TB-171" in text
+    assert "Manual" in text or "auto-verifiable" in text.lower()
+    # No briefing file leaked.
+    post_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    assert post_tasks_dir == pre_tasks_dir
+    # No queue line written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+    # Sanity: a clean update on the same TB-5 with no Manual bullet is
+    # accepted. Pins that we didn't flip the update branch into
+    # "always rejects briefing".
+    clean = _tb171_brief_with_verification("- `uv run pytest -q` — gates pass\n")
+    res_ok = tools.do_operator_queue_append(
+        cfg,
+        {"op": "update", "task_id": "TB-5", "briefing": clean},
+    )
+    body_ok = _unwrap(res_ok)
+    assert body_ok["op"] == "update"
+
+
+def test_tb171_manual_bullet_check_in_sync_with_check_py():
+    """Pin the duplicated-regex contract: `tools._MANUAL_BULLET_RE` must
+    behave identically to `check._MANUAL_BULLET_RE` so the queue-append
+    gate and the operator-facing `ap2 check` lint can never disagree on
+    what counts as a Manual bullet. The briefing's design explicitly
+    chose duplication over a tools→check coupling — this test is the
+    safety net that catches a future drift."""
+    from ap2 import check
+    samples_match = (
+        "- Manual: x",
+        "- manual: x",
+        "  - Manual: leading whitespace",
+        "* Manual: asterisk bullet",
+        "- [manual] bracketed",
+        "- [Manual] bracketed cap",
+    )
+    samples_skip = (
+        "Manual: not a bullet (no marker)",
+        "- a bullet that mentions manual inline",
+        "  the manual fallback path",
+        "- `grep -q manual foo.py`",
+    )
+    for s in samples_match:
+        assert tools._MANUAL_BULLET_RE.match(s), s
+        assert check._MANUAL_BULLET_RE.match(s), s
+    for s in samples_skip:
+        assert not tools._MANUAL_BULLET_RE.match(s), s
+        assert not check._MANUAL_BULLET_RE.match(s), s

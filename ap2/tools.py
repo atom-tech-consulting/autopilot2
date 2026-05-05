@@ -250,6 +250,20 @@ _GOAL_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.M)
 _WHY_NOW_MARKER_RE = re.compile(r"(?im)^\s*why\s+now(?=[\s:])")
 
 
+# TB-171: line-anchored bullet pattern for `Manual:` / `[manual]` items in
+# `## Verification`. Anchors on the bullet marker (`-` / `*`) so prose that
+# happens to mention the word "manual" inline doesn't false-positive.
+# Mirrors `ap2/check.py::_MANUAL_BULLET_RE` (kept in sync deliberately —
+# tools.py does not import check.py and the briefing recommended duplication
+# over a new tools→check coupling). If you edit this regex, also update
+# `ap2/check.py:144` so the queue-append gate and the operator-facing lint
+# stay in agreement.
+_MANUAL_BULLET_RE = re.compile(
+    r"^\s*[-*]\s*(?:Manual\s*:|\[manual\])",
+    re.IGNORECASE,
+)
+
+
 def _why_now_paragraph(goal_body: str) -> str | None:
     """Return the trailing paragraph attached to a line-anchored
     "Why now" marker inside `goal_body`, or None when no marker matches.
@@ -385,6 +399,19 @@ def _validate_briefing_structure(
          ships, was it useful?"), and the author must articulate that
          test in writing. Skipped when the briefing text is empty (the
          TB-135 non-empty gate handles that case with a clearer error).
+      6. (TB-171) The `## Verification` body must contain no `Manual:`
+         or `[manual]` bullets. The per-task verifier runs unattended
+         and cannot observe a live operator action — TB-122 hit
+         `retry_exhausted` on a single manual bullet despite the
+         implementation being complete. The rule already lived as
+         author-side prose (TB-138 ideation prompt + briefing
+         template + ap2-task skill) and as a non-fatal `ap2 check`
+         lint (`_check_briefings_manual_bullets`); this gate mirrors
+         it into the queue-append-time validator so a malformed
+         briefing can't slip past and cost a TB-N + a task-agent run.
+         Out-of-scope bullets are unaffected — only the `## Verification`
+         body is scanned. Match is case-insensitive (covers `Manual:`,
+         `manual:`, `[Manual]`, `[manual]`, etc.).
 
     `skip_goal_alignment=True` (TB-170) is the operator-CLI escape
     hatch: it skips checks (4) and (5) but runs every other validation
@@ -508,6 +535,47 @@ def _validate_briefing_structure(
             "this closes or the gap it fills, not just \"this would "
             "be nice to have\" (TB-164)."
         )
+    # TB-171: reject `Manual:` / `[manual]` bullets in `## Verification`.
+    # The per-task verifier is unattended — it has the diff, the working
+    # tree, and a shell, but no live operator. TB-122 hit `retry_exhausted`
+    # on a single manual bullet despite the implementation being complete.
+    # The rule lives in three author-side surfaces (ideation prompt,
+    # briefing template, ap2-task skill) and as a non-fatal `ap2 check`
+    # lint (`_check_briefings_manual_bullets`); this is the queue-append
+    # gate that mechanically blocks the malformed briefing before it costs
+    # a TB-N + a task-agent run. Only `## Verification` is scanned —
+    # bullets in `## Out of scope` (or anywhere else) are fine. We scan
+    # raw lines (rather than the parsed `bullets` list) so the regex
+    # stays aligned shape-for-shape with `ap2/check.py::_MANUAL_BULLET_RE`,
+    # and we walk the text line-by-line (rather than via
+    # `_briefing_section_body`) because the latter's heading regex is
+    # `\s*`-greedy and can swallow the first list bullet of a section
+    # whose body starts with a bullet — which is the structural shape of
+    # every well-formed `## Verification` section.
+    _verif_heading = re.compile(r"^##[ \t]+Verification\b", re.IGNORECASE)
+    _next_heading = re.compile(r"^##[ \t]+")
+    in_verification = False
+    for line in briefing_text.splitlines():
+        if _verif_heading.match(line):
+            in_verification = True
+            continue
+        if in_verification and _next_heading.match(line):
+            break
+        if in_verification and _MANUAL_BULLET_RE.match(line):
+            offending = line.strip()
+            return (
+                "briefing structure invalid: `## Verification` contains a "
+                f"`Manual:` bullet (`{offending}`). Auto-verifiable "
+                "bullets only — the unattended per-task verifier cannot "
+                "observe a live operator action (TB-122 hit "
+                "`retry_exhausted` on exactly this shape, TB-138 pinned "
+                "the rule). Convert the bullet to a backticked shell "
+                "command, a unit/e2e test name (with stubbed deps for "
+                "the operator-observation case), or a judge-checkable "
+                "prose claim that names a concrete file/symbol — or "
+                "move the bullet to `## Out of scope` if the behavior "
+                "genuinely cannot be auto-verified (TB-171)."
+            )
     return None
 
 
