@@ -915,6 +915,30 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
         )
         return
 
+    # TB-177: `janitor` jobs are deterministic Python (subprocess + git
+    # status parsing) — no SDK call, no LLM, no `_run_control_agent`
+    # plumbing. Cheap to run frequently; trivial to test. The routine
+    # emits its own `janitor_finding` events; we still bookend with
+    # `cron_start`/`cron_complete` so post-mortems can trace the run
+    # through the same event vocabulary as every other cron job.
+    # `job.prompt` is intentionally ignored — the work is hard-coded.
+    if job.name == "janitor":
+        from . import janitor as _janitor
+
+        events.append(cfg.events_file, "cron_start", job=job.name)
+        try:
+            _janitor.run_janitor(cfg)
+        except Exception as e:  # noqa: BLE001
+            events.append(
+                cfg.events_file,
+                "cron_error",
+                job=job.name,
+                error=f"{type(e).__name__}: {e}",
+            )
+        mark_run(cfg.cron_state_file, job.name)
+        events.append(cfg.events_file, "cron_complete", job=job.name)
+        return
+
     prompt = prompts.build_control_prompt(cfg, job.name, job.prompt)
     events.append(cfg.events_file, "cron_start", job=job.name)
     # TB-126: snapshot the state surface before the cron runs so we can

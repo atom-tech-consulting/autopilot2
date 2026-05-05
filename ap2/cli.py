@@ -150,6 +150,17 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     open_questions = parse_open_questions(
         cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     )
+    # TB-177: surface the count of recent `janitor_finding` events so an
+    # operator returning to the project sees stranded git state without
+    # running `ap2 logs` first. `recent_finding_count` walks the events
+    # tail and only counts findings inside `RECENT_FINDING_WINDOW_S` —
+    # stale findings from a day-old run don't accumulate (the next
+    # janitor cron will re-emit them if still relevant). Surfaced
+    # alongside pending-review and queue-pending so the three operator-
+    # attention signals share one cluster.
+    from .janitor import recent_finding_count as _recent_finding_count
+
+    janitor_findings = _recent_finding_count(cfg)
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -185,6 +196,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # Empty list when the file or section is absent — that's
             # the steady-state happy path for fresh projects.
             "open_questions": open_questions,
+            # TB-177: count of recent `janitor_finding` events (within
+            # `RECENT_FINDING_WINDOW_S`). 0 on healthy projects /
+            # missing events file — machine consumers always see the
+            # key for parseability.
+            "janitor_findings": janitor_findings,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -219,6 +235,17 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(
             f"review:   {pending_review} pending — {ids_line}\n"
             f"          (`ap2 approve TB-N`)"
+        )
+    if janitor_findings:
+        # TB-177: surface stranded git state without making the operator
+        # run `ap2 logs` first. Count only — per-finding detail (subkind,
+        # paths, hint) lives in events.jsonl. Wording mirrors the
+        # pending-review line so the operator-attention cluster reads
+        # consistently. Only emitted when N>0 — clean projects stay quiet.
+        print(
+            f"janitor:  {janitor_findings} stranded-state finding"
+            f"{'s' if janitor_findings != 1 else ''} — "
+            "`ap2 logs` (filter type=janitor_finding) to inspect"
         )
     if open_questions:
         # TB-173: surface ideator-surfaced questions from

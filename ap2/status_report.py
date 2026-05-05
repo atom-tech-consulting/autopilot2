@@ -142,6 +142,12 @@ Body shape (when posting):
   outside any current focus item — operator-judgement work that
   needs visibility on the report. If the line is absent, omit the
   bullet — there's nothing to surface.
+- TB-177: if the snapshot's `## Current state` block carries a
+  `- Janitor findings (N): stranded git state — ...` line, copy
+  that line VERBATIM as one of your bullets too. The janitor cron
+  surfaces stranded git state (staged-but-uncommitted, modified
+  not staged, untracked-non-ignored) — operator-attention work
+  that the report should carry. Absent ⇒ healthy ⇒ omit.
 
 After posting (or skipping), call
 `log_event(type="status_report", summary="<one sentence>")` so the
@@ -379,6 +385,22 @@ async def run_status_report(
         state_extras.append(
             f"- Open questions for operator ({len(open_questions)}): "
             + "; ".join(open_questions)
+        )
+    # TB-177: surface recent janitor findings inside the `## Current
+    # state` snapshot so the cron status-report routine can carry the
+    # signal into the Mattermost post (single source of truth via
+    # `recent_finding_count`). Stranded git state is exactly the
+    # "operator should know without grepping" class of signal that the
+    # cron report exists to surface; bundling it next to pending-review
+    # + open-questions keeps the three operator-attention signals on
+    # one screen.
+    from .janitor import recent_finding_count as _recent_finding_count
+
+    janitor_findings = _recent_finding_count(cfg)
+    if janitor_findings:
+        state_extras.append(
+            f"- Janitor findings ({janitor_findings}): stranded git state "
+            "— `ap2 logs` (filter type=janitor_finding) to inspect"
         )
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
