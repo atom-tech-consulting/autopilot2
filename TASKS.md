@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-173** **Surface ideation_state.md "Open questions for operator" in `ap2 status` and web home** `#autopilot` `#ideation` `#status` `#web` `#observability` — Promote `.cc-autopilot/ideation_state.md`'s `## Open questions for operator` section into `ap2 status` (text + JSON) and the web home page so ideator-surfaced questions reach the operator without manual file-reading. Closes the loop between Step 0 of the ideation cron (which writes the questions) and the operator's day-to-day surfaces (which today don't render them). [→ brief](.cc-autopilot/tasks/surface-ideation-state-md-open-questions.md)
 
 ## Pipeline Pending
 
@@ -64,6 +63,7 @@
 - [x] **TB-169** **Trim ideation's `_events_block` to a curated allowlist of event types** [→ brief](.cc-autopilot/tasks/trim-ideation-s-events-block-to-a-curate.md)
 - [x] **TB-170** **Add `--skip-goal-alignment` flag to `ap2 add` / `ap2 update` — bypass goal-cite + Why-now checks for operator-driven exceptions** [→ brief](.cc-autopilot/tasks/add-skip-goal-alignment-flag-to-ap2-add.md)
 - [x] **TB-171** **Briefing validator: reject `Manual:` bullets in `## Verification` at queue-append time** `#autopilot` `#ideation` `#briefing` `#validation` `#auto-verify` — Extend `_validate_briefing_structure` (ap2/tools.py) to reject `## Verification` bullets matching `Manual:` / `[manual]` at queue-append time — mirrors TB-138's prompt rule + `ap2 check` warning (`_check_briefings_manual_bullets`) into the pre-allocation gate so a Manual bullet can't slip into a queued briefing. [→ brief](.cc-autopilot/tasks/briefing-validator-reject-manual-bullets.md)
+- [x] **TB-173** **Surface ideation_state.md "Open questions for operator" in `ap2 status` and web home** `#autopilot` `#ideation` `#status` `#web` `#observability` — Promote `.cc-autopilot/ideation_state.md`'s `## Open questions for operator` section into `ap2 status` (text + JSON) and the web home page so ideator-surfaced questions reach the operator without manual file-reading. Closes the loop between Step 0 of the ideation cron (which writes the questions) and the operator's day-to-day surfaces (which today don't render them). [→ brief](.cc-autopilot/tasks/surface-ideation-state-md-open-questions.md)
 
 ## Frozen
 

@@ -293,3 +293,9 @@
 - **Summary:** Extended _validate_briefing_structure with a line-by-line `## Verification` Manual: bullet scan via duplicated `_MANUAL_BULLET_RE` (keep-in-sync with check.py:144); added 7 tests in test_tools.py (reject default, case-insensitive variants, Out-of-scope accept, no-false-positive on inline prose, queue-append reject, update-op reject, cross-module in-sync pin); added one-liner cross-reference in ideation.default.md; full ap2 suite (1002 tests) passes.
 - **Files:** ap2/tools.py, ap2/tests/test_tools.py, ap2/ideation.default.md
 - **Tests:** pass
+
+## [2026-05-05] TB-173: Surface ideation_state.md "Open questions for operator" in `ap2 status` and web home
+- **Commit:** `aee515e`
+- **Summary:** Added parse_open_questions(path) helper in ap2/ideation.py and wired it into ap2 status (text + JSON), the web home page (above the pending-queue card), and the cron status-report's state_extras + prompt-forwarding rule, with 22 new tests; full suite 1024 passed.
+- **Files:** ap2/ideation.py, ap2/cli.py, ap2/web.py, ap2/status_report.py, ap2/tests/test_ideation_state.py, ap2/tests/test_cli.py, ap2/tests/test_web.py, ap2/tests/test_status_report_skip.py
+- **Tests:** pass
