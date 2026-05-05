@@ -34,6 +34,7 @@ Configuration:
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -91,6 +92,134 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
 _PROJECT_PROMPT_REL = ".cc-autopilot/ideation_prompt.md"
+
+
+# TB-173: parser for the `## Open questions for operator` section of
+# `.cc-autopilot/ideation_state.md`. The ideation prompt's Step 0 mandates
+# this section whenever a focus item is `exhausted-needs-operator`, when
+# goal.md appears to need updating, OR when the ideator notices a gap
+# outside any current focus item. Today the surface is silent — the
+# section sits unread in `ideation_state.md` until the operator manually
+# opens the file.
+#
+# `parse_open_questions` is the single source of truth that `ap2 status`
+# (CLI), the web home page, and the cron status-report all call so the
+# three operator-facing surfaces stay in sync.
+#
+# Section-slicing reuses the same shape as
+# `ap2/check.py::_check_briefings_manual_bullets` — header regex matches
+# the `## Open questions for operator` heading line-anchored, slice runs
+# from heading-end to the next `## ` (or EOF). Per-bullet extraction:
+# `- ` / `* ` lines start a new entry; subsequent indented lines (two
+# spaces or more, or a tab) join the previous bullet with a single
+# space; blank lines finalize the current bullet. Cap at
+# `_OPEN_QUESTIONS_MAX_ENTRIES` (default 7) entries to bound rendering
+# cost; on truncation, append a synthetic "(+M more)" trailer entry so
+# the UI surfaces both the visible cap and the residual count.
+#
+# Failure mode: ideator may write the section as prose paragraphs
+# instead of bullets. Defense: when the bullet pass yields nothing, fall
+# back to splitting the section body on blank lines and treating each
+# paragraph as one entry. The same 7-cap applies to the fallback.
+_OPEN_QUESTIONS_HEADER_RE = re.compile(
+    r"^##\s+Open questions for operator\s*$", re.M,
+)
+_OPEN_QUESTIONS_NEXT_SECTION_RE = re.compile(r"^##\s+", re.M)
+_OPEN_QUESTIONS_BULLET_RE = re.compile(r"^\s*[-*]\s+(.*)$")
+_OPEN_QUESTIONS_MAX_ENTRIES = 7
+
+
+def parse_open_questions(path: Path) -> list[str]:
+    """Return the bullets under `## Open questions for operator` in `path`.
+
+    `path` is the absolute path to a project's
+    `.cc-autopilot/ideation_state.md`. Returns ``[]`` when the file is
+    missing, when the section header is absent, or when the section is
+    empty.
+
+    Bullet handling: each `- ` / `* ` line opens a new entry; indented
+    continuation lines under a bullet are joined into the previous entry
+    with a single space (newlines collapsed). Blank lines finalize the
+    current entry.
+
+    Fallback: if the section has no bullet lines at all (ideator wrote
+    prose paragraphs), split the body on blank lines and treat each
+    paragraph as one entry — same single-space whitespace collapse.
+
+    Cap: at most `_OPEN_QUESTIONS_MAX_ENTRIES` (7) real entries; on
+    overflow, the returned list is truncated to 7 and a synthetic
+    `"(+M more)"` trailer entry is appended (so the returned list can
+    be at most 8 elements long). Callers that render the list in a
+    space-constrained surface (CLI status text) may apply their own
+    further truncation; the JSON / web surfaces consume the whole list
+    untouched.
+
+    Pure / no I/O beyond the single read of `path`. Defensive against
+    OSErrors (returns ``[]`` rather than raising) so a transient
+    permission glitch on the ideation_state file never breaks
+    ``ap2 status``.
+    """
+    if not path.is_file():
+        return []
+    try:
+        text = path.read_text()
+    except OSError:
+        return []
+    m = _OPEN_QUESTIONS_HEADER_RE.search(text)
+    if m is None:
+        return []
+    body_start = m.end()
+    next_m = _OPEN_QUESTIONS_NEXT_SECTION_RE.search(text, body_start)
+    body = text[body_start: next_m.start() if next_m else len(text)]
+
+    entries: list[str] = []
+    current: list[str] | None = None
+    for raw in body.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            # Blank line — finalize the current bullet if any.
+            if current is not None:
+                joined = " ".join(current).strip()
+                if joined:
+                    entries.append(joined)
+                current = None
+            continue
+        bullet_m = _OPEN_QUESTIONS_BULLET_RE.match(raw)
+        if bullet_m is not None:
+            if current is not None:
+                joined = " ".join(current).strip()
+                if joined:
+                    entries.append(joined)
+            current = [bullet_m.group(1).strip()]
+        elif current is not None and (raw.startswith(" ") or raw.startswith("\t")):
+            # Continuation line under the current bullet — join with a
+            # single space so multi-line bullets render as one entry.
+            current.append(stripped)
+        # Else: a non-bullet, non-indented line outside any bullet
+        # context. Ignored for the bullet pass; the prose-fallback below
+        # handles the all-paragraphs shape.
+    if current is not None:
+        joined = " ".join(current).strip()
+        if joined:
+            entries.append(joined)
+
+    if not entries:
+        # Prose fallback: treat each blank-line-separated paragraph as
+        # one entry. Whitespace inside a paragraph collapses to single
+        # spaces (matches the bullet-continuation behavior above).
+        paragraphs = re.split(r"\n\s*\n", body.strip())
+        entries = [
+            " ".join(p.split()).strip()
+            for p in paragraphs if p.strip()
+        ]
+
+    if len(entries) > _OPEN_QUESTIONS_MAX_ENTRIES:
+        truncated = entries[:_OPEN_QUESTIONS_MAX_ENTRIES]
+        truncated.append(
+            f"(+{len(entries) - _OPEN_QUESTIONS_MAX_ENTRIES} more)"
+        )
+        return truncated
+    return entries
 
 
 def load_prompt(cfg: Config) -> str:

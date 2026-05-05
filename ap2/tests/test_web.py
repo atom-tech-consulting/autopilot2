@@ -1796,3 +1796,131 @@ def test_pending_queue_helper_is_grep_visible():
     text = (_P(web.__file__)).read_text()
     assert "def _render_pending_queue" in text
     assert "pending-queue" in text
+
+
+# --------- TB-173: ideator open-questions card on `/` ---------
+#
+# `_render_open_questions(cfg)` reads the `## Open questions for operator`
+# section from `.cc-autopilot/ideation_state.md` via
+# `parse_open_questions`, renders one `<li>` per bullet, and is mounted
+# above `_render_pending_queue` on `/`. Empty list → card omitted
+# entirely (server-side, not CSS-hidden).
+
+
+def _seed_ideation_state(cfg: Config, body: str) -> None:
+    path = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+
+
+def test_open_questions_card_renders_when_present(project: Config):
+    """Three bullets in the file → home page carries an `.open-questions`
+    card with one `<li>` per bullet and a header that names the count."""
+    _seed_ideation_state(
+        project,
+        "## Open questions for operator\n\n"
+        "- Should goal.md declare a new focus?\n"
+        "- Approve or reject TB-171 / TB-172 / TB-173.\n"
+        "- Insights index still empty.\n",
+    )
+    page = web._render_home(project)
+    # Card class present.
+    assert 'class="open-questions"' in page
+    # Header carries the count.
+    assert "3 open questions" in page
+    # Each bullet rendered as one `<li>`.
+    assert "<li>Should goal.md declare a new focus?</li>" in page
+    assert (
+        "<li>Approve or reject TB-171 / TB-172 / TB-173.</li>"
+    ) in page
+    assert "<li>Insights index still empty.</li>" in page
+
+
+def test_open_questions_card_omitted_when_empty(project: Config):
+    """No file / no section / empty section → card omitted entirely from
+    `/`, not just CSS-hidden. The `.open-questions` selector lives in
+    the page `<style>` so we scope the assertion to the post-`</style>`
+    body — that's where a rendered card would land."""
+    # Case 1: file does not exist (`project` fixture doesn't seed one).
+    page = web._render_home(project)
+    body = page.split("</style>", 1)[1]
+    assert 'class="open-questions"' not in body
+    assert "open questions" not in body.lower()
+
+    # Case 2: file exists but no `## Open questions for operator` section.
+    _seed_ideation_state(
+        project,
+        "# Ideation State\n\n## Mission alignment\n\n- nothing\n",
+    )
+    page = web._render_home(project)
+    body = page.split("</style>", 1)[1]
+    assert 'class="open-questions"' not in body
+    assert "open questions" not in body.lower()
+
+    # Case 3: section header present but empty body.
+    _seed_ideation_state(
+        project,
+        "## Open questions for operator\n\n## Proposals this cycle\n\n- TB-1\n",
+    )
+    page = web._render_home(project)
+    body = page.split("</style>", 1)[1]
+    assert 'class="open-questions"' not in body
+
+
+def test_open_questions_card_renders_above_pending_queue(project: Config):
+    """When BOTH cards have content, the open-questions card renders
+    ABOVE the pending-queue card on `/` so ideator-surfaced operator-
+    judgement work gets visual priority over mechanical pending ops."""
+    _seed_ideation_state(
+        project,
+        "## Open questions for operator\n\n"
+        "- Should we declare verifier robustness as the next focus?\n",
+    )
+    _seed_queue_entry(
+        project,
+        uuid="aaaaaaaa-1111-2222-3333-444444444444",
+        op="approve",
+        args={"task_id": "TB-99"},
+    )
+    page = web._render_home(project)
+    oq_idx = page.find('class="open-questions"')
+    pq_idx = page.find('class="pending-queue"')
+    assert oq_idx >= 0
+    assert pq_idx >= 0
+    assert oq_idx < pq_idx, (
+        f"open-questions card should render above pending-queue card; "
+        f"got open-questions at {oq_idx}, pending-queue at {pq_idx}"
+    )
+
+
+def test_open_questions_card_escapes_html(project: Config):
+    """Bullet bodies are HTML-escaped before rendering — defends against
+    an ideator (or some future adversarial input) writing a `<script>`
+    tag into the section body."""
+    _seed_ideation_state(
+        project,
+        "## Open questions for operator\n\n"
+        "- Should we use `<script>` tags? & other HTML\n",
+    )
+    page = web._render_home(project)
+    # Locate the card's `<li>` row — that's where bullet content lands.
+    li_start = page.find("<li>", page.find('class="open-questions"'))
+    li_end = page.find("</li>", li_start)
+    li = page[li_start:li_end]
+    # Raw `<script>` must not survive escaping; entities must be present.
+    assert "<script>" not in li
+    assert "&lt;script&gt;" in li
+    assert "&amp;" in li
+
+
+def test_open_questions_helper_is_grep_visible():
+    """Mirrors `test_pending_queue_helper_is_grep_visible` — the briefing's
+    `grep -rnE "parse_open_questions|open_questions" ap2/web.py` bullet
+    pins the helper name + CSS class to web.py source so a refactor that
+    drops either silently breaks the operator-facing card."""
+    from pathlib import Path as _P
+
+    text = (_P(web.__file__)).read_text()
+    assert "def _render_open_questions" in text
+    assert "open-questions" in text
+    assert "parse_open_questions" in text

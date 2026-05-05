@@ -590,6 +590,147 @@ def test_status_truncates_pending_review_ids_after_five(tmp_path: Path, capsys):
     assert payload["pending_review"] == 6
 
 
+# --------- TB-173: `ap2 status` surfaces ideator open questions ---------
+#
+# `parse_open_questions` reads the `## Open questions for operator`
+# section from `.cc-autopilot/ideation_state.md`. The CLI text branch
+# renders a "open questions for operator (N): ..." line truncated to the
+# first 5 with a "(+M more)" suffix; the JSON branch carries the full
+# helper output under `open_questions`. When the file or section is
+# absent, both branches stay quiet — the line is omitted from text
+# entirely, and JSON carries the empty list.
+
+
+def _seed_ideation_state(cfg: Config, body: str) -> None:
+    """Write `body` to `.cc-autopilot/ideation_state.md` so `cmd_status`
+    can pick it up via `parse_open_questions`."""
+    path = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+
+
+def test_cmd_status_renders_open_questions_when_present(
+    tmp_path: Path, capsys,
+):
+    """3 open questions in the file → text-mode `ap2 status` includes a
+    line beginning with "open questions for operator" naming the count
+    and joining the bullets with "; ". Verifies the line is wired into
+    the CLI rendering path at all."""
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    _seed_ideation_state(
+        cfg,
+        "## Open questions for operator\n\n"
+        "- Should goal.md declare a new focus?\n"
+        "- Approve or reject TB-171 / TB-172 / TB-173.\n"
+        "- Insights index still empty.\n",
+    )
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Line shape: "open questions for operator (3): bullet; bullet; bullet"
+    line = next(
+        (ln for ln in out.splitlines() if ln.startswith("open questions for operator")),
+        None,
+    )
+    assert line is not None, f"no open-questions line in status output:\n{out}"
+    assert "(3):" in line
+    assert "Should goal.md declare a new focus?" in line
+    assert "Approve or reject TB-171 / TB-172 / TB-173." in line
+    assert "Insights index still empty." in line
+
+
+def test_cmd_status_json_carries_full_open_questions_list(
+    tmp_path: Path, capsys,
+):
+    """JSON-mode `ap2 status --json` carries an `open_questions` key with
+    the full bullet list (untruncated by the CLI's 5-cap presentation
+    rule). Machine consumers see exactly what `parse_open_questions`
+    returned."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    _seed_ideation_state(
+        cfg,
+        "## Open questions for operator\n\n"
+        "- First.\n- Second.\n- Third.\n",
+    )
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["open_questions"] == ["First.", "Second.", "Third."]
+
+
+def test_cmd_status_omits_open_questions_line_when_absent(
+    tmp_path: Path, capsys,
+):
+    """No `ideation_state.md` file (fresh project) or empty section →
+    text branch must not grow a noisy "0 open questions" line, and JSON
+    carries the empty list. Mirrors TB-121's omit-on-zero shape for
+    pending-review."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    # No ideation_state.md created — the helper returns [].
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "open questions for operator" not in out
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["open_questions"] == []
+
+
+def test_cmd_status_truncates_open_questions_in_text_to_five(
+    tmp_path: Path, capsys,
+):
+    """When the helper returns more than 5 entries, the text branch shows
+    the first 5 (per-bullet truncated) with a "(+M more)" tail; JSON
+    keeps the full list (capped at 7+1 by `parse_open_questions` itself).
+    Pins the CLI's presentation cap independently of the helper's cap."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    bullets = "\n".join(
+        f"- question {i} text body here"
+        for i in range(1, 7)  # 6 bullets — under helper cap, over CLI cap
+    )
+    _seed_ideation_state(
+        cfg,
+        f"## Open questions for operator\n\n{bullets}\n",
+    )
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    line = next(
+        ln for ln in out.splitlines() if ln.startswith("open questions for operator")
+    )
+    assert "(6):" in line
+    # First 5 bullets named.
+    for i in range(1, 6):
+        assert f"question {i} text body here" in line
+    # 6th truncated out of the text rendering — replaced by suffix.
+    assert "question 6 text body here" not in line
+    assert "(+1 more)" in line
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    # JSON branch carries the full helper output untouched (6 entries,
+    # under the helper's 7-cap so no synthetic trailer is appended).
+    assert len(payload["open_questions"]) == 6
+
+
 # --------- TB-130: `ap2 status` reports the bundled web URL ---------
 
 

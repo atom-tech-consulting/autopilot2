@@ -444,6 +444,23 @@ _CSS = """<style>
   .pending-queue .pq-meta { color: #888; margin-right: 0.4rem }
   .pending-queue .pq-extra { color: #444 }
   .pending-queue details summary { color: #8a5a00; font-size: 11px }
+  /* TB-173: blue-tinted card for the ideator's `## Open questions for
+     operator` section. Sits above `.pending-queue` on the home page when
+     `parse_open_questions` returns >0 entries; omitted entirely when the
+     list is empty (no perpetual `0 open questions` noise). The blue
+     palette is distinct from `.pending-queue`'s amber so the operator
+     can tell pending operator ops (about to drain) from ideator-surfaced
+     escalation questions (need human judgement) at a glance. */
+  .open-questions { padding: 0.6rem 0.8rem; border-radius: 4px;
+                    margin: 0.5rem 0; background: #eef5ff;
+                    border-left: 4px solid #3a6db5; font-size: 13px;
+                    line-height: 1.5 }
+  .open-questions .oq-header { font-weight: 600; color: #234e85;
+                               margin-bottom: 0.3rem }
+  .open-questions ul.oq-entries { list-style: disc inside; padding: 0;
+                                  margin: 0 }
+  .open-questions ul.oq-entries li { padding: 0.15rem 0;
+                                     font-size: 12px; color: #333 }
 </style>"""
 
 
@@ -967,6 +984,42 @@ def _format_pending_queue_ts(ts: str) -> str:
     return m.group(1) if m else str(ts)
 
 
+def _render_open_questions(cfg: Config) -> str:
+    """Render the ideator's `## Open questions for operator` card (TB-173).
+
+    Reads `.cc-autopilot/ideation_state.md` via `parse_open_questions` and
+    renders each bullet as one `<li>` so the operator can scan the list
+    visually. Returns the empty string when the helper returns ``[]``
+    (file or section missing, or section empty) so the home renderer can
+    omit the card entirely — server-side omission, not CSS-hidden — and
+    fresh projects don't see a perpetual "0 open questions" card.
+
+    Mirrors the omit-on-empty + plural-aware-header shape of
+    `_render_pending_queue`; the visual palette differs (blue, not amber)
+    so the operator can tell the two cards apart at a glance.
+    """
+    from .ideation import parse_open_questions
+
+    entries = parse_open_questions(
+        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    )
+    if not entries:
+        return ""
+    rows = "".join(
+        f"<li>{html.escape(entry)}</li>" for entry in entries
+    )
+    plural = "" if len(entries) == 1 else "s"
+    return (
+        '<div class="open-questions">'
+        f'<div class="oq-header">'
+        f'{len(entries)} open question{plural} for operator '
+        f'(from <a href="/ideation_state">ideation_state.md</a>)'
+        f'</div>'
+        f'<ul class="oq-entries">{rows}</ul>'
+        '</div>'
+    )
+
+
 def _render_pending_queue(cfg: Config) -> str:
     """Render the pending-operator-queue card for the `/` index page.
 
@@ -1046,6 +1099,15 @@ def _render_home(cfg: Config) -> str:
     if paused:
         status += ' <span class="paused">[paused]</span>'
 
+    # TB-173: ideator-surfaced "Open questions for operator" preamble.
+    # The helper returns "" when `.cc-autopilot/ideation_state.md` has
+    # no `## Open questions for operator` section (or it's empty), so
+    # the card is omitted entirely on the steady-state happy path. When
+    # non-empty, sits ABOVE `_render_pending_queue` since ideator
+    # questions tend to ask for goal.md edits / focus-item rotations
+    # (operator-judgement work) while pending ops are mechanical and
+    # imminent — surfacing the judgement work first reflects priority.
+    open_questions_html = _render_open_questions(cfg)
     # TB-162: pending-operator-queue preamble. The helper returns "" when
     # the queue file is empty / fully drained, so the card is omitted
     # entirely on the steady-state happy path; non-empty queues get a
@@ -1065,6 +1127,7 @@ def _render_home(cfg: Config) -> str:
                       "Complete", "Frozen")
         )
         + "</div>"
+        f"{open_questions_html}"
         f"{pending_html}"
         f'<h2>events <span class="meta">— last 30, newest first '
         f'(<a href="/events">all</a>)</span></h2>'

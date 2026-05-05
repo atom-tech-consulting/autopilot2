@@ -134,6 +134,14 @@ Body shape (when posting):
   VERBATIM as one of your bullets so the operator sees which TB-Ns
   are waiting on `ap2 approve` without having to grep TASKS.md. If
   the line is absent, omit the bullet — there's nothing to surface.
+- TB-173: if the snapshot's `## Current state` block carries an
+  `- Open questions for operator (N): ...` line, copy that line
+  VERBATIM as one of your bullets too. The ideator surfaces this
+  section when a focus item is `exhausted-needs-operator`, when
+  goal.md appears to need updating, or when a gap was noticed
+  outside any current focus item — operator-judgement work that
+  needs visibility on the report. If the line is absent, omit the
+  bullet — there's nothing to surface.
 
 After posting (or skipping), call
 `log_event(type="status_report", summary="<one sentence>")` so the
@@ -352,6 +360,25 @@ async def run_status_report(
             f"- Pending operator review ({len(pending_ids)}): "
             f"{_format_pending_review_line(pending_ids)} "
             "— `ap2 approve TB-N`"
+        )
+    # TB-173: surface the ideator's `## Open questions for operator`
+    # section so the cron status-report carries the same escalation
+    # signal as the CLI / web home (single source of truth via
+    # `parse_open_questions`). Bullets joined with `; ` so the line
+    # mirrors the CLI text rendering — the agent then forwards the line
+    # verbatim into the Mattermost post per the prompt's contract below.
+    # When the file or section is absent / empty the helper returns []
+    # and we skip the line entirely so a clean board doesn't grow a
+    # noisy "0 open questions" bullet.
+    from .ideation import parse_open_questions
+
+    open_questions = parse_open_questions(
+        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    )
+    if open_questions:
+        state_extras.append(
+            f"- Open questions for operator ({len(open_questions)}): "
+            + "; ".join(open_questions)
         )
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,

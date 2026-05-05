@@ -138,6 +138,18 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         if t.blocked_on and all(b.lower() == "review" for b in t.blocked_on)
     ]
     pending_review = len(pending_review_ids)
+    # TB-173: surface the ideator's `## Open questions for operator`
+    # section from `.cc-autopilot/ideation_state.md` so questions
+    # surfaced at ideation time reach the operator without manual
+    # file-reading. JSON carries the full helper output (capped at 7 by
+    # `parse_open_questions`); the text-mode rendering below truncates
+    # to the first 5 with a "(+M more)" suffix to keep the status
+    # block compact, mirroring TB-151's pending-review pattern.
+    from .ideation import parse_open_questions
+
+    open_questions = parse_open_questions(
+        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    )
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -169,6 +181,10 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # external monitors). The `pending_review` count is kept
             # for backward compat with anything that already parsed it.
             "pending_review_ids": pending_review_ids,
+            # TB-173: the ideator's open-questions list, untruncated.
+            # Empty list when the file or section is absent — that's
+            # the steady-state happy path for fresh projects.
+            "open_questions": open_questions,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -203,6 +219,31 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(
             f"review:   {pending_review} pending — {ids_line}\n"
             f"          (`ap2 approve TB-N`)"
+        )
+    if open_questions:
+        # TB-173: surface ideator-surfaced questions from
+        # `ideation_state.md` so operator escalation reaches the CLI
+        # without a manual file read. Truncate per-bullet to ~80 chars
+        # with an ellipsis; cap at the first 5 bullets with a
+        # "(+M more)" tail so the status block stays compact (mirrors
+        # TB-151's pending-review-line shape).
+        _OPEN_QUESTIONS_RENDER_CAP = 5
+        _OPEN_QUESTIONS_BULLET_MAX_CHARS = 80
+        rendered: list[str] = []
+        for bullet in open_questions[:_OPEN_QUESTIONS_RENDER_CAP]:
+            if len(bullet) > _OPEN_QUESTIONS_BULLET_MAX_CHARS:
+                rendered.append(
+                    bullet[: _OPEN_QUESTIONS_BULLET_MAX_CHARS - 3] + "..."
+                )
+            else:
+                rendered.append(bullet)
+        if len(open_questions) > _OPEN_QUESTIONS_RENDER_CAP:
+            rendered.append(
+                f"(+{len(open_questions) - _OPEN_QUESTIONS_RENDER_CAP} more)"
+            )
+        print(
+            f"open questions for operator ({len(open_questions)}): "
+            + "; ".join(rendered)
         )
     nxt = board.next_ready()
     if nxt:

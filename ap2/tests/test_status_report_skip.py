@@ -635,6 +635,106 @@ def test_status_report_prompt_instructs_forwarding_pending_review_line():
 
 
 # ---------------------------------------------------------------------------
+# TB-173: ideator open-questions snapshot block + agent-prompt forwarder.
+#
+# Mirrors the TB-151 plumbing pattern: `parse_open_questions` reads the
+# `## Open questions for operator` section from
+# `.cc-autopilot/ideation_state.md` and the routine injects an
+# "Open questions for operator (N): ..." line into the snapshot's
+# state_extras. The prompt body separately tells the agent to forward
+# the line VERBATIM into the posted Mattermost report.
+
+
+def _seed_ideation_state(cfg: Config, body: str) -> None:
+    path = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+
+
+def test_run_status_report_injects_open_questions_line_when_present(
+    tmp_path, monkeypatch,
+):
+    """When ideation_state.md has a non-empty open-questions section, the
+    routine injects an "Open questions for operator (N): ..." line into
+    `state_extras` so the agent's snapshot block carries it. Pins the
+    state_extras → build_control_prompt plumbing for TB-173."""
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+    _seed_ideation_state(
+        cfg,
+        "## Open questions for operator\n\n"
+        "- Should goal.md declare a new focus?\n"
+        "- Approve or reject TB-171 / TB-172 / TB-173.\n"
+        "- Insights index still empty.\n",
+    )
+
+    captured: dict[str, str] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        captured["extras"] = "\n".join(state_extras or [])
+        return "stub"
+
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", _capture_prompt)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    extras = captured["extras"]
+    # Snapshot line carries the count + each bullet joined by `; ` so the
+    # agent can copy it verbatim into the report's bullet list.
+    assert "Open questions for operator (3):" in extras
+    assert "Should goal.md declare a new focus?" in extras
+    assert "Approve or reject TB-171 / TB-172 / TB-173." in extras
+    assert "Insights index still empty." in extras
+
+
+def test_run_status_report_omits_open_questions_line_when_empty(
+    tmp_path, monkeypatch,
+):
+    """No ideation_state.md / no section → snapshot has no open-questions
+    line, so a routine post doesn't grow a noisy "0 open questions"
+    bullet. Mirrors the omit-on-zero shape of the pending-review line."""
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+    # No ideation_state.md created.
+
+    captured: dict[str, list[str]] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        captured["extras"] = list(state_extras or [])
+        return "stub"
+
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", _capture_prompt)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    # No open-questions line in the extras — list may still carry other
+    # entries (e.g. the pending-review line) but nothing about
+    # "Open questions for operator".
+    joined = "\n".join(captured["extras"])
+    assert "Open questions for operator" not in joined
+
+
+def test_status_report_prompt_instructs_forwarding_open_questions_line():
+    """The canonical STATUS_REPORT_PROMPT body must tell the agent to
+    forward the "Open questions for operator" snapshot line into the
+    posted Mattermost report verbatim. Without this instruction the
+    snapshot line lands in the agent's context but not in the operator-
+    visible report — same failure shape as the TB-151 pin above."""
+    from ap2.status_report import STATUS_REPORT_PROMPT
+
+    body = STATUS_REPORT_PROMPT
+    assert "Open questions for operator" in body
+    # Forwarding rule must be explicit somewhere in the prompt body.
+    assert "verbatim" in body.lower() or "VERBATIM" in body
+
+
+# ---------------------------------------------------------------------------
 # TB-156: per-call-site effort knob for the status-report routine.
 #
 # Status-report is a pure summarization job (read events tail, render
