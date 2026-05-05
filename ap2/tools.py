@@ -346,6 +346,7 @@ def _validate_briefing_structure(
     briefing_text: str,
     *,
     goal_md_path: "Path | None" = None,
+    skip_goal_alignment: bool = False,
 ) -> str | None:
     """TB-154 + TB-161 + TB-164: structural gate for a freshly-authored briefing.
 
@@ -384,6 +385,17 @@ def _validate_briefing_structure(
          ships, was it useful?"), and the author must articulate that
          test in writing. Skipped when the briefing text is empty (the
          TB-135 non-empty gate handles that case with a clearer error).
+
+    `skip_goal_alignment=True` (TB-170) is the operator-CLI escape
+    hatch: it skips checks (4) and (5) but runs every other validation
+    unchanged. Used by `ap2 add --skip-goal-alignment` /
+    `ap2 update --skip-goal-alignment` so an operator filing a
+    legitimately-meta task (dependency bump, doc fix, infra
+    maintenance) doesn't have to manufacture goal-alignment prose for
+    a one-line typo fix. The bypass is operator-CLI-only — ideation,
+    MM handler, and other control agents do NOT propagate this kwarg
+    (the validators were designed for the human-out-of-the-loop case
+    where ideation has no operator review).
 
     Returns `None` when the briefing passes; an error-message string
     naming the missing/misnamed/empty section otherwise. The message
@@ -436,6 +448,16 @@ def _validate_briefing_structure(
             "prose) to score against the agent's diff. "
             f"{_BRIEFING_STRUCTURE_HINT}"
         )
+    # TB-170: operator-CLI escape hatch. When `skip_goal_alignment=True`,
+    # the TB-161 goal-anchor and TB-164 Why-now checks are skipped while
+    # every other gate above (TB-154 canonical sections, TB-138 verifiable
+    # bullets via `parse_verification_section`, TB-135 non-empty
+    # Verification) keeps firing. The bypass is opt-in at the operator
+    # CLI surface only; ideation / MM handler / other control agents do
+    # NOT pass this kwarg, so autonomous proposals always go through the
+    # full goal-alignment gate.
+    if skip_goal_alignment:
+        return None
     # TB-161: goal-anchor check. Runs only when goal.md is parseable and
     # contributes derivable anchors — a fresh project whose goal.md is
     # still the all-placeholder template short-circuits to "skip" so we
@@ -1265,9 +1287,15 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         # nor materialize an orphan briefing under `.cc-autopilot/tasks/`.
         # TB-161: also passes `goal_md_path` so the goal-anchor check
         # fires here (queue-append-time hard gate).
+        # TB-170: `skip_goal_alignment=True` (operator-CLI-only) skips
+        # the TB-161 + TB-164 goal-alignment gates while running every
+        # other check unchanged. The flag rides on the queue payload
+        # so the drain side can re-validate symmetrically.
+        skip_goal_alignment = bool(args.get("skip_goal_alignment"))
         struct_err = _validate_briefing_structure(
             briefing_content or "",
             goal_md_path=cfg.project_root / "goal.md",
+            skip_goal_alignment=skip_goal_alignment,
         )
         if struct_err:
             return _err(struct_err)
@@ -1325,6 +1353,14 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                 "meta": meta,
                 "briefing_path": briefing_rel,
             }
+            # TB-170: persist the operator's bypass intent on the queue
+            # record so the drain-side audit line can decorate the
+            # `applied operator-queued add_backlog → TB-N` line with
+            # `(goal-alignment check skipped)` when set. Default-false
+            # preserves the historical record shape — only operator-CLI
+            # adds with `--skip-goal-alignment` carry the flag.
+            if skip_goal_alignment:
+                rec_args["skip_goal_alignment"] = True
             rec: dict[str, Any] = {
                 "uuid": rec_uuid,
                 "op": op,
@@ -1507,10 +1543,16 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             # TB-154's first attempt: a briefing replaced via `update`
             # could otherwise still slip past the structural check the
             # `add_*` paths now enforce.
+            # TB-170: `skip_goal_alignment=True` from the CLI bypasses
+            # TB-161 + TB-164 on briefing-content edits as well. Runs
+            # every other validation (TB-154 canonical sections,
+            # parseable + non-empty Verification) unchanged.
+            update_skip_goal_alignment = bool(args.get("skip_goal_alignment"))
             if has_briefing_edit:
                 struct_err = _validate_briefing_structure(
                     str(briefing_content),
                     goal_md_path=cfg.project_root / "goal.md",
+                    skip_goal_alignment=update_skip_goal_alignment,
                 )
                 if struct_err:
                     return _err(struct_err)
@@ -1571,6 +1613,13 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                     "explicit clears."
                 )
             rec_args["fields"] = fields
+            # TB-170: persist the bypass intent on the queue record. Only
+            # meaningful when the update carried a briefing edit (the
+            # validator only fires on briefing-content updates), but
+            # storing it unconditionally keeps the audit-line shape
+            # consistent across record types.
+            if update_skip_goal_alignment:
+                rec_args["skip_goal_alignment"] = True
 
     # Non-add ops: no preallocation, no lock needed for the queue write
     # (the record is opaque to `_allocate_id`'s queue-max scan).
@@ -1965,7 +2014,19 @@ def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
     # decisions; the `(forced)` decoration is the human-readable signal.
     if op == "ideate":
         arrow = " → (forced)"
-    lines: list[str] = [f"- {ts} — applied operator-queued {op}{arrow}\n"]
+    # TB-170: when the operator-CLI bypass flag was set on an add_* /
+    # update op, decorate the audit line with `(goal-alignment check
+    # skipped)` so future ideation cycles can grep operator_log.md for
+    # the `goal-alignment check skipped` substring and decide whether
+    # to count the task toward "operator-validated work" vs
+    # "operator-bypassed-validation work" — useful signal for the
+    # rejection-reasons loop (TB-152) without a separate event type.
+    suffix = ""
+    if args.get("skip_goal_alignment"):
+        suffix = " (goal-alignment check skipped)"
+    lines: list[str] = [
+        f"- {ts} — applied operator-queued {op}{arrow}{suffix}\n"
+    ]
     if op == "reject":
         # TB-152: in addition to the standard `applied operator-queued
         # reject → TB-N` audit line above (so the reject vs. delete

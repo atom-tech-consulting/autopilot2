@@ -2314,3 +2314,310 @@ def test_tb154_operator_queue_append_docstring_carries_canonical_template():
         )
     # And the rejection contract is named so the agent reads it.
     assert "TB-154" in src
+
+
+# ---------------------------------------------------------------------------
+# TB-170: `--skip-goal-alignment` operator-CLI escape hatch from the
+# TB-161 goal-cite + TB-164 Why-now checks. The bypass is opt-in via
+# the kwarg on `_validate_briefing_structure` and rides on the operator-
+# queue payload as `skip_goal_alignment: true`. Every other validation
+# (canonical sections, parseable + non-empty Verification, single-line
+# title/tags/description) still fires.
+
+
+_TB170_NO_ALIGNMENT_BRIEFING = (
+    # Canonical-shape briefing that intentionally fails BOTH TB-161
+    # (Goal body cites no goal.md anchor) and TB-164 (no Why-now
+    # marker). With `skip_goal_alignment=False` the validator must
+    # reject; with True it must accept (every other gate passes).
+    "# tb-170 op-cli bypass\n\n"
+    "## Goal\n\nFix a one-line typo in a comment.\n\n"
+    "## Scope\n\n- foo.py\n\n"
+    "## Design\n\nDirect edit.\n\n"
+    "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+    "## Out of scope\n\n- nothing\n"
+)
+
+
+def test_validate_briefing_structure_signature_exposes_skip_goal_alignment():
+    """`_validate_briefing_structure(skip_goal_alignment=...)` is the
+    contract the CLI / queue-append callers wire onto. Pin via
+    `inspect.signature` so a refactor that drops the kwarg gets caught
+    immediately."""
+    import inspect
+    sig = inspect.signature(tools._validate_briefing_structure)
+    assert "skip_goal_alignment" in sig.parameters
+    p = sig.parameters["skip_goal_alignment"]
+    # Default-False so every existing caller (ideation / MM handler /
+    # migrate-to-ap2) keeps running every check unchanged.
+    assert p.default is False
+
+
+def test_validate_briefing_skip_goal_alignment_bypasses_anchor_and_why_now(
+    tmp_path,
+):
+    """A briefing that's canonically-shaped but lacks BOTH the goal-
+    anchor citation AND the Why-now marker:
+      - rejected with `skip_goal_alignment=False` (default, the
+        TB-161/164 gate fires).
+      - accepted with `skip_goal_alignment=True` (the operator-CLI
+        bypass).
+    Pin: the bypass is the ONE behavior change; every other validation
+    still fires (covered by the other tests below).
+    """
+    # Use a real goal.md so the TB-161 anchor check has anchors to miss.
+    goal_md = tmp_path / "goal.md"
+    goal_md.write_text(
+        "# Project Goals\n\n"
+        "## Mission\nOne-sentence statement of project purpose.\n\n"
+        "## Done when\n"
+        "- Operators can run the full pipeline without intervention.\n\n"
+        "## Current focus: ideation quality\n\nstuff\n"
+    )
+
+    # Default behavior: rejected.
+    err = tools._validate_briefing_structure(
+        _TB170_NO_ALIGNMENT_BRIEFING, goal_md_path=goal_md,
+    )
+    assert err is not None, (
+        "default validator must reject a no-anchor + no-why-now briefing"
+    )
+
+    # With the bypass: accepted.
+    err_bypass = tools._validate_briefing_structure(
+        _TB170_NO_ALIGNMENT_BRIEFING,
+        goal_md_path=goal_md,
+        skip_goal_alignment=True,
+    )
+    assert err_bypass is None, (
+        f"skip_goal_alignment=True must accept a briefing that fails only "
+        f"TB-161/164; got: {err_bypass!r}"
+    )
+
+
+def test_validate_briefing_skip_goal_alignment_still_fires_other_checks(
+    tmp_path,
+):
+    """The bypass is scoped to TB-161/164 — every OTHER validator keeps
+    firing even when the flag is True. Concretely: a missing
+    `## Verification` section is still rejected, a parseable but empty
+    Verification is still rejected, and a missing canonical section
+    (e.g. `## Scope`) is still rejected. Pinning at least the missing-
+    Verification case per the briefing's verification scope."""
+    # 1. Missing `## Verification` — TB-154 canonical-sections gate.
+    missing_verif = (
+        "# missing-verif via skip\n\n"
+        "## Goal\n\nFix a one-line typo.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(
+        missing_verif, skip_goal_alignment=True,
+    )
+    assert err is not None, (
+        "skip_goal_alignment must NOT bypass the missing-Verification gate"
+    )
+    assert "## Verification" in err
+
+    # 2. Empty Verification — TB-138 / TB-154 parseable-but-empty gate.
+    empty_verif = (
+        "# empty-verif via skip\n\n"
+        "## Goal\n\nFix a one-line typo.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Verification\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err2 = tools._validate_briefing_structure(
+        empty_verif, skip_goal_alignment=True,
+    )
+    assert err2 is not None
+    assert "empty" in err2.lower()
+
+    # 3. Missing `## Scope` — covers the broader canonical-sections gate.
+    missing_scope = (
+        "# missing-scope via skip\n\n"
+        "## Goal\n\nFix a one-line typo.\n\n"
+        "## Design\n\nstub\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err3 = tools._validate_briefing_structure(
+        missing_scope, skip_goal_alignment=True,
+    )
+    assert err3 is not None
+    assert "## Scope" in err3
+
+
+def test_validate_briefing_skip_goal_alignment_default_preserves_behavior():
+    """Pin the default-False kwarg: every existing call site that omits
+    the kwarg sees the same TB-161/164 enforcement as before TB-170.
+    Concretely: a no-why-now briefing is rejected when the kwarg is
+    omitted, identical to the pre-TB-170 contract."""
+    body = (
+        "# default-still-strict\n\n"
+        "## Goal\n\nA prose-only goal that never says the magic words.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nA thing.\n\n"
+        "## Verification\n\n- `uv run pytest -q`\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None
+    assert "Why now" in err and "TB-164" in err
+
+
+def test_queue_append_skip_goal_alignment_accepts_and_persists_flag(
+    cfg, tmp_path,
+):
+    """End-to-end at the queue-append boundary: a no-anchor + no-why-now
+    briefing routed through `do_operator_queue_append` with
+    `skip_goal_alignment=True` is ACCEPTED (the bypass works) and the
+    queue record carries `skip_goal_alignment: true` so the drain-side
+    audit line can decorate the operator_log.md entry."""
+    # Use the cfg's goal.md path — the validator falls back to "skip
+    # the anchor check" when goal.md is the placeholder template, so
+    # we need to seed real anchors to actually exercise the bypass.
+    goal_md = cfg.project_root / "goal.md"
+    goal_md.write_text(
+        "# Project Goals\n\n"
+        "## Mission\nOne-sentence statement of project purpose.\n\n"
+        "## Done when\n"
+        "- Operators can run the full pipeline without intervention.\n\n"
+        "## Current focus: ideation quality\n\nstuff\n"
+    )
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "operator-meta typo fix",
+            "briefing": _TB170_NO_ALIGNMENT_BRIEFING,
+            "skip_goal_alignment": True,
+        },
+    )
+    body = _unwrap(res)
+    assert body["task_id"].startswith("TB-")
+    # Queue record carries the flag so the drain-side audit line can
+    # surface it.
+    qpath = tools.operator_queue_path(cfg)
+    lines = [
+        json.loads(ln) for ln in qpath.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 1
+    rec = lines[0]
+    assert rec["op"] == "add_backlog"
+    assert rec["args"].get("skip_goal_alignment") is True
+
+
+def test_queue_append_without_skip_flag_rejects_no_alignment_briefing(
+    cfg, tmp_path,
+):
+    """Pin the default contract: WITHOUT `skip_goal_alignment=True`, the
+    same briefing routed through `do_operator_queue_append` is REJECTED
+    by TB-161/164 — the queue stays empty, no briefing file leaks."""
+    goal_md = cfg.project_root / "goal.md"
+    goal_md.write_text(
+        "# Project Goals\n\n"
+        "## Mission\nstuff.\n\n"
+        "## Done when\n"
+        "- Operators can run the full pipeline without intervention.\n\n"
+        "## Current focus: ideation quality\n\nstuff\n"
+    )
+    pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "would-be-meta but no flag",
+            "briefing": _TB170_NO_ALIGNMENT_BRIEFING,
+        },
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    # Either TB-161 (anchor) or TB-164 (why-now) must surface — both are
+    # designed to fire on this briefing without the bypass.
+    assert "TB-161" in text or "TB-164" in text or "Why now" in text
+    # No briefing file leaked.
+    post_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    assert post_tasks_dir == pre_tasks_dir
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_queue_append_skip_flag_does_not_bypass_other_validators(
+    cfg, tmp_path,
+):
+    """Pin scope of the bypass at the queue-append boundary: a briefing
+    missing `## Verification` is still rejected even with the flag
+    set, and a multi-line title is still rejected. The flag only
+    covers TB-161 + TB-164."""
+    # Missing Verification — canonical-sections gate must still fire.
+    missing_verif = (
+        "# missing-verif via queue + skip\n\n"
+        "## Goal\n\nFix a one-line typo.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "no verif",
+            "briefing": missing_verif,
+            "skip_goal_alignment": True,
+        },
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "## Verification" in text
+
+
+def test_skip_goal_alignment_only_applies_at_queue_append_when_flag_set(
+    cfg, tmp_path,
+):
+    """Pin the bypass scope: ideation-style callers that DO NOT pass
+    `skip_goal_alignment` always run the full goal-alignment gate
+    regardless of payload. Concretely: `do_board_edit` (the ideation /
+    control-agent surface) refuses a no-anchor + no-why-now briefing —
+    no bypass for ideation. The goal.md anchor check is what fires
+    here, mirroring the queue-append path with a real goal.md.
+    """
+    goal_md = cfg.project_root / "goal.md"
+    goal_md.write_text(
+        "# Project Goals\n\n"
+        "## Mission\nstuff.\n\n"
+        "## Done when\n"
+        "- Operators can run the full pipeline without intervention.\n\n"
+        "## Current focus: ideation quality\n\nstuff\n"
+    )
+    # Even if `skip_goal_alignment=True` is in the payload, `do_board_edit`
+    # ignores it (the kwarg is operator-CLI-only by design — passed only
+    # through the queue-append path). Validator runs the full gate.
+    res = tools.do_board_edit(
+        cfg,
+        {
+            "action": "add_backlog",
+            "title": "ideation-style with bogus flag",
+            "briefing": _TB170_NO_ALIGNMENT_BRIEFING,
+            "skip_goal_alignment": True,  # ignored on this surface
+        },
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    # TB-161 (anchor) or TB-164 (why-now) surfaces — bypass NOT honored.
+    assert "TB-161" in text or "TB-164" in text or "Why now" in text
+
+
+def test_validate_briefing_skip_goal_alignment_unit_function_pure():
+    """Direct-call pin without any cfg / fixture: pure function semantics.
+    Useful for the prose verification bullet that pins the kwarg
+    contract specifically."""
+    body = _TB170_NO_ALIGNMENT_BRIEFING
+    # Without the kwarg → reject (TB-164 fires regardless of goal.md).
+    err = tools._validate_briefing_structure(body)
+    assert err is not None
+    # With the kwarg → accept.
+    err2 = tools._validate_briefing_structure(body, skip_goal_alignment=True)
+    assert err2 is None

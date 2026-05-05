@@ -497,6 +497,9 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
     # directly. The TB-N is pre-allocated synchronously (so we can print
     # it immediately), the briefing file is pre-written, and only the
     # TASKS.md insertion is deferred until the daemon's next tick.
+    # TB-170: forward the operator-CLI `--skip-goal-alignment` opt-in onto
+    # the queue payload so the queue-append-time validator (and the
+    # drain-side audit line) sees the bypass intent.
     res = tools.do_operator_queue_append(
         cfg,
         {
@@ -506,6 +509,9 @@ def cmd_add(cfg: Config, args: argparse.Namespace) -> int:
             "description": "",
             "blocked_on": blocked,
             "briefing": briefing,
+            "skip_goal_alignment": bool(
+                getattr(args, "skip_goal_alignment", False)
+            ),
         },
     )
     if res.get("isError"):
@@ -612,6 +618,12 @@ def cmd_update(cfg: Config, args: argparse.Namespace) -> int:
         payload["blocked"] = blocked
 
     payload["force"] = bool(getattr(args, "force", False))
+    # TB-170: operator-CLI bypass of TB-161 + TB-164 on briefing-content
+    # edits. Only meaningful when `--briefing-file` is also set; harmless
+    # otherwise (the validator only fires on briefing edits, but the
+    # audit-line suffix still lands so operator intent is preserved).
+    if getattr(args, "skip_goal_alignment", False):
+        payload["skip_goal_alignment"] = True
 
     res = tools.do_operator_queue_append(cfg, payload)
     if res.get("isError"):
@@ -1191,6 +1203,26 @@ def build_parser() -> argparse.ArgumentParser:
              "as a `@blocked:<csv>` codespan on the task line so the parser "
              "never has to regex the description prose (TB-132).",
     )
+    # TB-170: operator-CLI escape hatch from the TB-161 goal-cite + TB-164
+    # Why-now checks. Use for legitimately-meta operator-filed work
+    # (dependency bumps, doc fixes, infra maintenance) where the
+    # validators were designed for ideation's human-out-of-the-loop case
+    # and shouldn't fire on a one-line typo fix. ALL OTHER validations
+    # (canonical Goal/Scope/Design/Verification/Out-of-scope, parseable +
+    # non-empty Verification, single-line title/tags/description) keep
+    # firing.
+    s.add_argument(
+        "--skip-goal-alignment",
+        action="store_true",
+        help="bypass the TB-161 goal-cite + TB-164 Why-now checks for "
+             "this operator-filed task (TB-170). Use for legitimately-"
+             "meta work (dependency bumps, doc fixes, infra "
+             "maintenance) where manufacturing goal-alignment prose "
+             "would be ceremony for its own sake. Other validations "
+             "still apply; the operator_log.md audit line is decorated "
+             "with `(goal-alignment check skipped)` so ideation Step 0 "
+             "can spot bypassed tasks.",
+    )
     s.set_defaults(func=cmd_add)
 
     s = sub.add_parser("init", help="scaffold gitignores + .cc-autopilot/tasks/ (idempotent)")
@@ -1293,6 +1325,20 @@ def build_parser() -> argparse.ArgumentParser:
              "Pipeline Pending. Has no effect on briefing-content "
              "edits — those are hard-refused on a running task "
              "regardless.",
+    )
+    # TB-170: same operator-CLI escape hatch as `ap2 add`. Only meaningful
+    # when the update carries a `--briefing-file` edit (the validator
+    # only fires on briefing-content changes); for board-line-only
+    # updates (title / tags / blocked / description) the flag is a
+    # no-op but the audit-line suffix still lands so the operator's
+    # intent is preserved in the log.
+    s.add_argument(
+        "--skip-goal-alignment",
+        action="store_true",
+        help="bypass the TB-161 goal-cite + TB-164 Why-now checks on "
+             "the briefing-content edit for this update (TB-170). "
+             "Operator-CLI-only escape hatch; mirrors `ap2 add "
+             "--skip-goal-alignment`.",
     )
     s.set_defaults(func=cmd_update)
 

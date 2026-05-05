@@ -1486,3 +1486,159 @@ def test_drain_ideate_idempotent_via_uuid(cfg: Config):
     evts = events.tail(cfg.events_file, 50)
     forced = [e for e in evts if e["type"] == "ideation_forced"]
     assert len(forced) == 1
+
+
+# ---------------------------------------------------------------------------
+# TB-170: `--skip-goal-alignment` operator-CLI bypass for the TB-161
+# goal-cite + TB-164 Why-now checks. The flag rides on the queue payload
+# (`skip_goal_alignment: true`); the queue-append validator honors it
+# (skipping TB-161 + TB-164 only) and the drain-side audit line in
+# operator_log.md is decorated with `(goal-alignment check skipped)` so
+# future ideation cycles can grep the bypassed tasks.
+
+
+_TB170_NO_ALIGNMENT_BRIEFING = (
+    "# operator-meta typo fix\n\n"
+    "## Goal\n\nFix a one-line typo in a comment.\n\n"
+    "## Scope\n\n- foo.py\n\n"
+    "## Design\n\nDirect edit.\n\n"
+    "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+    "## Out of scope\n\n- nothing\n"
+)
+
+
+def _seed_real_goal_md(cfg: Config) -> None:
+    """The TB-161 anchor check short-circuits to "skip" when goal.md
+    is the all-placeholder template; tests of the bypass need a real
+    goal.md so the no-anchor briefing actually trips the gate when the
+    bypass is OFF."""
+    (cfg.project_root / "goal.md").write_text(
+        "# Project Goals\n\n"
+        "## Mission\nOne-sentence statement of project purpose.\n\n"
+        "## Done when\n"
+        "- Operators can run the full pipeline without intervention.\n\n"
+        "## Current focus: ideation quality\n\nstuff\n"
+    )
+
+
+def test_queue_append_skip_goal_alignment_persists_flag_on_record(
+    cfg: Config,
+):
+    """End-to-end: a `do_operator_queue_append` with
+    `skip_goal_alignment=True` and a no-anchor + no-why-now briefing
+    is accepted, and the queued record carries
+    `args.skip_goal_alignment == True` so the drain-side audit line
+    can decorate operator_log.md."""
+    _seed_real_goal_md(cfg)
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "operator-meta typo fix",
+            "briefing": _TB170_NO_ALIGNMENT_BRIEFING,
+            "skip_goal_alignment": True,
+        },
+    )
+    body = _unwrap(res)
+    assert body["task_id"].startswith("TB-")
+
+    qpath = tools.operator_queue_path(cfg)
+    lines = [
+        json.loads(ln) for ln in qpath.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 1
+    assert lines[0]["args"].get("skip_goal_alignment") is True
+
+
+def test_drain_skip_goal_alignment_decorates_audit_line(cfg: Config):
+    """The drain-side audit line in operator_log.md gets the suffix
+    `(goal-alignment check skipped)` when the queued record carried
+    the flag. Future ideation cycles grep this substring to count
+    operator-bypassed tasks separately from operator-validated ones."""
+    _seed_real_goal_md(cfg)
+    body = _unwrap(tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "audited bypass",
+            "briefing": _TB170_NO_ALIGNMENT_BRIEFING,
+            "skip_goal_alignment": True,
+        },
+    ))
+    tools.drain_operator_queue(cfg)
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    # Standard line shape with the new suffix.
+    assert "applied operator-queued add_backlog" in log
+    assert body["task_id"] in log
+    assert "(goal-alignment check skipped)" in log
+
+
+def test_drain_without_flag_audit_line_unchanged(cfg: Config):
+    """No flag → no suffix. Pin the historical audit-line shape so the
+    decoration is visible only when the bypass was used."""
+    body = _unwrap(tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "default-validated add",
+            "briefing": _BRIEFING,
+        },
+    ))
+    tools.drain_operator_queue(cfg)
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "applied operator-queued add_backlog" in log
+    assert body["task_id"] in log
+    assert "(goal-alignment check skipped)" not in log
+
+
+def test_queue_append_without_skip_flag_rejects_no_alignment_briefing(
+    cfg: Config,
+):
+    """Pin the default contract at the queue-append boundary: WITHOUT
+    `skip_goal_alignment=True`, the same briefing is rejected by
+    TB-161/164 and no queue line is written. Mirrors the TB-154/161/164
+    "no leak on reject" pattern."""
+    _seed_real_goal_md(cfg)
+    pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "would-be-meta but no flag",
+            "briefing": _TB170_NO_ALIGNMENT_BRIEFING,
+        },
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "TB-161" in text or "TB-164" in text or "Why now" in text
+    post_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    assert post_tasks_dir == pre_tasks_dir
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_queue_append_skip_flag_does_not_bypass_other_validators(
+    cfg: Config,
+):
+    """Scope of the bypass: a briefing missing `## Verification` is
+    still rejected even with the flag set, and the canonical-sections
+    gate (TB-154) keeps firing. Pin via the missing-Verification case
+    per the briefing's verification scope."""
+    missing_verif = (
+        "# missing-verif via queue + skip\n\n"
+        "## Goal\n\nFix a one-line typo.\n\n"
+        "## Scope\n\n- foo.py\n\n"
+        "## Design\n\nstub\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "add_backlog",
+            "title": "no verif",
+            "briefing": missing_verif,
+            "skip_goal_alignment": True,
+        },
+    )
+    assert res.get("isError"), res
+    assert "## Verification" in res["content"][0]["text"]

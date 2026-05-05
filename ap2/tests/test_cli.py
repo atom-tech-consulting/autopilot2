@@ -764,6 +764,7 @@ def _add_args(
     briefing_file: str | None = None,
     no_verify: bool = False,
     blocked: str | None = None,
+    skip_goal_alignment: bool = False,
 ) -> Namespace:
     """Build a Namespace shaped like cmd_add's argparse output.
 
@@ -771,6 +772,8 @@ def _add_args(
     description live in the briefing. `_add_args` no longer accepts them.
     TB-132: `--blocked CSV` writes a `@blocked:<csv>` codespan onto the
     rendered task line.
+    TB-170: `--skip-goal-alignment` bypasses the TB-161 + TB-164 goal-
+    alignment checks for operator-driven exceptions.
     """
     return Namespace(
         section=section,
@@ -778,6 +781,7 @@ def _add_args(
         briefing_file=briefing_file,
         no_verify=no_verify,
         blocked=blocked,
+        skip_goal_alignment=skip_goal_alignment,
     )
 
 
@@ -1506,8 +1510,13 @@ def _update_args(
     clear_blocked: bool = False,
     briefing_file: str | None = None,
     force: bool = False,
+    skip_goal_alignment: bool = False,
 ) -> Namespace:
-    """Build a Namespace shaped like cmd_update's argparse output."""
+    """Build a Namespace shaped like cmd_update's argparse output.
+
+    TB-170: `--skip-goal-alignment` bypasses TB-161 + TB-164 on
+    briefing-content edits for operator-driven exceptions.
+    """
     return Namespace(
         task_id=task_id,
         title=title,
@@ -1518,6 +1527,7 @@ def _update_args(
         clear_blocked=clear_blocked,
         briefing_file=briefing_file,
         force=force,
+        skip_goal_alignment=skip_goal_alignment,
     )
 
 
@@ -1850,6 +1860,199 @@ def test_cmd_update_argparse_supports_clear_flags(tmp_path: Path):
     )
     assert args.clear_tags is True
     assert args.clear_blocked is True
+
+
+# ---------------------------------------------------------------------------
+# TB-170: `--skip-goal-alignment` operator-CLI escape hatch from the
+# TB-161 goal-cite + TB-164 Why-now checks. The flag is wired in BOTH
+# `ap2 add` and `ap2 update` subparsers; cmd_add/cmd_update forward it
+# onto the operator-queue payload as `skip_goal_alignment: true`.
+
+
+_TB170_NO_ALIGNMENT_BRIEFING = (
+    # Canonical-shape briefing that intentionally fails BOTH TB-161
+    # (Goal body cites no goal.md anchor) and TB-164 (no Why-now
+    # marker). Used to exercise the bypass end-to-end.
+    "# operator-meta typo fix\n\n"
+    "## Goal\n\nFix a one-line typo in a comment.\n\n"
+    "## Scope\n\n- foo.py\n\n"
+    "## Design\n\nDirect edit.\n\n"
+    "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+    "## Out of scope\n\n- nothing\n"
+)
+
+
+def _seed_real_goal_md(cfg: Config) -> None:
+    """The validator's TB-161 anchor check short-circuits to "skip"
+    when goal.md is the all-placeholder template. Tests of the bypass
+    need a real goal.md so the no-anchor briefing actually trips the
+    gate when the bypass is OFF."""
+    (cfg.project_root / "goal.md").write_text(
+        "# Project Goals\n\n"
+        "## Mission\nOne-sentence statement of project purpose.\n\n"
+        "## Done when\n"
+        "- Operators can run the full pipeline without intervention.\n\n"
+        "## Current focus: ideation quality\n\nstuff\n"
+    )
+
+
+def test_cmd_add_skip_goal_alignment_succeeds(tmp_path: Path):
+    """`ap2 add --skip-goal-alignment --briefing-file <no-anchor-no-why-now>`
+    succeeds: the queue-append payload carries `skip_goal_alignment:
+    true`, the queue drains, and TASKS.md contains the new task. This
+    is the end-to-end happy-path proof that the operator can file a
+    legitimately-meta task without manufacturing goal-alignment prose.
+    """
+    cfg = _project(tmp_path)
+    _seed_real_goal_md(cfg)
+    brief = tmp_path / "no-alignment.md"
+    brief.write_text(_TB170_NO_ALIGNMENT_BRIEFING)
+
+    rc = cmd_add(
+        cfg,
+        _add_args(
+            briefing_file=str(brief),
+            skip_goal_alignment=True,
+        ),
+    )
+    assert rc == 0
+
+    # Payload-on-disk pin: the queue record carries the flag so the
+    # drain-side audit can decorate operator_log.md.
+    qpath = tools.operator_queue_path(cfg)
+    import json as _json
+    lines = [
+        _json.loads(ln) for ln in qpath.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 1
+    assert lines[0]["args"].get("skip_goal_alignment") is True
+
+    # Drain → TASKS.md contains the new task.
+    _drain(cfg)
+    board = Board.load(cfg.tasks_file)
+    titles = [t.title for t in board.iter_tasks()]
+    assert "operator-meta typo fix" in titles
+
+
+def test_cmd_add_without_flag_rejects_no_alignment_briefing(
+    tmp_path: Path, capsys
+):
+    """Pin the default contract: WITHOUT `--skip-goal-alignment`, the
+    same briefing is rejected by TB-161/164 — `cmd_add` exits non-zero
+    with a structural error, no queue line, no TASKS.md mutation."""
+    cfg = _project(tmp_path)
+    _seed_real_goal_md(cfg)
+    brief = tmp_path / "no-alignment.md"
+    brief.write_text(_TB170_NO_ALIGNMENT_BRIEFING)
+
+    pre_tasks = cfg.tasks_file.read_text()
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
+    assert rc == 1, "default cmd_add must reject a no-anchor + no-why-now briefing"
+    err = capsys.readouterr().err
+    # Either TB-161 (anchor) or TB-164 (why-now) surfaces.
+    assert (
+        "TB-161" in err or "TB-164" in err or "Why now" in err
+        or "anchor" in err.lower()
+    ), err
+    # Nothing landed.
+    assert cfg.tasks_file.read_text() == pre_tasks
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_cmd_add_skip_goal_alignment_audit_line_decorated(tmp_path: Path):
+    """When the flag is set on `ap2 add`, the drain-side audit line in
+    operator_log.md is decorated with `(goal-alignment check skipped)`
+    so future ideation cycles can grep for the substring. Pins the
+    audit-line shape end-to-end (queue → drain → operator_log.md).
+    """
+    cfg = _project(tmp_path)
+    _seed_real_goal_md(cfg)
+    brief = tmp_path / "no-alignment.md"
+    brief.write_text(_TB170_NO_ALIGNMENT_BRIEFING)
+
+    rc = cmd_add(
+        cfg,
+        _add_args(briefing_file=str(brief), skip_goal_alignment=True),
+    )
+    assert rc == 0
+    _drain(cfg)
+    log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    log = log_path.read_text()
+    assert "applied operator-queued add_backlog" in log
+    assert "(goal-alignment check skipped)" in log
+
+
+def test_cmd_add_without_flag_audit_line_unchanged(tmp_path: Path):
+    """Pin the no-suffix shape: when `--skip-goal-alignment` is NOT
+    passed, the drain-side audit line keeps the historical shape with
+    no suffix. Concretely: a goal-aligned briefing applied without the
+    flag does NOT land a `(goal-alignment check skipped)` substring in
+    operator_log.md."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "good.md"
+    brief.write_text(_GOOD_BRIEFING)
+
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
+    assert rc == 0
+    _drain(cfg)
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "applied operator-queued add_backlog" in log
+    # Audit suffix only present when the flag was set.
+    assert "(goal-alignment check skipped)" not in log
+
+
+def test_cmd_add_argparse_wires_skip_goal_alignment(tmp_path: Path):
+    """`ap2 add --skip-goal-alignment` parses to `args.skip_goal_alignment
+    is True`; absent it defaults to False. Argparse-side wiring belt-
+    and-suspenders so a refactor of `build_parser` can't silently drop
+    the flag."""
+    from ap2.cli import build_parser
+
+    p = build_parser()
+    args = p.parse_args(
+        [
+            "--project", str(tmp_path),
+            "add",
+            "--briefing-file", "-",
+            "--skip-goal-alignment",
+        ]
+    )
+    assert args.cmd == "add"
+    assert args.skip_goal_alignment is True
+
+    args2 = p.parse_args(
+        ["--project", str(tmp_path), "add", "--briefing-file", "-"]
+    )
+    assert args2.skip_goal_alignment is False
+
+
+def test_cmd_update_argparse_wires_skip_goal_alignment(tmp_path: Path):
+    """Symmetrical pin for `ap2 update --skip-goal-alignment`. The flag
+    must be wired in BOTH subparsers per the briefing's verification
+    (`grep -c '"--skip-goal-alignment"' ap2/cli.py` ≥ 2)."""
+    from ap2.cli import build_parser
+
+    p = build_parser()
+    args = p.parse_args(
+        [
+            "--project", str(tmp_path),
+            "update", "TB-700",
+            "--title", "x",
+            "--skip-goal-alignment",
+        ]
+    )
+    assert args.cmd == "update"
+    assert args.skip_goal_alignment is True
+
+    args2 = p.parse_args(
+        [
+            "--project", str(tmp_path),
+            "update", "TB-700",
+            "--title", "x",
+        ]
+    )
+    assert args2.skip_goal_alignment is False
 
 
 # ---------------------------------------------------------------------------
