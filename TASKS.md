@@ -8,8 +8,7 @@
 
 ## Backlog
 
-- [ ] **TB-172** **Briefing validator: lint shell-fenced `## Verification` bullets for known pitfalls (bare `python`, `grep` without `-r` on dir, bare-path-as-command)** `#autopilot` `#ideation` `#briefing` `#validation` `#shell-bullets` `@blocked:review` — Extend `_validate_briefing_structure` to scan shell-fenced bullets in `## Verification` for the TB-76-documented pitfalls (bare `python`, `grep` without `-r` on a directory arg, bare-path-as-command). Closes the TB-156 / TB-165 / TB-166 same-shape verification-fail pattern (3 tasks in 4 days, all needing follow-up commits to fix `grep -nE` → `grep -rnE` typos). [→ brief](.cc-autopilot/tasks/briefing-validator-lint-shell-fenced-ver.md)
-- [ ] **TB-173** **Surface ideation_state.md "Open questions for operator" in `ap2 status` and web home** `#autopilot` `#ideation` `#status` `#web` `#observability` `@blocked:review` — Promote `.cc-autopilot/ideation_state.md`'s `## Open questions for operator` section into `ap2 status` (text + JSON) and the web home page so ideator-surfaced questions reach the operator without manual file-reading. Closes the loop between Step 0 of the ideation cron (which writes the questions) and the operator's day-to-day surfaces (which today don't render them). [→ brief](.cc-autopilot/tasks/surface-ideation-state-md-open-questions.md)
+- [ ] **TB-173** **Surface ideation_state.md "Open questions for operator" in `ap2 status` and web home** `#autopilot` `#ideation` `#status` `#web` `#observability` — Promote `.cc-autopilot/ideation_state.md`'s `## Open questions for operator` section into `ap2 status` (text + JSON) and the web home page so ideator-surfaced questions reach the operator without manual file-reading. Closes the loop between Step 0 of the ideation cron (which writes the questions) and the operator's day-to-day surfaces (which today don't render them). [→ brief](.cc-autopilot/tasks/surface-ideation-state-md-open-questions.md)
 
 ## Pipeline Pending
 
