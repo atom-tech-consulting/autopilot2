@@ -49,3 +49,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-05T00:43:36Z — applied operator-queued approve → TB-173
 - 2026-05-05T00:45:45Z — applied operator-queued reject → TB-172
 - 2026-05-05T00:45:45Z — rejected ideation proposal → TB-172 (Briefing validator: lint shell-fenced `## Verification` bullets for known pitfalls (bare `python`, `grep` without `-r` on dir, bare-path-as-command)): it's wack-a-mole fix that only enumerate limited cases and generalize poorly to other project
+- 2026-05-05T23:02:57Z — applied operator-queued add_backlog → TB-176
