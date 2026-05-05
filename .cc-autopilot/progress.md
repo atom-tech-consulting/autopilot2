@@ -281,3 +281,9 @@
 - **Summary:** Added include_types allowlist kwarg to _events_block and build_control_prompt (default None preserves status-report behavior); defined IDEATION_RELEVANT_EVENT_TYPES (9 entries: task lifecycle, operator decisions, cron_proposed); wired _run_ideation to pass it; added unit tests (filter positive/negative, empty-after-filter fallback, default-no-kwarg backwards-compat, build_control_prompt forwarding) and an end-to-end ideation test asserting captured prompt has task_complete but not judge_call/cron_complete; full pytest suite (975 tests) passes.
 - **Files:** ap2/ideation.py, ap2/prompts.py, ap2/tests/test_prompts.py, ap2/tests/test_ideation_trigger.py
 - **Tests:** pass
+
+## [2026-05-05] TB-170: Add `--skip-goal-alignment` flag to `ap2 add` / `ap2 update` — bypass goal-cite + Why-now checks for operator-driven exceptions
+- **Commit:** `a47328e`
+- **Summary:** Added --skip-goal-alignment flag to ap2 add / ap2 update (TB-170): plumbed skip_goal_alignment kwarg through _validate_briefing_structure (TB-161 + TB-164 bypass only; every other gate fires), forwarded via do_operator_queue_append payload on add_* and update branches, decorated drain-side audit line with `(goal-alignment check skipped)` suffix, ideation/board_edit surface ignores the kwarg by design. 995 tests pass.
+- **Files:** ap2/cli.py, ap2/tools.py, ap2/tests/test_cli.py, ap2/tests/test_tools.py, ap2/tests/test_operator_queue.py
+- **Tests:** pass
