@@ -287,3 +287,9 @@
 - **Summary:** Added --skip-goal-alignment flag to ap2 add / ap2 update (TB-170): plumbed skip_goal_alignment kwarg through _validate_briefing_structure (TB-161 + TB-164 bypass only; every other gate fires), forwarded via do_operator_queue_append payload on add_* and update branches, decorated drain-side audit line with `(goal-alignment check skipped)` suffix, ideation/board_edit surface ignores the kwarg by design. 995 tests pass.
 - **Files:** ap2/cli.py, ap2/tools.py, ap2/tests/test_cli.py, ap2/tests/test_tools.py, ap2/tests/test_operator_queue.py
 - **Tests:** pass
+
+## [2026-05-05] TB-171: Briefing validator: reject `Manual:` bullets in `## Verification` at queue-append time
+- **Commit:** `4344cc2`
+- **Summary:** Extended _validate_briefing_structure with a line-by-line `## Verification` Manual: bullet scan via duplicated `_MANUAL_BULLET_RE` (keep-in-sync with check.py:144); added 7 tests in test_tools.py (reject default, case-insensitive variants, Out-of-scope accept, no-false-positive on inline prose, queue-append reject, update-op reject, cross-module in-sync pin); added one-liner cross-reference in ideation.default.md; full ap2 suite (1002 tests) passes.
+- **Files:** ap2/tools.py, ap2/tests/test_tools.py, ap2/ideation.default.md
+- **Tests:** pass
