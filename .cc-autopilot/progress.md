@@ -299,3 +299,9 @@
 - **Summary:** Added parse_open_questions(path) helper in ap2/ideation.py and wired it into ap2 status (text + JSON), the web home page (above the pending-queue card), and the cron status-report's state_extras + prompt-forwarding rule, with 22 new tests; full suite 1024 passed.
 - **Files:** ap2/ideation.py, ap2/cli.py, ap2/web.py, ap2/status_report.py, ap2/tests/test_ideation_state.py, ap2/tests/test_cli.py, ap2/tests/test_web.py, ap2/tests/test_status_report_skip.py
 - **Tests:** pass
+
+## [2026-05-05] TB-176: Add `ideate [force]` to MM handler chat-verb list (parity with `ap2 ideate` CLI)
+- **Commit:** `9df5a15`
+- **Summary:** Closed the verification gap from cb8dd51 (verification_failed on bullet 4) by adding ap2/tests/e2e/test_tb176_mm_ideate_routing.py with three tests that synthesize @claude-bot ideate / ideate force / ideate --force mentions through handle_message and assert the captured operator_queue_append calls land with op="ideate" and the expected force flag; full regression gate (1029 tests) passes.
+- **Files:** ap2/tests/e2e/test_tb176_mm_ideate_routing.py
+- **Tests:** pass
