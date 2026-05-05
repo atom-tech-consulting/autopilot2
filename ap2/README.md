@@ -71,13 +71,15 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 check` | One-shot data-integrity check — `TASKS.md` shape, briefing-link resolution, `cron.yaml` schema, JSON state parseability, insights front matter. `--json` for machine-readable. Exit 1 on errors, warnings don't fail. |
 | `ap2 start` | Start the daemon backgrounded. `--foreground` runs in-shell. |
 | `ap2 stop` | SIGTERM the daemon. `-f` for SIGKILL. |
-| `ap2 status` | Daemon liveness, board counts, cron jobs, next task. `--json`. |
+| `ap2 status` | Daemon liveness, board counts, cron jobs, pending operator queue ops, pending-review TB-Ns (TB-151), and the latest "Open questions for operator" from `ideation_state.md` (TB-173). `--json`. |
 | `ap2 logs -n 40` | Tail recent events. `--json`. |
 | `ap2 add "<title>"` | Append a task. `-s Ready\|Backlog\|Frozen` (default: `Backlog` — TB-167; operator-filed tasks land in triage alongside ideation proposals and the daemon auto-promotes when capacity opens), `-t #tag`, `-d <desc>`, `--briefing-file <path>`, `--no-verify`. |
 | `ap2 backlog <TB-N>` | Move any task to Backlog. |
 | `ap2 unfreeze <TB-N>` | Un-freeze + reset retry counter. Refuses if not in Frozen. |
 | `ap2 delete <TB-N>` | Permanently remove a task. Refuses Active/Ready without `--force`. Emits `task_deleted`. |
 | `ap2 reject <TB-N> [--reason "..."]` | Reject an ideation-proposed task (Backlog + `@blocked:review` only) AND capture the rejection reason in `.cc-autopilot/operator_log.md` so ideation Step 0 stops re-proposing it (TB-152). Drops the row + briefing same as `delete`. For non-proposals use `ap2 delete`. |
+| `ap2 ideate [--force]` | Manually trigger an ideation cycle (TB-159). Bypasses the cooldown / `AP2_IDEATION_DISABLED` / non-empty-Ready-or-Backlog gates. Refuses if a task is currently Active unless `--force`. Forced runs still call `mark_run`, so the next natural cooldown resets. |
+| `ap2 update <TB-N> [--title ...] [--tags ...] [--description ...] [--blocked ...] [--briefing-file ...]` | In-place edit of a queued task's title / tags / description / blocked codespan / briefing (TB-153). Briefing path is slug-stable so git history of the briefing file stays contiguous. Hard-refused on tasks in Active or Pipeline Pending. |
 | `ap2 pause --reason "..."` | Set the pause flag (daemon stops dispatching, stays running). |
 | `ap2 resume` | Clear the pause flag. |
 | `ap2 cron list` | List cron jobs + last-fired timestamps. |
@@ -128,6 +130,7 @@ All `AP2_*` variables can be set in shell, in `<project>/.cc-autopilot/env` (KEY
 | `AP2_AUTO_DIAGNOSE_COOLDOWN_S` | `21600` (6h) | Cooldown between auto-diagnose fires. |
 | `AP2_IDEATION_DISABLED` | (unset) | Set `1`/`true`/`yes` to disable empty-board ideation. |
 | `AP2_IDEATION_COOLDOWN_S` | `7200` (2h) | Cooldown between ideation fires. |
+| `AP2_IDEATION_TRIGGER_TASK_COUNT` | `3` | Fire ideation when the Ready+Backlog count is BELOW this threshold (Active is still a hard gate — concurrent task-agent + control-agent SDK runs are not allowed) (TB-160). Set to `1` for the legacy "fire only when the working queue is fully empty" behavior; raise it (e.g. `5`) for projects with very fluid scope. Invalid (non-int, non-positive) values fall back to the default. |
 | `AP2_IDEATION_MAX_TURNS` | `30` | Max turns per ideation run. |
 | `AP2_EVENT_CONTEXT` | `50` | Number of events included in agent prompts. |
 | `AP2_MM_CHANNELS` | (unset) | Comma-separated Mattermost channel IDs to poll. |
@@ -159,7 +162,7 @@ Events are JSONL lines in `.cc-autopilot/events.jsonl`. Every line has `ts` (UTC
 
 **Failure.** `task_error`, `task_timeout`, `verification_failed` (per-task or project-wide gate), `verification_partial`, `retry_exhausted`, `cron_error`, `cron_timeout`, `ideation_error`, `ideation_timeout`, `mattermost_error`, `mattermost_timeout`, `mm_poll_error`, `state_commit_error`, `auto_diagnose_post_error`, `web_error`.
 
-**State / observability.** `task_implicit_commit` (HEAD-salvage on crash), `task_unfrozen`, `backlog_auto_promoted`, `cron_bootstrap`, `cron_proposed`, `cron_proposal_rejected`, `cron_proposal_error`, `ideation_state_updated`, `pipeline_start`, `orphan_recovery`, `board_malformed_line`, `mattermost`, `auto_diagnose_fired`, `auto_diagnose_no_destination`.
+**State / observability.** `task_implicit_commit` (HEAD-salvage on crash), `task_unfrozen`, `task_updated` (TB-153), `task_run_usage` (TB-165 — per-run token usage + cost emitted on every task-agent terminal path; stream/messages dumps are also retained on success post-TB-165), `control_run_usage` (TB-166 — same shape for ideation / cron / mattermost-handler runs, with a `label` field naming the run kind; control-agent stream/messages dumps land in `.cc-autopilot/debug/` alongside the prompt), `backlog_auto_promoted`, `cron_bootstrap`, `cron_proposed`, `cron_proposal_rejected`, `cron_proposal_error`, `ideation_state_updated`, `pipeline_start`, `orphan_recovery`, `board_malformed_line`, `mattermost`, `auto_diagnose_fired`, `auto_diagnose_no_destination`.
 
 `diagnose.MEANINGFUL_EVENT_TYPES` is the set the watchdog treats as "the daemon making progress"; `diagnose.FAILURE_EVENT_TYPES` is what it counts as broken. Both are in `ap2/diagnose.py` if you need to filter.
 

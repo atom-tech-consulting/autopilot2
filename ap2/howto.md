@@ -137,8 +137,11 @@ launch-task-and-validation-task split is retired.
 2. Cron       — run any due jobs from cron.yaml (status-report etc.)
 3. Tasks      — pick next Ready, or auto-promote next dispatchable Backlog
                 → run task agent
-4. Ideation   — fire `_maybe_ideate` if working board is fully empty
-                + cooldown elapsed (default 2h)
+4. Ideation   — fire `_maybe_ideate` if Ready+Backlog count is below
+                `AP2_IDEATION_TRIGGER_TASK_COUNT` (default 3, TB-160)
+                + cooldown elapsed (default 2h). Operator can also
+                trigger manually via `ap2 ideate [--force]` (TB-159),
+                bypassing the cooldown / disable / queue-depth gates.
 5. Watchdog   — `_maybe_auto_diagnose` posts to mattermost when daemon
                 idle > 3h
 ```
