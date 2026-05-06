@@ -131,3 +131,8 @@ Without a cap, the section accumulates over cycles even with triage discipline �
 - **kind:** per_task
 - **failed_criteria:** [fail] `grep -nE "Open questions for operator" ap2/ideation.default.md` — should return ZERO matches (rename complete).; [fail] `grep -nE "parse_open_questions" ap2/` — should return ZERO matches outside of test files validating the rename happened
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T191246Z-TB-191.prompt.md`, `stream: .cc-autopilot/debug/20260506T191246Z-TB-191.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T191246Z-TB-191.messages.jsonl`
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "Open questions for operator" ap2/ideation.default.md` — should return ZERO matches (rename complete).; [fail] `grep -nE "parse_open_questions" ap2/` — should return ZERO matches outside of test files validating the rename happened
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T194014Z-TB-191.prompt.md`, `stream: .cc-autopilot/debug/20260506T194014Z-TB-191.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T194014Z-TB-191.messages.jsonl`
