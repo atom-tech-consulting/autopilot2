@@ -166,3 +166,234 @@ def test_summarize_verification_failed_project_wide_synthesizes_bullet():
     assert "uv run pytest" in fb["bullet"]
     assert "FAILED test_foo.py" in fb["notes"]
     assert "exit 1" in out["summary_line"]
+
+
+# ---------------------------------------------------------------------------
+# TB-179 / TB-180: summarize_usage_event shared helper. Both
+# `ap2/cli.py::cmd_logs` (CLI, TB-180) and `ap2/web.py::_compact_usage_row`
+# (web events table, TB-179) consume this so the surfaces stay
+# byte-symmetric on the rendered string content.
+
+
+def _judge_call_event(**override) -> dict:
+    """Synthesize a `judge_call` event with the same nested-usage shape
+    we see in real today's-events payloads. Tests override the `task`,
+    `bullet_idx`, etc. as needed."""
+    e = {
+        "ts": "2026-05-04T19:11:38Z",
+        "type": "judge_call",
+        "task": "TB-1900",
+        "bullet_idx": 7,
+        "bullet_kind": "prose",
+        "verdict": "pass",
+        "duration_s": 8.002,
+        "model": "claude-opus-4-7",
+        "num_turns": 2,
+        "total_cost_usd": 0.146176,
+        "stop_reason": "end_turn",
+        "usage": {
+            "input_tokens": 6,
+            "cache_creation_input_tokens": 17016,
+            "cache_read_input_tokens": 42310,
+            "output_tokens": 287,
+            "server_tool_use": {
+                "web_search_requests": 0,
+                "web_fetch_requests": 0,
+            },
+            "service_tier": "standard",
+            "cache_creation": {"ephemeral_5m_input_tokens": 17016},
+            "iterations": 1,
+        },
+        "model_usage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 7636,
+                "costUSD": 0.006605,
+                "inference_geo": "us",
+            },
+        },
+    }
+    e.update(override)
+    return e
+
+
+def _task_run_usage_event(**override) -> dict:
+    e = {
+        "ts": "2026-05-04T15:15:13Z",
+        "type": "task_run_usage",
+        "task": "TB-1901",
+        "run_id": "20260504T150009Z-TB-1901",
+        "status": "complete",
+        "duration_s": 342.117,
+        "total_cost_usd": 0.851234,
+        "num_turns": 41,
+        "model": "claude-opus-4-7",
+        "usage": {
+            "input_tokens": 42,
+            "cache_creation_input_tokens": 68234,
+            "cache_read_input_tokens": 512891,
+            "output_tokens": 4123,
+            "server_tool_use": {"web_search_requests": 0},
+            "service_tier": "standard",
+        },
+        "model_usage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 6727,
+                "costUSD": 0.006812,
+            },
+        },
+    }
+    e.update(override)
+    return e
+
+
+def _control_run_usage_event(**override) -> dict:
+    e = {
+        "ts": "2026-05-04T18:09:21Z",
+        "type": "control_run_usage",
+        "label": "ideation",
+        "run_id": "20260504T180620Z-ideation",
+        "status": "complete",
+        "duration_s": 178.301,
+        "total_cost_usd": 0.421875,
+        "num_turns": 11,
+        "usage": {
+            "input_tokens": 18,
+            "cache_creation_input_tokens": 49231,
+            "cache_read_input_tokens": 104982,
+            "output_tokens": 2034,
+            "server_tool_use": {"web_search_requests": 0},
+            "service_tier": "standard",
+        },
+        "model_usage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 4726,
+                "costUSD": 0.004806,
+            },
+        },
+    }
+    e.update(override)
+    return e
+
+
+def test_summarize_usage_event_returns_compact_string():
+    """The helper returns a non-empty compact string for each of the
+    three usage-carrying event types, with the correct identity prefix
+    per type, all 6 numeric fields, and a length well under ~200 chars
+    on a real-world payload."""
+    # judge_call — `task=TB-N bullet=N/<kind> <verdict>` prefix.
+    out_jc = events.summarize_usage_event(_judge_call_event())
+    assert out_jc, "judge_call helper returned empty string"
+    assert "task=TB-1900" in out_jc
+    assert "bullet=7/prose" in out_jc
+    assert "pass" in out_jc
+    assert len(out_jc) < 200, out_jc
+
+    # task_run_usage — `task=TB-N <status> run=<run_id>` prefix.
+    out_tr = events.summarize_usage_event(_task_run_usage_event())
+    assert out_tr
+    assert "task=TB-1901" in out_tr
+    assert "complete" in out_tr
+    assert "run=20260504T150009Z-TB-1901" in out_tr
+    assert len(out_tr) < 200, out_tr
+
+    # control_run_usage — `label=<label> <status> run=<run_id>` prefix.
+    out_cr = events.summarize_usage_event(_control_run_usage_event())
+    assert out_cr
+    assert "label=ideation" in out_cr
+    assert "complete" in out_cr
+    assert "run=20260504T180620Z-ideation" in out_cr
+    assert len(out_cr) < 200, out_cr
+
+    # All three carry the 6 numeric fields.
+    for out, fields in (
+        (out_jc, ("in=6", "out=287", "cc=17,016", "cr=42,310",
+                  "$0.1462", "8.0s")),
+        (out_tr, ("in=42", "out=4,123", "cc=68,234", "cr=512,891",
+                  "$0.8512", "342.1s")),
+        (out_cr, ("in=18", "out=2,034", "cc=49,231", "cr=104,982",
+                  "$0.4219", "178.3s")),
+    ):
+        for f in fields:
+            assert f in out, (out, f)
+
+
+def test_summarize_usage_event_strips_verbose_nested_keys():
+    """Verbose nested fields — `server_tool_use`, `iterations`,
+    `service_tier`, `inference_geo`, `model_usage`, the nested
+    `cache_creation` object — must NOT leak into the compact string.
+    Inline compaction is the whole point; the verbose payload survives
+    in events.jsonl and (on web) in the row's <details> footer."""
+    for e in (
+        _judge_call_event(),
+        _task_run_usage_event(),
+        _control_run_usage_event(),
+    ):
+        out = events.summarize_usage_event(e)
+        for forbidden in (
+            "server_tool_use",
+            "iterations",
+            "service_tier",
+            "inference_geo",
+            "model_usage",
+            "ephemeral_5m_input_tokens",
+        ):
+            assert forbidden not in out, (e["type"], forbidden, out)
+
+
+def test_summarize_usage_event_returns_empty_for_unrelated_type():
+    """The helper is opt-in by event type. A non-target type (e.g.
+    `task_complete`, `daemon_start`) returns "" so the caller falls
+    back to the generic field-dump renderer."""
+    for typ in ("task_complete", "daemon_start", "verification_failed",
+                "task_start", "backlog_auto_promoted"):
+        out = events.summarize_usage_event({"type": typ, "task": "TB-X"})
+        assert out == "", (typ, out)
+
+
+def test_summarize_usage_event_handles_missing_usage_dict():
+    """A usage-typed event without any `usage` / `total_cost_usd` /
+    `duration_s` falls back to "" rather than emitting a degenerate
+    identity-only line. The caller can then defer to the generic
+    field-dump path."""
+    e = {"type": "judge_call"}  # No identity, no token, no duration.
+    assert events.summarize_usage_event(e) == ""
+
+
+def test_summarize_usage_event_truncates_when_max_chars_set():
+    """`max_chars=N` caps the returned string at N characters and
+    appends `…`. Callers on tight terminal widths can pin a width
+    budget; the natural compact form is well under 200 chars on real
+    payloads so the cap rarely kicks in."""
+    e = _judge_call_event()
+    natural = events.summarize_usage_event(e)
+    assert len(natural) > 50
+
+    truncated = events.summarize_usage_event(e, max_chars=50)
+    assert len(truncated) <= 50
+    assert truncated.endswith("…")
+    # Identity prefix still surfaces in the truncated form.
+    assert truncated.startswith("task=TB-1900")
+
+
+def test_summarize_usage_event_omits_token_summary_when_no_usage_dict():
+    """An event of a target type that carries `total_cost_usd` /
+    `duration_s` but no `usage` dict (very thin payload) still produces
+    a useful compact line — identity + cost + duration — without
+    crashing on the missing dict."""
+    e = {
+        "type": "task_run_usage",
+        "task": "TB-1902",
+        "status": "incomplete",
+        "run_id": "20260504T123456Z-TB-1902",
+        "total_cost_usd": 0.05,
+        "duration_s": 12.3,
+    }
+    out = events.summarize_usage_event(e)
+    assert "task=TB-1902" in out
+    assert "incomplete" in out
+    assert "run=20260504T123456Z-TB-1902" in out
+    assert "$0.0500" in out
+    assert "12.3s" in out
+    # No `in=` etc. because there was no usage dict to derive them from.
+    assert "in=" not in out
+    assert "cr=" not in out

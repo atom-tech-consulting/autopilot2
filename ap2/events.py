@@ -195,3 +195,133 @@ def _truncate(s: str, limit: int) -> str:
     if len(s) <= limit:
         return s
     return s[: max(0, limit - 1)].rstrip() + "…"
+
+
+# TB-179 / TB-180: shared compact formatter for the three usage-carrying
+# event types — `judge_call`, `task_run_usage`, `control_run_usage`.
+# Their verbose `usage` (and `model_usage`, `server_tool_use`,
+# `cache_creation`, `service_tier`, etc.) blob, when dumped inline via
+# the generic `_event_extra` / `_short` field-dump path, wraps the row
+# across several lines and drowns the at-a-glance signal both on the
+# events page and in `ap2 logs`.
+#
+# Both `ap2/web.py::_compact_usage_row` and `ap2/cli.py::cmd_logs`
+# consume this helper so the surfaces stay symmetric — an operator who
+# reads the same event in `ap2 logs` and on `/events` sees the same
+# 6-field tuple + identity prefix and muscle-memory scanning works
+# across both. Same shared-helper pattern TB-158 used to keep
+# `summarize_verification_failed` in lockstep across CLI and web.
+#
+# Shape: `<identity> · in=N out=N cc=N cr=N hit=N% $C · Ts` —
+# six numeric fields (input_tokens, output_tokens,
+# cache_creation_input_tokens, cache_read_input_tokens, total_cost_usd,
+# duration_s; cache hit % is derived from the four token fields and
+# rendered alongside) plus an event-type-specific identity prefix:
+#   judge_call         task=TB-N bullet=N/<kind> <verdict>
+#   task_run_usage     task=TB-N <status> run=<run_id>
+#   control_run_usage  label=<label> <status> run=<run_id>
+#
+# Verbose nested fields (model_usage, server_tool_use, iterations,
+# service_tier, inference_geo, the nested `cache_creation` object,
+# etc.) drop from the inline string entirely; on the web they still
+# live in the row's `<details>raw json</details>` toggle, and on the
+# CLI operators wanting raw bytes use `ap2 logs --json`. No data loss.
+_COMPACT_USAGE_EVENT_TYPES: frozenset[str] = frozenset({
+    "judge_call",
+    "task_run_usage",
+    "control_run_usage",
+})
+
+
+def summarize_usage_event(
+    event: dict,
+    *,
+    max_chars: int | None = None,
+) -> str:
+    """Compact, surface-agnostic one-line summary of a usage-carrying
+    event (`judge_call`, `task_run_usage`, `control_run_usage`).
+
+    Returns "" for events of any other type, OR for events of those
+    types that carry no `usage` / `total_cost_usd` / `duration_s` to
+    summarize. Callers typically check the return value and fall back
+    to a generic field-dump renderer when it's empty.
+
+    `max_chars` (optional) caps the returned string length, replacing
+    the tail with `…`. Surfaces with tight width budgets (CLI on a
+    narrow terminal) can pin a cap; the natural compact form is
+    well under 200 chars on a real-world payload.
+    """
+    typ = str(event.get("type") or "")
+    if typ not in _COMPACT_USAGE_EVENT_TYPES:
+        return ""
+
+    # Identity prefix — distinct fields per event type.
+    parts: list[str] = []
+    if typ == "judge_call":
+        task = str(event.get("task") or "").strip()
+        bidx = event.get("bullet_idx")
+        bkind = str(event.get("bullet_kind") or "").strip()
+        verdict = str(event.get("verdict") or "").strip()
+        if task:
+            parts.append(f"task={task}")
+        if bidx is not None:
+            bullet = f"{bidx}/{bkind}" if bkind else str(bidx)
+            parts.append(f"bullet={bullet}")
+        if verdict:
+            parts.append(verdict)
+    elif typ == "task_run_usage":
+        task = str(event.get("task") or "").strip()
+        status = str(event.get("status") or "").strip()
+        run_id = str(event.get("run_id") or "").strip()
+        if task:
+            parts.append(f"task={task}")
+        if status:
+            parts.append(status)
+        if run_id:
+            parts.append(f"run={run_id}")
+    elif typ == "control_run_usage":
+        label = str(event.get("label") or "").strip()
+        status = str(event.get("status") or "").strip()
+        run_id = str(event.get("run_id") or "").strip()
+        if label:
+            parts.append(f"label={label}")
+        if status:
+            parts.append(status)
+        if run_id:
+            parts.append(f"run={run_id}")
+    identity = " ".join(parts)
+
+    # Token + cost summary (in/out/cc/cr/hit%/$cost). Mirrors the shape
+    # of TB-157's `_event_token_summary` so the `?show=tokens` column
+    # and the compact row carry identical numeric formatting.
+    u = event.get("usage")
+    cost = event.get("total_cost_usd")
+    token_bits: list[str] = []
+    if isinstance(u, dict):
+        inp = int(u.get("input_tokens", 0) or 0)
+        outp = int(u.get("output_tokens", 0) or 0)
+        cc = int(u.get("cache_creation_input_tokens", 0) or 0)
+        cr = int(u.get("cache_read_input_tokens", 0) or 0)
+        denom = cr + cc + inp
+        hit = (cr / denom * 100.0) if denom else 0.0
+        token_bits.append(f"in={inp:,}")
+        token_bits.append(f"out={outp:,}")
+        token_bits.append(f"cc={cc:,}")
+        token_bits.append(f"cr={cr:,}")
+        token_bits.append(f"hit={hit:.1f}%")
+    if isinstance(cost, (int, float)):
+        token_bits.append(f"${float(cost):.4f}")
+    token_summary = " · ".join(token_bits)
+
+    # Duration.
+    dur = event.get("duration_s")
+    dur_str = f"{float(dur):.1f}s" if isinstance(dur, (int, float)) else ""
+
+    bits = [b for b in (identity, token_summary, dur_str) if b]
+    if not bits:
+        return ""
+    out = " · ".join(bits)
+    if max_chars is not None and len(out) > max_chars:
+        cap = max(0, max_chars - 1)
+        out = out[:cap].rstrip() + "…"
+    return out

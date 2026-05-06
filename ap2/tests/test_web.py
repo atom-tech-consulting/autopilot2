@@ -1913,6 +1913,57 @@ def test_compact_usage_event_types_referenced_in_web_module():
         assert typ in text, typ
 
 
+def test_summarize_usage_event_helper_consumed_by_web_module():
+    """TB-180 verification gate: the shared compact formatter
+    `summarize_usage_event` lives in `ap2/events.py` AND is consumed by
+    `ap2/web.py` (and `ap2/cli.py`). Pinning by name in all three files
+    catches a refactor that drops one surface and silently de-syncs
+    the rendering between `ap2 logs` and `/events`."""
+    from pathlib import Path as _P
+
+    root = _P(web.__file__).resolve().parent
+    for fname in ("events.py", "cli.py", "web.py"):
+        text = (root / fname).read_text()
+        assert "summarize_usage_event" in text, fname
+
+
+def test_compact_usage_row_html_byte_identical_post_extraction(project: Config):
+    """TB-180 byte-identical pin: after extracting the formatting helper
+    to `events.summarize_usage_event`, the inline summary cell rendered
+    for a usage-carrying event must still contain the same canonical
+    substrings (identity prefix tokens, the 6 numeric fields, no verbose
+    nested keys). The web renderer wraps the surface-agnostic string in
+    `html.escape`; a post-refactor regression that swaps separator
+    characters or drops fields would surface here."""
+    _seed_event(
+        project,
+        _full_judge_call_payload(task="TB-179", bullet_idx=2),
+    )
+    h = web._render_events(project, typ="judge_call", n=10)
+    rows_block = h.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    summary = _split_summary_cell(rows_block, "judge_call")
+
+    # Identity prefix tokens.
+    assert "task=TB-179" in summary
+    assert "bullet=2/prose" in summary
+    assert "pass" in summary
+
+    # 6 numeric fields, separator preserved.
+    assert "in=6" in summary
+    assert "out=287" in summary
+    assert "cc=17,016" in summary
+    assert "cr=42,310" in summary
+    assert "$0.1462" in summary
+    assert "8.0s" in summary
+
+    # Verbose nested keys still excluded.
+    for forbidden in (
+        "server_tool_use", "iterations", "service_tier",
+        "inference_geo", "ephemeral_5m_input_tokens", "model_usage",
+    ):
+        assert forbidden not in summary, forbidden
+
+
 # --------- TB-162: pending operator-queue card on `/` ---------
 
 

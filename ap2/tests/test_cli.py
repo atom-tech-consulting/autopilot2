@@ -2329,6 +2329,319 @@ def test_cmd_logs_json_flag_bypasses_pretty_formatter(tmp_path: Path, capsys):
 
 
 # ---------------------------------------------------------------------------
+# TB-180: cmd_logs renders the three usage-carrying event types
+# (`judge_call`, `task_run_usage`, `control_run_usage`) with the same
+# compact 6-field tuple + identity prefix that TB-179 introduced for
+# `/events`. The verbose `usage` / `model_usage` / `server_tool_use` /
+# `cache_creation` blobs do NOT leak into the inline rendering; operators
+# wanting raw bytes use `--json` (regression-pinned).
+
+
+_TB180_FULL_JUDGE_CALL = {
+    "ts": "2026-05-04T19:11:38Z",
+    "type": "judge_call",
+    "task": "TB-1800",
+    "bullet_idx": 7,
+    "bullet_kind": "prose",
+    "verdict": "pass",
+    "duration_s": 8.002,
+    "model": "claude-opus-4-7",
+    "num_turns": 2,
+    "total_cost_usd": 0.146176,
+    "stop_reason": "end_turn",
+    "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 17016,
+        "cache_read_input_tokens": 42310,
+        "output_tokens": 287,
+        "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0,
+        },
+        "service_tier": "standard",
+        "cache_creation": {"ephemeral_5m_input_tokens": 17016},
+        "iterations": 1,
+    },
+    "model_usage": {
+        "claude-haiku-4-5-20251001": {
+            "inputTokens": 7636,
+            "outputTokens": 22,
+            "costUSD": 0.006605,
+            "inference_geo": "us",
+        },
+    },
+}
+
+
+_TB180_FULL_TASK_RUN_USAGE = {
+    "ts": "2026-05-04T15:15:13Z",
+    "type": "task_run_usage",
+    "task": "TB-1801",
+    "run_id": "20260504T150009Z-TB-1801",
+    "status": "complete",
+    "duration_s": 342.117,
+    "total_cost_usd": 0.851234,
+    "num_turns": 41,
+    "model": "claude-opus-4-7",
+    "usage": {
+        "input_tokens": 42,
+        "cache_creation_input_tokens": 68234,
+        "cache_read_input_tokens": 512891,
+        "output_tokens": 4123,
+        "server_tool_use": {"web_search_requests": 0},
+        "service_tier": "standard",
+        "cache_creation": {"ephemeral_5m_input_tokens": 68234},
+        "iterations": 1,
+    },
+    "model_usage": {
+        "claude-haiku-4-5-20251001": {
+            "inputTokens": 6727,
+            "costUSD": 0.006812,
+            "inference_geo": "us",
+        },
+    },
+}
+
+
+_TB180_FULL_CONTROL_RUN_USAGE = {
+    "ts": "2026-05-04T18:09:21Z",
+    "type": "control_run_usage",
+    "label": "ideation",
+    "run_id": "20260504T180620Z-ideation",
+    "status": "complete",
+    "duration_s": 178.301,
+    "total_cost_usd": 0.421875,
+    "num_turns": 11,
+    "usage": {
+        "input_tokens": 18,
+        "cache_creation_input_tokens": 49231,
+        "cache_read_input_tokens": 104982,
+        "output_tokens": 2034,
+        "server_tool_use": {"web_search_requests": 0},
+        "service_tier": "standard",
+        "cache_creation": {"ephemeral_5m_input_tokens": 49231},
+        "iterations": 1,
+    },
+    "model_usage": {
+        "claude-haiku-4-5-20251001": {
+            "inputTokens": 4726,
+            "costUSD": 0.004806,
+            "inference_geo": "us",
+        },
+    },
+}
+
+
+def _seed_raw_event(cfg: Config, payload: dict) -> None:
+    """Append a pre-shaped event line with explicit `ts` to events.jsonl.
+    Bypasses `events.append` because that helper auto-stamps `ts`; we
+    want to pin a stable timestamp for the test's stdout assertions."""
+    import json as _json
+    with cfg.events_file.open("a") as f:
+        f.write(_json.dumps(payload) + "\n")
+
+
+def _assert_no_verbose_keys(out: str) -> None:
+    """Pin: the inline rendering omits the verbose nested keys that the
+    full payload carries. Operators wanting them use `--json | jq`."""
+    for forbidden in (
+        "server_tool_use",
+        "iterations",
+        "service_tier",
+        "inference_geo",
+        "ephemeral_5m_input_tokens",
+        "model_usage",
+    ):
+        assert forbidden not in out, f"verbose key leaked: {forbidden!r}"
+
+
+def test_cmd_logs_pretty_renders_judge_call(tmp_path: Path, capsys):
+    """TB-180: `judge_call` rows render as `<ts> judge_call <identity> ·
+    <6-field tuple> · <duration>` — identity prefix is `task=TB-N
+    bullet=N/<kind> <verdict>`. The verbose `usage` /
+    `model_usage` / `server_tool_use` / nested `cache_creation` keys do
+    NOT leak into the inline output."""
+    from ap2.cli import cmd_logs
+
+    cfg = _project(tmp_path)
+    _seed_raw_event(cfg, _TB180_FULL_JUDGE_CALL)
+
+    rc = cmd_logs(cfg, Namespace(n=10, json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # Identity prefix tokens for the judge_call shape.
+    assert "task=TB-1800" in out
+    assert "bullet=7/prose" in out
+    assert "pass" in out
+
+    # All 6 compact fields surface.
+    assert "in=6" in out                # input_tokens
+    assert "out=287" in out             # output_tokens
+    assert "cc=17,016" in out           # cache_creation_input_tokens
+    assert "cr=42,310" in out           # cache_read_input_tokens
+    assert "$0.1462" in out             # total_cost_usd, 4dp
+    assert "8.0s" in out                # duration_s, 1dp
+
+    # Verbose nested keys absent — that's the whole point of compaction.
+    _assert_no_verbose_keys(out)
+    # The nested `cache_creation` object's structure (matched braces around
+    # ephemeral_5m_input_tokens) does not appear inline — the scalar
+    # `cache_creation_input_tokens` (cc=) is what surfaces. Pin by absence
+    # of the inner object marker.
+    assert "{'ephemeral" not in out
+    assert '"ephemeral' not in out
+
+
+def test_cmd_logs_pretty_renders_task_run_usage(tmp_path: Path, capsys):
+    """TB-180: `task_run_usage` rows render with the `task=TB-N <status>
+    run=<run_id>` identity prefix instead of the `judge_call` bullet
+    shape. The 6 numeric fields surface; verbose nested keys do not."""
+    from ap2.cli import cmd_logs
+
+    cfg = _project(tmp_path)
+    _seed_raw_event(cfg, _TB180_FULL_TASK_RUN_USAGE)
+
+    rc = cmd_logs(cfg, Namespace(n=10, json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # Identity prefix specific to task_run_usage.
+    assert "task=TB-1801" in out
+    assert "complete" in out
+    assert "run=20260504T150009Z-TB-1801" in out
+
+    # 6 compact fields.
+    assert "in=42" in out
+    assert "out=4,123" in out
+    assert "cc=68,234" in out
+    assert "cr=512,891" in out
+    assert "$0.8512" in out
+    assert "342.1s" in out
+
+    _assert_no_verbose_keys(out)
+
+
+def test_cmd_logs_pretty_renders_control_run_usage(tmp_path: Path, capsys):
+    """TB-180: `control_run_usage` rows render with the `label=<label>
+    <status> run=<run_id>` identity prefix (cron / ideation / mattermost
+    runs don't have a TB-id). The 6 compact fields surface."""
+    from ap2.cli import cmd_logs
+
+    cfg = _project(tmp_path)
+    _seed_raw_event(cfg, _TB180_FULL_CONTROL_RUN_USAGE)
+
+    rc = cmd_logs(cfg, Namespace(n=10, json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # Identity prefix specific to control_run_usage.
+    assert "label=ideation" in out
+    assert "complete" in out
+    assert "run=20260504T180620Z-ideation" in out
+
+    # 6 compact fields.
+    assert "in=18" in out
+    assert "out=2,034" in out
+    assert "cc=49,231" in out
+    assert "cr=104,982" in out
+    assert "$0.4219" in out
+    assert "178.3s" in out
+
+    _assert_no_verbose_keys(out)
+
+
+def test_cmd_logs_json_flag_preserves_verbose_usage_payload(
+    tmp_path: Path, capsys,
+):
+    """TB-180 regression pin (parallel to TB-158's verification_failed
+    pin): when `--json` is set, `cmd_logs` skips ALL pretty-formatters
+    — including the new compact-usage path — and prints the full event
+    JSON verbatim. The verbose nested fields the compact path strips
+    inline (`server_tool_use`, `iterations`, `service_tier`,
+    `model_usage`, the nested `cache_creation` object) MUST be present
+    in `--json` output so operator scripts piping through `jq` keep
+    working unchanged."""
+    from ap2.cli import cmd_logs
+
+    cfg = _project(tmp_path)
+    _seed_raw_event(cfg, _TB180_FULL_JUDGE_CALL)
+    _seed_raw_event(cfg, _TB180_FULL_TASK_RUN_USAGE)
+    _seed_raw_event(cfg, _TB180_FULL_CONTROL_RUN_USAGE)
+
+    rc = cmd_logs(cfg, Namespace(n=10, json=True))
+    assert rc == 0
+    out = capsys.readouterr().out
+
+    # Each non-empty stdout line is parseable JSON — pretty-formatting
+    # bypassed. (No `·` separator from the compact form, no `<ts> type:16s`
+    # padding.)
+    import json as _json
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert len(lines) >= 3
+    parsed = [_json.loads(ln) for ln in lines]
+    by_type = {e["type"]: e for e in parsed if "type" in e}
+
+    # All three event types round-trip through `--json` unchanged.
+    assert "judge_call" in by_type
+    assert "task_run_usage" in by_type
+    assert "control_run_usage" in by_type
+
+    jc = by_type["judge_call"]
+    assert jc["task"] == "TB-1800"
+    # Verbose nested keys are STILL in the --json payload (pretty-bypass).
+    assert jc["usage"]["server_tool_use"]["web_search_requests"] == 0
+    assert jc["usage"]["service_tier"] == "standard"
+    assert jc["usage"]["cache_creation"]["ephemeral_5m_input_tokens"] == 17016
+    assert jc["usage"]["iterations"] == 1
+    assert "model_usage" in jc
+    assert (
+        jc["model_usage"]["claude-haiku-4-5-20251001"]["inference_geo"]
+        == "us"
+    )
+
+    tr = by_type["task_run_usage"]
+    assert tr["task"] == "TB-1801"
+    assert "model_usage" in tr
+    assert tr["usage"]["server_tool_use"]["web_search_requests"] == 0
+
+    cr = by_type["control_run_usage"]
+    assert cr["label"] == "ideation"
+    assert "model_usage" in cr
+    assert cr["usage"]["service_tier"] == "standard"
+
+
+def test_cmd_logs_pretty_path_does_not_mutate_events_jsonl(
+    tmp_path: Path, capsys,
+):
+    """TB-180 pin: rendering compact usage rows is a display-layer
+    operation. `cmd_logs` reads `events.jsonl` and writes nothing back.
+    A pre/post hash + byte-count comparison catches any accidental
+    write-on-read regression (e.g. a refactor that buffers lines back
+    into the file)."""
+    from ap2.cli import cmd_logs
+    import hashlib
+
+    cfg = _project(tmp_path)
+    _seed_raw_event(cfg, _TB180_FULL_JUDGE_CALL)
+    _seed_raw_event(cfg, _TB180_FULL_TASK_RUN_USAGE)
+    _seed_raw_event(cfg, _TB180_FULL_CONTROL_RUN_USAGE)
+
+    pre_bytes = cfg.events_file.read_bytes()
+    pre_hash = hashlib.sha256(pre_bytes).hexdigest()
+
+    rc = cmd_logs(cfg, Namespace(n=10, json=False))
+    assert rc == 0
+    capsys.readouterr()  # drain stdout so the test runner doesn't echo it.
+
+    post_bytes = cfg.events_file.read_bytes()
+    post_hash = hashlib.sha256(post_bytes).hexdigest()
+
+    assert pre_bytes == post_bytes
+    assert pre_hash == post_hash
+
+
+# ---------------------------------------------------------------------------
 # cmd_ideate (TB-159) — manual ideation trigger that bypasses the natural
 # empty-board / cooldown / `AP2_IDEATION_DISABLED` gates by routing through
 # the operator queue. The actual SDK invocation lives on the daemon side

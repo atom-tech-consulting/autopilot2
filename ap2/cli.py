@@ -786,6 +786,18 @@ def cmd_logs(cfg: Config, args: argparse.Namespace) -> int:
         if typ == "verification_failed":
             print(_format_verification_failed_row(ts, e))
             continue
+        # TB-180: compact one-line rendering for the three usage-carrying
+        # event types (`judge_call`, `task_run_usage`, `control_run_usage`)
+        # — the verbose `usage` / `model_usage` / `server_tool_use` blobs
+        # otherwise wrap the row across several lines and drown the
+        # at-a-glance signal. Same shared helper as TB-179's web rendering
+        # so the CLI and `/events` page stay symmetric. Operators wanting
+        # the raw payload pass `--json` (regression-pinned).
+        if typ in ("judge_call", "task_run_usage", "control_run_usage"):
+            compact = events.summarize_usage_event(e)
+            if compact:
+                print(f"{ts} {typ:16s} {compact}")
+                continue
         extras = {k: v for k, v in e.items() if k not in ("ts", "type")}
         extra = " ".join(f"{k}={_short(v)}" for k, v in extras.items())
         print(f"{ts} {typ:16s} {extra}")
