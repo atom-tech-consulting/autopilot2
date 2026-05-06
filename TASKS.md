@@ -10,7 +10,6 @@
 
 - [ ] **TB-174** **Parse focus statuses from ideation_state.md; auto-skip ideation cron when all focus items are `exhausted-needs-operator`** `#autopilot` `#ideation` `#cron` `#cost` `#observability` `@blocked:review` — Add `parse_focus_statuses(path) -> dict[str,str]` to ap2/ideation.py (sibling to TB-173's `parse_open_questions`); gate `_maybe_ideate` to skip the SDK call (emit `ideation_skipped reason=focus_exhausted`, bump cooldown) when every focus item the ideator self-declared is `exhausted-needs-operator`. `force_ideate` (TB-159) keeps bypassing. [→ brief](.cc-autopilot/tasks/parse-focus-statuses-from-ideation-state.md)
 - [ ] **TB-175** **Insight: compute post-TB-121 ideation acceptance rate from operator_log.md; bootstrap `.cc-autopilot/insights/ideation_quality.md`** `#autopilot` `#ideation` `#evaluation` `#insights` `#observability` `@blocked:review` — One-shot analysis: scan operator_log.md for `approve TB-N` / `rejected ideation proposal → TB-N` / `delete TB-N` lines since TB-121's review-gate landed; compute proposal-acceptance rate (approves/proposals); write the result to `.cc-autopilot/insights/ideation_quality.md` with YAML front matter (`tldr`, `updated`, `updated_by: TB-175`, `cites`) so the insights `_index.md` regeneration (TB-89) renders it. [→ brief](.cc-autopilot/tasks/insight-compute-post-tb-121-ideation-acc.md)
-- [ ] **TB-182** **Fix stale `ideation_state.md` references in cron status report (drop "Tasks awaiting review" redundancy + teach the agent to validate forwarded references)** [→ brief](.cc-autopilot/tasks/fix-stale-ideation-state-md-references-i.md)
 
 ## Pipeline Pending
 
@@ -73,6 +72,7 @@
 - [x] **TB-178** **Janitor LLM judge — classify findings as real-strand vs. operator-draft** `@blocked:TB-177` [→ brief](.cc-autopilot/tasks/janitor-llm-judge-classify-findings-as-r.md)
 - [x] **TB-180** **Apply compact `usage` rendering to `ap2 logs` (CLI parity with TB-179)** `@blocked:TB-179` [→ brief](.cc-autopilot/tasks/apply-compact-usage-rendering-to-ap2-log.md)
 - [x] **TB-181** **Add `/usage` token-cost dashboard to the web UI** [→ brief](.cc-autopilot/tasks/add-usage-token-cost-dashboard-to-the-we.md)
+- [x] **TB-182** **Fix stale `ideation_state.md` references in cron status report (drop "Tasks awaiting review" redundancy + teach the agent to validate forwarded references)** [→ brief](.cc-autopilot/tasks/fix-stale-ideation-state-md-references-i.md)
 
 ## Frozen
 

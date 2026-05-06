@@ -335,3 +335,9 @@
 - **Summary:** Closed TB-181's prior verification gap: the dashboard itself shipped in 67871f9 but its 7-day fixture seeded 7/5/21 events instead of the briefing's pinned 10/5/30 split. e979fa4 rewrites _tb181_seed_seven_day_mix to emit exactly 10 task_run_usage (varied status), 5 control_run_usage (varied label), and 30 judge_call (varied verdict), and updates the affected total-$ and subtype-count assertions; all 19 /usage tests + full 1074-test ap2 suite pass.
 - **Files:** ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-06] TB-182: Fix stale `ideation_state.md` references in cron status report (drop "Tasks awaiting review" redundancy + teach the agent to validate forwarded references)
+- **Commit:** `0b8aee9`
+- **Summary:** Follow-up to e6bc173: quoted the literal `tasks awaiting review` / `TB-N awaiting approval` phrase shape in the TB-121 paragraph's prohibition (outside the schema fragment) so the briefing's literal grep -nE verification command exits 0 instead of 1 (no matches). Schema fragment stays redundancy-free; all 1079 tests still pass.
+- **Files:** ap2/ideation.default.md
+- **Tests:** pass
