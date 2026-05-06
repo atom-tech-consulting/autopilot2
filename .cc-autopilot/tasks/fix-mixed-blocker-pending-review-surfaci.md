@@ -71,3 +71,10 @@ Each site has slightly different surrounding context: cli.py builds an `ids` lis
 - Auto-displaying the OTHER blockers on the pending-review surface (e.g., "TB-B (also gated on TB-X)"). The codespan is visible on the task line; surfacing the pending-review status is the load-bearing fix.
 - A new event type to mark mixed-blocker tasks. The `@blocked:` codespan IS the source of truth; no new event needed.
 - Web-side filtering controls that toggle between strict and loose pending-review semantics. The loose semantic is the right default; toggle-UI is unnecessary complexity.
+## Attempts
+
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "all\(.*lower\(\).*review.*for.*blocked_on" ap2/cli.py ap2/status_report.py ap2/web.py` — should return ZERO m
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T181654Z-TB-187.prompt.md`, `stream: .cc-autopilot/debug/20260506T181654Z-TB-187.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T181654Z-TB-187.messages.jsonl`
