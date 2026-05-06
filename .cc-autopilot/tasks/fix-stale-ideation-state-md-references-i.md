@@ -85,3 +85,10 @@ Existing `ideation_state.md` files written by the pre-this-task ideation prompt 
 - Updating the `ap2 status` CLI to apply the same validation logic. The CLI's open-questions surface (TB-173) reads from `ideation_state.md` directly without an LLM step; if CLI freshness becomes a complaint, that's a separate TB (read-time mechanical refresh in cli.py — option C scoped to the CLI surface only).
 - Web home page's open-questions surface (also TB-173). Same scope split as the CLI — separate concern.
 - Adding a new event type for "ideation bullet superseded." The skip-during-forward path is sufficient.
+## Attempts
+
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "tasks awaiting review|TB-N awaiting" ap2/ideation.default.md` — should return ZERO matches inside the `## Ope
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T024517Z-TB-182.prompt.md`, `stream: .cc-autopilot/debug/20260506T024517Z-TB-182.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T024517Z-TB-182.messages.jsonl`
