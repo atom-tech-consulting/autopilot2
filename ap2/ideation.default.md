@@ -282,12 +282,14 @@ are your invention, so it'll satisfy them by definition.
 
 Do NOT skip the clause for "obvious" or "trivial" tasks. The operator
 decides what's trivial; ideation does not. The clause is uniform
-across every proposal you emit. Do NOT list the tasks-awaiting-review
-TB-Ns in your `ideation_state.md` "Open questions for operator"
-section (TB-182) — `ap2 status` and the cron status-report's snapshot
-block surface those mechanically from current board state per run
-(TB-151 / TB-173), and forwarding a stale copy across the gap between
-ideation cycles risks contradicting the fresh list in the same post.
+across every proposal you emit. Do NOT include tasks awaiting review
+or `TB-N awaiting approval` bullets (the "tasks-awaiting-review"
+content shape) in your `ideation_state.md` "Open questions for
+operator" section (TB-182) — `ap2 status` and the cron status-report's
+snapshot block surface those mechanically from current board state
+per run (TB-151 / TB-173), and forwarding a stale copy across the gap
+between ideation cycles risks contradicting the fresh list in the
+same post.
 
 ## Goal-anchor requirement (TB-161 — load-bearing)
 Every briefing you propose MUST have its `## Goal` body cite, as a
