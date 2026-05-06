@@ -68,3 +68,10 @@ Goal.md's "Current focus: ideation quality" Push-for-progress section says: "Whe
 - Surfacing the slot count in `ap2 status` or web home. The metric is internal-to-ideation; operators don't need a separate view.
 - Backfilling old `ideation_state.md` files. Next ideation cycle reads the new prompt; no migration step.
 - Renaming the `state_extras` kwarg to better reflect its growing list of consumers. Naming consistency is fine; rename if a fourth consumer makes the name confusing.
+## Attempts
+
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "fewer than 3 workable|fewer than [0-9]+ workable" ap2/ideation.default.md` — should return ZERO matches (vali
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T050225Z-TB-183.prompt.md`, `stream: .cc-autopilot/debug/20260506T050225Z-TB-183.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T050225Z-TB-183.messages.jsonl`
