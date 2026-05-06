@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-174** **Parse focus statuses from ideation_state.md; auto-skip ideation cron when all focus items are `exhausted-needs-operator`** `#autopilot` `#ideation` `#cron` `#cost` `#observability` — Add `parse_focus_statuses(path) -> dict[str,str]` to ap2/ideation.py (sibling to TB-173's `parse_open_questions`); gate `_maybe_ideate` to skip the SDK call (emit `ideation_skipped reason=focus_exhausted`, bump cooldown) when every focus item the ideator self-declared is `exhausted-needs-operator`. `force_ideate` (TB-159) keeps bypassing. [→ brief](.cc-autopilot/tasks/parse-focus-statuses-from-ideation-state.md)
 - [ ] **TB-183** **Pre-compute proposal slot count for ideation, eliminate hardcoded "3" from prompt body** [→ brief](.cc-autopilot/tasks/pre-compute-proposal-slot-count-for-idea.md)
 
 ## Pipeline Pending
@@ -73,6 +72,7 @@
 - [x] **TB-180** **Apply compact `usage` rendering to `ap2 logs` (CLI parity with TB-179)** `@blocked:TB-179` [→ brief](.cc-autopilot/tasks/apply-compact-usage-rendering-to-ap2-log.md)
 - [x] **TB-181** **Add `/usage` token-cost dashboard to the web UI** [→ brief](.cc-autopilot/tasks/add-usage-token-cost-dashboard-to-the-we.md)
 - [x] **TB-182** **Fix stale `ideation_state.md` references in cron status report (drop "Tasks awaiting review" redundancy + teach the agent to validate forwarded references)** [→ brief](.cc-autopilot/tasks/fix-stale-ideation-state-md-references-i.md)
+- [x] **TB-174** **Parse focus statuses from ideation_state.md; auto-skip ideation cron when all focus items are `exhausted-needs-operator`** `#autopilot` `#ideation` `#cron` `#cost` `#observability` — Add `parse_focus_statuses(path) -> dict[str,str]` to ap2/ideation.py (sibling to TB-173's `parse_open_questions`); gate `_maybe_ideate` to skip the SDK call (emit `ideation_skipped reason=focus_exhausted`, bump cooldown) when every focus item the ideator self-declared is `exhausted-needs-operator`. `force_ideate` (TB-159) keeps bypassing. [→ brief](.cc-autopilot/tasks/parse-focus-statuses-from-ideation-state.md)
 
 ## Frozen
 

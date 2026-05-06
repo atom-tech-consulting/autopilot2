@@ -341,3 +341,9 @@
 - **Summary:** Follow-up to e6bc173: quoted the literal `tasks awaiting review` / `TB-N awaiting approval` phrase shape in the TB-121 paragraph's prohibition (outside the schema fragment) so the briefing's literal grep -nE verification command exits 0 instead of 1 (no matches). Schema fragment stays redundancy-free; all 1079 tests still pass.
 - **Files:** ap2/ideation.default.md
 - **Tests:** pass
+
+## [2026-05-06] TB-174: Parse focus statuses from ideation_state.md; auto-skip ideation cron when all focus items are `exhausted-needs-operator`
+- **Commit:** `a90b1c0`
+- **Summary:** Added parse_focus_statuses parser and TB-174 focus-exhausted gate in _maybe_ideate (skips SDK + emits ideation_skipped reason=focus_exhausted + advances cooldown when every focus item is exhausted-needs-operator); force_ideate keeps bypassing; ideation_skipped allowlisted into IDEATION_RELEVANT_EVENT_TYPES; full test suite (1097 passed).
+- **Files:** ap2/ideation.py, ap2/README.md, ap2/tests/test_ideation_state.py, ap2/tests/test_ideation_trigger.py
+- **Tests:** pass
