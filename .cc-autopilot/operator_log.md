@@ -61,3 +61,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-06T05:15:59Z — applied operator-queued reject → TB-175
 - 2026-05-06T05:15:59Z — rejected ideation proposal → TB-175 (Insight: compute post-TB-121 ideation acceptance rate from operator_log.md; bootstrap `.cc-autopilot/insights/ideation_quality.md`): (no reason given)
 - 2026-05-06T16:11:19Z — applied operator-queued ideate → (forced)
+- 2026-05-06T16:23:15Z — applied operator-queued add_backlog → TB-186

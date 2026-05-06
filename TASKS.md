@@ -10,6 +10,7 @@
 
 - [ ] **TB-184** **`ap2 ideate --hint "<text>"` — per-cycle operator intent forwarded into ideation prompt header** `#autopilot` `#ideation` `#cli` `#operator` `#prompts` `@blocked:review` — Add an optional --hint flag to `ap2 ideate` (and chat parity) that travels through the operator queue and surfaces verbatim in the next ideation prompt's header as a per-cycle operator nudge — closes the in-band-intent gap when operators force-bypass the focus-exhausted gate without rotating goal.md. [→ brief](.cc-autopilot/tasks/ap2-ideate-hint-text-per-cycle-operator.md)
 - [ ] **TB-185** **`ap2 frozen TB-N` — consolidated triage view for retry-exhausted Frozen tasks** `#autopilot` `#cli` `#observability` `#failure-recovery` `@blocked:review` — Add a read-only `ap2 frozen TB-N` CLI that consolidates briefing text + per-bullet failure notes from events.jsonl + git_log_grep commit summaries + a suggested-classification heuristic, so when retry_exhausted forces a design-fork escalation the operator's triage loop is one command instead of multi-tool dig. [→ brief](.cc-autopilot/tasks/ap2-frozen-tb-n-consolidated-triage-view.md)
+- [ ] **TB-186** **Fix `ideation_skipped_no_slots` event spam — slot check fires before cooldown gate (TB-183 regression)** [→ brief](.cc-autopilot/tasks/fix-ideation-skipped-no-slots-event-spam.md)
 
 ## Pipeline Pending
 
