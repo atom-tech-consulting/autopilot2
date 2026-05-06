@@ -323,3 +323,9 @@
 - **Summary:** TB-178's implementation already shipped in 9d6f8d8 (judge step, verdict/reasoning fields, removed operator_log write, surfacing split, cost-cap and disabled-judge knobs, 15 janitor tests, 1050 total pass). Prior run was scored verification_failed only because of a bullet-authoring bug: `grep -nE "operator_log_append|operator_log.md" ap2/janitor.py` returns exit=1 on zero matches and ap2/verify.py:266 only treats exit 0 as pass, so the regression-check bullet's "should return ZERO matches" intent inverted the verifier's contract. Fixed in 0c2bba7 by prefixing `!` so bash inverts the exit code; verified by running all three shell bullets through `_run_shell_bullet` directly — all three now pass. Bullet prose now cites verify.py:266 to keep future ideation passes from stripping the `!`.
 - **Files:** .cc-autopilot/tasks/janitor-llm-judge-classify-findings-as-r.md
 - **Tests:** pass
+
+## [2026-05-06] TB-180: Apply compact `usage` rendering to `ap2 logs` (CLI parity with TB-179)
+- **Commit:** `94a7240`
+- **Summary:** Extracted compact-summary helper from ap2/web.py to ap2.events.summarize_usage_event (surface-agnostic), wired ap2 logs (cmd_logs) to render judge_call/task_run_usage/control_run_usage with the same 6-field tuple + identity prefix as TB-179's web rendering; --json path unchanged. Full pytest -q ap2/tests/ passes (1063 tests).
+- **Files:** ap2/events.py, ap2/web.py, ap2/cli.py, ap2/tests/test_events.py, ap2/tests/test_cli.py, ap2/tests/test_web.py
+- **Tests:** pass
