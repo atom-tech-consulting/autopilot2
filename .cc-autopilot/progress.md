@@ -305,3 +305,9 @@
 - **Summary:** Closed the verification gap from cb8dd51 (verification_failed on bullet 4) by adding ap2/tests/e2e/test_tb176_mm_ideate_routing.py with three tests that synthesize @claude-bot ideate / ideate force / ideate --force mentions through handle_message and assert the captured operator_queue_append calls land with op="ideate" and the expected force flag; full regression gate (1029 tests) passes.
 - **Files:** ap2/tests/e2e/test_tb176_mm_ideate_routing.py
 - **Tests:** pass
+
+## [2026-05-06] TB-177: Janitor cron job — detect stranded git state in ap2 target projects (and surface for review)
+- **Commit:** `6c59ee6`
+- **Summary:** Added ap2/janitor.py (deterministic git-stranded-state detector emitting janitor_finding events + operator_log summary), wired into daemon.run_cron (no-LLM dispatch), cli.cmd_status (janitor: line + JSON janitor_findings), and status_report (snapshot extra + prompt instruction). Tests pin all four briefing verification surfaces (subkind detection, no-findings silence, cron dispatch routing through run_janitor instead of SDK, CLI rendering); 1031 ap2 tests pass.
+- **Files:** ap2/janitor.py, ap2/tests/test_janitor.py, ap2/cli.py, ap2/daemon.py, ap2/status_report.py
+- **Tests:** pass
