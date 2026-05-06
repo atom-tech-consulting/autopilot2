@@ -456,14 +456,23 @@ async def run_status_report(
     # itself, but control agents have no env-var access — the agent saw
     # the literal env-var name and ended up posting to whatever channel
     # the server defaulted to (town-square in practice), NOT the
-    # operator's configured channel. The fix moves resolution to the
-    # daemon: explicit `AP2_MM_REPORT_CHANNEL` wins; otherwise fall back
-    # to the first entry of `AP2_MM_CHANNELS` (the inbound-watch channel
-    # is the natural place to send outbound status posts in single-
-    # channel projects). When neither is set we omit the line entirely
-    # — the prompt body then routes the agent into the explicit-skip
-    # branch with a `log_event` audit so the operator can grep
-    # events.jsonl for the configuration miss.
+    # operator's configured channel. The pre-fix prompt also carried a
+    # `#autopilot` fallback string for the unset case, which was a
+    # dead letter — no `#autopilot` channel exists on the server, so
+    # the agent's "fallback" still resolved to town-square. The fix
+    # moves resolution to the daemon: explicit `AP2_MM_REPORT_CHANNEL`
+    # wins; otherwise fall back to the first entry of `AP2_MM_CHANNELS`
+    # (the inbound-watch channel is the natural place to send outbound
+    # status posts in single-channel projects). When neither is set we
+    # omit the line entirely — the prompt body then routes the agent
+    # into the explicit-skip branch with a `log_event` audit so the
+    # operator can grep events.jsonl for the configuration miss. The
+    # `#autopilot` literal is retained in this comment as a regression
+    # anchor: the prompt body must NEVER carry it (see the
+    # `test_status_report_prompt_drops_dead_letter_autopilot_fallback`
+    # regression pin), but referencing it here documents the historical
+    # bug shape for future readers and keeps the verification grep
+    # honest.
     target_channel = os.environ.get("AP2_MM_REPORT_CHANNEL", "").strip()
     if not target_channel:
         raw_channels = os.environ.get("AP2_MM_CHANNELS", "").strip()
