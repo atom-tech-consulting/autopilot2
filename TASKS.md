@@ -10,7 +10,6 @@
 
 - [ ] **TB-174** **Parse focus statuses from ideation_state.md; auto-skip ideation cron when all focus items are `exhausted-needs-operator`** `#autopilot` `#ideation` `#cron` `#cost` `#observability` `@blocked:review` — Add `parse_focus_statuses(path) -> dict[str,str]` to ap2/ideation.py (sibling to TB-173's `parse_open_questions`); gate `_maybe_ideate` to skip the SDK call (emit `ideation_skipped reason=focus_exhausted`, bump cooldown) when every focus item the ideator self-declared is `exhausted-needs-operator`. `force_ideate` (TB-159) keeps bypassing. [→ brief](.cc-autopilot/tasks/parse-focus-statuses-from-ideation-state.md)
 - [ ] **TB-175** **Insight: compute post-TB-121 ideation acceptance rate from operator_log.md; bootstrap `.cc-autopilot/insights/ideation_quality.md`** `#autopilot` `#ideation` `#evaluation` `#insights` `#observability` `@blocked:review` — One-shot analysis: scan operator_log.md for `approve TB-N` / `rejected ideation proposal → TB-N` / `delete TB-N` lines since TB-121's review-gate landed; compute proposal-acceptance rate (approves/proposals); write the result to `.cc-autopilot/insights/ideation_quality.md` with YAML front matter (`tldr`, `updated`, `updated_by: TB-175`, `cites`) so the insights `_index.md` regeneration (TB-89) renders it. [→ brief](.cc-autopilot/tasks/insight-compute-post-tb-121-ideation-acc.md)
-- [ ] **TB-178** **Janitor LLM judge — classify findings as real-strand vs. operator-draft** `@blocked:TB-177` [→ brief](.cc-autopilot/tasks/janitor-llm-judge-classify-findings-as-r.md)
 - [ ] **TB-180** **Apply compact `usage` rendering to `ap2 logs` (CLI parity with TB-179)** `@blocked:TB-179` [→ brief](.cc-autopilot/tasks/apply-compact-usage-rendering-to-ap2-log.md)
 
 ## Pipeline Pending
@@ -71,6 +70,7 @@
 - [x] **TB-176** **Add `ideate [force]` to MM handler chat-verb list (parity with `ap2 ideate` CLI)** [→ brief](.cc-autopilot/tasks/add-ideate-force-to-mm-handler-chat-verb.md)
 - [x] **TB-177** **Janitor cron job — detect stranded git state in ap2 target projects (and surface for review)** [→ brief](.cc-autopilot/tasks/janitor-cron-job-detect-stranded-git-sta.md)
 - [x] **TB-179** **Compact `usage` blob rendering for token/cost events in the web events table** [→ brief](.cc-autopilot/tasks/compact-usage-blob-rendering-for-token-c.md)
+- [x] **TB-178** **Janitor LLM judge — classify findings as real-strand vs. operator-draft** `@blocked:TB-177` [→ brief](.cc-autopilot/tasks/janitor-llm-judge-classify-findings-as-r.md)
 
 ## Frozen
 
