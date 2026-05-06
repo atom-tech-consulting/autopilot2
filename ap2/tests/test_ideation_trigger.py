@@ -1068,3 +1068,156 @@ def test_maybe_ideate_source_cooldown_check_precedes_slot_check():
         f"cooldown check, otherwise the early-return short-circuits "
         f"before the cooldown clock can rate-limit the emission."
     )
+
+
+# ---------------------------------------------------------------------------
+# TB-192: `insights.maybe_regenerate_index` must run AFTER the pre-snapshot
+# so a regenerated `.cc-autopilot/insights/_index.md` rides along in the
+# `state: ideation` commit instead of sitting dirty in the worktree
+# indefinitely. Pre-fix ordering ran the regen before `pre_snapshot` was
+# taken, so the rewritten index was part of the snapshot baseline (not the
+# diff) and never got staged. This violates the invariant that daemon-owned
+# state files in `_STATE_FILE_NAMES ∪ _STATE_DIRS` get committed coherently
+# with the agent run that produced them — the property TB-111/TB-112
+# introduced for linear rollback.
+
+
+def test_run_ideation_regenerated_index_lands_in_touched_paths(
+    tmp_path, monkeypatch
+):
+    """`_run_ideation` against a working tree where ideation regenerates
+    `_index.md` must include `.cc-autopilot/insights/_index.md` in the
+    `paths` list passed to `_commit_state_files` — i.e. the regen happens
+    after `pre_snapshot` so the post-run diff catches it.
+
+    Setup:
+      - One real insight file lives under `.cc-autopilot/insights/` with
+        no `_index.md` alongside it. The first call to
+        `maybe_regenerate_index` will write `_index.md` for the first time
+        (the `not index.exists()` branch).
+      - The pre-snapshot is taken with `_index.md` ABSENT and the post-
+        snapshot is taken with `_index.md` PRESENT, so
+        `_changed_state_paths` reports the path as appeared.
+      - The SDK control-agent is stubbed to a no-op; only the snapshot
+        machinery is real.
+
+    Pre-fix ordering: regen ran before `pre_snapshot` so `_index.md`
+    existed in BOTH snapshots with identical content → not in the diff →
+    not in `paths` → assertion fails.
+
+    Post-fix ordering: regen runs between `pre_snapshot` and
+    `_run_control_agent` → `_index.md` appears only in the post-snapshot
+    → in the diff → in `paths` → assertion passes.
+    """
+    import asyncio as _asyncio
+
+    from ap2 import ideation as ideation_mod
+    from ap2 import insights as insights_mod
+
+    # Standard ideation fixture (TASKS.md, CLAUDE.md, override prompt).
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={"Backlog": [("TB-1", "first"), ("TB-2", "second")]},
+    )
+
+    # Seed one real insight file under `.cc-autopilot/insights/` and make
+    # sure `_index.md` does NOT exist yet — the first
+    # `maybe_regenerate_index` call will materialize it.
+    insights_dir = insights_mod.insights_dir(cfg)
+    insights_dir.mkdir(parents=True, exist_ok=True)
+    (insights_dir / "sample.md").write_text(
+        "---\n"
+        "tldr: sample insight\n"
+        "updated: 2026-05-06T00:00:00Z\n"
+        "updated_by: TB-192\n"
+        "cites: [TB-192]\n"
+        "---\n\n"
+        "# sample\n\nbody\n"
+    )
+    index_path = insights_mod.index_path(cfg)
+    assert not index_path.exists(), (
+        "precondition: `_index.md` must be absent so the regen actually "
+        "writes (not the no-op steady-state path)"
+    )
+
+    # Capture the `paths` arg passed to `_commit_state_files`. We only
+    # stub THAT and `_run_control_agent` — `_snapshot_state_paths` /
+    # `_changed_state_paths` stay real, so the test exercises the actual
+    # diff machinery.
+    captured: dict = {}
+
+    async def fake_run_control_agent(
+        cfg_, sdk_, mcp_server_, *, label, prompt, allowed_tools, max_turns
+    ):
+        # No-op SDK — the agent makes no state-file edits.
+        return (False, None, "", Path("/tmp/fake-prompt-dump"))
+
+    def fake_commit(cfg_, message, *, paths):
+        captured["paths"] = list(paths)
+        captured["message"] = message
+
+    from ap2 import daemon as _daemon
+    monkeypatch.setattr(_daemon, "_run_control_agent", fake_run_control_agent)
+    monkeypatch.setattr(_daemon, "_commit_state_files", fake_commit)
+
+    _asyncio.run(
+        ideation_mod._run_ideation(cfg, sdk=None, mcp_server=None, slots=3)
+    )
+
+    # The regen must have actually written `_index.md` (sanity).
+    assert index_path.exists(), (
+        "`maybe_regenerate_index` should have created `_index.md` from "
+        "the seeded sample insight"
+    )
+
+    # The load-bearing assertion: `_index.md` is in the touched paths
+    # passed to `_commit_state_files`. Path is normalized to POSIX-relative
+    # form by `_snapshot_state_paths`.
+    assert "paths" in captured, (
+        "`_commit_state_files` should have been called — the regen alone "
+        "produces a non-empty diff"
+    )
+    assert ".cc-autopilot/insights/_index.md" in captured["paths"], (
+        f"TB-192: regenerated `_index.md` must ride along in the "
+        f"`state: ideation` commit. Got paths: {captured['paths']!r}. "
+        f"Pre-fix ordering ran `maybe_regenerate_index` BEFORE "
+        f"`pre_snapshot`, so the rewritten index was in the snapshot "
+        f"baseline (not the diff) and never got staged."
+    )
+    # And the commit message label is the canonical one.
+    assert captured["message"] == "state: ideation"
+
+
+def test_run_ideation_source_regen_call_follows_pre_snapshot(monkeypatch):
+    """TB-192 source-level pin: in `_run_ideation`, the line containing
+    `pre_snapshot = _daemon._snapshot_state_paths(cfg)` MUST appear before
+    the `insights.maybe_regenerate_index(cfg)` call. Pre-fix ordering
+    flipped these (regen first, snapshot second) and the rewritten
+    `_index.md` got eaten by the baseline.
+
+    Defense-in-depth: the behavioral test above pins the post-fix outcome,
+    this test pins the structural ordering directly so a future refactor
+    that re-introduces the bug surfaces here even if the behavioral test's
+    fixtures drift.
+    """
+    import inspect
+
+    src = inspect.getsource(ideation._run_ideation)
+    snap_idx = src.find("pre_snapshot = _daemon._snapshot_state_paths(cfg)")
+    regen_idx = src.find("insights.maybe_regenerate_index(cfg)")
+    assert snap_idx >= 0, (
+        "_run_ideation source must contain the `pre_snapshot = "
+        "_daemon._snapshot_state_paths(cfg)` call"
+    )
+    assert regen_idx >= 0, (
+        "_run_ideation source must contain the `insights."
+        "maybe_regenerate_index(cfg)` call"
+    )
+    assert snap_idx < regen_idx, (
+        f"TB-192: `pre_snapshot` (idx={snap_idx}) must come BEFORE "
+        f"`insights.maybe_regenerate_index` (idx={regen_idx}). Pre-fix "
+        f"ordering had the regen running before the snapshot, so a "
+        f"rewritten `_index.md` was baked into the baseline and never "
+        f"committed — breaking linear-rollback cohesion (TB-111/TB-112)."
+    )

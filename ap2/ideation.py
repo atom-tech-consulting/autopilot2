@@ -461,15 +461,6 @@ async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
         cooldown_s=cooldown,
         seconds_since_last=int(now - last) if last else None,
     )
-    # Refresh the insights index — ideation Step 0.5 reads
-    # `.cc-autopilot/insights/_index.md` for grounding (TB-89). Lazy:
-    # no-op when nothing changed. A failure here must NOT block the run.
-    try:
-        from . import insights
-
-        insights.maybe_regenerate_index(cfg)
-    except Exception:  # noqa: BLE001
-        pass
     # Lazy imports to avoid daemon ↔ ideation circular dependency.
     from . import daemon as _daemon
     from . import prompts
@@ -515,6 +506,22 @@ async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
     # any insights). Briefings already in the working tree from a prior op
     # do NOT ride along.
     pre_snapshot = _daemon._snapshot_state_paths(cfg)
+    # TB-89 / TB-192: refresh the insights index. Ideation's Step 0.5 reads
+    # `.cc-autopilot/insights/_index.md` for grounding, so the regen must
+    # happen BEFORE the control agent starts. It must also happen AFTER
+    # `pre_snapshot` so any rewrite to `_index.md` shows up in the post-run
+    # diff (`_changed_state_paths`) and rides along in the `state: ideation`
+    # commit — TB-192 caught the pre-fix ordering: regen ran before the
+    # snapshot, so a rewritten `_index.md` was part of the snapshot baseline,
+    # silently sat dirty in the working tree, and broke linear-rollback
+    # cohesion (TB-111/TB-112). Lazy: no-op when nothing changed. A failure
+    # here must NOT block the run.
+    try:
+        from . import insights
+
+        insights.maybe_regenerate_index(cfg)
+    except Exception:  # noqa: BLE001
+        pass
     timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
         cfg,
         sdk,
