@@ -55,7 +55,7 @@ Each site has slightly different surrounding context: cli.py builds an `ids` lis
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes.
-- `grep -nE "all\(.*lower\(\).*review.*for.*blocked_on" ap2/cli.py ap2/status_report.py ap2/web.py` — should return ZERO matches (validates the buggy pattern is gone from all three sites).
+- `! grep -nE "all\(.*lower\(\).*review.*for.*blocked_on" ap2/cli.py ap2/status_report.py ap2/web.py` — should return ZERO matches (the leading `!` inverts grep's exit so "no match" = bullet pass; validates the buggy pattern is gone from all three sites).
 - `grep -nE "any\(.*lower\(\).*review.*for.*blocked_on" ap2/cli.py ap2/status_report.py ap2/web.py` — at least 3 matches (the fix is applied at all three sites).
 - prose: a test in `test_web.py` synthesizes a fixture board with three Backlog tasks: TB-A `@blocked:review`, TB-B `@blocked:review,TB-X`, TB-C `@blocked:TB-X`. Calls `_is_pending_review` for each. Asserts (a) TB-A returns True, (b) TB-B returns True (the new behavior — was False pre-fix), (c) TB-C returns False.
 - prose: a test in `test_cli.py` exercises `cmd_status` against the same fixture and asserts the rendered text output's `review:` line lists BOTH TB-A and TB-B (in source order or whatever the existing sort is) — pre-fix it would only list TB-A.
