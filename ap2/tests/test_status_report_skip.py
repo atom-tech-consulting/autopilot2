@@ -620,6 +620,41 @@ def test_run_status_report_omits_pending_review_line_when_zero(
     assert captured["extras"] == []
 
 
+# ---------------------------------------------------------------------------
+# TB-187: `_pending_review_ids` (the helper that drives the snapshot
+# block's "Pending operator review (N): TB-..." line) must include
+# mixed-blocker tasks. Pre-fix it stripped any task carrying a
+# non-review blocker alongside `review`; the operator never saw it on
+# the cron-driven status post.
+
+def test_pending_review_ids_includes_mixed_blocker(tmp_path):
+    """Synthesize a Backlog with one pure-review task, one mixed
+    review+TB-X task, and one pure TB-X task. `_pending_review_ids`
+    returns the first two; the third stays out (`review` not among its
+    blockers). Pre-TB-187 only the first appeared."""
+    from ap2.board import Board
+    from ap2.status_report import _pending_review_ids
+
+    cfg = _cfg(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog", task_id="TB-770", title="pure review",
+        meta={"blocked": "review"},
+    )
+    board.add(
+        "Backlog", task_id="TB-771", title="mixed review and TB-99",
+        meta={"blocked": "review,TB-99"},
+    )
+    board.add(
+        "Backlog", task_id="TB-772", title="pure dep",
+        meta={"blocked": "TB-99"},
+    )
+    board.save()
+
+    ids = _pending_review_ids(cfg)
+    assert set(ids) == {"TB-770", "TB-771"}
+
+
 def test_status_report_prompt_instructs_forwarding_pending_review_line():
     """The canonical STATUS_REPORT_PROMPT body must tell the agent to
     forward the "Pending operator review" snapshot line into the posted

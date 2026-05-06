@@ -119,6 +119,113 @@ def test_tasks_page_filter_empty_state(tmp_path: Path):
     assert "no tasks pending review" in html.lower()
 
 
+# --------- TB-187: mixed-blocker pending-review surfacing ---------
+#
+# A task with `@blocked:review,TB-X` is pending operator review (the
+# operator's approval is meaningful) AND structurally gated on TB-X.
+# The surfacing predicate must classify it as pending review; the
+# dispatch predicate (`_is_dispatchable`) is unchanged and still
+# requires TB-X to land in Complete before auto-promotion.
+
+
+def test_is_pending_review_handles_mixed_blockers(tmp_path: Path):
+    """TB-187 regression: `_is_pending_review` returns True for any task
+    with `review` AMONG its blockers — pure-review (unchanged), mixed
+    (the bug fix), pure-non-review (unchanged), no blockers (unchanged).
+    """
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "- [ ] **TB-180** **review only** `@blocked:review` — pure review\n"
+        "- [ ] **TB-181** **mixed** `@blocked:review,TB-99` — review + TB-99\n"
+        "- [ ] **TB-182** **dep only** `@blocked:TB-99` — only TB-99\n"
+        "- [ ] **TB-183** **no blockers** — clean\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+    board = Board.load(cfg.tasks_file)
+
+    by_id = {t.id: t for t in board.iter_tasks("Backlog")}
+    assert web._is_pending_review(by_id["TB-180"]) is True
+    # The fix: mixed-blocker tasks now surface (was False pre-fix).
+    assert web._is_pending_review(by_id["TB-181"]) is True
+    assert web._is_pending_review(by_id["TB-182"]) is False
+    assert web._is_pending_review(by_id["TB-183"]) is False
+
+
+def test_tasks_page_filter_includes_mixed_blocker_pending_review(
+    tmp_path: Path,
+):
+    """`?filter=pending-review` must list a `@blocked:review,TB-X` task —
+    the operator's approval is the load-bearing missing signal, and pre-
+    TB-187 this task was invisible on the filter view."""
+    # IDs are well above any TB-N referenced in the rendered HTML
+    # itself (CSS comments cite real TB-Ns up to mid-100s), so a naive
+    # `in html` substring check stays unambiguous.
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "- [ ] **TB-9001** **proposal** `@blocked:review` — needs approval\n"
+        "- [ ] **TB-9002** **mixed** `@blocked:review,TB-9099` — needs approval & TB-9099\n"
+        "- [ ] **TB-9003** **dep only** `@blocked:TB-9099` — gated on TB-9099 only\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+
+    html = web._render_tasks(cfg, filter_kind="pending-review")
+    assert "TB-9001" in html
+    assert "TB-9002" in html  # the fix — was missing pre-TB-187
+    assert "TB-9003" not in html
+
+
+def test_mixed_blocker_pending_review_does_not_auto_promote(tmp_path: Path):
+    """TB-187 dispatch independence: surfacing a mixed-blocker task as
+    pending review does NOT change auto-promotion semantics. A task with
+    `@blocked:review,TB-X` (TB-X still in Backlog) MUST NOT be picked up
+    by `next_dispatchable`. The fix is surfacing-only.
+
+    TB-9099 is the prereq task — it has no blockers and could be
+    dispatched on its own merits, so the assertion is targeted at
+    TB-9070's `_is_dispatchable` flag, not the global sweep."""
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "- [ ] **TB-9070** **mixed** `@blocked:review,TB-9099` — needs both gates cleared\n"
+        "- [ ] **TB-9099** **prereq** — not yet complete\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+    board = Board.load(cfg.tasks_file)
+
+    # Surfacing classifies TB-9070 as pending review.
+    by_id = {t.id: t for t in board.iter_tasks("Backlog")}
+    assert web._is_pending_review(by_id["TB-9070"]) is True
+
+    # Dispatch refuses to promote TB-9070 — `review` is unsatisfiable
+    # while the codespan carries it (operator strips it via
+    # `ap2 approve`), AND TB-9099 has not landed in Complete. Either
+    # alone would block. (TB-9099 is itself dispatchable on its own
+    # merits — no blockers — so we check TB-9070 specifically rather
+    # than the sweep's first hit.)
+    completed = board.completed_ids()
+    assert board._is_dispatchable(by_id["TB-9070"], completed) is False
+
+
 def test_home_renders(project: Config):
     html = web._render_home(project)
     assert "<!DOCTYPE html>" in html

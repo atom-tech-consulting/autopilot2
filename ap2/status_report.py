@@ -70,16 +70,21 @@ def _format_pending_review_line(ids: list[str]) -> str:
 
 
 def _pending_review_ids(cfg: Config) -> list[str]:
-    """Return TB-Ns of Backlog tasks gated solely on the human-review clause.
+    """Return TB-Ns of Backlog tasks with the `review` blocker scheme.
 
     Mirrors the comprehension at `cli.cmd_status` (kept inline there to
-    avoid a `diagnose` import for one number) and the per-task scan in
-    `diagnose._board_health` — same predicate: at least one blocker,
-    and every blocker is the `review` scheme. The status-report routine
-    needs the full list (not just the count) to inject the
-    "Pending operator review (N): TB-..." line into the snapshot block;
-    failing to load the board is treated as zero pending so a transient
-    parse error never blocks a status post.
+    avoid a `diagnose` import for one number) and `web._is_pending_review`.
+    Predicate: at least one blocker, AND `review` appears among them
+    (TB-187). The status-report routine needs the full list (not just
+    the count) to inject the "Pending operator review (N): TB-..." line
+    into the snapshot block; failing to load the board is treated as
+    zero pending so a transient parse error never blocks a status post.
+
+    Note: `diagnose._board_health` uses a stricter `all(...)`-flavored
+    predicate intentionally — its watchdog needs to distinguish
+    review-only Backlog (operator AFK) from mixed-blocker tasks
+    (which it inspects for unsatisfiable non-review blockers
+    separately). The surfacing predicate here is the loose one.
     """
     if not cfg.tasks_file.exists():
         return []
@@ -89,7 +94,7 @@ def _pending_review_ids(cfg: Config) -> list[str]:
         return []
     return [
         t.id for t in board.iter_tasks("Backlog")
-        if t.blocked_on and all(b.lower() == "review" for b in t.blocked_on)
+        if t.blocked_on and any(b.lower() == "review" for b in t.blocked_on)
     ]
 
 

@@ -590,6 +590,66 @@ def test_status_truncates_pending_review_ids_after_five(tmp_path: Path, capsys):
     assert payload["pending_review"] == 6
 
 
+# ---------------------------------------------------------------------------
+# TB-187: mixed-blocker pending-review surfacing.
+#
+# A task with `@blocked:review,TB-X` was hidden from the `review:` line
+# pre-fix because the strict `all(b == "review" for b in blocked_on)`
+# filter excluded any task carrying a non-review blocker too. The fix
+# loosens the filter to `any(...)` — the operator still needs to
+# approve, the auto-dispatch gate (`_is_dispatchable`) is unchanged.
+
+def test_status_includes_mixed_blocker_in_pending_review(
+    tmp_path: Path, capsys,
+):
+    """Three Backlog tasks: pure review, mixed review+TB-X, pure TB-X.
+    The `review:` line names the first two; the third is excluded.
+    Pre-TB-187 only the first appeared. The JSON branch carries the
+    same list under `pending_review_ids` (machine consumers also need
+    the mixed-blocker IDs)."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog", task_id="TB-880", title="pure review",
+        meta={"blocked": "review"},
+    )
+    board.add(
+        "Backlog", task_id="TB-881", title="mixed review and TB-99",
+        meta={"blocked": "review,TB-99"},
+    )
+    board.add(
+        "Backlog", task_id="TB-882", title="pure TB-99 dep",
+        meta={"blocked": "TB-99"},
+    )
+    board.save()
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    # Both review-bearing IDs land on the `review:` line.
+    assert "review:" in out
+    assert "TB-880" in out
+    assert "TB-881" in out
+    # The pure-TB-99 case stays out of the surfacing — `review` is not
+    # among its blockers.
+    review_line = next(
+        (ln for ln in out.splitlines() if ln.startswith("review:")),
+        "",
+    )
+    assert "TB-882" not in review_line
+    # Count reflects the loose-predicate semantics (2, not 1).
+    assert "2 pending" in out
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["pending_review"] == 2
+    assert set(payload["pending_review_ids"]) == {"TB-880", "TB-881"}
+
+
 # --------- TB-173: `ap2 status` surfaces ideator open questions ---------
 #
 # `parse_open_questions` reads the `## Open questions for operator`

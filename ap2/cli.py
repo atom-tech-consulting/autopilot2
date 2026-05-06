@@ -133,9 +133,15 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # TB-151: keep the TB-Ns (not just the count) so the text branch can
     # name them and the JSON branch can carry a `pending_review_ids`
     # list — operators were having to grep TASKS.md to find the IDs.
+    # TB-187: `any(...)` (was `all(...)`) so mixed-blocker tasks
+    # (e.g. `@blocked:review,TB-5`) still surface as pending review —
+    # the operator's approval is meaningful even when other blockers
+    # remain, and `_is_dispatchable` continues to gate the actual
+    # auto-promotion. Mirrors `web._is_pending_review` and
+    # `status_report._pending_review_ids`.
     pending_review_ids = [
         t.id for t in board.iter_tasks("Backlog")
-        if t.blocked_on and all(b.lower() == "review" for b in t.blocked_on)
+        if t.blocked_on and any(b.lower() == "review" for b in t.blocked_on)
     ]
     pending_review = len(pending_review_ids)
     # TB-173: surface the ideator's `## Open questions for operator`

@@ -911,18 +911,29 @@ def _events_table(
 
 
 def _is_pending_review(t) -> bool:
-    """True iff task `t`'s only structural blocker is the `review` scheme.
+    """True iff `review` is AMONG `t`'s structural blockers.
 
-    TB-121: ideation-proposed tasks land with `@blocked:review` to gate
-    on operator approval. The pill rendered next to the task on
-    `/tasks` keys off this — we don't show it for tasks that have a
-    `review` token MIXED with other blockers (those are gated on the
-    other blockers too, so promotion timing is dominated by them).
+    Covers both the typical pure-`@blocked:review` case AND
+    mixed-blocker cases where the operator's approval still needs to
+    be captured even if other dependencies remain.
+
+    TB-121: ideation-proposed tasks land with `@blocked:review` to
+    gate on operator approval. The pill rendered next to the task on
+    `/tasks` (and the `review:` line on `ap2 status`, and the cron
+    status-report's snapshot block) keys off this — surfacing the
+    "wants my approval" signal is orthogonal to dispatchability.
+
+    TB-187: previously this used `all(...)`, which hid mixed-blocker
+    tasks (e.g. `@blocked:review,TB-5`) from the operator entirely.
+    Dispatch semantics are unchanged — `_is_dispatchable` still
+    requires every blocker satisfied; approving a mixed-blocker task
+    strips just the `review` token via `_approve_review_token` and
+    leaves any other blockers to gate auto-promotion naturally.
     """
-    blocked = getattr(t, "blocked_on", []) or []
-    if not blocked:
+    blocked_on = getattr(t, "blocked_on", []) or []
+    if not blocked_on:
         return False
-    return all(b.lower() == "review" for b in blocked)
+    return any(b.lower() == "review" for b in blocked_on)
 
 
 def _tasks_list(
