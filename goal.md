@@ -30,51 +30,50 @@ For ap2's own infrastructure, the practical "done enough" thresholds are:
 - Failure recovery (verification fails, retries exhaust, daemon restart,
   cron drift, agent timeouts) is fully automatic; only genuine design
   forks escalate.
-- Ideation reliably proposes goal-aligned next steps without drifting
-  into ap2-meta polish or scope creep, and stops proposing when the
-  target project's `## Done when` criteria are all met.
+- Ideation reliably proposes goal-aligned next steps that substantively
+  advance the goal (not just goal-shaped pro-forma compliance), without
+  drifting into ap2-meta polish or scope creep, and stops proposing when
+  the target project's `## Done when` criteria are all met.
 
-## Current focus: ideation quality
+## Current focus: ideation quality signal collection
 
 Ideation is the engine that turns "what's the goal" into "what's the next
-task." Today it's still the weakest link, even though the structural
-guards are now in place: TB-121's review gate ships proposals as
-`@blocked:review` so nothing dispatches without operator approval,
-TB-138's auto-verifiable-bullet rule is pinned into the briefing prompt,
-and TB-154 validates the canonical Goal/Scope/Design/Verification/
-Out-of-scope shape at queue-append time so a malformed proposal is
-rejected before TB-N is allocated. What remains is prompt-shape work —
-the two failure modes we still want it to avoid:
+task" — and it's still the weakest link in the walk-away promise. Even
+when proposals satisfy every structural validator, they often don't
+substantively advance the goal. The currently-shipped mechanical guards
+stop malformed proposals but not goal-shaped pro-forma ones — proposals
+that satisfy every validator and still don't advance the goal in
+substance. Improving prompt-side reasoning quality from here without
+empirical data on what "advances the goal" looks like in practice is
+gut-feel iteration.
 
-(1) **Gap-covering without drift**: ideation should fill in work the
-operator didn't think to enumerate, but every proposal must reduce to a
-visible step toward the declared goal. Concretely, the prompt needs to:
-- Re-read `goal.md` (when filled) and `progress.md` each cycle to know
-  what the goal is and how far we've come.
-- Reject proposals whose value is only "make ap2 itself nicer" unless
-  ap2-improvement is on the project's goal path. Bias toward the target
-  project's outcomes, not the meta-system's polish.
-- Surface uncovered axes (test coverage gaps, missing error paths, doc
-  staleness, performance regressions) but only when they connect to a
-  concrete goal-relevant outcome.
+The bottleneck is signal volume, not prompt-language craft. Before
+further prompt-shape work, accumulate the operator-decision and
+proposal-outcome data that lets the prompt be tuned against measurable
+behavior rather than intuition. The specific shape of that
+instrumentation is for ideation to derive — what to capture, where it
+lives, how it surfaces back into the next cycle.
 
-(2) **Push for progress without scope creep**: ideation should be
-ambitious — propose the *next meaningful chunk*, not the safest tiniest
-step — but every proposal needs to pass an "if we delete this and the
-goal still ships, was it useful?" test. Concretely:
-- Reject feature additions whose only justification is "this would be
-  cool" or "it might be useful later."
-- Prefer compounding changes (a refactor that unblocks 3 future tasks)
-  over isolated polish.
-- When two paths to the same outcome exist, pick the one that creates
-  fewer follow-up tasks, not the one that's faster to execute.
+These signals are dual-purpose. In the near term they support evaluation:
+the operator and the prompt-author tune ideation against evidence rather
+than intuition. In the longer term they are themselves agent context —
+ideation should be able to read its own track record and adapt its process
+and prompt dynamically based on what has and hasn't worked. Design the
+instrumentation with both audiences in mind from the start: structured,
+agent-readable, and persistent across cycles, not just human-readable
+metrics buried in a dashboard.
 
-TB-121 (review gate), TB-138 (auto-verifiable-bullet rule), and TB-154
-(canonical Goal/Scope/Design/Verification/Out-of-scope structural
-validator at queue-append time) gave us the mechanical scaffolding;
-the open work is folding the goal-relevance and scope-creep guards
-above into the ideation prompt itself so proposals arrive already
-filtered, not just gated after the fact.
+The failure mode signal collection exists to detect:
+**goal-shaped pro-forma compliance** — proposals that cite the right
+anchors, articulate a plausible rationale, satisfy every structural
+validator, and still don't move the goal forward in substance. The
+diagnostic is the delete-test: if you delete the proposal, does the goal
+still ship unchanged? If yes, it was pro-forma. The shape varies (polish
+of meta-system surfaces unrelated to the project's outcome; wack-a-mole
+fixes that address one case without generalizing; safe tiny steps when
+compounding moves are available) but the underlying problem is one:
+ideation is being ambitious in motion without being ambitious in
+substance.
 
 ## Non-goals
 
@@ -86,16 +85,15 @@ filtered, not just gated after the fact.
   `goal.md`. ap2 doesn't propose new mission statements; it executes
   against the one it's given.
 - **Multi-tenancy / shared sandbox**: one operator, one sandbox user,
-  one daemon. TB-120 (kernel-level fence via split users) is frozen
-  precisely because the multi-tenant case isn't on the path.
-- **Real-time collaboration**: Mattermost is the human-loop channel,
-  but the loop is async — operator nudges, daemon ticks, agent commits.
+  one daemon. Multi-tenant isolation is not on the path.
+- **Real-time collaboration**: Mattermost is the human-loop channel, but
+  the loop is async — operator nudges, daemon ticks, agent commits.
   Synchronous chat-driven editing (operator types, agent responds in
   real-time) is out of scope; the chat surface is for control, ack,
   approvals, and status — not for pair-programming.
 - **Cross-project orchestration**: each project has its own ap2 daemon
-  + state. ap2 doesn't aggregate across projects or propose work in
-  one project based on activity in another.
+  + state. ap2 doesn't aggregate across projects or propose work in one
+  project based on activity in another.
 
 ## Constraints
 
@@ -103,29 +101,17 @@ filtered, not just gated after the fact.
   under `.cc-autopilot/`. No database, no message broker. Recovery is
   always "read files, resume."
 - **Anthropic SDK + Claude Code CLI**: agent runs are `sdk.query()`
-  invocations against the bundled Claude Code binary. Model choice
-  configurable (today: Opus 4.7); token cost is the operational
-  constraint, not API rate limits.
-- **OAuth auth (CLAUDE_CODE_OAUTH_TOKEN)**: not API-key. 1M-context
-  beta is engaged for Opus 4.7 under this auth (TB-139-era probe);
-  features that require API-key (custom betas) are out of reach.
-- **macOS + Linux POSIX shells**: shell bullets run via `/bin/bash`
-  (TB-147); no cross-platform Windows support.
-- **No external mutation by task agents**: fenced files (TASKS.md,
-  CLAUDE.md, goal.md, .cc-autopilot/{progress,events,ideation_state,
-  cron,operator_log}.md, operator_queue_state.json,
-  operator_queue.jsonl) are agent-untouchable. Operator/daemon-only.
-- **Verification is gating**: every task lands with a real
-  `## Verification` section (TB-135 enforced) of auto-verifiable
-  bullets only (TB-138 pins this in the briefing prompt; TB-154
-  validates the canonical Goal/Scope/Design/Verification/Out-of-scope
-  shape at queue-append time so non-canonical section names —
-  `## Acceptance`, `## Tests` — are rejected before TB-N is
-  allocated). No manual-step bullets; if a behavior isn't
-  auto-checkable it's out-of-scope.
-- **Operator-in-the-loop where work is irreversible**: ideation
-  proposals require approval (TB-121 — landed; proposals carry
-  `@blocked:review` until `ap2 approve TB-N`), cron schedule
-  changes are operator-CLI-only (TB-146 — landed; `cron_edit` is
-  hidden from every agent toolset, mutation goes through
-  `ap2 cron edit`), git pushes are not automated.
+  invocations against the bundled Claude Code binary. Token cost is the
+  operational constraint, not API rate limits.
+- **OAuth auth (CLAUDE_CODE_OAUTH_TOKEN)**: not API-key. Features that
+  require API-key (custom betas) are out of reach.
+- **macOS + Linux POSIX shells**: no cross-platform Windows support.
+- **No external mutation by task agents**: fenced files (the board, the
+  goal, the daemon's state files) are agent-untouchable. Only the
+  operator and the daemon mutate them.
+- **Verification is gating**: every task lands with auto-verifiable
+  acceptance criteria the daemon can evaluate unattended. No manual-step
+  gating bullets.
+- **Operator-in-the-loop where work is irreversible**: ideation proposals
+  require operator approval before dispatch; cron schedule changes are
+  operator-CLI-only; git pushes are not automated.
