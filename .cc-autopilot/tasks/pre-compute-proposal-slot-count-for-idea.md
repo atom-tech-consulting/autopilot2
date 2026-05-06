@@ -50,7 +50,7 @@ Goal.md's "Current focus: ideation quality" Push-for-progress section says: "Whe
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes.
-- `grep -nE "fewer than 3 workable|fewer than [0-9]+ workable" ap2/ideation.default.md` — should return ZERO matches (validates the hardcoded magic number is gone).
+- `! grep -nE "fewer than 3 workable|fewer than [0-9]+ workable" ap2/ideation.default.md` — bash-negated grep; exits 0 only if there are ZERO matches (validates the hardcoded magic number is gone). Inverted so the verifier — which only treats exit 0 as pass (`ap2/verify.py:266`) — interprets "no matches" correctly; a bare `grep` with no matches exits 1 and would trip the verifier even though the regression intent is satisfied (precedent: `.cc-autopilot/tasks/janitor-llm-judge-classify-findings-as-r.md:61` after TB-178).
 - `grep -nE "proposal slots this cycle" ap2/ideation.default.md ap2/ideation.py` — present in BOTH the prompt body (the instruction referencing the snapshot value) AND `ap2/ideation.py` (the daemon's state_extras line construction).
 - `grep -nE "ideation_skipped_no_slots" ap2/ideation.py` — new event type is wired in the early-skip path.
 - prose: a test in `test_ideation*.py` synthesizes a fixture board with 2 Ready + 1 Backlog (`workable=3`) and `AP2_IDEATION_TRIGGER_TASK_COUNT=5`, calls `_maybe_ideate` with a stubbed SDK that captures the prompt sent; asserts (a) the captured prompt's `## Current state` block contains `- proposal slots this cycle: 2` (5 - 3 = 2), AND (b) the prompt body references "at most N" or "proposal slots this cycle" (not the hardcoded `3`).
