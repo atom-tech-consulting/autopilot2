@@ -67,3 +67,10 @@ The state_extras line adds ~30 tokens to every status-report prompt. Status-repo
 - Backfilling old town-square posts. They stay where they landed; future posts go to the right place.
 - Adding a CLI helper to display the resolved target channel (`ap2 status` could surface "status reports go to: <channel>"). Useful but separate; this task is about fixing the routing.
 - Updating the README or skills docs to mention `AP2_MM_REPORT_CHANNEL`. The env var should be self-documenting via the resolved-channel surfacing in `state_extras`; doc updates can come later if the env-knob discoverability becomes an operator complaint.
+## Attempts
+
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "#autopilot" ap2/status_report.py` — should return ZERO matches in the prompt body (regression: the dead-lette
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T185557Z-TB-190.prompt.md`, `stream: .cc-autopilot/debug/20260506T185557Z-TB-190.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T185557Z-TB-190.messages.jsonl`
