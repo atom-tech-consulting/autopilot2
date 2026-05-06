@@ -1,126 +1,138 @@
 # Ideation State
 
-_Last updated: 2026-05-06T16:11:49Z by ideation cron_
+_Last updated: 2026-05-06T18:37:42Z by ideation cron_
 
 ## Mission alignment
 
-Operator forced ideation (`applied operator-queued ideate → (forced)`
-16:11:19Z, operator_log) **one second after** the focus-exhausted
-gate correctly fired (`ideation_skipped reason=focus_exhausted`
-16:11:18Z) — confirms the post-restart gate works (TB-174's a90b1c0
-is now in the running binary) AND signals operator chose force-
-override over goal.md rotation. The five most recent completes still
-baseline goal.md's "Current focus: ideation quality":
+Operator pivoted goal.md `## Current focus` to "ideation quality
+signal collection" at 18:07:11Z (commit 41bf85b, operator_log).
+Forced ideation immediately afterward at 18:37:15Z. The five most-
+recent completes were authored under the prior focus's structural-
+guard era and don't yet bear on the new focus, but they DO confirm
+the mechanical-guard cascade is durable enough that prompt-craft
+iteration without empirical signal is the operator-diagnosed
+bottleneck.
 
-- TB-183 (6583b07, 05:42Z) — proposal-slot-count plumbed into prompt
-- TB-174 (a90b1c0, 05:34Z) — focus-exhausted auto-skip gate
+- TB-187 (33effb4, 18:37Z) — mixed-blocker pending-review surfacing fix
+- TB-186 (4b9c553, 16:33Z) — slot-check / cooldown ordering fix
+- TB-183 (6583b07, 05:42Z) — proposal slots plumbing
+- TB-174 (a90b1c0, 05:34Z) — focus-exhausted gate
 - TB-182 (0b8aee9) — cron status-report tasks-awaiting-review fix
-- TB-181 (e979fa4) — `/usage` web dashboard
-- TB-180 (94a7240) — `ap2 logs` compact `usage` parity
 
-Forced-cycle calibration this run: bias toward Done-when-bullet
-anchors (operator-walk-away, failure-recovery) rather than
-re-litigating exhausted "ideation quality" gaps; the operator's
-forced-but-no-goal-rotation move says "produce forward proposals,
-not paralysis, but stay narrow."
+This cycle re-derives from scratch against the new focus, per the
+18:07Z operator_log directive.
 
 ## Current focus assessment
 
-- **Ideation quality (gap-covering without drift; push for progress
-  without scope creep)**
-  - Progress so far: full structural-guard cascade landed — TB-121
-    review gate, TB-138 prompt rule, TB-152 reject reasons, TB-154
-    canonical structure validator, TB-161 goal-cite, TB-163
-    rejection-block, TB-164 Why-now check, TB-171 Manual rejection,
-    TB-173 open-questions surfacing, TB-174 focus-exhausted gate
-    (now firing post-restart per 16:11:18Z), TB-182 forwarded-
-    reference validation, TB-183 slot-count plumbing. TB-170 is
-    the operator escape hatch.
+- **Ideation quality signal collection (operator pivot 18:07:11Z;
+  goal.md lines 38-76)**
+  - Progress so far: zero TB-Ns shipped against this focus item —
+    it's ~30 minutes old. Adjacent prior work that produced the
+    free-text rejection signal stream: TB-152 (`ap2 reject --reason`
+    appends to operator_log.md), TB-163 (Recent operator rejections
+    block injected into ideation prompt header), TB-173 (Open
+    questions surfacing). Together those give Step 0 the existing
+    operator-decision signal — but only as prose lines, with no
+    structured per-proposal record binding cycle context to
+    outcome.
   - Gaps:
-    (1) **Forced-ideation has no in-band intent channel.** Today's
-    16:11:19Z confirms: operator can `ap2 ideate` past the gate but
-    the resulting cycle inherits a stale `exhausted-needs-operator`
-    assessment with zero signal about which slice of the focus
-    item operator wants forward motion on. Heavyweight workarounds
-    (rotate goal.md, mutate ideation_state.md) only. Proposal 1
-    addresses this.
-    (2) Pre-existing carried: TB-175 rejection authoritative;
-    TB-172 wack-a-mole rejection authoritative; n=3 literal-string-
-    anchor `## Verification` shell-bullet pattern operator-residual-
-    risk-accepted.
-  - Status: `exhausted-needs-operator`
-  - Reasoning: structural guards complete; gap (1) is a candidate
-    this cycle. Pre-existing gaps remain operator-rejected. Forced
-    cycle today lifts the auto-skip but doesn't change the
-    underlying judgment that the focus item is structurally done.
+    (1) **No structured per-proposal record exists.** When ideation
+    calls `do_board_edit({"action": "add_backlog", ...})` (cf.
+    ideation.default.md L262), the only artifacts are a TB-N row in
+    TASKS.md, the briefing file, and the operator_log audit line.
+    Cycle context (focus_anchor, why_now, gap_addressed) lives only
+    in briefing prose, and outcome (approved / rejected / completed
+    / failed) isn't linked back to that context in a queryable form.
+    Proposal 1 (TB-188) addresses this — the seed every downstream
+    signal-collection task will query.
+    (2) **No retrospective delete-test signal stream.** goal.md L61-76
+    names the delete-test as the diagnostic for goal-shaped pro-forma
+    compliance, but there is no operator surface to record the
+    delete-test verdict on a shipped proposal. The signal the focus
+    item most needs (operator answering "did this advance the goal in
+    substance") literally does not accumulate today. Proposal 2
+    (TB-189) adds `ap2 classify TB-N --delete-test ...`.
+    (3) **Track-record feedback into the next ideation cycle.** Once
+    (1) and (2) accumulate data, ideation should read its own track
+    record at proposal time. Out-of-scope this cycle (depends on
+    (1)+(2) producing signal volume first); will propose a
+    "Delete-test track record" prompt-header block in a later cycle.
+  - Status: `in-progress`
+  - Reasoning: focus is fresh; zero shipped TB-Ns; gaps (1)–(3) are
+    the natural decomposition; (1) and (2) are this cycle's
+    proposals; (3) waits for data.
 
 ## Non-goal risk check
 
-None. Both proposals anchor to Done-when bullets (operator-walk-
-away + failure-recovery), neither touches generic-task-scheduler,
-multi-tenancy, real-time collab, cross-project orchestration, or
-operator-judgment replacement.
+Both proposals anchor strictly to ideation signal capture / signal
+surfacing. Neither rotates goal.md (operator-owned), neither extends
+the chat surface beyond TB-152's existing operator-queue precedent,
+neither aggregates across projects, neither pushes into multi-tenancy
+or real-time. Clear.
 
 ## Considered & deferred this cycle
 
-- **`grep` exit-1 non-presence-check pitfall as ideation.default.md
-  prompt addition**: spirit overlaps TB-172's wack-a-mole rejection
-  ("enumerate-known-pitfalls generalizes poorly"). Deferred;
-  operator residual-risk acceptance carried (n=3: TB-178/182/183).
-- **Auto-rotate goal.md `## Current focus`**: violates Non-goal
-  "Replacing operator judgment on goal definition."
-- **Insight bootstrap (target-project-agnostic)**: TB-175 rejection
-  authoritative.
-- **Force-fill all 5 backlog slots**: fails goal.md delete-test;
-  TB-172/TB-175 reject pattern signals operator wants focused,
-  motivated proposals not exploration breadth.
-- **`ideation_force_override` event-only observability**: too thin
-  standalone; folded into Proposal 1 (the hint-bearing forced
-  cycle's audit event covers the same use case).
+- **Re-propose TB-175 framing (acceptance-rate insight regenerator
+  → `.cc-autopilot/insights/ideation_quality.md`).** TB-175 was
+  rejected at 05:15:59Z with "(no reason given)" BEFORE the 18:07Z
+  pivot. The new focus arguably re-validates the framing, but the
+  operator's recent rejection pattern (narrow / focused / one gap
+  per proposal — TB-184/185 today) suggests landing TB-188 (the
+  data source) first, then re-proposing the regenerator next cycle
+  with richer signal density, is more likely to ship than re-
+  proposing the same idea cold. Surfaced in Open questions below.
+- **`ap2 reject --category <enum>` rejection-reason taxonomy.**
+  TB-172's "enumerate-known-cases generalizes poorly" rejection
+  pattern applies — a fixed N-key enum risks the same wack-a-mole
+  framing, and free-text reasons + LLM mining at insight-regenerator
+  time is structurally cleaner.
+- **Self-evaluation field in ideation_state.md (Recent
+  retrospectives prompt section).** Operator's 18:07Z pivot
+  explicitly names "prompt-language craft" as NOT the bottleneck;
+  operator-authored verdict (TB-189) is the right primary signal
+  before any prompt-side retrospective field.
+- **`ap2 ideate --hint` re-proposal.** TB-184 rejected today
+  18:01:11Z: "goal.md is the operator-intent channel (Non-goal:
+  'operator owns goal.md'); --hint creates a parallel surface that
+  erodes that authority." Authoritative; will not re-propose.
+- **`ap2 frozen TB-N` triage view (TB-185 re-proposal).** Rejected
+  17:57Z as "Frozen tasks are very rare right now; consolidated
+  triage isn't the bottleneck." Authoritative; will not re-propose.
 
 ## Open questions for operator
 
-- **Forced-ideation cadence as goal-rotation signal.** Today's
-  16:11:19Z is the first force-override since TB-174 landed. If
-  these become routine (≥3/week), that's a stronger signal than
-  `exhausted-needs-operator` alone that goal.md `## Current focus`
-  should rotate. Proposal 1 lays the audit groundwork (hint-bearing
-  events become trackable). Worth deciding: at what cadence do you
-  want me to escalate "rotate goal.md" more loudly?
-- **Focus rotation still warranted (carried, secondary).** Even
-  with forced overrides as a release valve, the focus item self-
-  declares exhausted across 5+ consecutive assessments. Refresh
-  `goal.md ## Current focus`, OR pause the ideation cron, OR
-  explicitly declare ap2 "done enough" for now. Carried candidates:
-  "verifier robustness", "operator-walk-away resilience",
-  "target-project pivot once one is declared".
-- **TB-175 rejection had no `--reason` (carried).** `ap2 reject
-  TB-N --reason "..."` is the documented path; one-liner would
-  help future cycles avoid re-proposing semantically-similar work.
-  Non-blocking.
-- **Shell-bullet residual-risk acceptance, n=3 (carried):**
-  TB-178/182/183 retries on `grep`-exit-1 non-presence-check
-  pattern. All resolved within retry budget; TB-172-class
-  structural intervention operator-rejected. Surfacing for
-  awareness — confirm this is the durable decision.
+- **TB-175 re-proposal sequencing.** TB-175's framing (insight
+  regenerator → `.cc-autopilot/insights/ideation_quality.md`) was
+  rejected 05:15Z with no reason. The 18:07Z pivot makes this kind
+  of work the explicit focus. Plan: land TB-188 first (the signal
+  source), then re-propose the regenerator next cycle with richer
+  data. Confirm sequencing, or signal "re-propose now with broader
+  scope including legacy operator_log mining."
+- **Delete-test verdict enum shape (TB-189).** Proposed three
+  values: `advanced-goal`, `pro-forma`, `unclear`. Open to
+  extending (e.g. `partial-pro-forma` for proposals that solved a
+  sub-problem but not the headline gap). Will adopt your shape;
+  proposal is a starting point.
+- **Rejection pattern observation (n=4 today).** TB-184/185 today,
+  TB-172/175 prior — operator vetoes lean toward "doesn't move the
+  signal-collection focus forward" / "creates parallel intent
+  surfaces" / "enumeration generalizes poorly." Both proposals this
+  cycle pass each filter; flagging the pattern for cross-cycle
+  memory.
 - No unadopted `cron_proposed` events.
-- `.cc-autopilot/insights/_index.md` still empty; TB-175 rejection
-  means ideation will not seed without operator direction.
+- `.cc-autopilot/insights/_index.md` still empty. TB-188's records
+  become the natural seed for the first insight file; the next-
+  cycle regenerator proposal would populate it.
 
 ## Proposals this cycle
 
-5 slots available; proposing 2 (calibrated restraint):
+5 slots available; proposing 2 (focused; both anchor to the new
+focus item):
 
-- **TB-184**: `ap2 ideate --hint "<text>"` — per-cycle operator
-  intent forwarded into ideation prompt header. Closes gap (1)
-  above; anchors to "Current focus: ideation quality" (gap-covering
-  without drift) by giving operator an in-band knob to nudge the
-  next forced cycle toward a specific slice without rotating
-  goal.md.
-- **TB-185**: `ap2 frozen TB-N` consolidated triage view (briefing
-  + per-bullet failure notes from events.jsonl + git_log_grep
-  commit summaries + suggested-classification heuristic). Anchors
-  to goal.md Done when bullet 2 ("Failure recovery (verification
-  fails, retries exhaust, ...) is fully automatic; only genuine
-  design forks escalate") — when escalation is unavoidable, make
-  it lightweight.
+- **TB-188**: Capture per-proposal record at ideation `add_backlog`;
+  reconcile outcome on terminal events. Closes gap (1) — the
+  foundational signal capture.
+- **TB-189**: Add `ap2 classify TB-N --delete-test <verdict>` for
+  operator-authored retrospective delete-test verdicts on shipped
+  proposals. Closes gap (2). Blocked on TB-188 (per-proposal record
+  is the storage target for the verdict).
