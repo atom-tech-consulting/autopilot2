@@ -124,3 +124,10 @@ Without a cap, the section accumulates over cycles even with triage discipline �
 - Changing TB-173's surfacing logic structurally. The fix relies on the existing heading-match parser rejecting non-Decisions content; no new surfacing path.
 - Renaming `ap2/ideation.default.md` itself or restructuring how `load_prompt(cfg)` resolves it.
 - Updating documentation (README, skills/SKILL.md) to reflect the rename. The headings change in the prompt body; downstream docs that reference "open questions" by name can update opportunistically when other doc work happens.
+## Attempts
+
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "Open questions for operator" ap2/ideation.default.md` — should return ZERO matches (rename complete).; [fail] `grep -nE "parse_open_questions" ap2/` — should return ZERO matches outside of test files validating the rename happened
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T191246Z-TB-191.prompt.md`, `stream: .cc-autopilot/debug/20260506T191246Z-TB-191.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T191246Z-TB-191.messages.jsonl`
