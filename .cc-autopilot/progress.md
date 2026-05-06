@@ -311,3 +311,9 @@
 - **Summary:** Added ap2/janitor.py (deterministic git-stranded-state detector emitting janitor_finding events + operator_log summary), wired into daemon.run_cron (no-LLM dispatch), cli.cmd_status (janitor: line + JSON janitor_findings), and status_report (snapshot extra + prompt instruction). Tests pin all four briefing verification surfaces (subkind detection, no-findings silence, cron dispatch routing through run_janitor instead of SDK, CLI rendering); 1031 ap2 tests pass.
 - **Files:** ap2/janitor.py, ap2/tests/test_janitor.py, ap2/cli.py, ap2/daemon.py, ap2/status_report.py
 - **Tests:** pass
+
+## [2026-05-06] TB-179: Compact `usage` blob rendering for token/cost events in the web events table
+- **Commit:** `910ee0a`
+- **Summary:** Added `_compact_usage_row(e)` helper in ap2/web.py wrapping TB-157's `_event_token_summary` with an event-type-specific identity prefix (task/bullet/verdict for judge_call, task/status/run for task_run_usage, label/status/run for control_run_usage) and the `duration_s` field. Wired into `_events_table` alongside the verification_failed special-case so the 6-field tuple (in/out/cc/cr tokens + total_cost_usd + duration) replaces the verbose dict-dump for these three types; the full payload still lives in the `<details>raw json</details>` toggle. Added 6 tests in test_web.py: per-type compact rendering for all three event types (asserting the 6 numeric fields surface AND the nested keys server_tool_use/iterations/service_tier/inference_geo/model_usage/ephemeral_5m_input_tokens DO NOT leak into the inline cell), an opt-in-by-event-type backward-compat test (task_complete keeps the legacy key=value dump), the `_event_token_summary` regression check, and a grep-visibility test that pins the three type names in web.py. Full ap2/tests/ regression gate passes (1050 tests, 85.83s).
+- **Files:** ap2/web.py, ap2/tests/test_web.py
+- **Tests:** pass
