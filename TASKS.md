@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-187** **Fix mixed-blocker pending-review surfacing — `@blocked:review,TB-N` tasks are invisible** [→ brief](.cc-autopilot/tasks/fix-mixed-blocker-pending-review-surfaci.md)
 
 ## Pipeline Pending
 
