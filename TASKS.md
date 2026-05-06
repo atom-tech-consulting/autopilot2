@@ -12,6 +12,7 @@
 - [ ] **TB-175** **Insight: compute post-TB-121 ideation acceptance rate from operator_log.md; bootstrap `.cc-autopilot/insights/ideation_quality.md`** `#autopilot` `#ideation` `#evaluation` `#insights` `#observability` `@blocked:review` — One-shot analysis: scan operator_log.md for `approve TB-N` / `rejected ideation proposal → TB-N` / `delete TB-N` lines since TB-121's review-gate landed; compute proposal-acceptance rate (approves/proposals); write the result to `.cc-autopilot/insights/ideation_quality.md` with YAML front matter (`tldr`, `updated`, `updated_by: TB-175`, `cites`) so the insights `_index.md` regeneration (TB-89) renders it. [→ brief](.cc-autopilot/tasks/insight-compute-post-tb-121-ideation-acc.md)
 - [ ] **TB-179** **Compact `usage` blob rendering for token/cost events in the web events table** [→ brief](.cc-autopilot/tasks/compact-usage-blob-rendering-for-token-c.md)
 - [ ] **TB-178** **Janitor LLM judge — classify findings as real-strand vs. operator-draft** `@blocked:TB-177` [→ brief](.cc-autopilot/tasks/janitor-llm-judge-classify-findings-as-r.md)
+- [ ] **TB-180** **Apply compact `usage` rendering to `ap2 logs` (CLI parity with TB-179)** `@blocked:TB-179` [→ brief](.cc-autopilot/tasks/apply-compact-usage-rendering-to-ap2-log.md)
 
 ## Pipeline Pending
 
