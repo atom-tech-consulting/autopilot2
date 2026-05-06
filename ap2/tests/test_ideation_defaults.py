@@ -122,7 +122,10 @@ def test_ideation_prompt_pins_ideation_state_write_tool():
 
 
 def test_ideation_prompt_pins_step0_assessment():
-    """TB-87: Step 0 assessment schema + citation rule + OVERWRITE semantics."""
+    """TB-87 / TB-191: Step 0 assessment schema + citation rule +
+    OVERWRITE semantics. TB-191 renamed `## Open questions for
+    operator` to `## Decisions needed from operator` and added the
+    sibling agent-internal `## Cycle observations` section."""
     prompt = _default_prompt()
     assert ".cc-autopilot/ideation_state.md" in prompt
     assert "Step 0" in prompt or "step 0" in prompt
@@ -131,10 +134,16 @@ def test_ideation_prompt_pins_step0_assessment():
         "## Current focus assessment",
         "## Non-goal risk check",
         "## Considered & deferred",
-        "## Open questions for operator",
+        "## Cycle observations",
+        "## Decisions needed from operator",
         "## Proposals this cycle",
     ):
         assert section in prompt, f"missing schema section {section!r}"
+    # TB-191: the legacy section name is gone — the rename is hard.
+    assert "## Open questions for operator" not in prompt, (
+        "TB-191: the legacy `## Open questions for operator` schema "
+        "section should be renamed to `## Decisions needed from operator`."
+    )
     for status in ("in-progress", "exhausted-needs-operator", "deferred"):
         assert status in prompt, f"missing status value {status!r}"
     lower = prompt.lower()
@@ -153,9 +162,11 @@ def test_ideation_prompt_lists_ideation_state_first_in_read_order():
 
 
 def test_ideation_prompt_reads_operator_log_and_treats_as_authoritative():
-    """TB-106: operator_log.md is the operator-decision channel. Ideation
-    must read it and NOT re-propose actions logged there, even if its own
-    prior assessment surfaced them as 'Open questions for operator'."""
+    """TB-106 / TB-191: operator_log.md is the operator-decision channel.
+    Ideation must read it and NOT re-propose actions logged there, even
+    if its own prior assessment surfaced them as 'Decisions needed from
+    operator' (the post-TB-191 name) — or under the pre-TB-191 section
+    name on a state file from before the rename."""
     prompt = _default_prompt()
     assert ".cc-autopilot/operator_log.md" in prompt
     # Normalize whitespace — the prompt is markdown-wrapped so phrases
@@ -322,16 +333,17 @@ def test_ideation_prompt_explains_why_gate_is_uniform():
     )
 
 
-def test_ideation_prompt_forbids_tasks_awaiting_review_in_open_questions():
-    """TB-182: the `## Open questions for operator` schema fragment must
-    NOT instruct ideation to write "Tasks awaiting review" / "TB-N
-    awaiting approval" bullets — those duplicate the mechanically-
-    derived `Pending operator review (N): TB-...` line that
-    `ap2 status` (CLI) and the cron status-report inject from current
-    board state per run (TB-151 / TB-173). When the gap between
-    ideation cycles diverges from current board state (e.g. an
-    `ap2 approve` lands in the gap) the two lines actively
-    contradict each other in the same Mattermost post.
+def test_ideation_prompt_forbids_tasks_awaiting_review_in_operator_decisions():
+    """TB-182 / TB-191: the `## Decisions needed from operator` schema
+    fragment (renamed from `## Open questions for operator` in TB-191)
+    must NOT instruct ideation to write "Tasks awaiting review" /
+    "TB-N awaiting approval" bullets — those duplicate the
+    mechanically-derived `Pending operator review (N): TB-...` line
+    that `ap2 status` (CLI) and the cron status-report inject from
+    current board state per run (TB-151 / TB-173). When the gap
+    between ideation cycles diverges from current board state (e.g. an
+    `ap2 approve` lands in the gap) the two lines actively contradict
+    each other in the same Mattermost post.
 
     Pin both halves:
       (a) the prompt does NOT instruct ideation to LIST tasks-awaiting-
@@ -345,11 +357,7 @@ def test_ideation_prompt_forbids_tasks_awaiting_review_in_open_questions():
     prompt = _default_prompt()
     flat = " ".join(prompt.split())
     lower = flat.lower()
-    # (a) The pre-TB-182 instruction is gone. The exact sentence was
-    # "List the tasks awaiting review in your ideation_state.md
-    # 'Open questions for operator' section ..."; assert the directive
-    # form ("list the tasks awaiting review in your ideation_state")
-    # no longer appears.
+    # (a) The pre-TB-182 instruction is gone.
     assert "list the tasks awaiting review in your ideation_state" not in lower, (
         "TB-182: ideation prompt still instructs listing tasks-awaiting-"
         "review TB-Ns in ideation_state.md — that duplicates the "
@@ -366,16 +374,16 @@ def test_ideation_prompt_forbids_tasks_awaiting_review_in_open_questions():
         "preserve the lineage."
     )
 
-    # Schema-fragment-local check: between `## Open questions for
+    # Schema-fragment-local check: between `## Decisions needed from
     # operator` (the schema fragment near the top of the file, NOT
-    # `### Open questions for operator` or other appearances) and the
-    # next `## ` heading inside the schema, the literal substring
+    # `### Decisions needed from operator` or other appearances) and
+    # the next `## ` heading inside the schema, the literal substring
     # "Tasks awaiting review" must NOT appear (case-insensitive).
-    schema_idx = prompt.find("## Open questions for operator")
+    schema_idx = prompt.find("## Decisions needed from operator")
     assert schema_idx >= 0
     # The schema fragment is indented (it's inside a code block in the
     # markdown). Find the next `## ` heading that immediately follows.
-    after = prompt[schema_idx + len("## Open questions for operator"):]
+    after = prompt[schema_idx + len("## Decisions needed from operator"):]
     next_section_idx = after.find("## Proposals this cycle")
     assert next_section_idx >= 0, (
         "schema fragment is missing the trailing `## Proposals this "
@@ -383,9 +391,10 @@ def test_ideation_prompt_forbids_tasks_awaiting_review_in_open_questions():
     )
     section_body = after[:next_section_idx]
     assert "tasks awaiting review" not in section_body.lower(), (
-        f"TB-182: the `## Open questions for operator` schema fragment "
-        f"contains a 'Tasks awaiting review' bullet — that is the "
-        f"redundancy this task removes. Section body:\n{section_body!r}"
+        f"TB-182: the `## Decisions needed from operator` schema "
+        f"fragment contains a 'Tasks awaiting review' bullet — that "
+        f"is the redundancy this task removes. Section body:\n"
+        f"{section_body!r}"
     )
 
 
@@ -400,6 +409,186 @@ def test_ideation_prompt_does_not_contain_a_manual_bullet():
     assert not _re.search(r"(?m)^\s*[-*]\s*Manual\s*:", prompt), (
         "ideation prompt contains a `- Manual: ...` bullet — TB-138 forbids "
         "these in any briefing, and the prompt itself must lead by example"
+    )
+
+
+# ---------------------------------------------------------------------------
+# TB-191: `## Decisions needed from operator` actionability schema +
+# `## Cycle observations` triage discipline pins. These guard the
+# rename-and-add half of the schema fix: the operator-facing section
+# must require actionable decisions (with explicit prohibitions and
+# carry-discipline), and the agent-internal observations section must
+# carry the triage decision tree, the 10-bullet hard cap, the "default
+# is DROP" instruction, and the leak-prohibition list.
+
+
+def test_ideation_prompt_pins_decisions_section_actionability_schema():
+    """TB-191: the `## Decisions needed from operator` schema body must
+    require each bullet to be either a `?`-terminated direct question
+    OR explicitly prefixed `Decision needed:` / `Operator input
+    required:`, name the specific operator action, name the unblock-
+    condition, and enumerate the prohibited content shapes (status
+    observations, pattern-tracking, behavioral commentary, metric
+    updates). The (carried)-discipline language must also pin that
+    pure copy-paste of last cycle's text is forbidden."""
+    prompt = _default_prompt()
+    schema_idx = prompt.find("## Decisions needed from operator")
+    assert schema_idx >= 0, (
+        "TB-191: `## Decisions needed from operator` schema heading "
+        "missing from the prompt"
+    )
+    after = prompt[schema_idx + len("## Decisions needed from operator"):]
+    next_section_idx = after.find("## Proposals this cycle")
+    assert next_section_idx >= 0
+    body = after[:next_section_idx]
+    lower = body.lower()
+
+    # Each bullet must be `?`-terminated OR prefixed.
+    assert "?" in body and "terminated" in lower, (
+        "TB-191: schema body must require `?`-terminated questions"
+    )
+    assert "decision needed:" in lower, (
+        "TB-191: schema body must mention the `Decision needed:` prefix"
+    )
+    assert "operator input required:" in lower, (
+        "TB-191: schema body must mention the `Operator input required:` "
+        "prefix"
+    )
+    # Must articulate the specific operator action.
+    assert "specific operator action" in lower, (
+        "TB-191: schema body must require naming the specific operator action"
+    )
+    # Must articulate the unblock-condition.
+    assert "unblock-condition" in lower or "unblock condition" in lower, (
+        "TB-191: schema body must require naming the unblock-condition"
+    )
+    # Prohibited content shapes (all four).
+    for prohibited in (
+        "status observations",
+        "pattern-tracking",
+        "behavioral commentary",
+        "metric updates",
+    ):
+        assert prohibited in lower, (
+            f"TB-191: schema body missing prohibition on {prohibited!r}"
+        )
+    # (Carried) discipline pin.
+    assert "(carried)" in lower or "carried)" in lower, (
+        "TB-191: schema body must pin the (carried) discipline phrase"
+    )
+    assert "copy-paste" in lower and "forbidden" in lower, (
+        "TB-191: schema body must forbid pure copy-paste of last cycle's "
+        "text under (carried) discipline"
+    )
+    # TB-191 cross-ref so future trims preserve the lineage.
+    assert "TB-191" in prompt
+
+
+def test_ideation_prompt_pins_cycle_observations_triage_discipline():
+    """TB-191: the `## Cycle observations` schema body must pin the
+    triage-decision-tree language, the 10-bullet hard cap, the "default
+    disposition is DROP" instruction, and the hard prohibitions
+    (operator-actionable content, pure status reporting, recurring
+    "no X events" / negative-observation bullets)."""
+    prompt = _default_prompt()
+    schema_idx = prompt.find("## Cycle observations")
+    assert schema_idx >= 0, (
+        "TB-191: `## Cycle observations` schema heading missing from "
+        "the prompt"
+    )
+    # Body runs until the next `## ` heading inside the schema fragment.
+    # The schema fragment is indented (it's a code block in the markdown),
+    # so heading lines start with `    ##` — we slice on that pattern to
+    # avoid false-matching the `## Decisions needed from operator`
+    # cross-reference that appears (backticked) inside the prohibitions
+    # list of THIS section's own body.
+    after = prompt[schema_idx + len("## Cycle observations"):]
+    next_section_idx = after.find("\n    ## Decisions needed from operator")
+    assert next_section_idx >= 0, (
+        "TB-191: `## Cycle observations` should sit ABOVE `## Decisions "
+        "needed from operator` in the schema fragment"
+    )
+    body = after[:next_section_idx]
+    lower = body.lower()
+
+    # Agent-internal framing — observations must NOT be forwarded.
+    assert "agent-internal" in lower, (
+        "TB-191: schema body must label the section as agent-internal"
+    )
+    assert "not forwarded" in lower or "not be forwarded" in lower, (
+        "TB-191: schema body must state observations are NOT forwarded "
+        "to operator-facing surfaces"
+    )
+    # Triage decision tree — three branches.
+    assert "triage" in lower, (
+        "TB-191: schema body missing the triage discipline framing"
+    )
+    for branch in ("drop", "promote", "carry"):
+        assert branch in lower, (
+            f"TB-191: triage decision-tree branch {branch!r} missing"
+        )
+    # 10-bullet hard cap.
+    assert "10 bullets" in lower or "10-bullet" in lower, (
+        "TB-191: schema body must pin the 10-bullet hard cap"
+    )
+    assert "hard cap" in lower or "hard ceiling" in lower, (
+        "TB-191: schema body must label the cap as hard"
+    )
+    # Default disposition is DROP.
+    assert "default disposition" in lower and "drop" in lower, (
+        "TB-191: schema body must state the default disposition is DROP"
+    )
+    # Hard prohibitions.
+    assert "operator should act on" in lower or "operator-actionable" in lower, (
+        "TB-191: hard prohibition against operator-actionable content "
+        "missing from the schema body"
+    )
+    assert "status reporting" in lower, (
+        "TB-191: hard prohibition against pure status reporting missing"
+    )
+    assert "no x events" in lower or "no operator activity" in lower, (
+        "TB-191: hard prohibition against recurring negative-observation "
+        "bullets missing from the schema body"
+    )
+    # Cross-ref.
+    assert "TB-191" in prompt
+
+
+def test_ideation_prompt_cycle_observations_section_present():
+    """TB-191: explicit greppability check — the schema fragment carries
+    the `## Cycle observations` heading. Pinned separately from the
+    schema-content test above so a regression that drops the heading
+    entirely (e.g. a copy-paste mistake during a prompt rewrite) is
+    surfaced clearly."""
+    prompt = _default_prompt()
+    assert "## Cycle observations" in prompt, (
+        "TB-191: `## Cycle observations` heading is missing from the "
+        "schema fragment in `ap2/ideation.default.md`"
+    )
+
+
+def test_ideation_prompt_decisions_needed_section_present():
+    """TB-191: explicit greppability check — the schema fragment carries
+    the `## Decisions needed from operator` heading."""
+    prompt = _default_prompt()
+    assert "## Decisions needed from operator" in prompt, (
+        "TB-191: `## Decisions needed from operator` heading is missing "
+        "from the schema fragment in `ap2/ideation.default.md`"
+    )
+
+
+def test_ideation_prompt_no_legacy_open_questions_heading():
+    """TB-191: the legacy `## Open questions for operator` schema name
+    is gone — the rename is hard. Pinned separately from the
+    schema-content test so a regression that re-introduces the legacy
+    heading (e.g. an editor pasting back the pre-TB-191 schema by
+    mistake) is surfaced clearly."""
+    prompt = _default_prompt()
+    assert "Open questions for operator" not in prompt, (
+        "TB-191: the legacy `Open questions for operator` phrase still "
+        "appears in `ap2/ideation.default.md`. The rename to "
+        "`## Decisions needed from operator` is supposed to be hard — "
+        "no remaining references in the prompt body."
     )
 
 

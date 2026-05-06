@@ -144,16 +144,19 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         if t.blocked_on and any(b.lower() == "review" for b in t.blocked_on)
     ]
     pending_review = len(pending_review_ids)
-    # TB-173: surface the ideator's `## Open questions for operator`
-    # section from `.cc-autopilot/ideation_state.md` so questions
-    # surfaced at ideation time reach the operator without manual
-    # file-reading. JSON carries the full helper output (capped at 7 by
-    # `parse_open_questions`); the text-mode rendering below truncates
-    # to the first 5 with a "(+M more)" suffix to keep the status
-    # block compact, mirroring TB-151's pending-review pattern.
-    from .ideation import parse_open_questions
+    # TB-173 / TB-191: surface the ideator's `## Decisions needed from
+    # operator` section from `.cc-autopilot/ideation_state.md` so
+    # actionable decisions surfaced at ideation time reach the operator
+    # without manual file-reading. JSON carries the full helper output
+    # (capped at 7 by `parse_operator_decisions`); the text-mode
+    # rendering below truncates to the first 5 with a "(+M more)"
+    # suffix to keep the status block compact, mirroring TB-151's
+    # pending-review pattern. The agent-internal `## Cycle observations`
+    # section (TB-191) is structurally excluded by the parser's
+    # heading-match — it never reaches this surface.
+    from .ideation import parse_operator_decisions
 
-    open_questions = parse_open_questions(
+    operator_decisions = parse_operator_decisions(
         cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     )
     # TB-177: surface the count of recent `janitor_finding` events so an
@@ -207,10 +210,13 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # external monitors). The `pending_review` count is kept
             # for backward compat with anything that already parsed it.
             "pending_review_ids": pending_review_ids,
-            # TB-173: the ideator's open-questions list, untruncated.
-            # Empty list when the file or section is absent — that's
-            # the steady-state happy path for fresh projects.
-            "open_questions": open_questions,
+            # TB-173 / TB-191: the ideator's "decisions needed from
+            # operator" list, untruncated. Empty list when the file or
+            # section is absent — that's the steady-state happy path
+            # for fresh projects. Renamed from `open_questions`
+            # alongside the parser rename so the JSON key matches the
+            # operator-facing label and the underlying schema section.
+            "operator_decisions": operator_decisions,
             # TB-177: count of recent `janitor_finding` events (within
             # `RECENT_FINDING_WINDOW_S`). 0 on healthy projects /
             # missing events file — machine consumers always see the
@@ -283,29 +289,32 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             f"janitor:  {', '.join(parts)} — "
             "`ap2 logs` (filter type=janitor_finding) to inspect"
         )
-    if open_questions:
-        # TB-173: surface ideator-surfaced questions from
-        # `ideation_state.md` so operator escalation reaches the CLI
+    if operator_decisions:
+        # TB-173 / TB-191: surface ideator-surfaced operator decisions
+        # from `ideation_state.md` so escalation reaches the CLI
         # without a manual file read. Truncate per-bullet to ~80 chars
         # with an ellipsis; cap at the first 5 bullets with a
         # "(+M more)" tail so the status block stays compact (mirrors
-        # TB-151's pending-review-line shape).
-        _OPEN_QUESTIONS_RENDER_CAP = 5
-        _OPEN_QUESTIONS_BULLET_MAX_CHARS = 80
+        # TB-151's pending-review-line shape). Label changed from
+        # "open questions for operator" to "decisions needed" alongside
+        # the schema rename so the surfacing label matches the
+        # actionable-decision shape required by the schema.
+        _OPERATOR_DECISIONS_RENDER_CAP = 5
+        _OPERATOR_DECISIONS_BULLET_MAX_CHARS = 80
         rendered: list[str] = []
-        for bullet in open_questions[:_OPEN_QUESTIONS_RENDER_CAP]:
-            if len(bullet) > _OPEN_QUESTIONS_BULLET_MAX_CHARS:
+        for bullet in operator_decisions[:_OPERATOR_DECISIONS_RENDER_CAP]:
+            if len(bullet) > _OPERATOR_DECISIONS_BULLET_MAX_CHARS:
                 rendered.append(
-                    bullet[: _OPEN_QUESTIONS_BULLET_MAX_CHARS - 3] + "..."
+                    bullet[: _OPERATOR_DECISIONS_BULLET_MAX_CHARS - 3] + "..."
                 )
             else:
                 rendered.append(bullet)
-        if len(open_questions) > _OPEN_QUESTIONS_RENDER_CAP:
+        if len(operator_decisions) > _OPERATOR_DECISIONS_RENDER_CAP:
             rendered.append(
-                f"(+{len(open_questions) - _OPEN_QUESTIONS_RENDER_CAP} more)"
+                f"(+{len(operator_decisions) - _OPERATOR_DECISIONS_RENDER_CAP} more)"
             )
         print(
-            f"open questions for operator ({len(open_questions)}): "
+            f"decisions needed ({len(operator_decisions)}): "
             + "; ".join(rendered)
         )
     nxt = board.next_ready()

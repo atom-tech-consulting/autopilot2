@@ -676,14 +676,22 @@ def test_status_report_prompt_instructs_forwarding_pending_review_line():
 
 
 # ---------------------------------------------------------------------------
-# TB-173: ideator open-questions snapshot block + agent-prompt forwarder.
+# TB-173 / TB-191: ideator decisions-needed snapshot block + agent-prompt
+# forwarder.
 #
-# Mirrors the TB-151 plumbing pattern: `parse_open_questions` reads the
-# `## Open questions for operator` section from
-# `.cc-autopilot/ideation_state.md` and the routine injects an
-# "Open questions for operator (N): ..." line into the snapshot's
+# Mirrors the TB-151 plumbing pattern: `parse_operator_decisions` reads
+# the `## Decisions needed from operator` section from
+# `.cc-autopilot/ideation_state.md` (renamed from the pre-TB-191 `## Open
+# questions for operator`) and the routine injects a
+# "Decisions needed from operator (N): ..." line into the snapshot's
 # state_extras. The prompt body separately tells the agent to forward
 # the line VERBATIM into the posted Mattermost report.
+#
+# TB-191 also added the agent-internal `## Cycle observations` section
+# that MUST NOT leak to operator-facing surfaces. The cron status-report
+# is one of those surfaces — the leak-guard test at the bottom of this
+# block pins that observations content never enters the snapshot
+# state_extras even when both sections coexist on disk.
 
 
 def _seed_ideation_state(cfg: Config, body: str) -> None:
@@ -692,21 +700,22 @@ def _seed_ideation_state(cfg: Config, body: str) -> None:
     path.write_text(body)
 
 
-def test_run_status_report_injects_open_questions_line_when_present(
+def test_run_status_report_injects_operator_decisions_line_when_present(
     tmp_path, monkeypatch,
 ):
-    """When ideation_state.md has a non-empty open-questions section, the
-    routine injects an "Open questions for operator (N): ..." line into
-    `state_extras` so the agent's snapshot block carries it. Pins the
-    state_extras → build_control_prompt plumbing for TB-173."""
+    """When ideation_state.md has a non-empty decisions-needed section,
+    the routine injects a "Decisions needed from operator (N): ..."
+    line into `state_extras` so the agent's snapshot block carries it.
+    Pins the state_extras → build_control_prompt plumbing for
+    TB-173 / TB-191."""
     cfg = _cfg(tmp_path)
     _seed_active_for_run(cfg)
     _seed_ideation_state(
         cfg,
-        "## Open questions for operator\n\n"
-        "- Should goal.md declare a new focus?\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: should goal.md declare a new focus?\n"
         "- Approve or reject TB-171 / TB-172 / TB-173.\n"
-        "- Insights index still empty.\n",
+        "- Operator input required: rotate focus item?\n",
     )
 
     captured: dict[str, str] = {}
@@ -725,18 +734,19 @@ def test_run_status_report_injects_open_questions_line_when_present(
     extras = captured["extras"]
     # Snapshot line carries the count + each bullet joined by `; ` so the
     # agent can copy it verbatim into the report's bullet list.
-    assert "Open questions for operator (3):" in extras
-    assert "Should goal.md declare a new focus?" in extras
+    assert "Decisions needed from operator (3):" in extras
+    assert "Decision needed: should goal.md declare a new focus?" in extras
     assert "Approve or reject TB-171 / TB-172 / TB-173." in extras
-    assert "Insights index still empty." in extras
+    assert "Operator input required: rotate focus item?" in extras
 
 
-def test_run_status_report_omits_open_questions_line_when_empty(
+def test_run_status_report_omits_operator_decisions_line_when_empty(
     tmp_path, monkeypatch,
 ):
-    """No ideation_state.md / no section → snapshot has no open-questions
-    line, so a routine post doesn't grow a noisy "0 open questions"
-    bullet. Mirrors the omit-on-zero shape of the pending-review line."""
+    """No ideation_state.md / no section → snapshot has no
+    decisions-needed line, so a routine post doesn't grow a noisy
+    "0 decisions needed" bullet. Mirrors the omit-on-zero shape of the
+    pending-review line."""
     cfg = _cfg(tmp_path)
     _seed_active_for_run(cfg)
     # No ideation_state.md created.
@@ -754,35 +764,94 @@ def test_run_status_report_omits_open_questions_line_when_empty(
         run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
     )
 
-    # No open-questions line in the extras — list may still carry other
+    # No decisions-needed line in the extras — list may still carry other
     # entries (e.g. the pending-review line) but nothing about
-    # "Open questions for operator".
+    # "Decisions needed from operator".
     joined = "\n".join(captured["extras"])
-    assert "Open questions for operator" not in joined
+    assert "Decisions needed from operator" not in joined
 
 
-def test_status_report_prompt_instructs_forwarding_open_questions_line():
+def test_status_report_prompt_instructs_forwarding_operator_decisions_line():
     """The canonical STATUS_REPORT_PROMPT body must tell the agent to
-    forward the "Open questions for operator" snapshot line into the
+    forward the "Decisions needed from operator" snapshot line into the
     posted Mattermost report verbatim. Without this instruction the
     snapshot line lands in the agent's context but not in the operator-
     visible report — same failure shape as the TB-151 pin above."""
     from ap2.status_report import STATUS_REPORT_PROMPT
 
     body = STATUS_REPORT_PROMPT
-    assert "Open questions for operator" in body
+    assert "Decisions needed from operator" in body
     # Forwarding rule must be explicit somewhere in the prompt body.
     assert "verbatim" in body.lower() or "VERBATIM" in body
 
 
+def test_run_status_report_does_not_leak_cycle_observations(
+    tmp_path, monkeypatch,
+):
+    """TB-191: when ideation_state.md carries BOTH `## Decisions needed
+    from operator` (with two valid bullets) AND `## Cycle observations`
+    (with three observation-shaped bullets), the cron status-report
+    routine must inject ONLY the decisions content into state_extras
+    and NEVER any line referencing the cycle-observations bullets.
+    The agent-internal observations section is structurally excluded
+    by `parse_operator_decisions` — this test pins the structural
+    exclusion at the cron-post forwarding flow, not just the parser."""
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+    _seed_ideation_state(
+        cfg,
+        "# Ideation State\n\n"
+        "## Cycle observations\n\n"
+        "- n=3 retries on bullet kind Y this week.\n"
+        "- No unadopted cron_proposed events.\n"
+        "- Cadence is steady at 12 ticks/min.\n\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: approve TB-200?\n"
+        "- Operator input required: rotate focus to verifier robustness?\n",
+    )
+
+    captured: dict[str, str] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        captured["extras"] = "\n".join(state_extras or [])
+        return "stub"
+
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", _capture_prompt)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    extras = captured["extras"]
+    # Decisions content is present in the snapshot line.
+    assert "Decisions needed from operator (2):" in extras
+    assert "Decision needed: approve TB-200?" in extras
+    assert (
+        "Operator input required: rotate focus to verifier robustness?"
+        in extras
+    )
+    # None of the cycle-observations content leaks into state_extras.
+    for forbidden in (
+        "n=3 retries on bullet kind Y",
+        "No unadopted cron_proposed events",
+        "Cadence is steady at 12 ticks/min",
+    ):
+        assert forbidden not in extras, (
+            f"TB-191: cycle-observations bullet leaked into the cron "
+            f"status-report state_extras: {forbidden!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
-# TB-182: validate-against-events instruction for forwarded TB-N references.
+# TB-182 / TB-191: validate-against-events instruction for forwarded
+# TB-N references.
 #
-# The open-questions snapshot line forwards bullets the ideator wrote at the
-# last `ideation_state_updated` event. Up to ~2h of staleness can bleed
-# through (the gap between ideation cycles). The status-report agent's
-# prompt body must instruct it to cross-check forwarded TB-N references
-# against events.jsonl for any superseding `task_complete`,
+# The decisions-needed snapshot line forwards bullets the ideator wrote
+# at the last `ideation_state_updated` event. Up to ~2h of staleness can
+# bleed through (the gap between ideation cycles). The status-report
+# agent's prompt body must instruct it to cross-check forwarded TB-N
+# references against events.jsonl for any superseding `task_complete`,
 # `task_deleted`, `task_updated`, or `verification_failed` event AFTER
 # the `ideation_state_updated` ts, and skip / annotate stale bullets.
 
@@ -802,7 +871,7 @@ def test_status_report_prompt_pins_validation_against_events():
 
     body = STATUS_REPORT_PROMPT
     # Anchor: `ideation_state_updated` is the timestamp the agent uses
-    # to decide which events count as "after the open-questions
+    # to decide which events count as "after the decisions-needed
     # content was last refreshed".
     assert "ideation_state_updated" in body, (
         "TB-182: the validation instruction needs the "
@@ -859,20 +928,21 @@ def test_status_report_prompt_validation_instruction_describes_skip_or_annotate(
     )
 
 
-def test_run_status_report_smoke_stale_open_questions_bullet(tmp_path, monkeypatch):
-    """TB-182 smoke test: when the project has an `ideation_state.md`
-    with a `TB-X retry watch` open-questions bullet AND `events.jsonl`
-    contains a `task_complete TB-X` event AFTER the
-    `ideation_state_updated` ts, the prompt the agent receives must
-    carry BOTH (so the agent has the context to validate) AND the
-    validation instruction (so it knows to validate). We can't pin the
-    agent's actual reasoning without an integration test; the prompt-
-    content + event-presence pins are the load-bearing assertions.
+def test_run_status_report_smoke_stale_operator_decisions_bullet(tmp_path, monkeypatch):
+    """TB-182 / TB-191 smoke test: when the project has an
+    `ideation_state.md` with a `TB-X retry watch` decisions-needed
+    bullet AND `events.jsonl` contains a `task_complete TB-X` event
+    AFTER the `ideation_state_updated` ts, the prompt the agent
+    receives must carry BOTH (so the agent has the context to
+    validate) AND the validation instruction (so it knows to
+    validate). We can't pin the agent's actual reasoning without an
+    integration test; the prompt-content + event-presence pins are
+    the load-bearing assertions.
 
     Threading: use `_OptionsCapturingSDK` so the prompt actually
     handed to the SDK is captured (snapshot-block + body), then assert
-    the captured prompt contains the open-questions snapshot line, the
-    `task_complete` event marker, and the validation instruction.
+    the captured prompt contains the decisions-needed snapshot line,
+    the `task_complete` event marker, and the validation instruction.
     """
     cfg = _cfg(tmp_path)
     # Seed: an old ideation_state_updated event, then a task_complete
@@ -886,14 +956,15 @@ def test_run_status_report_smoke_stale_open_questions_bullet(tmp_path, monkeypat
         task="TB-999", status="complete", commit="abc1234",
         summary="TB-999 landed Complete after the ideation snapshot",
     )
-    # Open-questions section referencing TB-999 — this is the bullet
+    # Decisions-needed section referencing TB-999 — this is the bullet
     # the agent must validate as stale (since TB-999 has since
     # task_complete'd) and either skip or annotate.
     _seed_ideation_state(
         cfg,
-        "## Open questions for operator\n\n"
+        "## Decisions needed from operator\n\n"
         "- **TB-999 retry watch (n=1 prose-bullet over-specification)**: "
-        "watch for repeat over-specification in the next prose-only briefing.\n",
+        "decision needed: should we re-rank the retry watch now that the "
+        "task landed Complete?\n",
     )
 
     from ap2 import prompts as _prompts_mod
@@ -924,9 +995,9 @@ def test_run_status_report_smoke_stale_open_questions_bullet(tmp_path, monkeypat
 
     assert sdk.called is True, "skip-gate fired unexpectedly"
     prompt = captured["prompt"]
-    # The open-questions snapshot line carries the TB-X reference the
+    # The decisions-needed snapshot line carries the TB-X reference the
     # agent must validate.
-    assert "Open questions for operator (1):" in prompt
+    assert "Decisions needed from operator (1):" in prompt
     assert "TB-999 retry watch" in prompt
     # The validation instruction is in the body.
     assert "ideation_state_updated" in prompt
@@ -956,15 +1027,15 @@ def test_run_status_report_smoke_stale_open_questions_bullet(tmp_path, monkeypat
     assert "task_complete" in STATUS_REPORT_PROMPT
 
 
-def test_run_status_report_smoke_no_staleness_open_questions_bullet(
+def test_run_status_report_smoke_no_staleness_operator_decisions_bullet(
     tmp_path, monkeypatch,
 ):
-    """TB-182 smoke test, no-staleness branch: when `events.jsonl`
-    has NO `task_complete` / `task_deleted` / `task_updated` /
-    `verification_failed` event for the bullet's TB-N AFTER the
-    `ideation_state_updated` ts, the bullet is current and should
-    forward as-is. The prompt structure must give the agent the
-    context to make that call: the snapshot line is present, the
+    """TB-182 / TB-191 smoke test, no-staleness branch: when
+    `events.jsonl` has NO `task_complete` / `task_deleted` /
+    `task_updated` / `verification_failed` event for the bullet's
+    TB-N AFTER the `ideation_state_updated` ts, the bullet is current
+    and should forward as-is. The prompt structure must give the agent
+    the context to make that call: the snapshot line is present, the
     validation instruction is present, and `events.jsonl` does NOT
     contain a superseding event for the referenced TB-N.
 
@@ -983,13 +1054,13 @@ def test_run_status_report_smoke_no_staleness_open_questions_bullet(
         task="TB-1", status="complete", commit="abc1234",
         summary="unrelated task",
     )
-    # Open-questions bullet references TB-998 — but no event for TB-998
-    # appears AFTER the ideation_state_updated ts.
+    # Decisions-needed bullet references TB-998 — but no event for
+    # TB-998 appears AFTER the ideation_state_updated ts.
     _seed_ideation_state(
         cfg,
-        "## Open questions for operator\n\n"
+        "## Decisions needed from operator\n\n"
         "- **TB-998 retry watch (n=1 prose-bullet over-specification)**: "
-        "watch for repeat over-specification.\n",
+        "decision needed: should we keep the retry watch open?\n",
     )
 
     captured: dict[str, str] = {}
@@ -1015,7 +1086,7 @@ def test_run_status_report_smoke_no_staleness_open_questions_bullet(
     prompt = captured["prompt"]
     # Snapshot line + bullet present — the agent has something to
     # validate (and forward unchanged once it confirms freshness).
-    assert "Open questions for operator (1):" in prompt
+    assert "Decisions needed from operator (1):" in prompt
     assert "TB-998 retry watch" in prompt
     # Validation instruction present — the agent knows to validate.
     assert "ideation_state_updated" in prompt

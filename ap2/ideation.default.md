@@ -8,7 +8,9 @@ Read these files in order:
 2. .cc-autopilot/operator_log.md — operator decisions and action
    acknowledgements (if it exists). Each line is authoritative: do
    NOT re-propose actions or decisions logged here, even if your
-   prior assessment surfaced them as "Open questions for operator".
+   prior assessment surfaced them as "Decisions needed from operator"
+   (or under the pre-TB-191 section name on a state file from before
+   the rename).
    Treat this file as the operator-owned ground truth on what's been
    done, abandoned, or decided. The `## Recent operator rejections`
    block in this prompt's `## Current state` header (TB-163) is a
@@ -79,24 +81,76 @@ Use this exact schema for the `content` argument:
       e.g., "covered by TB-95 still in flight", "lower impact than
       the 3 ranked ahead of it", "would conflict with non-goal X">
 
-    ## Open questions for operator
-    - (Surfaced when a focus item is `exhausted-needs-operator`,
-      when goal.md appears to need updating, OR when you noticed a
-      gap outside any current focus item.)
+    ## Cycle observations
+    Agent-internal working notes (TB-191). NOT forwarded to
+    operator-facing surfaces (`ap2 status`, the Mattermost cron
+    status-report). Use this for observations that informed THIS
+    cycle's assessment but don't fit a structured section.
 
-    Do NOT include tasks-awaiting-review bullets in this section
-    (TB-182). Pending-review TB-Ns are surfaced mechanically by
-    `ap2 status` (CLI) and the cron status-report's snapshot block
-    (per TB-151 / TB-173) from current board state every run, so
-    duplicating that list here creates contradiction risk when the
-    gap between ideation cycles diverges from current board state
-    (e.g. an `ap2 approve` lands in the gap and the stale list
-    disagrees with the fresh one in the same Mattermost post).
-    Open-questions content stays focused on items that REQUIRE
-    narrative judgment ideation is uniquely positioned to surface —
-    focus-rotation candidates, retry-watch interpretations,
-    residual-risk acceptances, cross-TB pattern observations,
-    escalations.
+    Triage discipline (when writing this section):
+    1. Read the prior cycle's `## Cycle observations` bullets FIRST.
+    2. For each prior bullet, decide:
+       - Situation changed? → drop (mention the change in
+         Mission alignment if it's cross-cutting).
+       - Now fits a structured section? → promote there
+         (Mission alignment, Current focus > Gaps, Considered &
+         deferred); do NOT also keep here.
+       - Stale / no longer informs current reasoning? → drop.
+       - Still actively informing reasoning AND no better home?
+         → carry, with a one-sentence re-justification of why
+         this cycle still needs it.
+    3. Default disposition: DROP. Only carry if explicitly
+       re-justified.
+
+    Hard cap: 10 bullets max. If you can't triage to 10, the
+    discipline is slipping.
+
+    Hard prohibitions:
+    - NEVER an item the operator should act on (use
+      `## Decisions needed from operator`).
+    - NEVER pure status reporting (events.jsonl covers that).
+    - NEVER recurring "no X events" / "no operator activity"
+      type bullets.
+
+    ## Decisions needed from operator
+    Operator-facing escalation channel (TB-191). Each bullet MUST
+    satisfy ALL of:
+    - Direct question (`?`-terminated) OR explicit prefix
+      `Decision needed:` / `Operator input required:`.
+    - Names the specific operator action (`ap2 approve TB-N` /
+      "edit goal.md to add Y" / "decide between approach A vs B").
+    - Names the unblock-condition (what changes about the next
+      ideation cycle if the operator engages).
+
+    DO NOT include:
+    - Status observations ("No X events", "Cadence is steady").
+    - Pattern-tracking notes ("n=3 retries on bullet kind Y").
+    - Behavioral commentary about the operator.
+    - Metric updates without a corresponding decision.
+    - Items where the operator would need no input even if they
+      read the bullet.
+    - Tasks-awaiting-review bullets (TB-182). Pending-review TB-Ns
+      are surfaced mechanically by `ap2 status` (CLI) and the cron
+      status-report's snapshot block (per TB-151 / TB-173) from
+      current board state every run, so duplicating that list here
+      creates contradiction risk when the gap between ideation
+      cycles diverges from current board state (e.g. an
+      `ap2 approve` lands in the gap and the stale list disagrees
+      with the fresh one in the same Mattermost post).
+
+    Misplaced content redirect: if a noticed gap doesn't match the
+    actionable-decision shape above, route it to `## Cycle
+    observations` (agent-internal) rather than dumping it here.
+    Decisions-needed content stays focused on items that REQUIRE
+    narrative judgment ideation is uniquely positioned to surface
+    AND for which the operator's engagement actively unblocks the
+    next cycle — focus-rotation decisions, residual-risk
+    acceptances awaiting sign-off, escalations.
+
+    (Carried) discipline: a bullet may carry from the prior
+    cycle ONLY if you re-articulate the operator action and
+    unblock-condition this cycle. Pure copy-paste of last cycle's
+    text is forbidden.
 
     ## Proposals this cycle
     List the 3 task TB-Ns you're about to add (or fewer if Backlog
@@ -206,7 +260,7 @@ CLASSIFY each into ONE of:
    tagged `#fix-briefing` whose briefing instructs the agent to
    rewrite the broken bullets in the original briefing file. Cite
    the failed criterion verbatim and explain the fix. After it lands,
-   note in `ideation_state.md` "Open questions for operator" that
+   note in `ideation_state.md` "Decisions needed from operator" that
    the original task is ready for `ap2 unfreeze TB-N`.
 
 2. **split** — briefing scope was too large or mixed distinct
@@ -237,8 +291,10 @@ CLASSIFY each into ONE of:
    already-Complete TB-Ns, OR `goal.md` Non-goals appears to
    cover the area, OR the approach was fundamentally infeasible.
    Action: do NOT delete (operator owns deletes). Write a one-line
-   entry in your `ideation_state.md` "Open questions for operator"
-   section: `Recommend abandoning TB-N — reason: <X>`. Do NOT
+   entry in your `ideation_state.md` "Decisions needed from operator"
+   section: `Decision needed: Recommend abandoning TB-N — reason:
+   <X>` (the actionable-shape phrasing so the operator sees the
+   explicit delete/keep ask, not a passive observation). Do NOT
    auto-add a remediation task.
 
 When uncertain between edit-briefing and follow-up, default to
@@ -287,12 +343,12 @@ Do NOT skip the clause for "obvious" or "trivial" tasks. The operator
 decides what's trivial; ideation does not. The clause is uniform
 across every proposal you emit. Do NOT include tasks awaiting review
 or `TB-N awaiting approval` bullets (the "tasks-awaiting-review"
-content shape) in your `ideation_state.md` "Open questions for
-operator" section (TB-182) — `ap2 status` and the cron status-report's
-snapshot block surface those mechanically from current board state
-per run (TB-151 / TB-173), and forwarding a stale copy across the gap
-between ideation cycles risks contradicting the fresh list in the
-same post.
+content shape) in your `ideation_state.md` "Decisions needed from
+operator" section (TB-182 / TB-191) — `ap2 status` and the cron
+status-report's snapshot block surface those mechanically from
+current board state per run (TB-151 / TB-173), and forwarding a stale
+copy across the gap between ideation cycles risks contradicting the
+fresh list in the same post.
 
 ## Goal-anchor requirement (TB-161 — load-bearing)
 Every briefing you propose MUST have its `## Goal` body cite, as a

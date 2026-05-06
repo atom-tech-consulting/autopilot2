@@ -211,7 +211,7 @@ def test_cmd_start_refuses_without_token(tmp_path: Path, monkeypatch, capsys):
 
 def test_delete_removes_from_frozen(tmp_path: Path):
     """Primary use case: abandon a Frozen task that's been superseded.
-    Ideation surfaces these in the open-questions list."""
+    Ideation surfaces these in the decisions-needed list (TB-191)."""
     cfg = _project(tmp_path)
     board = Board.load(cfg.tasks_file)
     board.add("Frozen", task_id="TB-91", title="superseded")
@@ -650,88 +650,94 @@ def test_status_includes_mixed_blocker_in_pending_review(
     assert set(payload["pending_review_ids"]) == {"TB-880", "TB-881"}
 
 
-# --------- TB-173: `ap2 status` surfaces ideator open questions ---------
+# --------- TB-173 / TB-191: `ap2 status` surfaces ideator decisions ---------
 #
-# `parse_open_questions` reads the `## Open questions for operator`
-# section from `.cc-autopilot/ideation_state.md`. The CLI text branch
-# renders a "open questions for operator (N): ..." line truncated to the
-# first 5 with a "(+M more)" suffix; the JSON branch carries the full
-# helper output under `open_questions`. When the file or section is
+# `parse_operator_decisions` reads the `## Decisions needed from operator`
+# section from `.cc-autopilot/ideation_state.md` (renamed from the
+# pre-TB-191 `## Open questions for operator`). The CLI text branch
+# renders a "decisions needed (N): ..." line truncated to the first 5
+# with a "(+M more)" suffix; the JSON branch carries the full helper
+# output under `operator_decisions`. When the file or section is
 # absent, both branches stay quiet — the line is omitted from text
 # entirely, and JSON carries the empty list.
+#
+# TB-191 also added the agent-internal `## Cycle observations` section
+# that MUST NOT leak to operator-facing surfaces; the test at the end
+# of this block pins that the CLI never surfaces observations content
+# even when both sections coexist in the file.
 
 
 def _seed_ideation_state(cfg: Config, body: str) -> None:
     """Write `body` to `.cc-autopilot/ideation_state.md` so `cmd_status`
-    can pick it up via `parse_open_questions`."""
+    can pick it up via `parse_operator_decisions`."""
     path = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
 
 
-def test_cmd_status_renders_open_questions_when_present(
+def test_cmd_status_renders_operator_decisions_when_present(
     tmp_path: Path, capsys,
 ):
-    """3 open questions in the file → text-mode `ap2 status` includes a
-    line beginning with "open questions for operator" naming the count
-    and joining the bullets with "; ". Verifies the line is wired into
-    the CLI rendering path at all."""
+    """3 decisions in the file → text-mode `ap2 status` includes a
+    line beginning with "decisions needed" naming the count and joining
+    the bullets with "; ". Verifies the line is wired into the CLI
+    rendering path at all."""
     from ap2.cli import cmd_status
 
     cfg = _project(tmp_path)
     _seed_ideation_state(
         cfg,
-        "## Open questions for operator\n\n"
-        "- Should goal.md declare a new focus?\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: should goal.md declare a new focus?\n"
         "- Approve or reject TB-171 / TB-172 / TB-173.\n"
-        "- Insights index still empty.\n",
+        "- Operator input required: rotate focus item?\n",
     )
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
-    # Line shape: "open questions for operator (3): bullet; bullet; bullet"
+    # Line shape: "decisions needed (3): bullet; bullet; bullet"
     line = next(
-        (ln for ln in out.splitlines() if ln.startswith("open questions for operator")),
+        (ln for ln in out.splitlines() if ln.startswith("decisions needed")),
         None,
     )
-    assert line is not None, f"no open-questions line in status output:\n{out}"
+    assert line is not None, f"no decisions-needed line in status output:\n{out}"
     assert "(3):" in line
-    assert "Should goal.md declare a new focus?" in line
+    assert "Decision needed: should goal.md declare a new focus?" in line
     assert "Approve or reject TB-171 / TB-172 / TB-173." in line
-    assert "Insights index still empty." in line
+    assert "Operator input required: rotate focus item?" in line
 
 
-def test_cmd_status_json_carries_full_open_questions_list(
+def test_cmd_status_json_carries_full_operator_decisions_list(
     tmp_path: Path, capsys,
 ):
-    """JSON-mode `ap2 status --json` carries an `open_questions` key with
-    the full bullet list (untruncated by the CLI's 5-cap presentation
-    rule). Machine consumers see exactly what `parse_open_questions`
-    returned."""
+    """JSON-mode `ap2 status --json` carries an `operator_decisions` key
+    with the full bullet list (untruncated by the CLI's 5-cap
+    presentation rule). Machine consumers see exactly what
+    `parse_operator_decisions` returned."""
     import json as _json
     from ap2.cli import cmd_status
 
     cfg = _project(tmp_path)
     _seed_ideation_state(
         cfg,
-        "## Open questions for operator\n\n"
-        "- First.\n- Second.\n- Third.\n",
+        "## Decisions needed from operator\n\n"
+        "- First?\n- Second?\n- Third?\n",
     )
 
     rc = cmd_status(cfg, Namespace(json=True))
     assert rc == 0
     payload = _json.loads(capsys.readouterr().out)
-    assert payload["open_questions"] == ["First.", "Second.", "Third."]
+    assert payload["operator_decisions"] == ["First?", "Second?", "Third?"]
 
 
-def test_cmd_status_omits_open_questions_line_when_absent(
+def test_cmd_status_omits_operator_decisions_line_when_absent(
     tmp_path: Path, capsys,
 ):
     """No `ideation_state.md` file (fresh project) or empty section →
-    text branch must not grow a noisy "0 open questions" line, and JSON
-    carries the empty list. Mirrors TB-121's omit-on-zero shape for
-    pending-review."""
+    text branch must not grow a noisy "0 decisions needed" line, and
+    JSON carries the empty list. Mirrors TB-121's omit-on-zero shape
+    for pending-review."""
     import json as _json
     from ap2.cli import cmd_status
 
@@ -741,46 +747,47 @@ def test_cmd_status_omits_open_questions_line_when_absent(
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
-    assert "open questions for operator" not in out
+    assert "decisions needed" not in out
 
     rc = cmd_status(cfg, Namespace(json=True))
     assert rc == 0
     payload = _json.loads(capsys.readouterr().out)
-    assert payload["open_questions"] == []
+    assert payload["operator_decisions"] == []
 
 
-def test_cmd_status_truncates_open_questions_in_text_to_five(
+def test_cmd_status_truncates_operator_decisions_in_text_to_five(
     tmp_path: Path, capsys,
 ):
     """When the helper returns more than 5 entries, the text branch shows
     the first 5 (per-bullet truncated) with a "(+M more)" tail; JSON
-    keeps the full list (capped at 7+1 by `parse_open_questions` itself).
-    Pins the CLI's presentation cap independently of the helper's cap."""
+    keeps the full list (capped at 7+1 by `parse_operator_decisions`
+    itself). Pins the CLI's presentation cap independently of the
+    helper's cap."""
     import json as _json
     from ap2.cli import cmd_status
 
     cfg = _project(tmp_path)
     bullets = "\n".join(
-        f"- question {i} text body here"
+        f"- decision {i} text body here?"
         for i in range(1, 7)  # 6 bullets — under helper cap, over CLI cap
     )
     _seed_ideation_state(
         cfg,
-        f"## Open questions for operator\n\n{bullets}\n",
+        f"## Decisions needed from operator\n\n{bullets}\n",
     )
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
     line = next(
-        ln for ln in out.splitlines() if ln.startswith("open questions for operator")
+        ln for ln in out.splitlines() if ln.startswith("decisions needed")
     )
     assert "(6):" in line
     # First 5 bullets named.
     for i in range(1, 6):
-        assert f"question {i} text body here" in line
+        assert f"decision {i} text body here?" in line
     # 6th truncated out of the text rendering — replaced by suffix.
-    assert "question 6 text body here" not in line
+    assert "decision 6 text body here?" not in line
     assert "(+1 more)" in line
 
     rc = cmd_status(cfg, Namespace(json=True))
@@ -788,7 +795,64 @@ def test_cmd_status_truncates_open_questions_in_text_to_five(
     payload = _json.loads(capsys.readouterr().out)
     # JSON branch carries the full helper output untouched (6 entries,
     # under the helper's 7-cap so no synthetic trailer is appended).
-    assert len(payload["open_questions"]) == 6
+    assert len(payload["operator_decisions"]) == 6
+
+
+def test_cmd_status_does_not_leak_cycle_observations(
+    tmp_path: Path, capsys,
+):
+    """TB-191: when `ideation_state.md` carries BOTH `## Decisions
+    needed from operator` (with two valid bullets) AND
+    `## Cycle observations` (with three observation-shaped bullets),
+    `ap2 status` text output must surface ONLY the decisions content
+    and NEVER any line referencing the cycle-observations bullets.
+    The agent-internal observations section is structurally excluded
+    by `parse_operator_decisions` — this test proves the structural
+    exclusion lands at the CLI surface, not just at the parser."""
+    import json as _json
+    from ap2.cli import cmd_status
+
+    cfg = _project(tmp_path)
+    _seed_ideation_state(
+        cfg,
+        "# Ideation State\n\n"
+        "## Cycle observations\n\n"
+        "- n=3 retries on bullet kind Y this week.\n"
+        "- No unadopted cron_proposed events.\n"
+        "- Cadence is steady at 12 ticks/min.\n\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: approve TB-200?\n"
+        "- Operator input required: rotate focus to verifier robustness?\n",
+    )
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    # The decisions surface line is present with the right count.
+    line = next(
+        (ln for ln in out.splitlines() if ln.startswith("decisions needed")),
+        None,
+    )
+    assert line is not None
+    assert "(2):" in line
+    assert "Decision needed: approve TB-200?" in line
+    assert "Operator input required: rotate focus to verifier robustness?" in line
+    # None of the observations content leaks into the CLI output.
+    for forbidden in (
+        "n=3 retries on bullet kind Y",
+        "No unadopted cron_proposed events",
+        "Cadence is steady",
+    ):
+        assert forbidden not in out
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    # JSON also carries only the decisions bullets.
+    assert payload["operator_decisions"] == [
+        "Decision needed: approve TB-200?",
+        "Operator input required: rotate focus to verifier robustness?",
+    ]
 
 
 # --------- TB-130: `ap2 status` reports the bundled web URL ---------

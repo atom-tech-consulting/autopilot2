@@ -1,13 +1,21 @@
-"""TB-173: `parse_open_questions` — pin the `## Open questions for operator`
-section reader that powers the CLI / web / cron-status-report surfaces.
+"""TB-173 / TB-191: `parse_operator_decisions` — pin the
+`## Decisions needed from operator` section reader that powers the
+CLI / web / cron-status-report surfaces.
 
-The ideation prompt's Step 0 schema mandates an `## Open questions for
-operator` section in `.cc-autopilot/ideation_state.md` whenever a focus
-item is `exhausted-needs-operator`, when goal.md appears to need
-updating, or when the ideator notices a gap outside any current focus
-item. `parse_open_questions` is the single source of truth that
-`ap2 status` (CLI), the web home page, and the cron status-report all
-call so the three operator-facing surfaces stay in sync.
+The ideation prompt's Step 0 schema mandates a `## Decisions needed
+from operator` section in `.cc-autopilot/ideation_state.md` whenever
+the agent has an actionable decision the operator must engage with —
+naming the specific operator action and the unblock-condition for the
+next cycle. `parse_operator_decisions` is the single source of truth
+that `ap2 status` (CLI), the web home page, and the cron status-report
+all call so the three operator-facing surfaces stay in sync.
+
+TB-191 added the sibling `## Cycle observations` section as
+agent-internal working notes that MUST NOT leak to operator-facing
+surfaces. The defensive tests at the bottom of this module pin the
+parser's heading-match strictness — even when Cycle observations sits
+adjacent to (or BEFORE) the decisions section, the parser only ever
+returns Decisions-needed bullets.
 
 These tests pin:
   - missing-file / missing-section → empty list (no false positives).
@@ -15,12 +23,14 @@ These tests pin:
   - multi-line bullets collapse to one entry (continuation join).
   - >7 bullets get truncated with a synthetic "(+M more)" trailer.
   - prose-only fallback splits paragraphs by blank lines.
+  - TB-191 defensive: Cycle observations content is structurally
+    excluded, even when ordered before the decisions section.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from ap2.ideation import parse_focus_statuses, parse_open_questions
+from ap2.ideation import parse_focus_statuses, parse_operator_decisions
 
 
 def _write_ideation_state(tmp_path: Path, body: str) -> Path:
@@ -40,7 +50,7 @@ def _write_ideation_state(tmp_path: Path, body: str) -> Path:
 # the trigger for rendering the bullet line / card.
 
 
-def test_parse_open_questions_handles_missing_file_returns_empty_list(
+def test_parse_operator_decisions_handles_missing_file_returns_empty_list(
     tmp_path: Path,
 ):
     """File doesn't exist on disk yet (fresh project, no ideation cycle has
@@ -48,13 +58,13 @@ def test_parse_open_questions_handles_missing_file_returns_empty_list(
     on `ap2 status` for a clean project."""
     path = tmp_path / ".cc-autopilot" / "ideation_state.md"
     assert not path.exists()
-    assert parse_open_questions(path) == []
+    assert parse_operator_decisions(path) == []
 
 
-def test_parse_open_questions_handles_missing_section_returns_empty_list(
+def test_parse_operator_decisions_handles_missing_section_returns_empty_list(
     tmp_path: Path,
 ):
-    """File exists but has no `## Open questions for operator` heading.
+    """File exists but has no `## Decisions needed from operator` heading.
     Defends against ideator-prompt regressions that drop the section
     header — must not falsely scrape some other heading's bullets."""
     body = (
@@ -63,23 +73,23 @@ def test_parse_open_questions_handles_missing_section_returns_empty_list(
         "## Current focus assessment\n\n- another bullet\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    assert parse_open_questions(path) == []
+    assert parse_operator_decisions(path) == []
 
 
-def test_parse_open_questions_handles_empty_section_returns_empty_list(
+def test_parse_operator_decisions_handles_empty_section_returns_empty_list(
     tmp_path: Path,
 ):
     """The header is present but the body has no bullets and no prose.
-    Common shape after an ideation cycle that surfaced no questions — the
+    Common shape after an ideation cycle that surfaced no decisions — the
     ideator left the section header but wrote nothing under it. Must be
     treated the same as a missing section: no rendering."""
     body = (
         "# Ideation State\n\n"
-        "## Open questions for operator\n\n"
+        "## Decisions needed from operator\n\n"
         "## Proposals this cycle\n\n- TB-1\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    assert parse_open_questions(path) == []
+    assert parse_operator_decisions(path) == []
 
 
 # ---------------------------------------------------------------------------
@@ -87,54 +97,54 @@ def test_parse_open_questions_handles_empty_section_returns_empty_list(
 # exercises the truncation path on top of the same bullet pass.
 
 
-def test_parse_open_questions_returns_single_bullet(tmp_path: Path):
+def test_parse_operator_decisions_returns_single_bullet(tmp_path: Path):
     """Single-bullet section — sanity check that the slicer + bullet
     regex produce one entry. Anchors against future regex regressions
     that might require `>= 2` bullets to match."""
     body = (
-        "## Open questions for operator\n\n"
-        "- Should we update goal.md to declare verifier robustness as the next focus?\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: should we update goal.md to declare verifier robustness as the next focus?\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    assert parse_open_questions(path) == [
-        "Should we update goal.md to declare verifier robustness as the next focus?"
+    assert parse_operator_decisions(path) == [
+        "Decision needed: should we update goal.md to declare verifier robustness as the next focus?"
     ]
 
 
-def test_parse_open_questions_returns_bullets(tmp_path: Path):
+def test_parse_operator_decisions_returns_bullets(tmp_path: Path):
     """3-bullet section — pins the canonical shape the ideator emits each
     cycle. Each bullet survives as one entry; order is preserved."""
     body = (
         "# Ideation State\n\n"
-        "## Open questions for operator\n\n"
-        "- After TB-171/TB-172/TB-173 land, approve or reject via CLI.\n"
-        "- Pending operator op TB-170 adds `--skip-goal-alignment`.\n"
-        "- Insights index still empty — not blocking.\n\n"
+        "## Decisions needed from operator\n\n"
+        "- After TB-171/TB-172/TB-173 land, approve or reject via `ap2 approve TB-N`.\n"
+        "- Decision needed: adopt cron_proposed weekly-perf-snapshot via `ap2 cron edit`?\n"
+        "- Operator input required: confirm Insights index focus rotation.\n\n"
         "## Proposals this cycle\n\n- TB-171\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    result = parse_open_questions(path)
+    result = parse_operator_decisions(path)
     assert result == [
-        "After TB-171/TB-172/TB-173 land, approve or reject via CLI.",
-        "Pending operator op TB-170 adds `--skip-goal-alignment`.",
-        "Insights index still empty — not blocking.",
+        "After TB-171/TB-172/TB-173 land, approve or reject via `ap2 approve TB-N`.",
+        "Decision needed: adopt cron_proposed weekly-perf-snapshot via `ap2 cron edit`?",
+        "Operator input required: confirm Insights index focus rotation.",
     ]
 
 
-def test_parse_open_questions_collapses_multiline_bullets(tmp_path: Path):
+def test_parse_operator_decisions_collapses_multiline_bullets(tmp_path: Path):
     """A bullet whose body wraps onto subsequent indented continuation
     lines collapses to a single entry with single-space joins. Matches
-    how the ideator actually writes long questions today (see the
+    how the ideator actually writes long decisions today (see the
     in-flight `.cc-autopilot/ideation_state.md` for examples)."""
     body = (
-        "## Open questions for operator\n\n"
+        "## Decisions needed from operator\n\n"
         "- After this cycle lands TB-171 / TB-172 / TB-173 to Backlog they will\n"
         "  all sit `@blocked:review`. Approve via `ap2 approve TB-N` or reject\n"
         "  via `ap2 reject TB-N --reason ...`.\n"
-        "- Insights index still empty.\n"
+        "- Decision needed: rotate focus item.\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    result = parse_open_questions(path)
+    result = parse_operator_decisions(path)
     assert len(result) == 2
     # First bullet should have all three source lines collapsed into one
     # entry with single-space separators (no embedded \n).
@@ -144,32 +154,32 @@ def test_parse_open_questions_collapses_multiline_bullets(tmp_path: Path):
         "via `ap2 reject TB-N --reason ...`."
     )
     assert "\n" not in result[0]
-    assert result[1] == "Insights index still empty."
+    assert result[1] == "Decision needed: rotate focus item."
 
 
-def test_parse_open_questions_caps_at_seven(tmp_path: Path):
+def test_parse_operator_decisions_caps_at_seven(tmp_path: Path):
     """>7 bullets get truncated with a trailing "(+M more)" entry so the
     rendering surfaces don't have to defend against unbounded sections.
     The cap protects the CLI status block (which truncates further to 5)
     and the web card (which renders all entries) from runaway sections.
     """
     bullets = "\n".join(
-        f"- question number {i} from the ideator's cycle"
+        f"- decision number {i} from the ideator's cycle?"
         for i in range(1, 11)  # 10 bullets
     )
-    body = f"## Open questions for operator\n\n{bullets}\n"
+    body = f"## Decisions needed from operator\n\n{bullets}\n"
     path = _write_ideation_state(tmp_path, body)
-    result = parse_open_questions(path)
+    result = parse_operator_decisions(path)
     # Cap: 7 real entries + 1 synthetic "(+M more)" trailer = 8 total.
     assert len(result) == 8
     # First 7 are the original bullets in source order.
     for i in range(7):
-        assert result[i] == f"question number {i + 1} from the ideator's cycle"
+        assert result[i] == f"decision number {i + 1} from the ideator's cycle?"
     # 8th entry is the truncation marker, citing the residual count.
     assert result[7] == "(+3 more)"
 
 
-def test_parse_open_questions_falls_back_to_paragraphs_when_no_bullets(
+def test_parse_operator_decisions_falls_back_to_paragraphs_when_no_bullets(
     tmp_path: Path,
 ):
     """Ideator may write the section as prose paragraphs instead of
@@ -178,13 +188,13 @@ def test_parse_open_questions_falls_back_to_paragraphs_when_no_bullets(
     on blank lines, treating each paragraph as one entry. Keeps the
     operator-visible signal flowing even when the schema slips."""
     body = (
-        "## Open questions for operator\n\n"
+        "## Decisions needed from operator\n\n"
         "First paragraph spans one\nline of prose.\n\n"
         "Second paragraph is its own entry.\n\n"
         "Third and final paragraph.\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    result = parse_open_questions(path)
+    result = parse_operator_decisions(path)
     assert result == [
         "First paragraph spans one line of prose.",
         "Second paragraph is its own entry.",
@@ -192,40 +202,143 @@ def test_parse_open_questions_falls_back_to_paragraphs_when_no_bullets(
     ]
 
 
-def test_parse_open_questions_section_at_end_of_file(tmp_path: Path):
-    """`## Open questions for operator` is the LAST section in the file —
-    the slicer must read to EOF rather than requiring a trailing `## `
-    heading. Pins behavior for the common shape where the ideator ends
-    the file with this section."""
+def test_parse_operator_decisions_section_at_end_of_file(tmp_path: Path):
+    """`## Decisions needed from operator` is the LAST section in the
+    file — the slicer must read to EOF rather than requiring a trailing
+    `## ` heading. Pins behavior for the common shape where the ideator
+    ends the file with this section."""
     body = (
         "# Ideation State\n\n"
         "## Mission alignment\n\n- nothing to add\n\n"
-        "## Open questions for operator\n\n"
-        "- A trailing-section question.\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: a trailing-section decision?\n"
         "- Another one.\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    result = parse_open_questions(path)
+    result = parse_operator_decisions(path)
     assert result == [
-        "A trailing-section question.",
+        "Decision needed: a trailing-section decision?",
         "Another one.",
     ]
 
 
-def test_parse_open_questions_accepts_star_bullets(tmp_path: Path):
+def test_parse_operator_decisions_accepts_star_bullets(tmp_path: Path):
     """Both `- ` and `* ` bullet markers are valid markdown — the helper
     accepts either shape so an ideator who uses `*` doesn't silently lose
     the surfacing path."""
     body = (
-        "## Open questions for operator\n\n"
+        "## Decisions needed from operator\n\n"
         "* First star-marked entry.\n"
         "* Second.\n"
     )
     path = _write_ideation_state(tmp_path, body)
-    assert parse_open_questions(path) == [
+    assert parse_operator_decisions(path) == [
         "First star-marked entry.",
         "Second.",
     ]
+
+
+# ---------------------------------------------------------------------------
+# TB-191: defensive guards — the parser MUST ignore the sibling
+# `## Cycle observations` section even when ordered adjacent / before
+# the decisions section. Cycle observations are agent-internal working
+# notes that must never leak to operator-facing surfaces.
+
+
+def test_parse_operator_decisions_ignores_cycle_observations_below(
+    tmp_path: Path,
+):
+    """TB-191: when both `## Decisions needed from operator` AND
+    `## Cycle observations` are present (canonical schema order:
+    observations AFTER decisions in the file? — actually decisions
+    after observations per the prompt schema, but either ordering
+    must work), the parser returns ONLY the decisions bullets and
+    NONE of the observations content. The next-section regex
+    (`^##\\s+`) terminates the slice at `## Cycle observations` so
+    its bullets never enter the entries list."""
+    body = (
+        "# Ideation State\n\n"
+        "## Cycle observations\n\n"
+        "- n=3 retries on bullet kind Y this week.\n"
+        "- No unadopted cron_proposed events.\n"
+        "- Cadence is steady at 12 ticks/min.\n\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: approve TB-200?\n"
+        "- Operator input required: confirm focus rotation.\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    result = parse_operator_decisions(path)
+    # ONLY the decisions bullets — observations content excluded.
+    assert result == [
+        "Decision needed: approve TB-200?",
+        "Operator input required: confirm focus rotation.",
+    ]
+    # Defensive: none of the observations content leaked.
+    joined = " | ".join(result)
+    assert "n=3 retries" not in joined
+    assert "No unadopted cron_proposed events" not in joined
+    assert "Cadence is steady" not in joined
+
+
+def test_parse_operator_decisions_ignores_cycle_observations_when_decisions_first(
+    tmp_path: Path,
+):
+    """TB-191 defensive: even when `## Cycle observations` follows
+    `## Decisions needed from operator` immediately (no intervening
+    section), the next-section regex stops the slice at the
+    observations heading, so observations bullets are never scraped."""
+    body = (
+        "# Ideation State\n\n"
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: should we adopt the cron_proposed snapshot?\n"
+        "- Operator input required: pick approach A or B.\n\n"
+        "## Cycle observations\n\n"
+        "- The recent rejection pattern is n=4 today.\n"
+        "- Insights index still empty.\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    result = parse_operator_decisions(path)
+    assert result == [
+        "Decision needed: should we adopt the cron_proposed snapshot?",
+        "Operator input required: pick approach A or B.",
+    ]
+    joined = " | ".join(result)
+    assert "rejection pattern" not in joined
+    assert "Insights index still empty" not in joined
+
+
+def test_parse_operator_decisions_strict_heading_match(tmp_path: Path):
+    """TB-191 defensive: the heading-match regex is line-anchored on
+    the exact `## Decisions needed from operator` literal — a malformed
+    fixture where Cycle observations appears BEFORE Decisions needed
+    must still return only decisions bullets, no leakage of
+    observations content."""
+    body = (
+        "# Ideation State\n\n"
+        "## Mission alignment\n\nIntro.\n\n"
+        # Cycle observations FIRST (malformed ordering vs. canonical
+        # schema, but the parser must still slice cleanly).
+        "## Cycle observations\n\n"
+        "- prior cycle observation about cadence.\n"
+        "- n=2 verification_partial events on prose bullets.\n"
+        "- prior cycle: insights index still empty.\n\n"
+        # Then Decisions needed.
+        "## Decisions needed from operator\n\n"
+        "- Decision needed: rotate focus item to verifier robustness?\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    result = parse_operator_decisions(path)
+    assert result == [
+        "Decision needed: rotate focus item to verifier robustness?",
+    ]
+    # Triple-check: none of the observations leaked.
+    for forbidden in (
+        "prior cycle observation",
+        "n=2 verification_partial",
+        "insights index still empty",
+    ):
+        for entry in result:
+            assert forbidden not in entry
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +383,7 @@ def test_parse_focus_statuses_returns_empty_when_section_missing(
     body = (
         "# Ideation State\n\n"
         "## Mission alignment\n\n- something\n\n"
-        "## Open questions for operator\n\n- a question\n"
+        "## Decisions needed from operator\n\n- Decision needed: do X?\n"
     )
     path = _write_ideation_state(tmp_path, body)
     assert parse_focus_statuses(path) == {}
@@ -287,7 +400,7 @@ def test_parse_focus_statuses_handles_empty_section_returns_empty_dict(
     body = (
         "## Current focus assessment\n\n"
         "goal.md says nothing actionable yet — placeholder section.\n\n"
-        "## Open questions for operator\n\n"
+        "## Decisions needed from operator\n\n"
     )
     path = _write_ideation_state(tmp_path, body)
     assert parse_focus_statuses(path) == {}
@@ -317,7 +430,7 @@ def test_parse_focus_statuses_returns_status_per_focus_item(tmp_path: Path):
         "  - Gaps: blocked on operator.\n"
         "  - Status: `deferred`\n"
         "  - Reasoning: parked.\n\n"
-        "## Open questions for operator\n\n- something\n"
+        "## Decisions needed from operator\n\n- Decision needed: confirm focus?\n"
     )
     path = _write_ideation_state(tmp_path, body)
     result = parse_focus_statuses(path)

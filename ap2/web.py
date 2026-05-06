@@ -445,27 +445,33 @@ _CSS = """<style>
   .pending-queue .pq-meta { color: #888; margin-right: 0.4rem }
   .pending-queue .pq-extra { color: #444 }
   .pending-queue details summary { color: #8a5a00; font-size: 11px }
-  /* TB-173: blue-tinted card for the ideator's `## Open questions for
-     operator` section. Sits above `.pending-queue` on the home page when
-     `parse_open_questions` returns >0 entries; omitted entirely when the
-     list is empty (no perpetual `0 open questions` noise). The blue
-     palette is distinct from `.pending-queue`'s amber so the operator
-     can tell pending operator ops (about to drain) from ideator-surfaced
-     escalation questions (need human judgement) at a glance. */
-  .open-questions { padding: 0.6rem 0.8rem; border-radius: 4px;
-                    margin: 0.5rem 0; background: #eef5ff;
-                    border-left: 4px solid #3a6db5; font-size: 13px;
-                    line-height: 1.5 }
-  .open-questions .oq-header { font-weight: 600; color: #234e85;
-                               margin-bottom: 0.3rem }
-  .open-questions ul.oq-entries { list-style: disc inside; padding: 0;
-                                  margin: 0 }
-  .open-questions ul.oq-entries li { padding: 0.15rem 0;
-                                     font-size: 12px; color: #333 }
+  /* TB-173 / TB-191: blue-tinted card for the ideator's
+     `## Decisions needed from operator` section (renamed from the
+     pre-TB-191 "Open questions for operator"). Sits above
+     `.pending-queue` on the home page when `parse_operator_decisions`
+     returns >0 entries; omitted entirely when the list is empty (no
+     perpetual `0 decisions needed` noise). The blue palette is distinct
+     from `.pending-queue`'s amber so the operator can tell pending
+     operator ops (about to drain) from ideator-surfaced operator
+     decisions (need human judgement) at a glance. CSS class name
+     `.operator-decisions` matches the parser + schema name; the legacy
+     `.open-questions` aliases (oq-header / ul.oq-entries) survive
+     unrenamed-internally as `.od-header` / `ul.od-entries` for the
+     same reason. */
+  .operator-decisions { padding: 0.6rem 0.8rem; border-radius: 4px;
+                        margin: 0.5rem 0; background: #eef5ff;
+                        border-left: 4px solid #3a6db5; font-size: 13px;
+                        line-height: 1.5 }
+  .operator-decisions .od-header { font-weight: 600; color: #234e85;
+                                   margin-bottom: 0.3rem }
+  .operator-decisions ul.od-entries { list-style: disc inside; padding: 0;
+                                      margin: 0 }
+  .operator-decisions ul.od-entries li { padding: 0.15rem 0;
+                                         font-size: 12px; color: #333 }
   /* TB-181: /usage token-cost dashboard.
      Card-style layout — each section sits in a `.usage-card` container
      with a thin border so the chart / table content stays prominent.
-     `.usage-summary` reuses the blue-tinted palette from `.open-questions`
+     `.usage-summary` reuses the blue-tinted palette from `.operator-decisions`
      to mark "this is the at-a-glance summary" the operator should read
      first. The stat tiles inside reuse the `.stat` shape already used on
      the board overview so the visual vocabulary stays tight. */
@@ -1079,23 +1085,30 @@ def _format_pending_queue_ts(ts: str) -> str:
     return m.group(1) if m else str(ts)
 
 
-def _render_open_questions(cfg: Config) -> str:
-    """Render the ideator's `## Open questions for operator` card (TB-173).
+def _render_operator_decisions(cfg: Config) -> str:
+    """Render the ideator's `## Decisions needed from operator` card (TB-173 / TB-191).
 
-    Reads `.cc-autopilot/ideation_state.md` via `parse_open_questions` and
-    renders each bullet as one `<li>` so the operator can scan the list
-    visually. Returns the empty string when the helper returns ``[]``
-    (file or section missing, or section empty) so the home renderer can
-    omit the card entirely — server-side omission, not CSS-hidden — and
-    fresh projects don't see a perpetual "0 open questions" card.
+    Reads `.cc-autopilot/ideation_state.md` via
+    `parse_operator_decisions` and renders each bullet as one `<li>` so
+    the operator can scan the list visually. Returns the empty string
+    when the helper returns ``[]`` (file or section missing, or
+    section empty) so the home renderer can omit the card entirely —
+    server-side omission, not CSS-hidden — and fresh projects don't
+    see a perpetual "0 decisions needed" card.
 
     Mirrors the omit-on-empty + plural-aware-header shape of
-    `_render_pending_queue`; the visual palette differs (blue, not amber)
-    so the operator can tell the two cards apart at a glance.
-    """
-    from .ideation import parse_open_questions
+    `_render_pending_queue`; the visual palette differs (blue, not
+    amber) so the operator can tell the two cards apart at a glance.
 
-    entries = parse_open_questions(
+    TB-191: the agent-internal `## Cycle observations` section is
+    structurally excluded by the parser's heading-match regex — even
+    if a future schema rewrite repositions the two sections adjacent,
+    `parse_operator_decisions` only ever returns bullets from under
+    the `## Decisions needed from operator` heading.
+    """
+    from .ideation import parse_operator_decisions
+
+    entries = parse_operator_decisions(
         cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     )
     if not entries:
@@ -1105,12 +1118,12 @@ def _render_open_questions(cfg: Config) -> str:
     )
     plural = "" if len(entries) == 1 else "s"
     return (
-        '<div class="open-questions">'
-        f'<div class="oq-header">'
-        f'{len(entries)} open question{plural} for operator '
+        '<div class="operator-decisions">'
+        f'<div class="od-header">'
+        f'{len(entries)} decision{plural} needed from operator '
         f'(from <a href="/ideation_state">ideation_state.md</a>)'
         f'</div>'
-        f'<ul class="oq-entries">{rows}</ul>'
+        f'<ul class="od-entries">{rows}</ul>'
         '</div>'
     )
 
@@ -2046,15 +2059,17 @@ def _render_home(cfg: Config) -> str:
     if paused:
         status += ' <span class="paused">[paused]</span>'
 
-    # TB-173: ideator-surfaced "Open questions for operator" preamble.
-    # The helper returns "" when `.cc-autopilot/ideation_state.md` has
-    # no `## Open questions for operator` section (or it's empty), so
-    # the card is omitted entirely on the steady-state happy path. When
-    # non-empty, sits ABOVE `_render_pending_queue` since ideator
-    # questions tend to ask for goal.md edits / focus-item rotations
-    # (operator-judgement work) while pending ops are mechanical and
-    # imminent — surfacing the judgement work first reflects priority.
-    open_questions_html = _render_open_questions(cfg)
+    # TB-173 / TB-191: ideator-surfaced "Decisions needed from
+    # operator" preamble. The helper returns "" when
+    # `.cc-autopilot/ideation_state.md` has no `## Decisions needed
+    # from operator` section (or it's empty), so the card is omitted
+    # entirely on the steady-state happy path. When non-empty, sits
+    # ABOVE `_render_pending_queue` since ideator decisions tend to
+    # ask for goal.md edits / focus-item rotations / approve-or-reject
+    # calls (operator-judgement work) while pending ops are mechanical
+    # and imminent — surfacing the judgement work first reflects
+    # priority.
+    operator_decisions_html = _render_operator_decisions(cfg)
     # TB-162: pending-operator-queue preamble. The helper returns "" when
     # the queue file is empty / fully drained, so the card is omitted
     # entirely on the steady-state happy path; non-empty queues get a
@@ -2074,7 +2089,7 @@ def _render_home(cfg: Config) -> str:
                       "Complete", "Frozen")
         )
         + "</div>"
-        f"{open_questions_html}"
+        f"{operator_decisions_html}"
         f"{pending_html}"
         f'<h2>events <span class="meta">— last 30, newest first '
         f'(<a href="/events">all</a>)</span></h2>'

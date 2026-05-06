@@ -348,7 +348,8 @@ Cron schedule mutation is NOT in your toolset (TB-146): there is no
 `cron_edit` tool available to control agents. If you see unadopted
 `cron_proposed` events from task agents and think one should fire on
 a schedule, SURFACE the proposal (e.g. via `ideation_state_write`'s
-"Open questions for operator" section, or `mattermost_reply` /
+"Decisions needed from operator" section (TB-191; pre-rename "Open
+questions for operator"), or `mattermost_reply` /
 `operator_log_append` for non-ideation control runs) — the operator
 adopts via `ap2 cron edit`.
 """

@@ -107,48 +107,68 @@ _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
 _PROJECT_PROMPT_REL = ".cc-autopilot/ideation_prompt.md"
 
 
-# TB-173: parser for the `## Open questions for operator` section of
-# `.cc-autopilot/ideation_state.md`. The ideation prompt's Step 0 mandates
-# this section whenever a focus item is `exhausted-needs-operator`, when
-# goal.md appears to need updating, OR when the ideator notices a gap
-# outside any current focus item. Today the surface is silent — the
-# section sits unread in `ideation_state.md` until the operator manually
-# opens the file.
+# TB-173 / TB-191: parser for the `## Decisions needed from operator`
+# section of `.cc-autopilot/ideation_state.md` (renamed from the
+# pre-TB-191 `## Open questions for operator`). The ideation prompt's
+# Step 0 schema mandates this section whenever the agent has an
+# actionable decision the operator must engage with — naming the
+# specific operator action and the unblock-condition for the next
+# cycle. Today the surface is silent — the section sits unread in
+# `ideation_state.md` until the operator manually opens the file.
 #
-# `parse_open_questions` is the single source of truth that `ap2 status`
-# (CLI), the web home page, and the cron status-report all call so the
-# three operator-facing surfaces stay in sync.
+# `parse_operator_decisions` is the single source of truth that
+# `ap2 status` (CLI), the web home page, and the cron status-report
+# all call so the three operator-facing surfaces stay in sync.
+#
+# TB-191 added the sibling `## Cycle observations` section as
+# agent-internal working notes that MUST NOT leak to operator-facing
+# surfaces. The header-match regex below is line-anchored on
+# `## Decisions needed from operator` precisely, so the parser
+# structurally cannot scrape `## Cycle observations` content even
+# when the two sections sit adjacent. The defensive
+# `test_parse_operator_decisions_ignores_cycle_observations` test
+# pins this against future schema reorderings.
 #
 # Section-slicing reuses the same shape as
-# `ap2/check.py::_check_briefings_manual_bullets` — header regex matches
-# the `## Open questions for operator` heading line-anchored, slice runs
-# from heading-end to the next `## ` (or EOF). Per-bullet extraction:
+# `ap2/check.py::_check_briefings_manual_bullets` — header regex
+# matches the section heading line-anchored, slice runs from
+# heading-end to the next `## ` (or EOF). Per-bullet extraction:
 # `- ` / `* ` lines start a new entry; subsequent indented lines (two
 # spaces or more, or a tab) join the previous bullet with a single
 # space; blank lines finalize the current bullet. Cap at
-# `_OPEN_QUESTIONS_MAX_ENTRIES` (default 7) entries to bound rendering
-# cost; on truncation, append a synthetic "(+M more)" trailer entry so
-# the UI surfaces both the visible cap and the residual count.
+# `_OPERATOR_DECISIONS_MAX_ENTRIES` (default 7) entries to bound
+# rendering cost; on truncation, append a synthetic "(+M more)"
+# trailer entry so the UI surfaces both the visible cap and the
+# residual count.
 #
 # Failure mode: ideator may write the section as prose paragraphs
 # instead of bullets. Defense: when the bullet pass yields nothing, fall
 # back to splitting the section body on blank lines and treating each
 # paragraph as one entry. The same 7-cap applies to the fallback.
-_OPEN_QUESTIONS_HEADER_RE = re.compile(
-    r"^##\s+Open questions for operator\s*$", re.M,
+_OPERATOR_DECISIONS_HEADER_RE = re.compile(
+    r"^##\s+Decisions needed from operator\s*$", re.M,
 )
-_OPEN_QUESTIONS_NEXT_SECTION_RE = re.compile(r"^##\s+", re.M)
-_OPEN_QUESTIONS_BULLET_RE = re.compile(r"^\s*[-*]\s+(.*)$")
-_OPEN_QUESTIONS_MAX_ENTRIES = 7
+_OPERATOR_DECISIONS_NEXT_SECTION_RE = re.compile(r"^##\s+", re.M)
+_OPERATOR_DECISIONS_BULLET_RE = re.compile(r"^\s*[-*]\s+(.*)$")
+_OPERATOR_DECISIONS_MAX_ENTRIES = 7
 
 
-def parse_open_questions(path: Path) -> list[str]:
-    """Return the bullets under `## Open questions for operator` in `path`.
+def parse_operator_decisions(path: Path) -> list[str]:
+    """Return the bullets under `## Decisions needed from operator` in `path`.
 
     `path` is the absolute path to a project's
     `.cc-autopilot/ideation_state.md`. Returns ``[]`` when the file is
     missing, when the section header is absent, or when the section is
     empty.
+
+    TB-191: this parser MUST ignore the sibling `## Cycle observations`
+    section (agent-internal working notes that must not leak to
+    operator-facing surfaces). The line-anchored header regex matches
+    only `## Decisions needed from operator` precisely, and the
+    next-section regex (`^##\\s+`) terminates the slice at the very
+    next `## ` heading, so a `## Cycle observations` section sitting
+    adjacent — before OR after the decisions section — is structurally
+    excluded from the returned list.
 
     Bullet handling: each `- ` / `* ` line opens a new entry; indented
     continuation lines under a bullet are joined into the previous entry
@@ -159,7 +179,7 @@ def parse_open_questions(path: Path) -> list[str]:
     prose paragraphs), split the body on blank lines and treat each
     paragraph as one entry — same single-space whitespace collapse.
 
-    Cap: at most `_OPEN_QUESTIONS_MAX_ENTRIES` (7) real entries; on
+    Cap: at most `_OPERATOR_DECISIONS_MAX_ENTRIES` (7) real entries; on
     overflow, the returned list is truncated to 7 and a synthetic
     `"(+M more)"` trailer entry is appended (so the returned list can
     be at most 8 elements long). Callers that render the list in a
@@ -178,11 +198,11 @@ def parse_open_questions(path: Path) -> list[str]:
         text = path.read_text()
     except OSError:
         return []
-    m = _OPEN_QUESTIONS_HEADER_RE.search(text)
+    m = _OPERATOR_DECISIONS_HEADER_RE.search(text)
     if m is None:
         return []
     body_start = m.end()
-    next_m = _OPEN_QUESTIONS_NEXT_SECTION_RE.search(text, body_start)
+    next_m = _OPERATOR_DECISIONS_NEXT_SECTION_RE.search(text, body_start)
     body = text[body_start: next_m.start() if next_m else len(text)]
 
     entries: list[str] = []
@@ -197,7 +217,7 @@ def parse_open_questions(path: Path) -> list[str]:
                     entries.append(joined)
                 current = None
             continue
-        bullet_m = _OPEN_QUESTIONS_BULLET_RE.match(raw)
+        bullet_m = _OPERATOR_DECISIONS_BULLET_RE.match(raw)
         if bullet_m is not None:
             if current is not None:
                 joined = " ".join(current).strip()
@@ -226,10 +246,10 @@ def parse_open_questions(path: Path) -> list[str]:
             for p in paragraphs if p.strip()
         ]
 
-    if len(entries) > _OPEN_QUESTIONS_MAX_ENTRIES:
-        truncated = entries[:_OPEN_QUESTIONS_MAX_ENTRIES]
+    if len(entries) > _OPERATOR_DECISIONS_MAX_ENTRIES:
+        truncated = entries[:_OPERATOR_DECISIONS_MAX_ENTRIES]
         truncated.append(
-            f"(+{len(entries) - _OPEN_QUESTIONS_MAX_ENTRIES} more)"
+            f"(+{len(entries) - _OPERATOR_DECISIONS_MAX_ENTRIES} more)"
         )
         return truncated
     return entries
@@ -251,7 +271,7 @@ def parse_open_questions(path: Path) -> list[str]:
 # operator path (`force_ideate`, TB-159) bypasses the gate.
 #
 # Section-slicing reuses the same `^##\s+` next-section regex as
-# `parse_open_questions` (the next H2 heading or EOF terminates the
+# `parse_operator_decisions` (the next H2 heading or EOF terminates the
 # section). Top-level focus-item bullets are detected by
 # `_FOCUS_TOP_BULLET_RE` (line starts with `- **` at column 0); the
 # title may wrap onto an indented continuation line until the closing
@@ -306,7 +326,7 @@ def parse_focus_statuses(path: Path) -> dict[str, str]:
     if m is None:
         return {}
     body_start = m.end()
-    next_m = _OPEN_QUESTIONS_NEXT_SECTION_RE.search(text, body_start)
+    next_m = _OPERATOR_DECISIONS_NEXT_SECTION_RE.search(text, body_start)
     body = text[body_start: next_m.start() if next_m else len(text)]
 
     lines = body.splitlines()

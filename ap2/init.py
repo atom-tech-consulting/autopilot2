@@ -188,7 +188,8 @@ IDEATION_STATE_TEMPLATE = (
     "_Not yet generated. Will be written on the next ideation cron tick.\n"
     "Schema (set by `ap2/cron.default.yaml`'s ideation prompt):\n"
     "Mission alignment / Current focus assessment / Non-goal risk check /\n"
-    "Considered & deferred / Open questions for operator / Proposals._\n"
+    "Considered & deferred / Cycle observations / Decisions needed from\n"
+    "operator / Proposals._\n"
 )
 
 

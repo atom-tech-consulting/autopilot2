@@ -724,7 +724,7 @@ def _write_ideation_state_focus(cfg: Config, statuses: list[tuple[str, str]]) ->
     for title, status in statuses:
         body.append(f"- **{title}**\n")
         body.append(f"  - Status: `{status}`\n")
-    body.append("\n## Open questions for operator\n\n- placeholder\n")
+    body.append("\n## Decisions needed from operator\n\n- placeholder\n")
     state_file = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text("".join(body))

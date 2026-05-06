@@ -145,23 +145,23 @@ Body shape (when posting):
   VERBATIM as one of your bullets so the operator sees which TB-Ns
   are waiting on `ap2 approve` without having to grep TASKS.md. If
   the line is absent, omit the bullet — there's nothing to surface.
-- TB-173: if the snapshot's `## Current state` block carries an
-  `- Open questions for operator (N): ...` line, copy that line
-  VERBATIM as one of your bullets too. The ideator surfaces this
-  section when a focus item is `exhausted-needs-operator`, when
-  goal.md appears to need updating, or when a gap was noticed
-  outside any current focus item — operator-judgement work that
-  needs visibility on the report. If the line is absent, omit the
-  bullet — there's nothing to surface.
-- TB-182: BEFORE you forward the open-questions line (or any TB-N
-  reference its bullets carry) into the post, validate against
-  events.jsonl that the references are still current. The bullets
-  were written by the ideator at the most recent
+- TB-173 / TB-191: if the snapshot's `## Current state` block
+  carries an `- Decisions needed from operator (N): ...` line, copy
+  that line VERBATIM as one of your bullets too. The ideator
+  surfaces this section when there is an actionable decision the
+  operator must engage with — focus-rotation calls, residual-risk
+  acceptances awaiting sign-off, escalations — operator-judgement
+  work that needs visibility on the report. If the line is absent,
+  omit the bullet — there's nothing to surface.
+- TB-182: BEFORE you forward the decisions-needed line (or any
+  TB-N reference its bullets carry) into the post, validate
+  against events.jsonl that the references are still current. The
+  bullets were written by the ideator at the most recent
   `ideation_state_updated` event in the tail; up to the ideation
-  interval (~2h) of staleness can bleed through into the open-
-  questions snapshot. Procedure:
+  interval (~2h) of staleness can bleed through into the
+  decisions-needed snapshot. Procedure:
     1. Note the `ts` of the most recent `ideation_state_updated`
-       event in `events.jsonl`. That's when the open-questions
+       event in `events.jsonl`. That's when the decisions-needed
        content was last refreshed.
     2. For every TB-N referenced in a forwarded bullet, scan
        events.jsonl for any `task_complete`, `task_deleted`,
@@ -404,24 +404,27 @@ async def run_status_report(
             f"{_format_pending_review_line(pending_ids)} "
             "— `ap2 approve TB-N`"
         )
-    # TB-173: surface the ideator's `## Open questions for operator`
-    # section so the cron status-report carries the same escalation
-    # signal as the CLI / web home (single source of truth via
-    # `parse_open_questions`). Bullets joined with `; ` so the line
-    # mirrors the CLI text rendering — the agent then forwards the line
-    # verbatim into the Mattermost post per the prompt's contract below.
-    # When the file or section is absent / empty the helper returns []
-    # and we skip the line entirely so a clean board doesn't grow a
-    # noisy "0 open questions" bullet.
-    from .ideation import parse_open_questions
+    # TB-173 / TB-191: surface the ideator's `## Decisions needed from
+    # operator` section so the cron status-report carries the same
+    # escalation signal as the CLI / web home (single source of truth
+    # via `parse_operator_decisions`). Bullets joined with `; ` so the
+    # line mirrors the CLI text rendering — the agent then forwards
+    # the line verbatim into the Mattermost post per the prompt's
+    # contract below. When the file or section is absent / empty the
+    # helper returns [] and we skip the line entirely so a clean
+    # board doesn't grow a noisy "0 decisions needed" bullet. The
+    # agent-internal `## Cycle observations` section (TB-191) is
+    # structurally excluded by the parser — it never reaches this
+    # surface and therefore never reaches the Mattermost post.
+    from .ideation import parse_operator_decisions
 
-    open_questions = parse_open_questions(
+    operator_decisions = parse_operator_decisions(
         cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     )
-    if open_questions:
+    if operator_decisions:
         state_extras.append(
-            f"- Open questions for operator ({len(open_questions)}): "
-            + "; ".join(open_questions)
+            f"- Decisions needed from operator ({len(operator_decisions)}): "
+            + "; ".join(operator_decisions)
         )
     # TB-177 + TB-178: surface recent janitor findings inside the
     # `## Current state` snapshot so the cron status-report routine can
