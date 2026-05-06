@@ -599,6 +599,12 @@ def test_run_status_report_omits_pending_review_line_when_zero(
 ):
     """Clean board (zero review-gated tasks) → no snapshot line, so a
     routine post doesn't grow a noisy "0 pending" bullet."""
+    # TB-190: the daemon now also injects a `post target channel:` line
+    # when either env var is set. This test asserts the strictly-empty
+    # extras path, so isolate from the operator's actual env (the user
+    # who runs the suite likely has `AP2_MM_CHANNELS` set in their shell).
+    monkeypatch.delenv("AP2_MM_REPORT_CHANNEL", raising=False)
+    monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
     cfg = _cfg(tmp_path)
     _seed_active_for_run(cfg)
     # No review-gated Backlog tasks added.
@@ -1266,4 +1272,223 @@ def test_run_control_agent_explicit_effort_overrides_env(
     extra = (sdk.options_kw or {}).get("extra_args") or {}
     assert extra.get("effort") == "medium", (
         f"explicit effort=medium not honored over env xhigh; got {extra!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# TB-190: server-side resolution of the status-report target channel.
+#
+# Pre-fix the prompt told the agent to "post...to the channel identified
+# by AP2_MM_REPORT_CHANNEL (or #autopilot if unset)" — but control agents
+# have no env-var access, the literal string was opaque, and the
+# `#autopilot` fallback didn't exist on the server. The agent ended up
+# posting to whatever channel the server defaulted to (town-square),
+# NOT the operator's configured channel. The fix: the daemon resolves
+# the env vars and injects a `- post target channel: <id>` line into
+# the snapshot block via `state_extras`; the prompt body now points at
+# that line. Tests below pin (a) explicit env wins, (b) fallback to
+# `AP2_MM_CHANNELS[0]`, (c) skip-on-unset, (d) prompt body grep
+# regressions for the dead-letter `#autopilot` literal and the new
+# instruction's load-bearing markers.
+
+
+def _capture_extras_factory():
+    """Return (capture_dict, capture_fn) so the daemon-side state_extras
+    threading can be inspected without rendering the full prompt."""
+    captured: dict[str, list[str]] = {"extras": []}
+
+    def _capture(cfg, name, body, *, state_extras=None):
+        captured["extras"] = list(state_extras or [])
+        return "stub"
+
+    return captured, _capture
+
+
+def test_run_status_report_resolves_explicit_report_channel(
+    tmp_path, monkeypatch,
+):
+    """TB-190: explicit `AP2_MM_REPORT_CHANNEL=<id>` wins over the
+    `AP2_MM_CHANNELS` fallback. The resolved ID lands in the
+    `state_extras` list as `- post target channel: <id>` — the agent
+    reads it from the rendered `## Current state` snapshot block."""
+    monkeypatch.setenv("AP2_MM_REPORT_CHANNEL", "channel-foo")
+    monkeypatch.setenv("AP2_MM_CHANNELS", "channel-bar,channel-baz")
+
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+
+    captured, capture_fn = _capture_extras_factory()
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", capture_fn)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert sdk.called is True
+    assert "- post target channel: channel-foo" in captured["extras"]
+    # The fallback channels are NOT used when the explicit override is set.
+    assert not any("channel-bar" in x for x in captured["extras"])
+    assert not any("channel-baz" in x for x in captured["extras"])
+
+
+def test_run_status_report_falls_back_to_first_mm_channel(
+    tmp_path, monkeypatch,
+):
+    """TB-190: when `AP2_MM_REPORT_CHANNEL` is unset, the daemon falls
+    back to the first entry of `AP2_MM_CHANNELS` — the natural default
+    for single-channel projects (the inbound-watch channel is where
+    outbound status posts belong)."""
+    monkeypatch.delenv("AP2_MM_REPORT_CHANNEL", raising=False)
+    monkeypatch.setenv("AP2_MM_CHANNELS", "channel-bar,channel-baz")
+
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+
+    captured, capture_fn = _capture_extras_factory()
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", capture_fn)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert "- post target channel: channel-bar" in captured["extras"]
+    # The second entry is NOT used — only the first.
+    assert not any("channel-baz" in x for x in captured["extras"])
+
+
+def test_run_status_report_omits_target_channel_when_unset(
+    tmp_path, monkeypatch,
+):
+    """TB-190: when neither env var is set, NO `post target channel:`
+    line is appended. The agent then takes the prompt's explicit-skip
+    branch instead of guessing a channel ID from server defaults."""
+    monkeypatch.delenv("AP2_MM_REPORT_CHANNEL", raising=False)
+    monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
+
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+
+    captured, capture_fn = _capture_extras_factory()
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", capture_fn)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    joined = "\n".join(captured["extras"])
+    assert "post target channel:" not in joined
+
+
+def test_run_status_report_treats_blank_env_as_unset(tmp_path, monkeypatch):
+    """TB-190: an empty / whitespace-only `AP2_MM_REPORT_CHANNEL` (e.g.
+    `AP2_MM_REPORT_CHANNEL=` left in an env file) is treated as unset
+    so the fallback to `AP2_MM_CHANNELS[0]` still kicks in. Mirrors
+    `mattermost._channels_to_watch` parsing — an empty value is not a
+    valid channel ID."""
+    monkeypatch.setenv("AP2_MM_REPORT_CHANNEL", "   ")
+    monkeypatch.setenv("AP2_MM_CHANNELS", "channel-bar")
+
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+
+    captured, capture_fn = _capture_extras_factory()
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", capture_fn)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert "- post target channel: channel-bar" in captured["extras"]
+
+
+def test_status_report_prompt_drops_dead_letter_autopilot_fallback():
+    """TB-190 regression: the prompt body must NOT carry the literal
+    string `#autopilot` (the pre-fix fallback that nobody could reach
+    — there's no `#autopilot` channel on the server). The fix removed
+    it entirely; the prompt now routes the agent through the explicit-
+    skip branch when no channel is configured."""
+    from ap2.status_report import STATUS_REPORT_PROMPT
+
+    assert "#autopilot" not in STATUS_REPORT_PROMPT, (
+        "TB-190 regression: dead-letter `#autopilot` fallback string "
+        "is back in STATUS_REPORT_PROMPT"
+    )
+
+
+def test_status_report_prompt_instructs_reading_post_target_channel():
+    """TB-190: the prompt body must point the agent at the
+    `- post target channel:` snapshot line and tell it to skip with a
+    `log_event` audit when the line is absent — pinned by phrasal
+    markers so a paraphrase that drops the contract trips this test."""
+    from ap2.status_report import STATUS_REPORT_PROMPT
+
+    body = STATUS_REPORT_PROMPT
+    # The forwarder names the snapshot line so the agent knows where to
+    # look for the resolved ID.
+    assert "post target channel:" in body
+    # The skip branch is explicit — the agent log_events with the load-
+    # bearing reason string when the line is absent.
+    assert "no AP2_MM_REPORT_CHANNEL or AP2_MM_CHANNELS configured" in body
+    # The env-var name is referenced in the prompt-body context (the
+    # skip-reason string for grep regressions).
+    assert "AP2_MM_REPORT_CHANNEL" in body
+    # Anti-regression: the agent is explicitly told NOT to fall back to
+    # server defaults / inbound-mention channels.
+    lower = body.lower()
+    assert "do not guess" in lower or "do not guess a channel" in lower
+
+
+def test_run_status_report_target_channel_threads_into_full_prompt(
+    tmp_path, monkeypatch,
+):
+    """TB-190 agent-input integrity: when a channel is configured, the
+    rendered prompt's `## Current state` snapshot block actually
+    carries the `- post target channel: <id>` line in a position the
+    agent can read it — same pattern the TB-151 snapshot pin uses.
+
+    Synthesizes a fixture environment, runs the status-report routine
+    against the REAL `build_control_prompt` (not a stub), and asserts
+    the captured prompt has the snapshot line wired through end-to-end."""
+    monkeypatch.setenv("AP2_MM_REPORT_CHANNEL", "channel-foo")
+    monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
+
+    cfg = _cfg(tmp_path)
+    _seed_active_for_run(cfg)
+
+    # Wrap the real builder so we can inspect the rendered prompt
+    # without short-circuiting it. Same shape as the TB-182 smoke test.
+    from ap2 import prompts as _prompts_mod
+
+    real_build = _prompts_mod.build_control_prompt
+    captured: dict[str, str] = {}
+
+    def _wrapped(cfg, name, body, **kw):
+        out = real_build(cfg, name, body, **kw)
+        captured["prompt"] = out
+        return out
+
+    monkeypatch.setattr("ap2.prompts.build_control_prompt", _wrapped)
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert sdk.called is True
+    prompt = captured["prompt"]
+    # Snapshot block carries the resolved channel ID.
+    assert "- post target channel: channel-foo" in prompt
+    # The line lands inside the `## Current state` block (above the
+    # `## Control job` framing) so the agent reads it as part of the
+    # snapshot, not as part of the job body.
+    cs_idx = prompt.find("## Current state")
+    cj_idx = prompt.find("## Control job")
+    target_idx = prompt.find("- post target channel: channel-foo")
+    assert cs_idx >= 0 and cj_idx > cs_idx and cs_idx < target_idx < cj_idx, (
+        "post target channel line is not inside the `## Current state` "
+        "block — agent will not pick it up as snapshot context"
     )

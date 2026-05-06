@@ -106,8 +106,14 @@ def _pending_review_ids(cfg: Config) -> list[str]:
 # until they re-bootstrap; the runtime ignores `job.prompt` for this job
 # regardless, so the routine's content is always authoritative.
 STATUS_REPORT_PROMPT = """\
-Post a concise autopilot status report to the mattermost channel
-identified by AP2_MM_REPORT_CHANNEL (or #autopilot if unset).
+Post a concise autopilot status report to the channel ID from the
+`- post target channel:` line in the `## Current state` snapshot above
+(TB-190; the daemon resolves `AP2_MM_REPORT_CHANNEL` — falling back to
+`AP2_MM_CHANNELS[0]` — and injects the resolved ID there). If that line
+is absent, the operator hasn't configured a status-report target — call
+`log_event(type="status_report", summary="skipped: no AP2_MM_REPORT_CHANNEL or AP2_MM_CHANNELS configured")`
+and finish. Do NOT guess a channel ID from server defaults or recent
+inbound `mattermost` events.
 
 Freshness contract (TB-128 — non-negotiable):
 - The headline timestamp in your post is the literal `now:` value
@@ -445,6 +451,29 @@ async def run_status_report(
             f"- Janitor findings: {', '.join(parts)} — "
             "`ap2 logs` (filter type=janitor_finding) to inspect"
         )
+    # TB-190: resolve the status-report target channel server-side.
+    # Pre-fix the prompt asked the agent to read `AP2_MM_REPORT_CHANNEL`
+    # itself, but control agents have no env-var access — the agent saw
+    # the literal env-var name and ended up posting to whatever channel
+    # the server defaulted to (town-square in practice), NOT the
+    # operator's configured channel. The fix moves resolution to the
+    # daemon: explicit `AP2_MM_REPORT_CHANNEL` wins; otherwise fall back
+    # to the first entry of `AP2_MM_CHANNELS` (the inbound-watch channel
+    # is the natural place to send outbound status posts in single-
+    # channel projects). When neither is set we omit the line entirely
+    # — the prompt body then routes the agent into the explicit-skip
+    # branch with a `log_event` audit so the operator can grep
+    # events.jsonl for the configuration miss.
+    target_channel = os.environ.get("AP2_MM_REPORT_CHANNEL", "").strip()
+    if not target_channel:
+        raw_channels = os.environ.get("AP2_MM_CHANNELS", "").strip()
+        for c in raw_channels.split(","):
+            c = c.strip()
+            if c:
+                target_channel = c
+                break
+    if target_channel:
+        state_extras.append(f"- post target channel: {target_channel}")
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
         state_extras=state_extras,
