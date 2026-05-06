@@ -347,3 +347,9 @@
 - **Summary:** Added parse_focus_statuses parser and TB-174 focus-exhausted gate in _maybe_ideate (skips SDK + emits ideation_skipped reason=focus_exhausted + advances cooldown when every focus item is exhausted-needs-operator); force_ideate keeps bypassing; ideation_skipped allowlisted into IDEATION_RELEVANT_EVENT_TYPES; full test suite (1097 passed).
 - **Files:** ap2/ideation.py, ap2/README.md, ap2/tests/test_ideation_state.py, ap2/tests/test_ideation_trigger.py
 - **Tests:** pass
+
+## [2026-05-06] TB-183: Pre-compute proposal slot count for ideation, eliminate hardcoded "3" from prompt body
+- **Commit:** `6583b07`
+- **Summary:** Implementation landed in d69a34e (ideation.default.md drops "fewer than 3 workable", state_extras carries `proposal slots this cycle: N`, early-skip emits `ideation_skipped_no_slots`, 1097/1097 tests pass). Two prior retries both failed on the briefing's own `grep -nE ... "fewer than [0-9]+ workable"` bullet — bare grep exits 1 on no matches, but `ap2/verify.py:266` treats non-zero as fail, making the bullet unsatisfiable. 6583b07 converts that bullet to the `!`-prefix exit-code-inversion idiom (precedent: janitor-llm-judge briefing post-TB-178); bullet now exits 0 when there are zero matches. No source changes in this commit; the impl in d69a34e is unchanged.
+- **Files:** .cc-autopilot/tasks/pre-compute-proposal-slot-count-for-idea.md
+- **Tests:** pass
