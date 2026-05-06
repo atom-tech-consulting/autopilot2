@@ -75,3 +75,8 @@ Goal.md's "Current focus: ideation quality" Push-for-progress section says: "Whe
 - **kind:** per_task
 - **failed_criteria:** [fail] `grep -nE "fewer than 3 workable|fewer than [0-9]+ workable" ap2/ideation.default.md` — should return ZERO matches (vali
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T050225Z-TB-183.prompt.md`, `stream: .cc-autopilot/debug/20260506T050225Z-TB-183.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T050225Z-TB-183.messages.jsonl`
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "fewer than 3 workable|fewer than [0-9]+ workable" ap2/ideation.default.md` — should return ZERO matches (vali
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T051520Z-TB-183.prompt.md`, `stream: .cc-autopilot/debug/20260506T051520Z-TB-183.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T051520Z-TB-183.messages.jsonl`
