@@ -102,11 +102,11 @@ Without a cap, the section accumulates over cycles even with triage discipline �
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes.
-- `grep -nE "Open questions for operator" ap2/ideation.default.md` — should return ZERO matches (rename complete).
+- `! grep -nE "Open questions for operator" ap2/ideation.default.md` — should return ZERO matches (rename complete). The leading `!` inverts grep's exit code so no-match (grep exit 1) becomes verifier-pass (exit 0); see TB-187 for the same shell-bullet idiom fix.
 - `grep -nE "Decisions needed from operator" ap2/ideation.default.md` — at least one match (the new section heading + schema instructions).
 - `grep -nE "Cycle observations" ap2/ideation.default.md` — at least one match (the new agent-internal section).
 - `grep -nE "parse_operator_decisions" ap2/ideation.py ap2/cli.py ap2/web.py ap2/status_report.py` — function defined in ideation.py AND imported by all three caller surfaces.
-- `grep -nE "parse_open_questions" ap2/` — should return ZERO matches outside of test files validating the rename happened cleanly.
+- `! grep -rnE "parse_open_questions" ap2/` — should return ZERO matches anywhere under `ap2/` (the rename was complete; no test file needs the legacy symbol name). Adds `-r` for directory recursion and `!` for exit-code inversion (TB-187 idiom).
 - prose: a test in `test_ideation_defaults.py` loads `ap2/ideation.default.md` and asserts the `## Decisions needed from operator` section's body contains all of: a "?-terminated OR prefix" requirement, an "articulate the specific operator action" requirement, a list of prohibited content kinds (status observations, pattern-tracking, behavioral commentary, metric updates), and the (carried)-discipline language.
 - prose: a test pins the new `## Cycle observations` section's body — contains the triage-decision-tree language, the 10-bullet hard cap, the "default disposition is DROP" instruction, and the hard prohibitions against operator-actionable content + pure status reporting + recurring negative-observation bullets.
 - prose: a test in `test_ideation.py` synthesizes a fixture `ideation_state.md` containing both `## Decisions needed from operator` (with two valid bullets) AND `## Cycle observations` (with three observation-shaped bullets); calls `parse_operator_decisions(path)`; asserts the returned list contains exactly the two decisions bullets and NONE of the observations content.

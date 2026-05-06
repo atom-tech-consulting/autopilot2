@@ -168,8 +168,8 @@ no agent — including ideation — has `cron_edit` and so cannot adopt
 those proposals: cron schedule mutation is operator-CLI-only via
 `ap2 cron edit ...`. If you see one or more unadopted
 `cron_proposed` events in the recent-events block, SURFACE them
-in your per-cycle assessment (e.g. an "Open questions for
-operator" entry naming the proposal + rationale) so the operator
+in your per-cycle assessment (e.g. a `## Decisions needed
+from operator` entry naming the proposal + rationale) so the operator
 can review and adopt manually. Do NOT propose a task whose only
 purpose is to adopt a `cron_proposed` event — the operator owns
 that promotion path.
