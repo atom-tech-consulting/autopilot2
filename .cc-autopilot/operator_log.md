@@ -68,3 +68,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-06T18:01:11Z — rejected ideation proposal → TB-184 (`ap2 ideate --hint "<text>"` — per-cycle operator intent forwarded into ideation prompt header): goal.md is the operator-intent channel (Non-goal: "operator owns goal.md"); --hint creates a parallel surface that erodes that authority. Doesn't advance the signal-collection focus and adds a confounder to future signal-attribution. To nudge ideation, edit goal.md — that's the cheap, principled path.
 - 2026-05-06T18:07:11Z — Pivoted Current focus to "ideation quality signal collection" (see goal.md commit 41bf85b). Prior ideation_state.md focus assessments structurally stale — next cycle should re-derive from scratch against the new focus. Bottleneck is signal volume, not prompt craft.
 - 2026-05-06T18:16:52Z — applied operator-queued add_backlog → TB-187
+- 2026-05-06T18:37:15Z — applied operator-queued ideate → (forced)
