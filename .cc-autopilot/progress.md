@@ -353,3 +353,9 @@
 - **Summary:** Implementation landed in d69a34e (ideation.default.md drops "fewer than 3 workable", state_extras carries `proposal slots this cycle: N`, early-skip emits `ideation_skipped_no_slots`, 1097/1097 tests pass). Two prior retries both failed on the briefing's own `grep -nE ... "fewer than [0-9]+ workable"` bullet — bare grep exits 1 on no matches, but `ap2/verify.py:266` treats non-zero as fail, making the bullet unsatisfiable. 6583b07 converts that bullet to the `!`-prefix exit-code-inversion idiom (precedent: janitor-llm-judge briefing post-TB-178); bullet now exits 0 when there are zero matches. No source changes in this commit; the impl in d69a34e is unchanged.
 - **Files:** .cc-autopilot/tasks/pre-compute-proposal-slot-count-for-idea.md
 - **Tests:** pass
+
+## [2026-05-06] TB-186: Fix `ideation_skipped_no_slots` event spam — slot check fires before cooldown gate (TB-183 regression)
+- **Commit:** `4b9c553`
+- **Summary:** Swapped the slot-check and cooldown-check ordering in _maybe_ideate so emit-and-mark_run branches are now rate-limited by the cooldown clock; updated docstring + added 4 regression tests pinning back-to-back call behavior, post-cooldown re-emit, docstring order, and source-level invariant. Full ap2/tests/ suite passes (1101).
+- **Files:** ap2/ideation.py, ap2/tests/test_ideation_trigger.py
+- **Tests:** pass

@@ -10,7 +10,6 @@
 
 - [ ] **TB-184** **`ap2 ideate --hint "<text>"` — per-cycle operator intent forwarded into ideation prompt header** `#autopilot` `#ideation` `#cli` `#operator` `#prompts` `@blocked:review` — Add an optional --hint flag to `ap2 ideate` (and chat parity) that travels through the operator queue and surfaces verbatim in the next ideation prompt's header as a per-cycle operator nudge — closes the in-band-intent gap when operators force-bypass the focus-exhausted gate without rotating goal.md. [→ brief](.cc-autopilot/tasks/ap2-ideate-hint-text-per-cycle-operator.md)
 - [ ] **TB-185** **`ap2 frozen TB-N` — consolidated triage view for retry-exhausted Frozen tasks** `#autopilot` `#cli` `#observability` `#failure-recovery` `@blocked:review` — Add a read-only `ap2 frozen TB-N` CLI that consolidates briefing text + per-bullet failure notes from events.jsonl + git_log_grep commit summaries + a suggested-classification heuristic, so when retry_exhausted forces a design-fork escalation the operator's triage loop is one command instead of multi-tool dig. [→ brief](.cc-autopilot/tasks/ap2-frozen-tb-n-consolidated-triage-view.md)
-- [ ] **TB-186** **Fix `ideation_skipped_no_slots` event spam — slot check fires before cooldown gate (TB-183 regression)** [→ brief](.cc-autopilot/tasks/fix-ideation-skipped-no-slots-event-spam.md)
 
 ## Pipeline Pending
 
@@ -76,6 +75,7 @@
 - [x] **TB-182** **Fix stale `ideation_state.md` references in cron status report (drop "Tasks awaiting review" redundancy + teach the agent to validate forwarded references)** [→ brief](.cc-autopilot/tasks/fix-stale-ideation-state-md-references-i.md)
 - [x] **TB-174** **Parse focus statuses from ideation_state.md; auto-skip ideation cron when all focus items are `exhausted-needs-operator`** `#autopilot` `#ideation` `#cron` `#cost` `#observability` — Add `parse_focus_statuses(path) -> dict[str,str]` to ap2/ideation.py (sibling to TB-173's `parse_open_questions`); gate `_maybe_ideate` to skip the SDK call (emit `ideation_skipped reason=focus_exhausted`, bump cooldown) when every focus item the ideator self-declared is `exhausted-needs-operator`. `force_ideate` (TB-159) keeps bypassing. [→ brief](.cc-autopilot/tasks/parse-focus-statuses-from-ideation-state.md)
 - [x] **TB-183** **Pre-compute proposal slot count for ideation, eliminate hardcoded "3" from prompt body** [→ brief](.cc-autopilot/tasks/pre-compute-proposal-slot-count-for-idea.md)
+- [x] **TB-186** **Fix `ideation_skipped_no_slots` event spam — slot check fires before cooldown gate (TB-183 regression)** [→ brief](.cc-autopilot/tasks/fix-ideation-skipped-no-slots-event-spam.md)
 
 ## Frozen
 
