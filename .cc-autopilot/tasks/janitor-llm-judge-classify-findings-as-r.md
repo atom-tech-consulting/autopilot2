@@ -74,3 +74,10 @@ This is a deliberate design choice. operator_log.md is read by ideation Step 0 a
 - Custom verdict labels per project. The three labels are codebase-fixed.
 - Re-judging a finding on subsequent scans (memoization across cron runs). Each scan judges fresh; if the same finding persists, the operator sees it persist in events.jsonl and decides.
 - Web UI surface for findings. CLI + status-report cron + events.jsonl is enough for v1.
+## Attempts
+
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "operator_log_append|operator_log.md" ap2/janitor.py` — should return ZERO matches (regression check: TB-177's
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T000052Z-TB-178.prompt.md`, `stream: .cc-autopilot/debug/20260506T000052Z-TB-178.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T000052Z-TB-178.messages.jsonl`
