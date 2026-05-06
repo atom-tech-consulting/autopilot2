@@ -142,6 +142,32 @@ Body shape (when posting):
   outside any current focus item — operator-judgement work that
   needs visibility on the report. If the line is absent, omit the
   bullet — there's nothing to surface.
+- TB-182: BEFORE you forward the open-questions line (or any TB-N
+  reference its bullets carry) into the post, validate against
+  events.jsonl that the references are still current. The bullets
+  were written by the ideator at the most recent
+  `ideation_state_updated` event in the tail; up to the ideation
+  interval (~2h) of staleness can bleed through into the open-
+  questions snapshot. Procedure:
+    1. Note the `ts` of the most recent `ideation_state_updated`
+       event in `events.jsonl`. That's when the open-questions
+       content was last refreshed.
+    2. For every TB-N referenced in a forwarded bullet, scan
+       events.jsonl for any `task_complete`, `task_deleted`,
+       `task_updated`, or `verification_failed` event for that TB-N
+       with `ts` AFTER the `ideation_state_updated` ts.
+    3. If found, the bullet is stale. Either skip it entirely
+       (preferred when the bullet's premise no longer holds — e.g.
+       a "TB-N retry watch" bullet for a TB-N that has now landed
+       Complete) OR rewrite it with a parenthetical noting the
+       staleness (e.g. "(per stale ideation_state.md; TB-N landed
+       Complete at <ts>)"). Skipping is preferred — the snapshot
+       line is best-effort, not load-bearing.
+    4. If no superseding event is found, the bullet's TB-N
+       references are still current — forward as-is.
+  This validation is reasoning-only; the agent already has both
+  events.jsonl and the snapshot in context. Don't wait on a tool;
+  walk the events tail you already read above and decide.
 - TB-177: if the snapshot's `## Current state` block carries a
   `- Janitor findings (N): stranded git state — ...` line, copy
   that line VERBATIM as one of your bullets too. The janitor cron

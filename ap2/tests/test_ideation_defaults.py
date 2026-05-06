@@ -322,6 +322,73 @@ def test_ideation_prompt_explains_why_gate_is_uniform():
     )
 
 
+def test_ideation_prompt_forbids_tasks_awaiting_review_in_open_questions():
+    """TB-182: the `## Open questions for operator` schema fragment must
+    NOT instruct ideation to write "Tasks awaiting review" / "TB-N
+    awaiting approval" bullets — those duplicate the mechanically-
+    derived `Pending operator review (N): TB-...` line that
+    `ap2 status` (CLI) and the cron status-report inject from current
+    board state per run (TB-151 / TB-173). When the gap between
+    ideation cycles diverges from current board state (e.g. an
+    `ap2 approve` lands in the gap) the two lines actively
+    contradict each other in the same Mattermost post.
+
+    Pin both halves:
+      (a) the prompt does NOT instruct ideation to LIST tasks-awaiting-
+          review TB-Ns inside `ideation_state.md` (the pre-TB-182
+          phrasing — `List the tasks awaiting review in your
+          ideation_state.md ...`);
+      (b) the prompt explicitly PROHIBITS that content with a
+          greppable phrase (`tasks-awaiting-review`) so an editor
+          regression that removes the prohibition trips this test.
+    """
+    prompt = _default_prompt()
+    flat = " ".join(prompt.split())
+    lower = flat.lower()
+    # (a) The pre-TB-182 instruction is gone. The exact sentence was
+    # "List the tasks awaiting review in your ideation_state.md
+    # 'Open questions for operator' section ..."; assert the directive
+    # form ("list the tasks awaiting review in your ideation_state")
+    # no longer appears.
+    assert "list the tasks awaiting review in your ideation_state" not in lower, (
+        "TB-182: ideation prompt still instructs listing tasks-awaiting-"
+        "review TB-Ns in ideation_state.md — that duplicates the "
+        "mechanical Pending-review line and is forbidden."
+    )
+    # (b) The new prohibition is explicit and greppable.
+    assert "tasks-awaiting-review" in lower, (
+        "TB-182: ideation prompt is missing the explicit prohibition "
+        "phrase 'tasks-awaiting-review' — the schema fragment should "
+        "say `Do NOT include tasks-awaiting-review bullets`."
+    )
+    assert "TB-182" in prompt, (
+        "TB-182 cross-ref expected in the prompt for future trims to "
+        "preserve the lineage."
+    )
+
+    # Schema-fragment-local check: between `## Open questions for
+    # operator` (the schema fragment near the top of the file, NOT
+    # `### Open questions for operator` or other appearances) and the
+    # next `## ` heading inside the schema, the literal substring
+    # "Tasks awaiting review" must NOT appear (case-insensitive).
+    schema_idx = prompt.find("## Open questions for operator")
+    assert schema_idx >= 0
+    # The schema fragment is indented (it's inside a code block in the
+    # markdown). Find the next `## ` heading that immediately follows.
+    after = prompt[schema_idx + len("## Open questions for operator"):]
+    next_section_idx = after.find("## Proposals this cycle")
+    assert next_section_idx >= 0, (
+        "schema fragment is missing the trailing `## Proposals this "
+        "cycle` anchor; this test relies on that anchor"
+    )
+    section_body = after[:next_section_idx]
+    assert "tasks awaiting review" not in section_body.lower(), (
+        f"TB-182: the `## Open questions for operator` schema fragment "
+        f"contains a 'Tasks awaiting review' bullet — that is the "
+        f"redundancy this task removes. Section body:\n{section_body!r}"
+    )
+
+
 def test_ideation_prompt_does_not_contain_a_manual_bullet():
     """Self-consistency: the ideation prompt itself MUST NOT use a
     `- Manual: ...` bullet anywhere. Catches accidental regression where

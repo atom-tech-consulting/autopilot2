@@ -81,6 +81,20 @@ Use this exact schema for the `content` argument:
       when goal.md appears to need updating, OR when you noticed a
       gap outside any current focus item.)
 
+    Do NOT include tasks-awaiting-review bullets in this section
+    (TB-182). Pending-review TB-Ns are surfaced mechanically by
+    `ap2 status` (CLI) and the cron status-report's snapshot block
+    (per TB-151 / TB-173) from current board state every run, so
+    duplicating that list here creates contradiction risk when the
+    gap between ideation cycles diverges from current board state
+    (e.g. an `ap2 approve` lands in the gap and the stale list
+    disagrees with the fresh one in the same Mattermost post).
+    Open-questions content stays focused on items that REQUIRE
+    narrative judgment ideation is uniquely positioned to surface —
+    focus-rotation candidates, retry-watch interpretations,
+    residual-risk acceptances, cross-TB pattern observations,
+    escalations.
+
     ## Proposals this cycle
     List the 3 task TB-Ns you're about to add (or fewer if Backlog
     already has ≥3 workable items, in which case write
@@ -268,9 +282,12 @@ are your invention, so it'll satisfy them by definition.
 
 Do NOT skip the clause for "obvious" or "trivial" tasks. The operator
 decides what's trivial; ideation does not. The clause is uniform
-across every proposal you emit. List the tasks awaiting review in
-your `ideation_state.md` "Open questions for operator" section so the
-operator can find them quickly.
+across every proposal you emit. Do NOT list the tasks-awaiting-review
+TB-Ns in your `ideation_state.md` "Open questions for operator"
+section (TB-182) — `ap2 status` and the cron status-report's snapshot
+block surface those mechanically from current board state per run
+(TB-151 / TB-173), and forwarding a stale copy across the gap between
+ideation cycles risks contradicting the fresh list in the same post.
 
 ## Goal-anchor requirement (TB-161 — load-bearing)
 Every briefing you propose MUST have its `## Goal` body cite, as a

@@ -735,6 +735,282 @@ def test_status_report_prompt_instructs_forwarding_open_questions_line():
 
 
 # ---------------------------------------------------------------------------
+# TB-182: validate-against-events instruction for forwarded TB-N references.
+#
+# The open-questions snapshot line forwards bullets the ideator wrote at the
+# last `ideation_state_updated` event. Up to ~2h of staleness can bleed
+# through (the gap between ideation cycles). The status-report agent's
+# prompt body must instruct it to cross-check forwarded TB-N references
+# against events.jsonl for any superseding `task_complete`,
+# `task_deleted`, `task_updated`, or `verification_failed` event AFTER
+# the `ideation_state_updated` ts, and skip / annotate stale bullets.
+
+
+def test_status_report_prompt_pins_validation_against_events():
+    """TB-182: the canonical STATUS_REPORT_PROMPT body must instruct the
+    agent to validate forwarded TB-N references against events.jsonl
+    before posting. Pin the load-bearing markers so a paraphrase that
+    drops the cross-check trips this test:
+
+      - `ideation_state_updated` (the timestamp anchor)
+      - `task_complete` (one of the four superseding event types)
+      - `events.jsonl` (the source of truth the agent walks)
+      - `TB-182` (cross-ref so future trims preserve the lineage)
+    """
+    from ap2.status_report import STATUS_REPORT_PROMPT
+
+    body = STATUS_REPORT_PROMPT
+    # Anchor: `ideation_state_updated` is the timestamp the agent uses
+    # to decide which events count as "after the open-questions
+    # content was last refreshed".
+    assert "ideation_state_updated" in body, (
+        "TB-182: the validation instruction needs the "
+        "`ideation_state_updated` event-name anchor so the agent knows "
+        "which timestamp to compare against."
+    )
+    # At least one of the four superseding event types must be named
+    # so the agent knows what shape of event invalidates a bullet.
+    assert "task_complete" in body
+    # The four-event list should be enumerated together — pin the
+    # other three names too so a regression that names only one of
+    # them surfaces here.
+    for ev in ("task_deleted", "task_updated", "verification_failed"):
+        assert ev in body, (
+            f"TB-182: superseding event type {ev!r} missing from the "
+            f"status-report validation instruction"
+        )
+    # The agent walks `events.jsonl` directly (already in context).
+    assert "events.jsonl" in body
+    # TB-182 cross-ref so future trims preserve the lineage.
+    assert "TB-182" in body
+
+
+def test_status_report_prompt_validation_instruction_describes_skip_or_annotate():
+    """TB-182: the validation instruction must explain BOTH branches —
+    when a stale bullet is found, the agent either SKIPS it or
+    REWRITES it with a parenthetical noting the staleness. A prompt
+    that says "validate" but doesn't tell the agent what to DO with
+    a stale bullet leaves the resolution undefined.
+    """
+    from ap2.status_report import STATUS_REPORT_PROMPT
+
+    body = STATUS_REPORT_PROMPT
+    lower = body.lower()
+    # Skip branch.
+    assert "skip" in lower, (
+        "TB-182: validation instruction missing the skip-stale-bullet branch"
+    )
+    # Rewrite-with-parenthetical branch.
+    assert (
+        "stale ideation_state.md" in lower
+        or "rewrite" in lower
+        or "parenthetical" in lower
+    ), (
+        "TB-182: validation instruction missing the rewrite-with-"
+        "parenthetical branch"
+    )
+    # The "if not found, forward as-is" branch — the no-staleness path
+    # must be explicit so the agent doesn't drop bullets that are still
+    # current.
+    assert "as-is" in lower or "as is" in lower or "still current" in lower, (
+        "TB-182: validation instruction missing the no-staleness "
+        "forward-as-is branch"
+    )
+
+
+def test_run_status_report_smoke_stale_open_questions_bullet(tmp_path, monkeypatch):
+    """TB-182 smoke test: when the project has an `ideation_state.md`
+    with a `TB-X retry watch` open-questions bullet AND `events.jsonl`
+    contains a `task_complete TB-X` event AFTER the
+    `ideation_state_updated` ts, the prompt the agent receives must
+    carry BOTH (so the agent has the context to validate) AND the
+    validation instruction (so it knows to validate). We can't pin the
+    agent's actual reasoning without an integration test; the prompt-
+    content + event-presence pins are the load-bearing assertions.
+
+    Threading: use `_OptionsCapturingSDK` so the prompt actually
+    handed to the SDK is captured (snapshot-block + body), then assert
+    the captured prompt contains the open-questions snapshot line, the
+    `task_complete` event marker, and the validation instruction.
+    """
+    cfg = _cfg(tmp_path)
+    # Seed: an old ideation_state_updated event, then a task_complete
+    # event for TB-X landing AFTER it. The skip-gate also needs at least
+    # one non-self event after the most recent cron_complete; the
+    # task_complete satisfies both that gate AND the staleness fixture.
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(cfg.events_file, "ideation_state_updated", bytes=200)
+    events.append(
+        cfg.events_file, "task_complete",
+        task="TB-999", status="complete", commit="abc1234",
+        summary="TB-999 landed Complete after the ideation snapshot",
+    )
+    # Open-questions section referencing TB-999 — this is the bullet
+    # the agent must validate as stale (since TB-999 has since
+    # task_complete'd) and either skip or annotate.
+    _seed_ideation_state(
+        cfg,
+        "## Open questions for operator\n\n"
+        "- **TB-999 retry watch (n=1 prose-bullet over-specification)**: "
+        "watch for repeat over-specification in the next prose-only briefing.\n",
+    )
+
+    from ap2 import prompts as _prompts_mod
+
+    real_build = _prompts_mod.build_control_prompt
+    captured: dict[str, str] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        # Reproduce build_control_prompt's structure faithfully enough
+        # that the assertion can find both halves: the snapshot line
+        # injected via `state_extras` (TB-173) and the validation
+        # instruction in `body` (TB-182).
+        block = "## Current state\n"
+        if state_extras:
+            block += "\n".join(state_extras) + "\n"
+        out = block + f"\n## Control job: {name}\n{body}"
+        captured["prompt"] = out
+        return out
+
+    monkeypatch.setattr(
+        "ap2.prompts.build_control_prompt", _capture_prompt
+    )
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert sdk.called is True, "skip-gate fired unexpectedly"
+    prompt = captured["prompt"]
+    # The open-questions snapshot line carries the TB-X reference the
+    # agent must validate.
+    assert "Open questions for operator (1):" in prompt
+    assert "TB-999 retry watch" in prompt
+    # The validation instruction is in the body.
+    assert "ideation_state_updated" in prompt
+    assert "task_complete" in prompt
+    assert "TB-182" in prompt
+    # The events-file fixture exists on disk so the agent's Read tool
+    # could observe both events at runtime (the prompt instructs the
+    # agent to re-read the events tail with Read).
+    assert cfg.events_file.is_file()
+    evts = events.tail(cfg.events_file, 50)
+    types = [e.get("type") for e in evts]
+    assert "ideation_state_updated" in types
+    assert any(
+        e.get("type") == "task_complete" and e.get("task") == "TB-999"
+        for e in evts
+    )
+
+    # Sanity: the same fixture wired through the REAL build_control_prompt
+    # would also expose both halves to the agent. We don't run the real
+    # builder here (it pulls in `git log` + a board snapshot, which is
+    # out of scope for this prompt-content assertion) but we verify the
+    # body-level pin lands on the source constant directly so a future
+    # `build_control_prompt` rewrite can't drop the validation
+    # instruction without flipping the body-level test above.
+    from ap2.status_report import STATUS_REPORT_PROMPT
+    assert "ideation_state_updated" in STATUS_REPORT_PROMPT
+    assert "task_complete" in STATUS_REPORT_PROMPT
+
+
+def test_run_status_report_smoke_no_staleness_open_questions_bullet(
+    tmp_path, monkeypatch,
+):
+    """TB-182 smoke test, no-staleness branch: when `events.jsonl`
+    has NO `task_complete` / `task_deleted` / `task_updated` /
+    `verification_failed` event for the bullet's TB-N AFTER the
+    `ideation_state_updated` ts, the bullet is current and should
+    forward as-is. The prompt structure must give the agent the
+    context to make that call: the snapshot line is present, the
+    validation instruction is present, and `events.jsonl` does NOT
+    contain a superseding event for the referenced TB-N.
+
+    Mirrors the staleness fixture above but inverts the events tail
+    so the no-staleness branch of the validation instruction is
+    pinned.
+    """
+    cfg = _cfg(tmp_path)
+    # Seed activity that satisfies the skip-gate but does NOT match the
+    # bullet's TB-N — i.e. the staleness check should find no
+    # superseding event.
+    events.append(cfg.events_file, "cron_complete", job="status-report")
+    events.append(cfg.events_file, "ideation_state_updated", bytes=200)
+    events.append(
+        cfg.events_file, "task_complete",
+        task="TB-1", status="complete", commit="abc1234",
+        summary="unrelated task",
+    )
+    # Open-questions bullet references TB-998 — but no event for TB-998
+    # appears AFTER the ideation_state_updated ts.
+    _seed_ideation_state(
+        cfg,
+        "## Open questions for operator\n\n"
+        "- **TB-998 retry watch (n=1 prose-bullet over-specification)**: "
+        "watch for repeat over-specification.\n",
+    )
+
+    captured: dict[str, str] = {}
+
+    def _capture_prompt(cfg, name, body, *, state_extras=None):
+        block = "## Current state\n"
+        if state_extras:
+            block += "\n".join(state_extras) + "\n"
+        out = block + f"\n## Control job: {name}\n{body}"
+        captured["prompt"] = out
+        return out
+
+    monkeypatch.setattr(
+        "ap2.prompts.build_control_prompt", _capture_prompt
+    )
+
+    sdk = _NoopSDK()
+    asyncio.run(
+        run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
+    )
+
+    assert sdk.called is True
+    prompt = captured["prompt"]
+    # Snapshot line + bullet present — the agent has something to
+    # validate (and forward unchanged once it confirms freshness).
+    assert "Open questions for operator (1):" in prompt
+    assert "TB-998 retry watch" in prompt
+    # Validation instruction present — the agent knows to validate.
+    assert "ideation_state_updated" in prompt
+    assert "task_complete" in prompt
+    # The "if not found, forward as-is" branch is named in the prompt
+    # so the agent has explicit guidance for the no-staleness case.
+    lower = prompt.lower()
+    assert (
+        "as-is" in lower or "as is" in lower or "still current" in lower
+    ), "no-staleness branch ('forward as-is') missing from prompt"
+    # Events fixture: NO superseding event for TB-998 lands after the
+    # ideation_state_updated ts — verifies the no-staleness fixture is
+    # set up correctly.
+    evts = events.tail(cfg.events_file, 50)
+    # Find the ideation_state_updated index, then scan after it for
+    # any superseding event referencing TB-998. There must be none.
+    isu_idx = -1
+    for i, e in enumerate(evts):
+        if e.get("type") == "ideation_state_updated":
+            isu_idx = i
+    assert isu_idx >= 0
+    superseding_for_998 = [
+        e for e in evts[isu_idx + 1:]
+        if e.get("type") in {
+            "task_complete", "task_deleted",
+            "task_updated", "verification_failed",
+        } and e.get("task") == "TB-998"
+    ]
+    assert superseding_for_998 == [], (
+        "no-staleness fixture is broken: a superseding event for "
+        "TB-998 was found after ideation_state_updated; the test "
+        "should pin the case where NONE exists"
+    )
+
+
+# ---------------------------------------------------------------------------
 # TB-156: per-call-site effort knob for the status-report routine.
 #
 # Status-report is a pure summarization job (read events tail, render
