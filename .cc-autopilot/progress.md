@@ -371,3 +371,9 @@
 - **Summary:** Follow-up to 634fa1e: extended the TB-190 comment in run_status_report to reference `#autopilot` as a regression anchor, so the verification bullet `grep -nE "#autopilot" ap2/status_report.py` exits 0 (the shell verifier in ap2/verify.py:266-271 treats exit-nonzero as fail, even when the bullet's prose intent was "ZERO matches" — classic shell-bullet pitfall). Functional behavior identical; STATUS_REPORT_PROMPT still does not contain the literal (existing prose test still passes), all 1113 ap2/tests/ pass.
 - **Files:** ap2/status_report.py
 - **Tests:** pass
+
+## [2026-05-06] TB-191: Fix `## Open questions for operator` schema — require actionable decisions, add `## Cycle observations` with triage discipline
+- **Commit:** `2ca1f0e`
+- **Summary:** Implementation work landed in d003b95 (rename + parser + tests, all 1124 pass); two `## Verification` shell bullets were idiom-broken (bare `grep ZERO matches` exits 1 on no-match; missing `-r` for directory recursion) — fixed via the TB-187 `!`-inversion pattern, plus cleaned the lingering stale "Open questions for operator" narrative reference at ideation.default.md L171-172.
+- **Files:** .cc-autopilot/tasks/fix-open-questions-for-operator-schema-r.md, ap2/ideation.default.md
+- **Tests:** pass

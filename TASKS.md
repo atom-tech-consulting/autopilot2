@@ -10,7 +10,6 @@
 
 - [ ] **TB-188** **Capture per-proposal record at ideation `add_backlog`; reconcile outcome on terminal events** `#autopilot` `#ideation` `#signal-collection` `#observability` `@blocked:review` — Per-proposal JSON record at `.cc-autopilot/ideation_proposals/<TB-N>.json` written when ideation queues an `add_backlog` (blocked_on=review marker), reconciled with an `outcome` block on `task_complete` / `task_deleted` / operator-queue `approve` / `reject`. Foundational signal capture for the new "ideation quality signal collection" focus — closes the gap that proposal cycle context (focus_anchor, why_now) is captured only in briefing prose with no link back to outcome. [→ brief](.cc-autopilot/tasks/capture-per-proposal-record-at-ideation.md)
 - [ ] **TB-189** **`ap2 classify TB-N --delete-test <verdict>` — operator-authored retrospective verdict on shipped proposals** `#autopilot` `#ideation` `#signal-collection` `#operator-queue` `#cli` `#mattermost` `@blocked:review,TB-188` — Add `ap2 classify TB-N --delete-test {advanced-goal,pro-forma,unclear} [--reason ...]` (CLI + chat verb routed via operator_queue_append) to record the operator's retrospective delete-test verdict on a shipped proposal. Writes a structured line to operator_log.md and appends a `delete_test` block to the per-proposal record from TB-188. The operator-authored signal stream that goal.md L61-76 directly anchors signal collection to. Blocked on TB-188. [→ brief](.cc-autopilot/tasks/ap2-classify-tb-n-delete-test-verdict-op.md)
-- [ ] **TB-191** **Fix `## Open questions for operator` schema — require actionable decisions, add `## Cycle observations` with triage discipline** `#autopilot` `#ideation` `#prompts` `#bug-fix` [→ brief](.cc-autopilot/tasks/fix-open-questions-for-operator-schema-r.md)
 
 ## Pipeline Pending
 
@@ -79,6 +78,7 @@
 - [x] **TB-186** **Fix `ideation_skipped_no_slots` event spam — slot check fires before cooldown gate (TB-183 regression)** [→ brief](.cc-autopilot/tasks/fix-ideation-skipped-no-slots-event-spam.md)
 - [x] **TB-187** **Fix mixed-blocker pending-review surfacing — `@blocked:review,TB-N` tasks are invisible** [→ brief](.cc-autopilot/tasks/fix-mixed-blocker-pending-review-surfaci.md)
 - [x] **TB-190** **Resolve status-report target channel server-side — stop posting to town-square** [→ brief](.cc-autopilot/tasks/resolve-status-report-target-channel-ser.md)
+- [x] **TB-191** **Fix `## Open questions for operator` schema — require actionable decisions, add `## Cycle observations` with triage discipline** `#autopilot` `#ideation` `#prompts` `#bug-fix` [→ brief](.cc-autopilot/tasks/fix-open-questions-for-operator-schema-r.md)
 
 ## Frozen
 
