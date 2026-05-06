@@ -62,3 +62,7 @@ ideation won't re-propose decisions logged here._
 - 2026-05-06T05:15:59Z — rejected ideation proposal → TB-175 (Insight: compute post-TB-121 ideation acceptance rate from operator_log.md; bootstrap `.cc-autopilot/insights/ideation_quality.md`): (no reason given)
 - 2026-05-06T16:11:19Z — applied operator-queued ideate → (forced)
 - 2026-05-06T16:23:15Z — applied operator-queued add_backlog → TB-186
+- 2026-05-06T17:57:00Z — applied operator-queued reject → TB-185
+- 2026-05-06T17:57:00Z — rejected ideation proposal → TB-185 (`ap2 frozen TB-N` — consolidated triage view for retry-exhausted Frozen tasks): utility not aligned with current focus on ideation quality signal collection; Frozen tasks are very rare right now (consolidated triage isn't the bottleneck)
+- 2026-05-06T18:01:11Z — applied operator-queued reject → TB-184
+- 2026-05-06T18:01:11Z — rejected ideation proposal → TB-184 (`ap2 ideate --hint "<text>"` — per-cycle operator intent forwarded into ideation prompt header): goal.md is the operator-intent channel (Non-goal: "operator owns goal.md"); --hint creates a parallel surface that erodes that authority. Doesn't advance the signal-collection focus and adds a confounder to future signal-attribution. To nudge ideation, edit goal.md — that's the cheap, principled path.
