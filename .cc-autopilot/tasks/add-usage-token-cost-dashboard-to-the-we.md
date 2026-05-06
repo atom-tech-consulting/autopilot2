@@ -124,3 +124,10 @@ For a project with 10,000 events (~6 months of operation at ~50 events/day), ful
 - Per-event-row drill-into-stream-jsonl from this view. Click-through to existing `/task-run/<run-id>` page covers the deep-dive case.
 - Currency conversion (showing values in non-USD). USD only.
 - Cost attribution to specific operators / agents beyond what `model_usage` and event-type already provide.
+## Attempts
+
+### 2026-05-06 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] prose: a test in `test_web.py` synthesizes a fixture `events.jsonl` containing 7 days of event mix (10 task_run_usage ev
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260506T012727Z-TB-181.prompt.md`, `stream: .cc-autopilot/debug/20260506T012727Z-TB-181.stream.jsonl`, `messages: .cc-autopilot/debug/20260506T012727Z-TB-181.messages.jsonl`
