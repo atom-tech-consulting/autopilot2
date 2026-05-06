@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ap2.ideation import parse_open_questions
+from ap2.ideation import parse_focus_statuses, parse_open_questions
 
 
 def _write_ideation_state(tmp_path: Path, body: str) -> Path:
@@ -226,3 +226,224 @@ def test_parse_open_questions_accepts_star_bullets(tmp_path: Path):
         "First star-marked entry.",
         "Second.",
     ]
+
+
+# ---------------------------------------------------------------------------
+# TB-174: `parse_focus_statuses` — pin the `## Current focus assessment`
+# parser that powers the `_maybe_ideate` focus-exhausted gate.
+#
+# The ideation prompt's Step 0 schema (`ap2/ideation.default.md` lines
+# 60-66) mandates one top-level `- **<title>**` bullet per goal.md
+# `## Current focus` entry, with a nested `- Status: <value>` sub-bullet
+# whose value is one of `in-progress` / `exhausted-needs-operator` /
+# `deferred`. `parse_focus_statuses` returns `{title: status}` so the
+# daemon can short-circuit the natural ideation cron when every focus
+# item self-reports `exhausted-needs-operator`. The forced operator
+# path (`force_ideate`, TB-159) bypasses the gate.
+#
+# These tests pin:
+#   - missing-file / missing-section / empty-section → {}.
+#   - single in-progress, single exhausted-needs-operator, multi-mixed.
+#   - multi-line title (the production shape — title wraps onto a
+#     continuation line before the closing `**`).
+#   - malformed status values map to "unknown" (never to a valid status).
+
+
+def test_parse_focus_statuses_handles_missing_file_returns_empty_dict(
+    tmp_path: Path,
+):
+    """File doesn't exist on disk yet (fresh project, no ideation cycle has
+    run) — must return {}. The gate then reads `focus_statuses and
+    all(...)`, which is False on `{}`, so the natural path stays
+    unaffected."""
+    path = tmp_path / ".cc-autopilot" / "ideation_state.md"
+    assert not path.exists()
+    assert parse_focus_statuses(path) == {}
+
+
+def test_parse_focus_statuses_returns_empty_when_section_missing(
+    tmp_path: Path,
+):
+    """File exists but has no `## Current focus assessment` heading —
+    must return {} so the gate stays a no-op. Defends against ideator-
+    prompt regressions that might drop the section header."""
+    body = (
+        "# Ideation State\n\n"
+        "## Mission alignment\n\n- something\n\n"
+        "## Open questions for operator\n\n- a question\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    assert parse_focus_statuses(path) == {}
+
+
+def test_parse_focus_statuses_handles_empty_section_returns_empty_dict(
+    tmp_path: Path,
+):
+    """Header is present but the section body has no `- **<title>**`
+    bullets. Must return {} — the gate stays a no-op. The pre-prose
+    introduction in the production file (`goal.md "Current focus: X"
+    remains the sole declared focus.`) lands here as a non-bullet line
+    that the parser ignores."""
+    body = (
+        "## Current focus assessment\n\n"
+        "goal.md says nothing actionable yet — placeholder section.\n\n"
+        "## Open questions for operator\n\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    assert parse_focus_statuses(path) == {}
+
+
+def test_parse_focus_statuses_returns_status_per_focus_item(tmp_path: Path):
+    """Multi-item canonical shape — three focus items, mixed statuses.
+    Pins the parser's primary return shape: dict ordering preserved
+    (Python 3.7+ guarantees insertion order), titles whitespace-clean,
+    statuses lowercased and stripped of backticks."""
+    body = (
+        "# Ideation State\n\n"
+        "## Mission alignment\n\nSome paragraph.\n\n"
+        "## Current focus assessment\n\n"
+        "- **First focus item**\n"
+        "  - Progress so far: TB-50 shipped.\n"
+        "  - Gaps: none material.\n"
+        "  - Status: `in-progress`\n"
+        "  - Reasoning: still landing follow-ups.\n"
+        "- **Second focus item**\n"
+        "  - Progress so far: TB-60 shipped.\n"
+        "  - Gaps: none.\n"
+        "  - Status: `exhausted-needs-operator`\n"
+        "  - Reasoning: every reasonable next step has shipped.\n"
+        "- **Third focus item**\n"
+        "  - Progress so far: TB-70 partial.\n"
+        "  - Gaps: blocked on operator.\n"
+        "  - Status: `deferred`\n"
+        "  - Reasoning: parked.\n\n"
+        "## Open questions for operator\n\n- something\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    result = parse_focus_statuses(path)
+    assert result == {
+        "First focus item": "in-progress",
+        "Second focus item": "exhausted-needs-operator",
+        "Third focus item": "deferred",
+    }
+
+
+def test_parse_focus_statuses_single_in_progress(tmp_path: Path):
+    """Single-item / `in-progress` — sanity check the most common shape
+    (the load-bearing default for a project with one active focus)."""
+    body = (
+        "## Current focus assessment\n\n"
+        "- **Ideation quality**\n"
+        "  - Progress so far: TB-100 shipped.\n"
+        "  - Gaps: none.\n"
+        "  - Status: `in-progress`\n"
+        "  - Reasoning: still iterating.\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    assert parse_focus_statuses(path) == {"Ideation quality": "in-progress"}
+
+
+def test_parse_focus_statuses_single_exhausted(tmp_path: Path):
+    """Single-item / `exhausted-needs-operator` — the gate-tripping
+    shape. The dict will carry exactly one entry whose value is the
+    canonical `exhausted-needs-operator` literal."""
+    body = (
+        "## Current focus assessment\n\n"
+        "- **Walk-away resilience**\n"
+        "  - Progress so far: TB-200 shipped.\n"
+        "  - Gaps: none material.\n"
+        "  - Status: `exhausted-needs-operator`\n"
+        "  - Reasoning: every reasonable next step has shipped.\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    assert parse_focus_statuses(path) == {
+        "Walk-away resilience": "exhausted-needs-operator",
+    }
+
+
+def test_parse_focus_statuses_handles_multiline_title(tmp_path: Path):
+    """The production format wraps long titles across one continuation
+    line before the closing `**` (real example from the in-flight
+    `.cc-autopilot/ideation_state.md`):
+
+        - **Ideation quality (gap-covering without drift; push for progress
+          without scope creep)**
+          - Progress so far: ...
+
+    The parser must collapse the wrapped title into a single
+    whitespace-normalized string so the gate's all-exhausted check
+    reads a stable key."""
+    body = (
+        "## Current focus assessment\n\n"
+        "- **Ideation quality (gap-covering without drift; push for progress\n"
+        "  without scope creep)**\n"
+        "  - Progress so far: TB-100 shipped.\n"
+        "  - Gaps: none.\n"
+        "  - Status: `in-progress`\n"
+        "  - Reasoning: iterating.\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    result = parse_focus_statuses(path)
+    assert result == {
+        "Ideation quality (gap-covering without drift; push for progress "
+        "without scope creep)": "in-progress",
+    }
+
+
+def test_parse_focus_statuses_malformed_status_returns_unknown(tmp_path: Path):
+    """A status value outside the canonical {`in-progress`,
+    `exhausted-needs-operator`, `deferred`} set returns `unknown` for
+    that item — never silently mapping to a valid status. The gate
+    only short-circuits on `exhausted-needs-operator`, so `unknown`
+    keeps the natural ideation path running (fail-open on parse
+    glitches)."""
+    body = (
+        "## Current focus assessment\n\n"
+        "- **First focus**\n"
+        "  - Status: `bogus-value`\n"
+        "- **Second focus**\n"
+        "  - Status: in-progress\n"
+        "- **Third focus**\n"
+        "  - (no status sub-bullet at all)\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    result = parse_focus_statuses(path)
+    assert result == {
+        "First focus": "unknown",
+        "Second focus": "in-progress",
+        "Third focus": "unknown",
+    }
+
+
+def test_parse_focus_statuses_section_at_end_of_file(tmp_path: Path):
+    """`## Current focus assessment` is the LAST section in the file —
+    the slicer must read to EOF rather than requiring a trailing `## `
+    heading. Pins behavior for layouts that omit later sections (e.g.
+    a fresh ideation_state.md with no proposals yet)."""
+    body = (
+        "# Ideation State\n\n"
+        "## Mission alignment\n\nIntro paragraph.\n\n"
+        "## Current focus assessment\n\n"
+        "- **Trailing focus**\n"
+        "  - Status: `exhausted-needs-operator`\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    assert parse_focus_statuses(path) == {
+        "Trailing focus": "exhausted-needs-operator",
+    }
+
+
+def test_parse_focus_statuses_ignores_non_top_level_bold_spans(tmp_path: Path):
+    """`**...**` spans that aren't top-level bullets (e.g. inside a
+    `Reasoning:` sub-bullet's prose, or in the section's introductory
+    paragraph) must not get scraped as focus items. The parser keys
+    only on lines whose first non-whitespace token is `- **`."""
+    body = (
+        "## Current focus assessment\n\n"
+        "Intro paragraph mentioning **goal.md** in passing.\n\n"
+        "- **Real focus**\n"
+        "  - Status: `in-progress`\n"
+        "  - Reasoning: pinning **non-goal** drift watch.\n"
+    )
+    path = _write_ideation_state(tmp_path, body)
+    assert parse_focus_statuses(path) == {"Real focus": "in-progress"}

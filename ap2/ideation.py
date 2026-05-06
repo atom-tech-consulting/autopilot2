@@ -94,6 +94,13 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
     "task_updated",
     # Cron proposals — explicit ideation.default.md rule.
     "cron_proposed",
+    # Self-skip telemetry (TB-174) — when the natural ideation cron
+    # short-circuited because every focus item is
+    # `exhausted-needs-operator`. Visible to the next cycle so the
+    # ideator sees the prior gate trip in its events block (avoids
+    # re-discovering a stale "we already self-reported exhausted"
+    # signal across cycles).
+    "ideation_skipped",
 )
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
@@ -226,6 +233,135 @@ def parse_open_questions(path: Path) -> list[str]:
         )
         return truncated
     return entries
+
+
+# TB-174: parser for the `## Current focus assessment` section's per-item
+# `Status:` field. Each top-level focus-item bullet has the shape
+# documented in `ap2/ideation.default.md` (lines 60-66):
+#
+#     - **<focus item verbatim from goal.md>**
+#       - Progress so far: ...
+#       - Gaps: ...
+#       - Status: `in-progress` | `exhausted-needs-operator` | `deferred`
+#       - Reasoning: <one sentence>
+#
+# `parse_focus_statuses` returns `{focus title: status}` so the daemon
+# can self-skip the natural ideation cron when every focus item is
+# `exhausted-needs-operator` (gate in `_maybe_ideate`). The forced
+# operator path (`force_ideate`, TB-159) bypasses the gate.
+#
+# Section-slicing reuses the same `^##\s+` next-section regex as
+# `parse_open_questions` (the next H2 heading or EOF terminates the
+# section). Top-level focus-item bullets are detected by
+# `_FOCUS_TOP_BULLET_RE` (line starts with `- **` at column 0); the
+# title may wrap onto an indented continuation line until the closing
+# `**`. The `Status:` sub-bullet is found by scanning forward inside
+# the focus item's body.
+_FOCUS_HEADER_RE = re.compile(r"^##\s+Current focus assessment\s*$", re.M)
+_FOCUS_TOP_BULLET_RE = re.compile(r"^-\s+\*\*")
+_FOCUS_TITLE_SPAN_RE = re.compile(r"\*\*(.+?)\*\*", re.S)
+_FOCUS_STATUS_RE = re.compile(r"^\s*-\s+Status:\s*(.+?)\s*$")
+_FOCUS_VALID_STATUSES: frozenset[str] = frozenset(
+    {"in-progress", "exhausted-needs-operator", "deferred"}
+)
+_FOCUS_STATUS_UNKNOWN = "unknown"
+
+
+def parse_focus_statuses(path: Path) -> dict[str, str]:
+    """Return `{focus title: status}` from `## Current focus assessment` in `path`.
+
+    `path` is the absolute path to a project's
+    `.cc-autopilot/ideation_state.md`. Returns ``{}`` when the file is
+    missing, when the section header is absent, or when no focus-item
+    bullets parse out of the section body.
+
+    Each top-level `- **<title>**` bullet inside the section becomes one
+    entry in the returned dict, mapping the title (whitespace-collapsed)
+    to its `Status:` sub-bullet's value (lowercased, surrounding
+    backticks stripped). Statuses outside the canonical set
+    {`in-progress`, `exhausted-needs-operator`, `deferred`} — including
+    a focus item with no `Status:` sub-bullet at all — are reported as
+    `unknown`. The gate in `_maybe_ideate` only short-circuits on
+    `exhausted-needs-operator`, so `unknown` keeps the natural ideation
+    path running (the safer default — never skip on a parse glitch).
+
+    Title handling: the title may wrap across one indented continuation
+    line before its closing `**` (the load-bearing example from
+    production: `**Ideation quality (gap-covering without drift; push\n
+    for progress without scope creep)**` spans two lines). Whitespace
+    inside the title collapses to single spaces.
+
+    Pure / no I/O beyond the single read of `path`. Defensive against
+    OSErrors (returns ``{}`` rather than raising) so a transient
+    permission glitch on the ideation_state file never crashes
+    `_maybe_ideate`.
+    """
+    if not path.is_file():
+        return {}
+    try:
+        text = path.read_text()
+    except OSError:
+        return {}
+    m = _FOCUS_HEADER_RE.search(text)
+    if m is None:
+        return {}
+    body_start = m.end()
+    next_m = _OPEN_QUESTIONS_NEXT_SECTION_RE.search(text, body_start)
+    body = text[body_start: next_m.start() if next_m else len(text)]
+
+    lines = body.splitlines()
+    starts = [
+        i for i, ln in enumerate(lines)
+        if _FOCUS_TOP_BULLET_RE.match(ln)
+    ]
+    if not starts:
+        return {}
+    bounds = starts + [len(lines)]
+
+    result: dict[str, str] = {}
+    for k in range(len(starts)):
+        start, end = bounds[k], bounds[k + 1]
+        title, status = _parse_one_focus_item(lines[start:end])
+        if title:
+            result[title] = status
+    return result
+
+
+def _parse_one_focus_item(item_lines: list[str]) -> tuple[str, str]:
+    """Extract `(title, status)` from a single focus-item slice.
+
+    `item_lines[0]` is the `- **<title-start>` line; later lines are
+    the title's continuation (if `**` didn't close on line 0) plus the
+    nested sub-bullets (`- Progress so far:`, `- Gaps:`, `- Status:`,
+    `- Reasoning:`). Title is the text inside the FIRST `**...**`
+    span (whitespace collapsed). Status is the value of the FIRST
+    `- Status:` sub-bullet, lowercased and with surrounding backticks
+    stripped; falls back to `_FOCUS_STATUS_UNKNOWN` when the value
+    isn't in the canonical set or the sub-bullet is missing entirely.
+    """
+    if not item_lines:
+        return "", _FOCUS_STATUS_UNKNOWN
+    head = item_lines[0].lstrip()
+    if head.startswith("- "):
+        head = head[2:]
+    # Join the head with continuation lines (whitespace-stripped) so a
+    # `**...**` span that wraps across one or more lines re-assembles
+    # cleanly. The non-greedy match in `_FOCUS_TITLE_SPAN_RE` then
+    # picks the first `**...**` span and discards the sub-bullets that
+    # follow.
+    joined = " ".join([head] + [ln.strip() for ln in item_lines[1:]])
+    m = _FOCUS_TITLE_SPAN_RE.search(joined)
+    title = " ".join(m.group(1).split()) if m else ""
+
+    status = _FOCUS_STATUS_UNKNOWN
+    for line in item_lines:
+        ms = _FOCUS_STATUS_RE.match(line)
+        if ms is None:
+            continue
+        raw = ms.group(1).strip().strip("`").strip().lower()
+        status = raw if raw in _FOCUS_VALID_STATUSES else _FOCUS_STATUS_UNKNOWN
+        break
+    return title, status
 
 
 def load_prompt(cfg: Config) -> str:
@@ -435,6 +571,18 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
        check — same trigger condition, but with explicit event +
        cooldown advancement.
     4. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire.
+    5. Focus-exhausted gate (TB-174) — when the prior cycle's
+       `ideation_state.md` self-reports `Status:
+       exhausted-needs-operator` for EVERY focus item under
+       `## Current focus assessment`, ideation skips the SDK call
+       (emits `ideation_skipped reason=focus_exhausted` and advances
+       the cooldown). Closes goal.md's "stops proposing when target
+       project's `## Done when` criteria are all met" Done-when
+       bullet at the ideator-self-report level: today, even a
+       unanimous `exhausted-needs-operator` self-report keeps burning
+       SDK cost on increasingly thin proposals every cooldown window.
+       The forced path (`force_ideate`, TB-159) bypasses this gate so
+       the operator can override after refreshing goal.md.
 
     Delegates the actual SDK invocation + bookkeeping to `_run_ideation`
     so the forced-run path (`force_ideate`, TB-159) shares the same
@@ -478,18 +626,44 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     now = time.time()
     if now - last < cooldown:
         return
+    # TB-174: focus-exhausted gate — if the prior cycle's
+    # ideation_state.md self-reports `Status: exhausted-needs-operator`
+    # for every focus item under `## Current focus assessment`, skip
+    # the SDK call. The natural path is the only one that gates here;
+    # `force_ideate` (TB-159) bypasses this check so the operator can
+    # override after refreshing goal.md. We still call `mark_run` so a
+    # 30s daemon tick doesn't keep re-evaluating the gate every loop.
+    focus_statuses = parse_focus_statuses(
+        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    )
+    if focus_statuses and all(
+        s == "exhausted-needs-operator" for s in focus_statuses.values()
+    ):
+        events.append(
+            cfg.events_file,
+            "ideation_skipped",
+            reason="focus_exhausted",
+            focus_count=len(focus_statuses),
+        )
+        mark_run(cfg.cron_state_file, IDEATION_NAME)
+        return
     await _run_ideation(cfg, sdk, mcp_server, slots=slots)
 
 
 async def force_ideate(cfg: Config, sdk, mcp_server) -> None:
     """Run ideation unconditionally — manual operator trigger (TB-159).
 
-    Bypasses the `AP2_IDEATION_DISABLED` opt-out, the cooldown, and the
-    Ready+Backlog queue-depth gate. Does NOT bypass the Active hard
-    gate — that check lives at queue-append time in
-    `do_operator_queue_append({"op": "ideate", ...})` and at drain time
-    is implicit (the daemon won't dispatch the forced run while a task
-    agent is sharing the SDK slot).
+    Bypasses the `AP2_IDEATION_DISABLED` opt-out, the cooldown, the
+    Ready+Backlog queue-depth gate, and the TB-174 focus-exhausted
+    gate (i.e. fires even when every focus item in
+    `ideation_state.md` self-reports `Status:
+    exhausted-needs-operator` — that's the precise scenario where the
+    operator triggers a forced run after refreshing goal.md so the
+    fresh focus has somewhere to land its first proposals). Does NOT
+    bypass the Active hard gate — that check lives at queue-append
+    time in `do_operator_queue_append({"op": "ideate", ...})` and at
+    drain time is implicit (the daemon won't dispatch the forced run
+    while a task agent is sharing the SDK slot).
 
     Still calls `mark_run` (via `_run_ideation`) after the run so the
     NEXT natural cooldown clock resets — i.e. running `ap2 ideate` ten
