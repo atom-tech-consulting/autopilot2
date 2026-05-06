@@ -862,3 +862,209 @@ def test_force_ideate_bypasses_focus_exhausted_gate(tmp_path, monkeypatch):
         "force_ideate must invoke the control agent unconditionally — "
         "the focus-exhausted gate is bypassed on the forced path"
     )
+
+
+# ---------------------------------------------------------------------------
+# TB-186: gate-ordering — the cooldown gate must run BEFORE the slot-skip
+# branch so that branch's `mark_run` actually suppresses re-emission on the
+# next tick. Pre-TB-186 the slot-skip branch ran first, short-circuited
+# before the cooldown check, and `ideation_skipped_no_slots` fired once per
+# ~30s daemon tick instead of once per cooldown window.
+#
+# The TB-183 tests above pin SINGLE-CALL behavior (slots=0 → exactly one
+# event lands, mark_run called); the bug lives in REPEAT-CALL behavior, so
+# these tests pin the call-rate gap explicitly.
+
+
+def test_maybe_ideate_slot_skip_respects_cooldown(tmp_path, monkeypatch):
+    """Two back-to-back calls of `_maybe_ideate` with slots=0 must emit
+    exactly ONE `ideation_skipped_no_slots` event, NOT two.
+
+    Pre-TB-186 ordering: slot-check ran before cooldown-check, so the
+    slot=0 early-return short-circuited before the cooldown gate could
+    suppress repeat ticks. The first call wrote `last_run = now` via
+    `mark_run`, but the second call never reached the cooldown read —
+    it re-emitted before the cooldown check could short-circuit.
+
+    Post-TB-186 ordering: cooldown-check runs first; once `mark_run`
+    bumps `last_run`, the next tick's cooldown check returns silently
+    before reaching the slot-check branch. Result: at most one
+    `ideation_skipped_no_slots` event per cooldown window, as TB-183's
+    commit message originally claimed.
+    """
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={
+            "Ready": [("TB-1", "r1"), ("TB-2", "r2")],
+            "Backlog": [
+                ("TB-3", "b1"), ("TB-4", "b2"), ("TB-5", "b3"),
+            ],
+        },
+    )
+    # `_make_project` clobbers the cooldown to 0 — undo that here so the
+    # cooldown gate is actually exercised.
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+
+    # Anchor a deterministic clock. t0 is "now" for the first call;
+    # last_run is set 10000s in the past (>> cooldown), so the cooldown
+    # gate is satisfied on the first call. The second call uses the same
+    # clock value (no advance), so the cooldown gate must short-circuit.
+    t0 = 1_700_000_000.0
+    save_state(cfg.cron_state_file, {IDEATION_NAME: t0 - 10000})
+    monkeypatch.setattr(time, "time", lambda: t0)
+
+    calls = _stub_run_control_agent(monkeypatch)
+
+    # First call: cooldown elapsed, slots=0, branch fires.
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+    # Second call back-to-back, no clock advance: cooldown gate must
+    # suppress the skip-emission.
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    # SDK never invoked on either call.
+    assert calls == [], "ideation should have skipped — slots=0"
+
+    evts = events.tail(cfg.events_file, 20)
+    skips = [e for e in evts if e["type"] == "ideation_skipped_no_slots"]
+    assert len(skips) == 1, (
+        f"expected exactly ONE ideation_skipped_no_slots event across two "
+        f"back-to-back calls (the cooldown gate should suppress the "
+        f"second call's skip-emission); got {len(skips)} events: "
+        f"{[e['type'] for e in evts]}"
+    )
+
+    # Sanity: `mark_run` advanced the cooldown clock to t0 on the first
+    # call. Since `time.time` is monkeypatched to t0, `last_run == t0`.
+    state = load_state(cfg.cron_state_file)
+    assert state[IDEATION_NAME] == t0, (
+        f"mark_run should have written last_run = t0 ({t0}); got "
+        f"{state[IDEATION_NAME]}"
+    )
+
+
+def test_maybe_ideate_slot_skip_re_emits_after_cooldown(tmp_path, monkeypatch):
+    """After the cooldown elapses, a third `_maybe_ideate` call with
+    slots=0 must emit a SECOND `ideation_skipped_no_slots` event.
+
+    Pins that the cooldown gate is rate-limiting the skip-emission, NOT
+    silencing it permanently — the operator's events.jsonl still gets
+    one skip event per cooldown window so the at-or-above-threshold
+    state remains visible (just not at 30s/tick spam rate).
+    """
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={
+            "Ready": [("TB-1", "r1"), ("TB-2", "r2")],
+            "Backlog": [
+                ("TB-3", "b1"), ("TB-4", "b2"), ("TB-5", "b3"),
+            ],
+        },
+    )
+    cooldown_s = 7200
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", str(cooldown_s))
+
+    # Mutable clock — start past the cooldown so the first call fires.
+    clock = {"t": 1_700_000_000.0}
+    save_state(cfg.cron_state_file, {IDEATION_NAME: clock["t"] - 10000})
+    monkeypatch.setattr(time, "time", lambda: clock["t"])
+
+    calls = _stub_run_control_agent(monkeypatch)
+
+    # Call 1 + Call 2 at the same clock value — exactly one event lands
+    # (per the cooldown-suppression test above).
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    evts = events.tail(cfg.events_file, 20)
+    skips_before = [e for e in evts if e["type"] == "ideation_skipped_no_slots"]
+    assert len(skips_before) == 1, (
+        "precondition: the first two calls should land exactly one event"
+    )
+
+    # Advance clock past the cooldown and call again.
+    clock["t"] += cooldown_s + 1
+
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    evts = events.tail(cfg.events_file, 20)
+    skips_after = [e for e in evts if e["type"] == "ideation_skipped_no_slots"]
+    assert len(skips_after) == 2, (
+        f"after the cooldown elapses, a second ideation_skipped_no_slots "
+        f"event should land; expected 2 events total, got {len(skips_after)}: "
+        f"{[e['type'] for e in evts]}"
+    )
+
+    # SDK never invoked — slots=0 throughout.
+    assert calls == [], "ideation should have skipped — slots=0 throughout"
+
+
+def test_maybe_ideate_docstring_lists_cooldown_before_slot_check():
+    """TB-186 docstring pin: the gates-in-order list in
+    `_maybe_ideate.__doc__` must enumerate the cooldown gate BEFORE the
+    slot-check gate. Pre-TB-186 the docstring listed slot-check at #3
+    and cooldown at #4 (matching the buggy code order); post-TB-186
+    they swap.
+
+    Greppable phrasing pin: "Cooldown" (capitalized — it's the gate-list
+    bullet header) appears before "proposal-slot budget" in the
+    docstring. This catches both the human-readable enumeration AND
+    serves as a behavioral lock — if a future refactor re-orders the
+    code, this test forces a corresponding docstring update.
+    """
+    doc = ideation._maybe_ideate.__doc__
+    assert doc is not None, "_maybe_ideate must carry a docstring"
+    cooldown_idx = doc.find("Cooldown")
+    slot_idx = doc.find("proposal-slot budget")
+    assert cooldown_idx >= 0, (
+        "docstring must list the Cooldown gate by name in the gate "
+        "enumeration"
+    )
+    assert slot_idx >= 0, (
+        "docstring must list the proposal-slot budget gate by name in "
+        "the gate enumeration"
+    )
+    assert cooldown_idx < slot_idx, (
+        f"docstring gate ordering is wrong: 'Cooldown' (idx={cooldown_idx}) "
+        f"must appear BEFORE 'proposal-slot budget' (idx={slot_idx}) so "
+        f"the docstring matches the post-TB-186 code order. The cooldown "
+        f"gate must run first so emit-and-mark_run branches below it are "
+        f"actually rate-limited by the cooldown clock."
+    )
+
+
+def test_maybe_ideate_source_cooldown_check_precedes_slot_check():
+    """TB-186 source-level pin (matches the briefing's verification
+    bullet exactly): in the source of `_maybe_ideate`, the literal
+    'cooldown' substring must appear before the literal 'slots'
+    substring. Both substrings appear in the docstring AND in the
+    function body; the pin is a structural assert that the code-order
+    invariant holds across the whole function definition.
+
+    Pre-TB-186 ordering would have flipped these — the slot-check
+    branch (using `slots`) appeared in the body before the cooldown
+    check, but in the docstring the cooldown line came first, so the
+    overall first-occurrence ordering happened to be cooldown < slots.
+    The post-TB-186 invariant tightens this: BOTH the docstring
+    enumeration AND the in-body check have cooldown before slots. The
+    test is intentionally a single `find < find` assertion mirroring
+    the briefing's verification command.
+    """
+    import inspect
+
+    src = inspect.getsource(ideation._maybe_ideate)
+    cd_idx = src.find("cooldown")
+    slot_idx = src.find("slots")
+    assert cd_idx >= 0, "_maybe_ideate source must mention 'cooldown'"
+    assert slot_idx >= 0, "_maybe_ideate source must mention 'slots'"
+    assert cd_idx < slot_idx, (
+        f"cooldown check must precede slot check in _maybe_ideate "
+        f"(cooldown at {cd_idx}, slots at {slot_idx}). TB-186: any gate "
+        f"that emits + calls mark_run MUST be positioned after the "
+        f"cooldown check, otherwise the early-return short-circuits "
+        f"before the cooldown clock can rate-limit the emission."
+    )

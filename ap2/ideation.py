@@ -560,7 +560,15 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     1. `AP2_IDEATION_DISABLED` opt-out (tests + manual-only projects).
     2. Active hard gate — non-empty Active means a task is in flight and
        sharing the SDK slot with a control agent is unsafe.
-    3. Per-cycle proposal-slot budget (TB-183) —
+    3. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire. This
+       gate is positioned ABOVE every emit-and-`mark_run` branch below
+       (TB-186) so that those branches' `mark_run` writes actually
+       suppress re-emission on the next tick — pre-TB-186 the slot-skip
+       branch was positioned BEFORE the cooldown check, so the early
+       return short-circuited before the cooldown clock could gate the
+       skip event, and `ideation_skipped_no_slots` fired once per ~30s
+       tick instead of once per cooldown window.
+    4. Per-cycle proposal-slot budget (TB-183) —
        `slots = max(0, AP2_IDEATION_TRIGGER_TASK_COUNT - (Ready+Backlog))`.
        When `slots <= 0` the queue is already at the operator's
        configured threshold, so there's nothing for the agent to fill;
@@ -570,7 +578,6 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
        subsumes the pre-TB-183 `queued >= threshold` silent-return
        check — same trigger condition, but with explicit event +
        cooldown advancement.
-    4. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire.
     5. Focus-exhausted gate (TB-174) — when the prior cycle's
        `ideation_state.md` self-reports `Status:
        exhausted-needs-operator` for EVERY focus item under
@@ -605,6 +612,12 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     # items there are.
     if next(board.iter_tasks(section="Active"), None) is not None:
         return
+    state = load_state(cfg.cron_state_file)
+    last = state.get(IDEATION_NAME, 0.0)
+    cooldown = _cooldown_s()
+    now = time.time()
+    if now - last < cooldown:
+        return
     slots, queued, threshold = _compute_slots(cfg)
     if slots <= 0:
         # TB-183: queue at-or-above threshold → no slots to fill. Emit
@@ -612,6 +625,14 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
         # rather than vanishing into a silent return) and advance the
         # cooldown so a wedged-at-threshold board doesn't hammer the
         # gate on every tick.
+        #
+        # TB-186: this branch must run AFTER the cooldown gate above —
+        # `mark_run` here only suppresses re-emission on subsequent ticks
+        # if the cooldown check actually reads `last_run` before reaching
+        # this branch. (The pre-TB-186 ordering placed this branch first,
+        # so the early-return short-circuited before the cooldown check
+        # ever ran, and the gate fired once per ~30s tick instead of once
+        # per cooldown window.)
         events.append(
             cfg.events_file,
             "ideation_skipped_no_slots",
@@ -619,12 +640,6 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
             threshold=threshold,
         )
         mark_run(cfg.cron_state_file, IDEATION_NAME)
-        return
-    state = load_state(cfg.cron_state_file)
-    last = state.get(IDEATION_NAME, 0.0)
-    cooldown = _cooldown_s()
-    now = time.time()
-    if now - last < cooldown:
         return
     # TB-174: focus-exhausted gate — if the prior cycle's
     # ideation_state.md self-reports `Status: exhausted-needs-operator`
