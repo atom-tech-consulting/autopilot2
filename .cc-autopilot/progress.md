@@ -377,3 +377,9 @@
 - **Summary:** Implementation work landed in d003b95 (rename + parser + tests, all 1124 pass); two `## Verification` shell bullets were idiom-broken (bare `grep ZERO matches` exits 1 on no-match; missing `-r` for directory recursion) — fixed via the TB-187 `!`-inversion pattern, plus cleaned the lingering stale "Open questions for operator" narrative reference at ideation.default.md L171-172.
 - **Files:** .cc-autopilot/tasks/fix-open-questions-for-operator-schema-r.md, ap2/ideation.default.md
 - **Tests:** pass
+
+## [2026-05-06] TB-192: Commit insights/_index.md after ideation-driven regeneration
+- **Commit:** `f271953`
+- **Summary:** Reordered `insights.maybe_regenerate_index(cfg)` in `_run_ideation` to run between `pre_snapshot` and `_run_control_agent` so a regenerated `_index.md` rides along in the `state: ideation` commit; added two regression tests (behavioral diff-list assertion + structural source-order pin). Full suite: 1126 passed.
+- **Files:** ap2/ideation.py, ap2/tests/test_ideation_trigger.py
+- **Tests:** pass
