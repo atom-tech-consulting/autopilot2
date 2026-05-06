@@ -329,3 +329,9 @@
 - **Summary:** Extracted compact-summary helper from ap2/web.py to ap2.events.summarize_usage_event (surface-agnostic), wired ap2 logs (cmd_logs) to render judge_call/task_run_usage/control_run_usage with the same 6-field tuple + identity prefix as TB-179's web rendering; --json path unchanged. Full pytest -q ap2/tests/ passes (1063 tests).
 - **Files:** ap2/events.py, ap2/web.py, ap2/cli.py, ap2/tests/test_events.py, ap2/tests/test_cli.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-06] TB-181: Add `/usage` token-cost dashboard to the web UI
+- **Commit:** `e979fa4`
+- **Summary:** Closed TB-181's prior verification gap: the dashboard itself shipped in 67871f9 but its 7-day fixture seeded 7/5/21 events instead of the briefing's pinned 10/5/30 split. e979fa4 rewrites _tb181_seed_seven_day_mix to emit exactly 10 task_run_usage (varied status), 5 control_run_usage (varied label), and 30 judge_call (varied verdict), and updates the affected total-$ and subtype-count assertions; all 19 /usage tests + full 1074-test ap2 suite pass.
+- **Files:** ap2/tests/test_web.py
+- **Tests:** pass
