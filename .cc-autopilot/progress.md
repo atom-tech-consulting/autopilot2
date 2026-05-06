@@ -359,3 +359,9 @@
 - **Summary:** Swapped the slot-check and cooldown-check ordering in _maybe_ideate so emit-and-mark_run branches are now rate-limited by the cooldown clock; updated docstring + added 4 regression tests pinning back-to-back call behavior, post-cooldown re-emit, docstring order, and source-level invariant. Full ap2/tests/ suite passes (1101).
 - **Files:** ap2/ideation.py, ap2/tests/test_ideation_trigger.py
 - **Tests:** pass
+
+## [2026-05-06] TB-187: Fix mixed-blocker pending-review surfacing — `@blocked:review,TB-N` tasks are invisible
+- **Commit:** `33effb4`
+- **Summary:** Code fix landed in fc199a7 (any-not-all at the 3 surfacing call sites + regression tests, all 1106 tests pass). Prior verification failed only on the `grep ... should return ZERO matches` shell bullet because grep exits 1 on no-match and verify._run_shell_bullet treats non-zero as fail; this commit prepends `!` to that bullet so bash inverts the exit and the verifier sees pass. No code change needed — the post-fc199a7 tree already satisfies the briefing's intent at all three call sites.
+- **Files:** .cc-autopilot/tasks/fix-mixed-blocker-pending-review-surfaci.md
+- **Tests:** pass

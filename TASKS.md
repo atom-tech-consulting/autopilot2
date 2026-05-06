@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-187** **Fix mixed-blocker pending-review surfacing — `@blocked:review,TB-N` tasks are invisible** [→ brief](.cc-autopilot/tasks/fix-mixed-blocker-pending-review-surfaci.md)
 
 ## Pipeline Pending
 
@@ -75,6 +74,7 @@
 - [x] **TB-174** **Parse focus statuses from ideation_state.md; auto-skip ideation cron when all focus items are `exhausted-needs-operator`** `#autopilot` `#ideation` `#cron` `#cost` `#observability` — Add `parse_focus_statuses(path) -> dict[str,str]` to ap2/ideation.py (sibling to TB-173's `parse_open_questions`); gate `_maybe_ideate` to skip the SDK call (emit `ideation_skipped reason=focus_exhausted`, bump cooldown) when every focus item the ideator self-declared is `exhausted-needs-operator`. `force_ideate` (TB-159) keeps bypassing. [→ brief](.cc-autopilot/tasks/parse-focus-statuses-from-ideation-state.md)
 - [x] **TB-183** **Pre-compute proposal slot count for ideation, eliminate hardcoded "3" from prompt body** [→ brief](.cc-autopilot/tasks/pre-compute-proposal-slot-count-for-idea.md)
 - [x] **TB-186** **Fix `ideation_skipped_no_slots` event spam — slot check fires before cooldown gate (TB-183 regression)** [→ brief](.cc-autopilot/tasks/fix-ideation-skipped-no-slots-event-spam.md)
+- [x] **TB-187** **Fix mixed-blocker pending-review surfacing — `@blocked:review,TB-N` tasks are invisible** [→ brief](.cc-autopilot/tasks/fix-mixed-blocker-pending-review-surfaci.md)
 
 ## Frozen
 
