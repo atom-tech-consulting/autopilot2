@@ -70,3 +70,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-06T18:16:52Z — applied operator-queued add_backlog → TB-187
 - 2026-05-06T18:37:15Z — applied operator-queued ideate → (forced)
 - 2026-05-06T18:55:27Z — applied operator-queued add_backlog → TB-190
+- 2026-05-06T19:12:30Z — applied operator-queued add_backlog → TB-191 (goal-alignment check skipped)
