@@ -2314,21 +2314,40 @@ def _tb181_seed(cfg: Config, evt: dict) -> None:
 
 
 def _tb181_seed_seven_day_mix(cfg: Config, now: _tb181_dt.datetime) -> None:
-    """7 days × {1 task_run_usage, 3 judge_call} + 5 control_run_usage
-    spread across the 7 days. Events span TB-200 / TB-201 so per-task
-    aggregation has multiple rows to rank."""
-    for d in range(7):
-        ts = (now - _tb181_dt.timedelta(days=d, hours=2)).strftime(
+    """Seven-day fixture matching TB-181's prose verification-bullet
+    counts EXACTLY: 10 task_run_usage events with varied status, 5
+    control_run_usage events with varied label, 30 judge_call events
+    with varied verdict. Events span TB-200 / TB-201 so per-task
+    aggregation has multiple rows to rank, and use day = i % 7 so all
+    seven days carry events (the chart's per-day rect count is what
+    `?window=` differentiation tests pin)."""
+    statuses = [
+        "complete",             # i=0
+        "complete",             # i=1
+        "verification_failed",  # i=2
+        "complete",             # i=3
+        "retry_exhausted",      # i=4
+        "complete",             # i=5
+        "pipeline_pending",     # i=6
+        "complete",             # i=7
+        "verification_failed",  # i=8
+        "complete",             # i=9
+    ]
+    # 10 task_run_usage events, distributed across the 7-day window via
+    # i % 7 so every day has at least one task_run_usage row.
+    for i, status in enumerate(statuses):
+        d = i % 7
+        ts = (now - _tb181_dt.timedelta(days=d, hours=2, minutes=i)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        task = "TB-200" if d % 2 == 0 else "TB-201"
+        task = "TB-200" if i % 2 == 0 else "TB-201"
         _tb181_seed(cfg, {
             "ts": ts,
             "type": "task_run_usage",
             "task": task,
-            "run_id": f"r{d}",
-            "status": "complete" if d != 3 else "verification_failed",
-            "duration_s": 60.0 + d,
+            "run_id": f"r{i}",
+            "status": status,
+            "duration_s": 60.0 + i,
             "usage": {
                 "input_tokens": 100,
                 "output_tokens": 200,
@@ -2342,27 +2361,36 @@ def _tb181_seed_seven_day_mix(cfg: Config, now: _tb181_dt.datetime) -> None:
             "total_cost_usd": 0.55,
             "num_turns": 10,
         })
-        for j in range(3):
-            _tb181_seed(cfg, {
-                "ts": ts,
-                "type": "judge_call",
-                "task": task,
-                "bullet_idx": j,
-                "bullet_kind": "prose",
-                "verdict": "pass" if j != 1 else "fail",
-                "duration_s": 5.0,
-                "total_cost_usd": 0.10,
-                "usage": {
-                    "input_tokens": 10,
-                    "output_tokens": 50,
-                    "cache_creation_input_tokens": 1000,
-                    "cache_read_input_tokens": 5000,
-                },
-                "model_usage": {
-                    "claude-opus-4-7": {"costUSD": 0.09},
-                    "claude-haiku-4-5-20251001": {"costUSD": 0.01},
-                },
-            })
+    # 30 judge_call events with varied verdict (10 pass + 10 fail + 10
+    # unverified via i % 3), spread across all 7 days via i % 7.
+    verdicts = ["pass", "fail", "unverified"]
+    for i in range(30):
+        d = i % 7
+        verdict = verdicts[i % 3]
+        ts = (now - _tb181_dt.timedelta(days=d, hours=3, minutes=i)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        task = "TB-200" if i % 2 == 0 else "TB-201"
+        _tb181_seed(cfg, {
+            "ts": ts,
+            "type": "judge_call",
+            "task": task,
+            "bullet_idx": i,
+            "bullet_kind": "prose",
+            "verdict": verdict,
+            "duration_s": 5.0,
+            "total_cost_usd": 0.10,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 50,
+                "cache_creation_input_tokens": 1000,
+                "cache_read_input_tokens": 5000,
+            },
+            "model_usage": {
+                "claude-opus-4-7": {"costUSD": 0.09},
+                "claude-haiku-4-5-20251001": {"costUSD": 0.01},
+            },
+        })
     # 5 control_run_usage spread across the 7 days; varied labels so
     # the by-subtype breakdown has multiple rows.
     for k, label in enumerate([
@@ -2429,15 +2457,16 @@ def test_usage_dashboard_renders_full_with_seven_day_fixture(tmp_path: Path):
     )
 
     # Breakdown table has a row per event type with the expected sums.
-    # 7 task_run_usage @ $0.55 = $3.85; 21 judge_call @ $0.10 = $2.10;
-    # 5 control_run_usage @ $0.08 = $0.40.
+    # 10 task_run_usage @ $0.55 = $5.50; 30 judge_call @ $0.10 = $3.00;
+    # 5 control_run_usage @ $0.08 = $0.40 — counts pinned to the
+    # briefing's prose verification bullet (10/5/30).
     assert ">task_run_usage<" in h
     assert ">control_run_usage<" in h
     assert ">judge_call<" in h
     # Use 4dp totals (the renderer's format); accept the sum's exact
     # representation.
-    assert "$3.8500" in h, "task_run_usage total $ not rendered"
-    assert "$2.1000" in h, "judge_call total $ not rendered"
+    assert "$5.5000" in h, "task_run_usage total $ not rendered"
+    assert "$3.0000" in h, "judge_call total $ not rendered"
     assert "$0.4000" in h, "control_run_usage total $ not rendered"
 
     # Top-10 has at least one TB-N link.
@@ -2632,15 +2661,20 @@ def test_usage_aggregate_by_event_type_subtype_breakdown(tmp_path: Path):
     _tb181_seed_seven_day_mix(cfg, now)
     by_type = web._aggregate_usage_by_event_type(web._load_usage_events(cfg))
 
-    # task_run_usage: 6 complete + 1 verification_failed
+    # task_run_usage: 6 complete + 2 verification_failed +
+    # 1 retry_exhausted + 1 pipeline_pending = 10 events total.
     sub_t = by_type["task_run_usage"]["by_subtype"]
     assert sub_t["complete"]["count"] == 6
-    assert sub_t["verification_failed"]["count"] == 1
+    assert sub_t["verification_failed"]["count"] == 2
+    assert sub_t["retry_exhausted"]["count"] == 1
+    assert sub_t["pipeline_pending"]["count"] == 1
 
-    # judge_call: 14 pass + 7 fail (3 per day × 7 days, j!=1 → pass)
+    # judge_call: 10 pass + 10 fail + 10 unverified = 30 events total
+    # (verdicts cycle through ['pass','fail','unverified'] via i%3).
     sub_j = by_type["judge_call"]["by_subtype"]
-    assert sub_j["pass"]["count"] == 14
-    assert sub_j["fail"]["count"] == 7
+    assert sub_j["pass"]["count"] == 10
+    assert sub_j["fail"]["count"] == 10
+    assert sub_j["unverified"]["count"] == 10
 
     # control_run_usage: 5 events split across {ideation, cron-status-report,
     # mm-handler}. The MM- post-id label collapses into mm-handler.
