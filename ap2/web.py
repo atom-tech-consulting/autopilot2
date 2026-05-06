@@ -587,6 +587,106 @@ def _event_token_summary(e: dict) -> str:
     return " · ".join(bits)
 
 
+# TB-179: compact one-line rendering for the three event types whose
+# verbose `usage` blob (and `model_usage`, `server_tool_use`, etc. nested
+# dicts) drowns the events page when dumped inline via `_event_extra`.
+# The shape is: `<identity> · <token-tuple> · <duration>` — six numeric
+# fields (in / out / cc / cr / total_cost / duration) plus an event-type-
+# specific identity prefix so the operator sees "what cost what" without
+# expanding the row.
+#
+# Verbose nested fields (server_tool_use, model_usage, iterations,
+# service_tier, inference_geo, the nested `cache_creation` object, etc.)
+# drop from the inline cell entirely; they're still in the row's
+# `<details>raw json</details>` toggle (no data loss).
+_COMPACT_USAGE_EVENT_TYPES = frozenset({
+    "judge_call",
+    "task_run_usage",
+    "control_run_usage",
+})
+
+
+def _compact_usage_row(e: dict) -> str:
+    """Inline `<td class="summary">` HTML for the three usage-carrying
+    event types (TB-179). Returns "" if `e` is not one of the three or
+    has no `usage`/`total_cost_usd`/`duration_s` to summarize.
+
+    The returned string is HTML — `<span class="meta">` tags wrap the
+    field labels for visual consistency with `_event_extra`.
+    """
+    typ = str(e.get("type") or "")
+    if typ not in _COMPACT_USAGE_EVENT_TYPES:
+        return ""
+
+    # Identity prefix — distinct fields per event type.
+    parts: list[str] = []
+    if typ == "judge_call":
+        task = str(e.get("task") or "").strip()
+        bidx = e.get("bullet_idx")
+        bkind = str(e.get("bullet_kind") or "").strip()
+        verdict = str(e.get("verdict") or "").strip()
+        if task:
+            parts.append(
+                f'<span class="meta">task=</span>{html.escape(task)}'
+            )
+        if bidx is not None:
+            bullet = (
+                f"{bidx}/{bkind}" if bkind else str(bidx)
+            )
+            parts.append(
+                f'<span class="meta">bullet=</span>{html.escape(bullet)}'
+            )
+        if verdict:
+            parts.append(html.escape(verdict))
+    elif typ == "task_run_usage":
+        task = str(e.get("task") or "").strip()
+        status = str(e.get("status") or "").strip()
+        run_id = str(e.get("run_id") or "").strip()
+        if task:
+            parts.append(
+                f'<span class="meta">task=</span>{html.escape(task)}'
+            )
+        if status:
+            parts.append(html.escape(status))
+        if run_id:
+            parts.append(
+                f'<span class="meta">run=</span>{html.escape(run_id)}'
+            )
+    elif typ == "control_run_usage":
+        label = str(e.get("label") or "").strip()
+        status = str(e.get("status") or "").strip()
+        run_id = str(e.get("run_id") or "").strip()
+        if label:
+            parts.append(
+                f'<span class="meta">label=</span>{html.escape(label)}'
+            )
+        if status:
+            parts.append(html.escape(status))
+        if run_id:
+            parts.append(
+                f'<span class="meta">run=</span>{html.escape(run_id)}'
+            )
+    identity = " ".join(parts)
+
+    # Token + cost summary (reuses TB-157's helper for the
+    # in/out/cc/cr/hit/$ tuple).
+    token_summary = _event_token_summary(e)
+
+    # Duration.
+    dur = e.get("duration_s")
+    dur_str = ""
+    if isinstance(dur, (int, float)):
+        dur_str = f"{float(dur):.1f}s"
+
+    # If none of the three pieces resolved to anything useful, fall back
+    # to the empty string so the caller can defer to the generic
+    # `_event_extra` dump.
+    bits = [b for b in (identity, html.escape(token_summary), dur_str) if b]
+    if not any(bits):
+        return ""
+    return " · ".join(bits)
+
+
 # TB-158: shared `verification_failed` rendering. The per-row inline
 # summary lives on the events table; the larger block sits at the top of
 # `/task-run/<run-id>` when the latest verdict was a verification fail.
@@ -790,13 +890,6 @@ def _events_table(
                 f'<td class="tokens">'
                 f'{html.escape(_event_token_summary(e))}</td>'
             )
-        elif typ == "judge_call":
-            ts_html = _event_token_summary(e)
-            if ts_html:
-                extra = (
-                    f'<span class="meta">tokens=</span>'
-                    f'{html.escape(ts_html)} · {extra}'
-                )
         # TB-158: replace the generic field dump with a pass/fail counter
         # and an inline list of failing-bullet headlines for
         # `verification_failed` rows. Passing / unverified bullets are
@@ -805,6 +898,16 @@ def _events_table(
         # footer below (unchanged).
         if typ == "verification_failed":
             extra = _verification_failed_row_summary(e)
+        # TB-179: compact rendering for the three event types whose
+        # verbose `usage` / `model_usage` blobs otherwise wrap the row
+        # several lines and drown the at-a-glance signal. The compact
+        # form keeps identity + 6 numeric fields inline; the full
+        # payload still lives in the `<details>raw json</details>`
+        # footer below (no data loss).
+        elif typ in _COMPACT_USAGE_EVENT_TYPES:
+            compact = _compact_usage_row(e)
+            if compact:
+                extra = compact
         rows.append(
             f'<tr class="{cls}">'
             f'<td class="ts">{html.escape(ts)}</td>'

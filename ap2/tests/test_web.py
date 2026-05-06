@@ -1620,6 +1620,299 @@ def test_summarize_verification_failed_shared_helper_is_grep_visible():
         assert "summarize_verification_failed" in text, fname
 
 
+# ---------------------------------------------------------------------------
+# TB-179: compact `usage` blob rendering on the events table.
+#
+# Three event types — `judge_call`, `task_run_usage`, `control_run_usage` —
+# carry a verbose `usage` (and often `model_usage`) dict that, when
+# `_event_extra` dumps it inline, wraps the row across several lines and
+# drowns the at-a-glance signal. The compact rendering keeps an identity
+# prefix + 6 numeric fields (in / out / cc / cr / total_cost / duration)
+# in the inline cell; the full payload still lives in the row's
+# `<details>raw json</details>` toggle (no data loss).
+
+
+import json as _tb179_json
+
+
+def _full_judge_call_payload(*, task: str, bullet_idx: int) -> dict:
+    """Return a `judge_call` event dict modelled on a real today's-events
+    payload — same nested shape inside `usage` and `model_usage` so the
+    test pins both the inclusion of the 6 compact fields AND the
+    exclusion of the verbose nested keys."""
+    return {
+        "ts": "2026-05-04T19:11:38Z",
+        "type": "judge_call",
+        "task": task,
+        "bullet_idx": bullet_idx,
+        "bullet_kind": "prose",
+        "verdict": "pass",
+        "duration_s": 8.002,
+        "model": "claude-opus-4-7",
+        "num_turns": 2,
+        "total_cost_usd": 0.146176,
+        "stop_reason": "end_turn",
+        "usage": {
+            "input_tokens": 6,
+            "cache_creation_input_tokens": 17016,
+            "cache_read_input_tokens": 42310,
+            "output_tokens": 287,
+            "server_tool_use": {
+                "web_search_requests": 0,
+                "web_fetch_requests": 0,
+            },
+            "service_tier": "standard",
+            "cache_creation": {"ephemeral_5m_input_tokens": 17016},
+            "iterations": 1,
+        },
+        "model_usage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 7636,
+                "outputTokens": 22,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0,
+                "webSearchRequests": 0,
+                "costUSD": 0.006605,
+                "contextWindow": 200000,
+                "inference_geo": "us",
+            },
+        },
+    }
+
+
+def _split_summary_cell(rows_block: str, type_marker: str) -> str:
+    """Return the part of the row before its `<details>raw json</details>`
+    block — i.e. the inline summary cell that displays by default. Keyed
+    off the substring `type_marker` (the event-type token) so we can pick
+    the right row out of a multi-row table."""
+    chunks = []
+    for chunk in rows_block.split("<tr "):
+        if type_marker not in chunk:
+            continue
+        before_details = chunk.split("<details>", 1)[0]
+        chunks.append(before_details)
+    return "\n".join(chunks)
+
+
+def _seed_event(cfg: Config, payload: dict) -> None:
+    """Append a pre-shaped event to `events.jsonl`. Bypasses
+    `ev_mod.append` because the helper auto-stamps `ts` and we want to
+    pin a specific value for the test."""
+    with cfg.events_file.open("a") as f:
+        f.write(_tb179_json.dumps(payload) + "\n")
+
+
+def test_events_table_renders_judge_call_compactly(project: Config):
+    """TB-179: a `judge_call` row's inline summary is the 6-field compact
+    form, NOT the verbose `usage`/`model_usage` dict dump. The full
+    payload still lands in the `<details>raw json</details>` footer."""
+    _seed_event(
+        project,
+        _full_judge_call_payload(task="TB-165", bullet_idx=7),
+    )
+    h = web._render_events(project, typ="judge_call", n=10)
+    rows_block = h.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    summary = _split_summary_cell(rows_block, "judge_call")
+
+    # Identity prefix.
+    assert "task=" in summary
+    assert "TB-165" in summary
+    assert "bullet=" in summary
+    assert "7/prose" in summary
+    assert "pass" in summary
+
+    # All 6 numeric fields surface inline.
+    assert "in=6" in summary           # input_tokens
+    assert "out=287" in summary        # output_tokens
+    assert "cc=17,016" in summary      # cache_creation_input_tokens
+    assert "cr=42,310" in summary      # cache_read_input_tokens
+    assert "$0.1462" in summary        # total_cost_usd, 4dp
+    assert "8.0s" in summary           # duration_s
+
+    # Verbose nested fields do NOT leak into the inline cell.
+    assert "server_tool_use" not in summary
+    assert "iterations" not in summary
+    assert "service_tier" not in summary
+    assert "inference_geo" not in summary
+    # The nested `cache_creation` object key (distinct from the
+    # `cache_creation_input_tokens` scalar that DOES surface).
+    assert "ephemeral_5m_input_tokens" not in summary
+    # `model_usage` (the per-model breakdown) is omitted from the
+    # inline cell per the briefing's v1 scope.
+    assert "model_usage" not in summary
+
+    # The escape-hatch — full raw payload survives in the row's details.
+    full_block = next(
+        chunk for chunk in rows_block.split("<tr ") if "judge_call" in chunk
+    )
+    assert "<details>" in full_block
+    raw_json = full_block.split("<details>", 1)[1]
+    assert "server_tool_use" in raw_json
+    assert "iterations" in raw_json
+    assert "service_tier" in raw_json
+    assert "model_usage" in raw_json
+    assert "ephemeral_5m_input_tokens" in raw_json
+
+
+def test_events_table_renders_task_run_usage_compactly(project: Config):
+    """TB-179: `task_run_usage` rows use the same compact form, with a
+    `task=` / `status` / `run=` identity prefix instead of the
+    `judge_call` bullet shape."""
+    _seed_event(project, {
+        "ts": "2026-05-05T22:28:54Z",
+        "type": "task_run_usage",
+        "task": "TB-176",
+        "run_id": "20260505T230301Z-TB-176",
+        "status": "complete",
+        "duration_s": 611.106,
+        "total_cost_usd": 2.066962,
+        "num_turns": 41,
+        "model": "claude-opus-4-7",
+        "usage": {
+            "input_tokens": 50,
+            "cache_creation_input_tokens": 113811,
+            "cache_read_input_tokens": 2026862,
+            "output_tokens": 13403,
+            "server_tool_use": {"web_search_requests": 0},
+            "service_tier": "standard",
+        },
+        "model_usage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 6793,
+                "costUSD": 0.006888,
+            },
+        },
+    })
+    h = web._render_events(project, typ="task_run_usage", n=10)
+    rows_block = h.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    summary = _split_summary_cell(rows_block, "task_run_usage")
+
+    # Identity prefix specific to task_run_usage.
+    assert "task=" in summary
+    assert "TB-176" in summary
+    assert "complete" in summary
+    assert "run=" in summary
+    assert "20260505T230301Z-TB-176" in summary
+
+    # 6 numeric fields.
+    assert "in=50" in summary
+    assert "out=13,403" in summary
+    assert "cc=113,811" in summary
+    assert "cr=2,026,862" in summary
+    assert "$2.0670" in summary
+    assert "611.1s" in summary
+
+    # Verbose fields stay out of the inline cell.
+    assert "server_tool_use" not in summary
+    assert "service_tier" not in summary
+    assert "model_usage" not in summary
+
+
+def test_events_table_renders_control_run_usage_compactly(project: Config):
+    """TB-179: `control_run_usage` rows use the `label=` identity prefix
+    (cron / mattermost / ideation runs don't have a TB-id)."""
+    _seed_event(project, {
+        "ts": "2026-05-05T22:28:54Z",
+        "type": "control_run_usage",
+        "label": "cron-status-report",
+        "run_id": "20260505T222829Z-cron-status-report",
+        "status": "complete",
+        "duration_s": 24.639,
+        "total_cost_usd": 0.4321735,
+        "num_turns": 5,
+        "usage": {
+            "input_tokens": 12,
+            "cache_creation_input_tokens": 57834,
+            "cache_read_input_tokens": 61340,
+            "output_tokens": 1407,
+            "server_tool_use": {"web_search_requests": 0},
+            "service_tier": "standard",
+        },
+        "model_usage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 4726,
+                "costUSD": 0.004806,
+            },
+        },
+    })
+    h = web._render_events(project, typ="control_run_usage", n=10)
+    rows_block = h.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    summary = _split_summary_cell(rows_block, "control_run_usage")
+
+    # Identity prefix specific to control_run_usage.
+    assert "label=" in summary
+    assert "cron-status-report" in summary
+    assert "complete" in summary
+    assert "run=" in summary
+    assert "20260505T222829Z-cron-status-report" in summary
+
+    # 6 numeric fields.
+    assert "in=12" in summary
+    assert "out=1,407" in summary
+    assert "cc=57,834" in summary
+    assert "cr=61,340" in summary
+    assert "$0.4322" in summary
+    assert "24.6s" in summary
+
+    # Verbose fields stay out of the inline cell.
+    assert "server_tool_use" not in summary
+    assert "service_tier" not in summary
+    assert "model_usage" not in summary
+
+
+def test_events_table_compact_path_is_opt_in_by_event_type(project: Config):
+    """TB-179: events not in the compact-usage type set continue to
+    render via the existing generic field-dump path. The new compact
+    path is opt-in by event type, NOT a global rewrite — legacy events
+    without a `usage` blob (e.g. `daemon_start`, `cron_complete`) keep
+    their familiar key=value shape."""
+    # Synthetic non-target event type with structurally similar fields
+    # — same `task=` / `status=` keys but NOT `task_run_usage`.
+    _seed_event(project, {
+        "ts": "2026-05-04T19:00:00Z",
+        "type": "task_complete",
+        "task": "TB-300",
+        "status": "complete",
+        "commit": "deadbeef",
+        "summary": "legacy lifecycle row",
+    })
+    h = web._render_events(project, typ="task_complete", n=10)
+    rows_block = h.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+    summary = _split_summary_cell(rows_block, "task_complete")
+    # The generic dump format renders the lifecycle fields verbatim —
+    # exactly the legacy shape, NOT the compact `task=TB-N complete run=...`
+    # form that the new path produces.
+    assert "TB-300" in summary
+    assert "deadbeef" in summary
+    assert "legacy lifecycle row" in summary
+    # Sanity: the new compact-form bits do NOT appear because this row
+    # didn't go through `_compact_usage_row`. (No 6-field tuple was
+    # synthesized for an event without a `usage` dict.)
+    assert "in=" not in summary
+    assert "cr=" not in summary
+
+
+def test_event_token_summary_helper_survives_refactor():
+    """TB-179 regression check: TB-157's `_event_token_summary` helper
+    still exists and is callable. The compact rendering wraps it; a
+    refactor that deletes it would silently break both the
+    `?show=tokens` column and the `_compact_usage_row` token tuple."""
+    from ap2.web import _event_token_summary
+    assert callable(_event_token_summary)
+
+
+def test_compact_usage_event_types_referenced_in_web_module():
+    """TB-179 verification gate: all three event types are name-referenced
+    in `ap2/web.py` — specifically near the `verification_failed`
+    special-case branch in `_events_table`. The briefing's `grep -nE`
+    bullet pins this."""
+    from pathlib import Path as _P
+
+    text = (_P(web.__file__).resolve().parent / "web.py").read_text()
+    for typ in ("judge_call", "task_run_usage", "control_run_usage"):
+        assert typ in text, typ
+
+
 # --------- TB-162: pending operator-queue card on `/` ---------
 
 
