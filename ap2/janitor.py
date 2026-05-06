@@ -1,4 +1,4 @@
-"""Janitor — deterministic detector for stranded git state in a project (TB-177).
+"""Janitor — git-stranded-state detector + LLM-judge classifier (TB-177, TB-178).
 
 Why this module exists
 ----------------------
@@ -12,24 +12,35 @@ the operator manually runs `git status`. The bug-class (any pipeline
 script that mishandles its own commit, plus operator scratch left over a
 context switch) repeats across projects.
 
-The janitor runs deterministically (no LLM, no SDK call) on the cron
-cadence the operator chose in `cron.yaml` and emits a `janitor_finding`
-event per detection plus a single summary line in `operator_log.md` when
-at least one finding fires. v1 is **report-first**: detection without
-auto-remediation. Operators see findings on `ap2 status` and the next
-cron status-report; they decide whether to commit, discard, or ignore.
-A future `ap2 janitor apply` (separate TB) can offer guided remediation
-once the safe-cases-vs-risky-cases distinction has had operator-eyes-on
-for at least one shipping cycle.
+But "stranded" vs. "operator's deliberate draft" cannot be distinguished
+by file-system inspection alone — both look identical to `git status`.
+A staged file could be the post-TB-22 detritus (real strand) OR the
+operator running `git add` to review staging before committing
+(deliberate WIP). TB-178 layers an LLM judge on top of TB-177's
+deterministic detector that classifies each finding as one of:
+
+  real_strand       — high confidence the file is unintended detritus.
+  operator_draft    — high confidence it's deliberate operator work.
+  ambiguous         — judge couldn't make a confident call.
+
+Per the operator's directive (TB-178), classified findings emit ONLY to
+events.jsonl — NO summary line in the operator decision log. The
+operator decision log stays curated for genuine operator decisions
+(`ap2 ack`, queue ops, rejections); janitor findings — even classified —
+are observability, not operator decisions. (Ideation Step 0 reads the
+operator decision log as authoritative ground truth on operator
+decisions; flooding it with auto-emitted janitor noise would dilute the
+signal ideation calibrates against — TB-152, TB-163.)
 
 What's NOT in v1 (explicit, so a future contributor doesn't get clever)
 - Auto-commit / auto-stash / auto-discard. All destructive or surprising.
 - Other detection kinds beyond `git_stranded_state` (dead-blocker,
   pipeline-pending-with-dead-pid, stale debug dumps, TASKS.md drift) —
   each gets its own TB once the framework's prove-out lands.
-- LLM-driven interpretation. Deterministic Python is sufficient.
+- Multi-finding LLM aggregation. v1 judges per-finding.
+- Confidence-score field. Three discrete labels suffice.
+- Memoization across cron runs. Each scan judges fresh.
 - Multi-project scans. One daemon per project; one janitor per daemon.
-- Configurable per-finding age thresholds via env. Defaults baked in.
 
 Detection scope (v1)
 --------------------
@@ -47,12 +58,11 @@ One kind: `git_stranded_state`. Three subkinds:
                            tracked nor matched by .gitignore. Operator
                            scratch work or pipeline detritus.
 
-Each finding is a `JanitorFinding(subkind, paths, age_s, hint)` record. The
-`hint` is a one-line operator suggestion (e.g. "commit with the operator's
-intent, or `git restore --staged` to unstage"). Findings are aggregated
-into a `JanitorReport`; one event is emitted per finding (NOT per file —
-keeps the events.jsonl tail readable). `operator_log.md` gains exactly
-one summary line per run that found anything.
+Each finding is a `JanitorFinding(subkind, paths, age_s, hint, verdict,
+reasoning)` record. The `hint` is a one-line operator suggestion (e.g.
+"commit with the operator's intent, or `git restore --staged` to
+unstage"); the `verdict` and `reasoning` fields are populated by the
+TB-178 LLM judge after the deterministic detector runs.
 
 Excluded paths (working-tree-modified check)
 --------------------------------------------
@@ -71,15 +81,34 @@ Note: this exclusion is for the `modified_not_staged` and
 intentionally surfaces ANY staged file — if the daemon's own commit path
 left something staged, that's a daemon bug worth surfacing.
 
+Cost shape (TB-178)
+-------------------
+One janitor cron run with N findings issues N SDK calls (one judge call
+per finding); the per-call shared-context block (events tail + operator
+log tail + recent commits + active TB list) is built once and reused.
+At default cadence (every 6h) and a healthy project (typically 0-2
+findings per scan), expected cost is ~$0.05-0.20 per scan, captured in
+`control_run_usage`-style `judge_call` events.
+
+For projects with chronically-many findings, `AP2_JANITOR_MAX_FINDINGS_LLM`
+(default 10) caps the per-run LLM budget: findings beyond the cap emit
+with `verdict="ambiguous"` and skip the SDK call. Setting the env var
+to 0 disables the judge entirely (deterministic-only fallback) — useful
+for cost-constrained projects or repro-style tests.
+
 Public surface
 --------------
-`run_janitor(cfg) -> JanitorReport` — the entry the daemon dispatches via
-the cron-job table; also callable directly from tests. Pure function modulo
-the `events.append` and `operator_log.md` append it does at the end.
+`run_janitor(cfg, sdk=None) -> JanitorReport` — the entry the daemon
+dispatches via the cron-job table; also callable directly from tests.
+Async because the per-finding judge step makes async SDK calls. When
+`sdk is None` (or the env-cap is 0), the function falls back to
+TB-177's deterministic-only behavior with `verdict="ambiguous"` on
+every finding.
 """
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import subprocess
 import time
@@ -109,6 +138,74 @@ MIN_MODIFIED_AGE_S = 5 * 60
 # Sized at 7h so a default 6h cadence (`0 */6 * * *`) always shows the
 # most recent run's findings without overlap risk.
 RECENT_FINDING_WINDOW_S = 7 * 3600
+
+# Per-run cap on LLM judge calls (TB-178). A scan with N candidate findings
+# issues at most `min(N, _max_findings_llm())` SDK calls; findings beyond
+# the cap emit with `verdict="ambiguous"` (operator decides). Set to 0
+# via env to disable the judge entirely and fall back to TB-177's
+# deterministic behavior. The default of 10 matches the briefing's
+# "expected cost ~$0.05-0.20 per scan" target — operators with chronic
+# >10-finding scans should fix the underlying churn, not raise the cap.
+_AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT = 10
+
+
+def _max_findings_llm() -> int:
+    """Resolve the per-run LLM judge cap from env (TB-178).
+
+    `AP2_JANITOR_MAX_FINDINGS_LLM` overrides the default; non-numeric
+    values fall back to the default rather than crashing the cron run
+    (operator typos shouldn't break janitor). Negative values clamp to 0
+    (disabled).
+    """
+    raw = os.environ.get("AP2_JANITOR_MAX_FINDINGS_LLM")
+    if raw is None or raw == "":
+        return _AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT
+    try:
+        v = int(raw)
+    except ValueError:
+        return _AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT
+    return max(0, v)
+
+
+# Verdict vocabulary (TB-178). Codebase-fixed; per-project custom labels
+# are explicit out-of-scope. Unknown verdicts coming back from the SDK
+# fall back to "ambiguous" (defensive — a hallucinated label shouldn't
+# silently render as a real_strand).
+VERDICT_REAL_STRAND = "real_strand"
+VERDICT_OPERATOR_DRAFT = "operator_draft"
+VERDICT_AMBIGUOUS = "ambiguous"
+KNOWN_VERDICTS = frozenset({
+    VERDICT_REAL_STRAND,
+    VERDICT_OPERATOR_DRAFT,
+    VERDICT_AMBIGUOUS,
+})
+
+# Read-only tools the per-finding judge may use (mirrors `JUDGE_REPO_READ_TOOLS`
+# in `verify.py`). The judge is read-only by construction — Read/Glob/Grep
+# scoped to `cfg.project_root`, no Bash, no MCP-write. Same shape TB-136
+# pinned for the prose-bullet judge.
+JUDGE_REPO_READ_TOOLS = ["Read", "Glob", "Grep"]
+
+# Lifecycle event types fed to the judge as recent-history context. Filtered
+# tightly so the judge sees task arcs (start, complete, pipeline pending,
+# verification fail, ideation approval) rather than the full firehose.
+_JUDGE_LIFECYCLE_EVENT_TYPES = frozenset({
+    "task_start",
+    "task_complete",
+    "task_pipeline_pending",
+    "verification_failed",
+    "ideation_approved",
+    "cron_complete",
+    "cron_error",
+    "pipeline_task_start",
+})
+
+# Truncation caps for the per-finding judge prompt. The static bounds
+# keep the prompt size predictable per call (a few KB total); the judge
+# can pull more detail via Read/Glob/Grep if needed.
+_JUDGE_EVENTS_TAIL_N = 50
+_JUDGE_RECENT_COMMITS_N = 10
+_JUDGE_REASONING_MAX_CHARS = 200
 
 
 # --------------------------------------------------------------------------
@@ -173,12 +270,22 @@ class JanitorFinding:
     POSIX-relative file list; `age_s` is the max age across the paths
     (0 for staged_uncommitted — git doesn't surface stage-time); `hint` is
     the one-line operator suggestion the event + log line carry verbatim.
+
+    TB-178: `verdict` and `reasoning` are populated by the LLM judge
+    after the deterministic detector runs. `verdict` is always one of
+    `KNOWN_VERDICTS`; defaults to `ambiguous` until classified (so
+    callers reading a pre-judge `JanitorFinding` see a safe default).
+    `reasoning` is a one-sentence rationale capped at
+    `_JUDGE_REASONING_MAX_CHARS`, empty when the judge was disabled or
+    skipped (cap overflow).
     """
 
     subkind: str
     paths: list[str]
     age_s: int
     hint: str
+    verdict: str = VERDICT_AMBIGUOUS
+    reasoning: str = ""
 
 
 @dataclass
@@ -366,22 +473,33 @@ def _check_untracked_non_ignored(cfg: Config) -> JanitorFinding | None:
 # --------------------------------------------------------------------------
 
 
-def run_janitor(cfg: Config) -> JanitorReport:
-    """Run all v1 janitor checks; emit events + operator_log line on findings.
+async def run_janitor(cfg: Config, sdk=None) -> JanitorReport:
+    """Run all v1 janitor checks; emit one classified event per finding.
 
-    Side effects:
-      - one `janitor_finding` event per (subkind, paths-set) — never per
-        file. The events.jsonl tail stays readable even when a check
-        returns 50 paths.
-      - one summary line appended to `.cc-autopilot/operator_log.md` when
-        at least one finding fires. Clean runs are silent (no noise on
-        healthy projects — operator inbox stays calm).
+    Side effects (TB-178 contract):
+      - one `janitor_finding` event per (subkind, paths-set) carrying
+        `verdict` ∈ {real_strand, operator_draft, ambiguous} and a
+        one-sentence `reasoning` (≤200 chars). Never per-file — the
+        events.jsonl tail stays readable even when a check returns 50
+        paths.
+      - one `judge_call` event per LLM judge invocation (token usage,
+        cost, model, duration), so cost-tradeoff experiments can
+        aggregate per-judge spend without routing through the daemon's
+        `_log_message` capture path.
+      - **NO write to the operator decision log.** Per the operator's
+        directive (TB-178), classified findings emit ONLY to
+        events.jsonl; the operator decision log is reserved for
+        genuine operator decisions (`ap2 ack`, queue ops, rejections).
+        Janitor findings — even classified — are observability, not
+        operator decisions.
 
     Returns the structured `JanitorReport` so callers can introspect
     without re-reading events.jsonl.
 
-    Pure deterministic Python — no SDK call, no LLM. Cheap enough to run
-    every cron tick without operator concern.
+    Async because the per-finding judge step makes async SDK calls. When
+    `sdk is None` (or `AP2_JANITOR_MAX_FINDINGS_LLM=0`), the function
+    falls back to TB-177's deterministic behavior: every finding emits
+    with `verdict="ambiguous"` and no SDK calls fire.
     """
     report = JanitorReport()
     for check in (
@@ -396,6 +514,28 @@ def run_janitor(cfg: Config) -> JanitorReport:
     if not report.findings:
         return report
 
+    # TB-178: classify each finding via the LLM judge before emitting
+    # events. Cap-aware (overflow → "ambiguous"); SDK-optional (None
+    # falls back to "ambiguous" without judging). The shared-context
+    # block is built once per run and reused across per-finding calls.
+    cap = _max_findings_llm()
+    if sdk is not None and cap > 0:
+        shared_ctx = _build_judge_shared_context(cfg)
+        for i, f in enumerate(report.findings):
+            if i >= cap:
+                f.verdict = VERDICT_AMBIGUOUS
+                f.reasoning = (
+                    f"skipped: exceeded AP2_JANITOR_MAX_FINDINGS_LLM={cap}"
+                )
+                continue
+            verdict, reasoning = await _judge_finding(
+                cfg, sdk, f, shared_ctx,
+            )
+            f.verdict = verdict
+            f.reasoning = reasoning
+    # else: judge disabled. Findings keep their dataclass-default
+    # `verdict="ambiguous"` and empty `reasoning` — emitted as-is below.
+
     for f in report.findings:
         events.append(
             cfg.events_file,
@@ -405,37 +545,268 @@ def run_janitor(cfg: Config) -> JanitorReport:
             paths=list(f.paths),
             age_s=f.age_s,
             hint=f.hint,
+            verdict=f.verdict,
+            reasoning=f.reasoning,
         )
 
-    _append_operator_log_summary(cfg, report)
     return report
 
 
-def _append_operator_log_summary(cfg: Config, report: JanitorReport) -> None:
-    """Append one summary bullet to `.cc-autopilot/operator_log.md`.
+# --------------------------------------------------------------------------
+# LLM judge — classifier for `JanitorFinding` (TB-178)
+# --------------------------------------------------------------------------
 
-    Format mirrors the rejection-line shape (`tools._append_operator_audit_line`):
-    `- <ts> — janitor: N stranded-state finding(s) (M paths). See events.jsonl.`
 
-    Single line per run keeps the log scannable. Per-finding detail lives
-    in events.jsonl (one event per subkind, with paths inline).
+def _build_judge_shared_context(cfg: Config) -> str:
+    """Compose the per-run static-context block fed to every per-finding judge.
+
+    The block is built once per `run_janitor` call (NOT per-finding), so a
+    scan with N findings doesn't re-walk events.jsonl / git log N times.
+    Composes:
+
+      - Last `_JUDGE_EVENTS_TAIL_N` events from events.jsonl, filtered to
+        the lifecycle subset (`_JUDGE_LIFECYCLE_EVENT_TYPES`) — task arcs
+        rather than the full firehose.
+      - Last `_JUDGE_RECENT_COMMITS_N` commit SHAs + subjects + changed
+        paths (so the judge can correlate finding paths with recently-
+        committed work).
+      - The list of TB-Ns currently in Active / Backlog / Pipeline
+        Pending with their briefing paths (so the judge can `Read` a
+        briefing if a finding's file paths look scope-relevant).
+
+    Each section is small + bounded; the total is a few KB. The judge can
+    pull more detail via Read/Glob/Grep if it needs to.
     """
-    log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    ts = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    n_findings = len(report.findings)
-    n_paths = report.total_paths
-    line = (
-        f"- {ts} — janitor: {n_findings} stranded-state finding"
-        f"{'s' if n_findings != 1 else ''} ({n_paths} path"
-        f"{'s' if n_paths != 1 else ''}). See events.jsonl.\n"
+    parts: list[str] = []
+
+    # Lifecycle events tail.
+    lifecycle: list[str] = []
+    try:
+        for evt in events.tail(cfg.events_file, n=300):
+            if evt.get("type") not in _JUDGE_LIFECYCLE_EVENT_TYPES:
+                continue
+            ts = evt.get("ts", "")
+            typ = evt.get("type", "")
+            extras = {
+                k: v for k, v in evt.items()
+                if k not in ("ts", "type")
+                and k in ("task", "title", "job", "kind", "name", "pid")
+            }
+            extra_str = " ".join(f"{k}={v}" for k, v in extras.items())
+            lifecycle.append(f"  {ts} {typ} {extra_str}".rstrip())
+    except (OSError, ValueError):
+        pass
+    lifecycle = lifecycle[-_JUDGE_EVENTS_TAIL_N:]
+    parts.append("Recent lifecycle events (most recent last):")
+    parts.append("\n".join(lifecycle) if lifecycle else "  (none)")
+
+    # Recent commits with changed paths.
+    commits_block: list[str] = []
+    rc, log_out = _run_git(
+        cfg,
+        "log",
+        f"-n{_JUDGE_RECENT_COMMITS_N}",
+        "--pretty=format:%h %s",
+        "--name-only",
     )
-    # Ensure the file ends with a newline before we append (matches the
-    # convention `tools._append_operator_audit_line` leans on).
-    existing = log_path.read_text() if log_path.exists() else ""
-    if existing and not existing.endswith("\n"):
-        existing += "\n"
-    log_path.write_text(existing + line)
+    if rc == 0:
+        # `git log --name-only` separates entries with blank lines; group them.
+        current: list[str] = []
+        groups: list[list[str]] = []
+        for ln in log_out.splitlines():
+            if ln.strip() == "":
+                if current:
+                    groups.append(current)
+                    current = []
+            else:
+                current.append(ln)
+        if current:
+            groups.append(current)
+        for grp in groups:
+            header = grp[0]
+            paths = grp[1:]
+            paths_str = ", ".join(paths[:8]) + (
+                f" (+{len(paths) - 8} more)" if len(paths) > 8 else ""
+            )
+            commits_block.append(f"  {header}    paths: {paths_str}")
+    parts.append("\nRecent commits (most recent first):")
+    parts.append("\n".join(commits_block) if commits_block else "  (none)")
+
+    # Active / Backlog / Pipeline-Pending TB list.
+    tb_block: list[str] = []
+    try:
+        from .board import Board
+
+        board = Board.load(cfg.tasks_file)
+        for section in ("Active", "Backlog", "Pipeline Pending"):
+            for line in board.sections.get(section, []):
+                tb_block.append(f"  [{section}] {line.strip()}")
+    except Exception:  # noqa: BLE001
+        pass
+    parts.append(
+        "\nIn-flight tasks (Active / Backlog / Pipeline Pending). "
+        "Briefings live under .cc-autopilot/tasks/ — Read them if a "
+        "finding path looks scope-relevant:"
+    )
+    parts.append("\n".join(tb_block) if tb_block else "  (none)")
+
+    return "\n".join(parts)
+
+
+async def _judge_finding(
+    cfg: Config,
+    sdk,
+    finding: JanitorFinding,
+    shared_context: str,
+) -> tuple[str, str]:
+    """Ask the SDK to classify ONE finding as real_strand / operator_draft / ambiguous.
+
+    Returns ``(verdict, reasoning)``. On any error (SDK exception, parse
+    failure, unknown verdict), returns ``("ambiguous", "<error>")`` rather
+    than raising — a janitor scan must never crash the daemon's cron loop.
+
+    Emits a `judge_call` event (TB-157 shape) carrying usage / model /
+    cost / verdict / duration so per-finding judge spend can be aggregated
+    out of band of the daemon's `_log_message` capture path.
+    """
+    paths_inline = ", ".join(finding.paths[:10])
+    if len(finding.paths) > 10:
+        paths_inline += f" (+{len(finding.paths) - 10} more)"
+
+    prompt = (
+        "You are classifying ONE janitor finding (a candidate stranded git-"
+        "state observation) as either unintended detritus or deliberate "
+        "operator work. Answer with ONE LINE of JSON: "
+        '{"verdict": "real_strand" | "operator_draft" | "ambiguous", '
+        '"reasoning": "<one sentence, ≤200 chars>"}. '
+        "Do not include any other text outside that JSON line.\n\n"
+        "Verdict semantics:\n"
+        "  real_strand    — high confidence the file is unintended detritus. "
+        "Examples: a staged file matches a recently-completed pipeline "
+        "task's expected output paths AND the pipeline log shows a commit "
+        "failure; OR an untracked file in a directory whose siblings are "
+        "gitignored and no recent operator activity touches the path.\n"
+        "  operator_draft — high confidence the file is deliberate operator "
+        "work. Examples: an untracked file in repo root with operator-style "
+        "naming (`draft_*.md`, `notes-*.md`, `scratch.*`, `goal-draft.md`) "
+        "AND no TB-N references it; OR a working-tree-modified file the "
+        "operator has been actively touching (mtime within last hour).\n"
+        "  ambiguous      — judge cannot make a confident call.\n\n"
+        "You have Read, Glob, and Grep tools scoped to the project root. "
+        "Use them sparingly: read a briefing under .cc-autopilot/tasks/ "
+        "only if a finding path looks scope-relevant to a TB-N in the "
+        "in-flight list; grep recent files to confirm a hypothesis. "
+        "Default to `ambiguous` rather than guessing.\n\n"
+        f"Finding:\n"
+        f"  subkind: {finding.subkind}\n"
+        f"  paths: {paths_inline}\n"
+        f"  age_s: {finding.age_s}\n"
+        f"  hint: {finding.hint}\n\n"
+        f"Static context (built once per janitor run):\n"
+        f"{shared_context}\n"
+    )
+
+    verdict = VERDICT_AMBIGUOUS
+    reasoning = ""
+    text = ""
+    result_meta: dict = {}
+    error_note = ""
+    t0 = time.monotonic()
+    try:
+        effort = os.environ.get(
+            "AP2_JANITOR_JUDGE_EFFORT",
+            os.environ.get("AP2_AGENT_EFFORT", "high"),
+        )
+        options = sdk.ClaudeAgentOptions(
+            cwd=str(cfg.project_root),
+            allowed_tools=list(JUDGE_REPO_READ_TOOLS),
+            permission_mode="bypassPermissions",
+            max_turns=int(os.environ.get("AP2_JANITOR_JUDGE_MAX_TURNS", 12)),
+            setting_sources=["project"],
+            model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+            extra_args={"effort": effort},
+        )
+        async for msg in sdk.query(prompt=prompt, options=options):
+            content = getattr(msg, "content", None)
+            if isinstance(content, list):
+                for part in content:
+                    t = getattr(part, "text", None)
+                    if isinstance(t, str) and t.strip():
+                        text = t.strip()
+            else:
+                t = getattr(msg, "result", None)
+                if isinstance(t, str) and t.strip():
+                    text = t.strip()
+            for k in ("model", "num_turns", "total_cost_usd", "stop_reason"):
+                v = getattr(msg, k, None)
+                if v is not None:
+                    result_meta[k] = v
+            for k in ("usage", "model_usage"):
+                v = getattr(msg, k, None)
+                if isinstance(v, dict) and v:
+                    result_meta[k] = v
+    except Exception as e:  # noqa: BLE001
+        error_note = f"judge error: {type(e).__name__}: {e}"
+    duration_s = time.monotonic() - t0
+
+    if error_note:
+        verdict = VERDICT_AMBIGUOUS
+        reasoning = error_note
+    else:
+        verdict, reasoning = _parse_judge_response(text)
+
+    # Cap reasoning to the documented bound.
+    if len(reasoning) > _JUDGE_REASONING_MAX_CHARS:
+        reasoning = (
+            reasoning[: _JUDGE_REASONING_MAX_CHARS - 1].rstrip() + "…"
+        )
+
+    # Emit `judge_call` (TB-157 shape) — best-effort; a write failure
+    # here must not flip the judge's verdict.
+    try:
+        payload: dict = {
+            "task": "",
+            "bullet_idx": -1,
+            "bullet_kind": f"janitor:{finding.subkind}",
+            "verdict": verdict,
+            "duration_s": round(duration_s, 3),
+        }
+        for k in ("model", "num_turns", "total_cost_usd",
+                  "stop_reason", "usage", "model_usage"):
+            if k in result_meta:
+                payload[k] = result_meta[k]
+        events.append(cfg.events_file, "judge_call", **payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return verdict, reasoning
+
+
+def _parse_judge_response(response: str) -> tuple[str, str]:
+    """Extract `(verdict, reasoning)` from the judge's reply.
+
+    Tolerant: extracts the first balanced ``{...}`` substring; any parse
+    failure or unknown verdict falls back to ``("ambiguous", "<note>")``.
+    """
+    if not response:
+        return VERDICT_AMBIGUOUS, "empty judge response"
+    start = response.find("{")
+    end = response.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return VERDICT_AMBIGUOUS, f"no JSON in response: {response[:120]!r}"
+    try:
+        data = json.loads(response[start:end + 1])
+    except json.JSONDecodeError:
+        return VERDICT_AMBIGUOUS, (
+            f"malformed JSON: {response[start:end + 1][:120]!r}"
+        )
+    verdict = str(data.get("verdict", "")).strip().lower()
+    reasoning = str(data.get("reasoning", "")).strip()
+    if verdict not in KNOWN_VERDICTS:
+        return VERDICT_AMBIGUOUS, (
+            f"unknown verdict {verdict!r}; reasoning: {reasoning[:120]}"
+        )
+    return verdict, reasoning
 
 
 # --------------------------------------------------------------------------
@@ -455,22 +826,48 @@ def recent_finding_count(cfg: Config, *, window_s: int | None = None) -> int:
     `window_s` defaults to `RECENT_FINDING_WINDOW_S`. Returns 0 on a
     missing or unparseable events file (status surfaces should never
     crash on a transient I/O hiccup).
+
+    TB-178: this is the legacy total-count helper — kept for backward
+    compat with the JSON `janitor_findings` field. New surfacing logic
+    should use `recent_finding_counts_by_verdict` so strands count for
+    operator urgency while drafts get a softer summary.
     """
+    counts = recent_finding_counts_by_verdict(cfg, window_s=window_s)
+    return sum(counts.values())
+
+
+def recent_finding_counts_by_verdict(
+    cfg: Config, *, window_s: int | None = None,
+) -> dict[str, int]:
+    """Per-verdict count of recent `janitor_finding` events (TB-178).
+
+    Returns a dict ``{"real_strand": N, "operator_draft": M,
+    "ambiguous": K}`` (always all three keys, defaulting to 0). Findings
+    older than `window_s` (default `RECENT_FINDING_WINDOW_S`) are
+    excluded — same freshness contract as `recent_finding_count`.
+
+    Findings missing a `verdict` field (legacy events from pre-TB-178
+    runs) bucket as `ambiguous` so the surfacing logic stays consistent
+    when the events.jsonl tail mixes old and new formats.
+    """
+    out = {
+        VERDICT_REAL_STRAND: 0,
+        VERDICT_OPERATOR_DRAFT: 0,
+        VERDICT_AMBIGUOUS: 0,
+    }
     if not cfg.events_file.exists():
-        return 0
+        return out
     win = window_s if window_s is not None else RECENT_FINDING_WINDOW_S
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=win)
     cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
-    count = 0
-    # 500-event window is enough headroom: the janitor emits at most 3
-    # events per run (one per subkind), and operators rarely set the cadence
-    # under 1h. So even the fast end of the operator-tuning range stays
-    # well inside this window.
     for evt in events.tail(cfg.events_file, n=500):
         if evt.get("type") != "janitor_finding":
             continue
         ts = evt.get("ts") or ""
         if ts < cutoff_str:
             continue
-        count += 1
-    return count
+        verdict = str(evt.get("verdict") or VERDICT_AMBIGUOUS).strip().lower()
+        if verdict not in out:
+            verdict = VERDICT_AMBIGUOUS
+        out[verdict] += 1
+    return out

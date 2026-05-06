@@ -152,15 +152,24 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     )
     # TB-177: surface the count of recent `janitor_finding` events so an
     # operator returning to the project sees stranded git state without
-    # running `ap2 logs` first. `recent_finding_count` walks the events
-    # tail and only counts findings inside `RECENT_FINDING_WINDOW_S` —
-    # stale findings from a day-old run don't accumulate (the next
-    # janitor cron will re-emit them if still relevant). Surfaced
-    # alongside pending-review and queue-pending so the three operator-
-    # attention signals share one cluster.
-    from .janitor import recent_finding_count as _recent_finding_count
+    # running `ap2 logs` first. The verdict-aware counter walks the
+    # events tail and only counts findings inside
+    # `RECENT_FINDING_WINDOW_S` — stale findings from a day-old run
+    # don't accumulate (the next janitor cron will re-emit them if
+    # still relevant). Surfaced alongside pending-review and
+    # queue-pending so the three operator-attention signals share one
+    # cluster.
+    # TB-178: split the counter by LLM-judge verdict — only
+    # `real_strand` drives the urgency tone of the `janitor:` line;
+    # `operator_draft` findings get a softer summary; `ambiguous`
+    # findings (judge couldn't decide) bucket together for operator
+    # eyes-on without flagging as urgent.
+    from .janitor import (
+        recent_finding_counts_by_verdict as _recent_finding_counts,
+    )
 
-    janitor_findings = _recent_finding_count(cfg)
+    janitor_counts = _recent_finding_counts(cfg)
+    janitor_findings = sum(janitor_counts.values())
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -201,6 +210,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # missing events file — machine consumers always see the
             # key for parseability.
             "janitor_findings": janitor_findings,
+            # TB-178: per-verdict breakdown so machine consumers (web
+            # UI, external monitors) can render strands vs drafts vs
+            # ambiguous independently. Always all three keys, defaulting
+            # to 0.
+            "janitor_findings_by_verdict": janitor_counts,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -237,14 +251,30 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             f"          (`ap2 approve TB-N`)"
         )
     if janitor_findings:
-        # TB-177: surface stranded git state without making the operator
-        # run `ap2 logs` first. Count only — per-finding detail (subkind,
-        # paths, hint) lives in events.jsonl. Wording mirrors the
-        # pending-review line so the operator-attention cluster reads
-        # consistently. Only emitted when N>0 — clean projects stay quiet.
+        # TB-177 + TB-178: surface stranded git state without making the
+        # operator run `ap2 logs` first. Render strands / drafts /
+        # ambiguous separately so a `draft_*.md` working notebook
+        # doesn't read as urgent — only `real_strand` carries the
+        # operator-attention urgency. Per-finding detail (subkind,
+        # paths, hint, reasoning) lives in events.jsonl.
+        n_strand = janitor_counts["real_strand"]
+        n_draft = janitor_counts["operator_draft"]
+        n_ambig = janitor_counts["ambiguous"]
+        parts: list[str] = []
+        if n_strand:
+            parts.append(
+                f"{n_strand} strand{'s' if n_strand != 1 else ''}"
+            )
+        if n_draft:
+            parts.append(
+                f"{n_draft} draft{'s' if n_draft != 1 else ''}"
+            )
+        if n_ambig:
+            parts.append(
+                f"{n_ambig} ambiguous"
+            )
         print(
-            f"janitor:  {janitor_findings} stranded-state finding"
-            f"{'s' if janitor_findings != 1 else ''} — "
+            f"janitor:  {', '.join(parts)} — "
             "`ap2 logs` (filter type=janitor_finding) to inspect"
         )
     if open_questions:

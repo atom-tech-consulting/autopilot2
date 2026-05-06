@@ -386,21 +386,33 @@ async def run_status_report(
             f"- Open questions for operator ({len(open_questions)}): "
             + "; ".join(open_questions)
         )
-    # TB-177: surface recent janitor findings inside the `## Current
-    # state` snapshot so the cron status-report routine can carry the
-    # signal into the Mattermost post (single source of truth via
-    # `recent_finding_count`). Stranded git state is exactly the
-    # "operator should know without grepping" class of signal that the
-    # cron report exists to surface; bundling it next to pending-review
-    # + open-questions keeps the three operator-attention signals on
-    # one screen.
-    from .janitor import recent_finding_count as _recent_finding_count
+    # TB-177 + TB-178: surface recent janitor findings inside the
+    # `## Current state` snapshot so the cron status-report routine can
+    # carry the signal into the Mattermost post. Verdict-aware split
+    # (strands vs drafts vs ambiguous) so `draft_*.md` operator
+    # notebooks don't read as urgent in the post; only `real_strand`
+    # carries the operator-attention urgency. Bundled next to
+    # pending-review + open-questions keeps the operator-attention
+    # signals on one screen.
+    from .janitor import (
+        recent_finding_counts_by_verdict as _recent_finding_counts,
+    )
 
-    janitor_findings = _recent_finding_count(cfg)
-    if janitor_findings:
+    jcounts = _recent_finding_counts(cfg)
+    n_strand = jcounts["real_strand"]
+    n_draft = jcounts["operator_draft"]
+    n_ambig = jcounts["ambiguous"]
+    if n_strand or n_draft or n_ambig:
+        parts: list[str] = []
+        if n_strand:
+            parts.append(f"{n_strand} strand{'s' if n_strand != 1 else ''}")
+        if n_draft:
+            parts.append(f"{n_draft} draft{'s' if n_draft != 1 else ''}")
+        if n_ambig:
+            parts.append(f"{n_ambig} ambiguous")
         state_extras.append(
-            f"- Janitor findings ({janitor_findings}): stranded git state "
-            "— `ap2 logs` (filter type=janitor_finding) to inspect"
+            f"- Janitor findings: {', '.join(parts)} — "
+            "`ap2 logs` (filter type=janitor_finding) to inspect"
         )
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,

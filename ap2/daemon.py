@@ -915,10 +915,13 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
         )
         return
 
-    # TB-177: `janitor` jobs are deterministic Python (subprocess + git
-    # status parsing) — no SDK call, no LLM, no `_run_control_agent`
-    # plumbing. Cheap to run frequently; trivial to test. The routine
-    # emits its own `janitor_finding` events; we still bookend with
+    # TB-177 + TB-178: `janitor` jobs run a deterministic git-state
+    # detection pass (subprocess + `git status --porcelain` parsing),
+    # then layer an LLM judge over the candidate findings to classify
+    # each as real_strand / operator_draft / ambiguous. The judge step
+    # makes async SDK calls but stays out of `_run_control_agent`'s
+    # control-prompt plumbing — janitor's prompt is purpose-built per
+    # finding (see `janitor._judge_finding`). We still bookend with
     # `cron_start`/`cron_complete` so post-mortems can trace the run
     # through the same event vocabulary as every other cron job.
     # `job.prompt` is intentionally ignored — the work is hard-coded.
@@ -927,7 +930,7 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
 
         events.append(cfg.events_file, "cron_start", job=job.name)
         try:
-            _janitor.run_janitor(cfg)
+            await _janitor.run_janitor(cfg, sdk)
         except Exception as e:  # noqa: BLE001
             events.append(
                 cfg.events_file,
