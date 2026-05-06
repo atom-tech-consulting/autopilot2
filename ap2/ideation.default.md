@@ -24,7 +24,10 @@ Read these files in order:
 5. progress.md — recent completed work, for follow-up discovery.
 6. CLAUDE.md — project conventions and any Autopilot config.
 
-Propose new tasks ONLY if Backlog has fewer than 3 workable items.
+Propose at most N new tasks this cycle, where N is the
+`proposal slots this cycle` value in the `## Current state` block above.
+If N is 0, do not propose any tasks (the queue is already at the
+operator's configured threshold).
 
 ## Step 0: write the progress assessment FIRST (TB-87)
 Before proposing anything, call the `ideation_state_write` MCP tool

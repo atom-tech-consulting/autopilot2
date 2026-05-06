@@ -377,7 +377,7 @@ def test_control_run_usage_emitted_via_ideation(cfg, monkeypatch):
         total_cost_usd=0.123,
         num_turns=2,
     )
-    asyncio.run(ideation_mod._run_ideation(cfg, sdk, mcp_server=None))
+    asyncio.run(ideation_mod._run_ideation(cfg, sdk, mcp_server=None, slots=3))
 
     evts = events.tail(cfg.events_file, 30)
     runs = [e for e in evts if e["type"] == "control_run_usage"]
@@ -411,7 +411,7 @@ def test_ideation_timeout_emits_both_events(cfg, monkeypatch):
 
     cfg.control_timeout_s = 1
     sdk = _sdk_hanging(sleep_s=5.0)
-    asyncio.run(ideation_mod._run_ideation(cfg, sdk, mcp_server=None))
+    asyncio.run(ideation_mod._run_ideation(cfg, sdk, mcp_server=None, slots=3))
 
     evts = events.tail(cfg.events_file, 30)
     timeouts = [e for e in evts if e["type"] == "ideation_timeout"]
@@ -450,7 +450,7 @@ def test_ideation_error_emits_both_events(cfg, monkeypatch):
     )
 
     sdk = _sdk_raising(RuntimeError("kaboom"))
-    asyncio.run(ideation_mod._run_ideation(cfg, sdk, mcp_server=None))
+    asyncio.run(ideation_mod._run_ideation(cfg, sdk, mcp_server=None, slots=3))
 
     evts = events.tail(cfg.events_file, 30)
     errors = [e for e in evts if e["type"] == "ideation_error"]

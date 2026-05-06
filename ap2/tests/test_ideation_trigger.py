@@ -480,3 +480,227 @@ def test_run_ideation_prompt_filters_events_block_to_relevant_kinds(
     # And `cron_complete` (cron-lifecycle plumbing — explicit briefing
     # callout).
     assert " cron_complete " not in events_block
+
+
+# ---------------------------------------------------------------------------
+# TB-183: pre-computed proposal-slot count flows into the prompt's
+# `## Current state` snapshot block via `state_extras` (TB-151), so the
+# prompt body's "propose at most N" instruction reads N from a single
+# source of truth instead of the pre-TB-183 hardcoded magic-3 (which
+# drifted out of sync with `AP2_IDEATION_TRIGGER_TASK_COUNT` once
+# operators bumped the env knob).
+
+
+def test_slot_count_injected_into_state_extras(tmp_path, monkeypatch):
+    """`_maybe_ideate` with `AP2_IDEATION_TRIGGER_TASK_COUNT=5` and a board
+    of 2 Ready + 1 Backlog (workable=3) computes `slots = 5 - 3 = 2` and
+    passes the line `- proposal slots this cycle: 2` into the prompt's
+    `## Current state` snapshot block.
+
+    Pins both halves: (a) the captured prompt's snapshot block contains
+    the exact slot-count line; (b) the prompt body references the
+    snapshot value (`proposal slots this cycle` / "at most N") instead
+    of the pre-TB-183 hardcoded `fewer than 3`.
+    """
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={
+            "Ready": [("TB-1", "ready 1"), ("TB-2", "ready 2")],
+            "Backlog": [("TB-3", "backlog 1")],
+        },
+    )
+    # Use the load-bearing default prompt body so the assertion on
+    # "proposal slots this cycle" / "at most N" / no hardcoded 3 lands
+    # against the real prompt — the override would mask a regression.
+    override = cfg.project_root / ".cc-autopilot" / "ideation_prompt.md"
+    if override.exists():
+        override.unlink()
+    calls = _stub_run_control_agent(monkeypatch)
+
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    assert len(calls) == 1, "ideation should have fired (workable=3 < threshold=5)"
+    prompt = calls[0]["prompt"]
+
+    # (a) The snapshot block carries the exact slot-count line. Anchor
+    # the search inside the `## Current state` block (the snapshot ends
+    # at `## Control job:`) so a future re-export of the same line
+    # somewhere else doesn't accidentally satisfy this assertion.
+    snapshot_start = prompt.find(
+        "## Current state (rendered just before this prompt was sent)"
+    )
+    snapshot_end = prompt.find("## Control job:", snapshot_start)
+    assert snapshot_start != -1 and snapshot_end != -1
+    snapshot = prompt[snapshot_start:snapshot_end]
+    assert "- proposal slots this cycle: 2" in snapshot, (
+        f"expected slot-count line in snapshot block; snapshot:\n{snapshot}"
+    )
+
+    # (b) The prompt body references the snapshot value, not a hardcoded
+    # number. Both pieces of evidence must hold:
+    #   - The "propose at most N" / "proposal slots this cycle" framing
+    #     is present somewhere in the prompt body.
+    #   - The pre-TB-183 hardcoded "fewer than 3 workable" is gone.
+    assert "proposal slots this cycle" in prompt, (
+        "prompt body must reference the slot-count line by name"
+    )
+    assert "fewer than 3 workable" not in prompt, (
+        "pre-TB-183 hardcoded magic-3 must be gone from the prompt body"
+    )
+
+
+def test_slots_zero_skips_with_event_and_marks_run(tmp_path, monkeypatch):
+    """Early-skip path: workable=5 with threshold=5 → slots=0 → SDK NOT
+    invoked, `ideation_skipped_no_slots` event lands, `mark_run` advances
+    the cooldown so a wedged-at-threshold board doesn't hammer the gate
+    every tick.
+
+    Pins all three behaviors the briefing calls out:
+      (a) the SDK is NOT invoked (capture spy stays empty);
+      (b) an `ideation_skipped_no_slots` event lands in events.jsonl,
+          carrying both `queued` and `threshold` so an operator
+          inspecting events sees why the skip fired;
+      (c) `mark_run` is called so the cooldown clock advances normally.
+    """
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={
+            "Ready": [("TB-1", "r1"), ("TB-2", "r2")],
+            "Backlog": [
+                ("TB-3", "b1"), ("TB-4", "b2"), ("TB-5", "b3"),
+            ],
+        },
+    )
+    # Anchor the cooldown timestamp at a known stale value so the
+    # post-call check can prove `mark_run` advanced it.
+    save_state(cfg.cron_state_file, {IDEATION_NAME: 0.0})
+    calls = _stub_run_control_agent(monkeypatch)
+
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    # (a) SDK never invoked.
+    assert calls == [], "ideation should have skipped — slots=0"
+
+    # (b) The skip event landed with queue + threshold context.
+    evts = events.tail(cfg.events_file, 20)
+    skips = [e for e in evts if e["type"] == "ideation_skipped_no_slots"]
+    assert len(skips) == 1, (
+        f"expected exactly one ideation_skipped_no_slots event; got: "
+        f"{[e['type'] for e in evts]}"
+    )
+    assert skips[0]["queued"] == 5
+    assert skips[0]["threshold"] == 5
+    # And the historical entry-marker event is absent — this is a skip,
+    # not an SDK invocation.
+    assert "ideation_empty_board" not in [e["type"] for e in evts]
+
+    # (c) Cooldown advanced. The fixture seeded the timestamp to 0.0;
+    # `mark_run` overwrites with `time.time()` which is well into the
+    # 21st-century epoch range.
+    state = load_state(cfg.cron_state_file)
+    assert state[IDEATION_NAME] > time.time() - 5, (
+        "_maybe_ideate must call mark_run on the slots=0 skip path so "
+        "the cooldown clock advances"
+    )
+
+
+def test_slots_clamp_prevents_negative_count(tmp_path, monkeypatch):
+    """No-double-decrement edge case: workable=6 with threshold=5 →
+    `max(0, 5 - 6) = 0`, NOT a negative slot count. Same skip-with-event
+    behavior as the slots=0-at-threshold case. Pins the clamp.
+
+    This covers the scenario where the board is over-threshold (e.g.
+    operator-added tasks beyond the configured budget) — the slot math
+    must never inject a negative integer into the prompt or wrap into
+    a giant unsigned value.
+    """
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _make_project(
+        tmp_path,
+        monkeypatch,
+        sections={
+            "Ready": [("TB-1", "r1"), ("TB-2", "r2"), ("TB-3", "r3")],
+            "Backlog": [
+                ("TB-4", "b1"), ("TB-5", "b2"), ("TB-6", "b3"),
+            ],
+        },
+    )
+    calls = _stub_run_control_agent(monkeypatch)
+
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    assert calls == [], "ideation should have skipped — slots clamp to 0"
+    evts = events.tail(cfg.events_file, 20)
+    skips = [e for e in evts if e["type"] == "ideation_skipped_no_slots"]
+    assert len(skips) == 1
+    # The event records the raw queued count (6), not the clamped slot
+    # value — operators inspecting events.jsonl can see the over-threshold
+    # state directly.
+    assert skips[0]["queued"] == 6
+    assert skips[0]["threshold"] == 5
+
+
+def test_slot_count_default_threshold_full_budget(tmp_path, monkeypatch):
+    """Backwards-compat: with `AP2_IDEATION_TRIGGER_TASK_COUNT` unset
+    (default=3) and workable=0, slots=3 — i.e. the default behavior
+    matches today's pre-TB-183 hardcoded prompt instruction ("propose
+    new tasks ONLY if Backlog has fewer than 3 workable items" → up
+    to 3 proposals when Backlog is empty).
+
+    Pins that bumping the env knob is the ONLY way to change the
+    proposal-slot budget — there's no remaining hardcoded magic-3
+    that would break parity with TB-160's env-knob default.
+    """
+    monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
+    cfg = _make_project(tmp_path, monkeypatch, sections={})
+    # Use the load-bearing default prompt so the slot line lands as it
+    # would in production.
+    override = cfg.project_root / ".cc-autopilot" / "ideation_prompt.md"
+    if override.exists():
+        override.unlink()
+    calls = _stub_run_control_agent(monkeypatch)
+
+    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
+
+    assert len(calls) == 1, "ideation should have fired (workable=0 < default 3)"
+    prompt = calls[0]["prompt"]
+    snapshot_start = prompt.find(
+        "## Current state (rendered just before this prompt was sent)"
+    )
+    snapshot_end = prompt.find("## Control job:", snapshot_start)
+    snapshot = prompt[snapshot_start:snapshot_end]
+    assert "- proposal slots this cycle: 3" in snapshot, (
+        f"default-threshold path must inject slot-count=3 (the historical "
+        f"hardcoded value); snapshot:\n{snapshot}"
+    )
+
+
+def test_ideation_default_md_has_no_hardcoded_fewer_than_workable(tmp_path):
+    """Defense-in-depth grep against the load-bearing default prompt:
+    the pre-TB-183 phrase `fewer than <N> workable` must not survive
+    anywhere in `ap2/ideation.default.md`. The slot count is now read
+    from the snapshot block at the top of the prompt — any `fewer
+    than N workable` reading would be a hardcoded magic number that
+    the env knob can't reach."""
+    import re as _re
+
+    from ap2.ideation import _DEFAULT_PROMPT_PATH
+
+    text = _DEFAULT_PROMPT_PATH.read_text()
+    matches = _re.findall(r"fewer than \d+ workable", text)
+    assert not matches, (
+        f"ap2/ideation.default.md still has hardcoded `fewer than N "
+        f"workable` phrases: {matches}. The slot count must flow from "
+        f"the `## Current state` snapshot block, not a magic number "
+        f"baked into the prompt body."
+    )
+    # Positive: the prompt body references the slot-count line by name.
+    assert "proposal slots this cycle" in text, (
+        "ap2/ideation.default.md must reference the `proposal slots "
+        "this cycle` snapshot line by name so the agent reads its "
+        "per-cycle proposal budget from a single source of truth."
+    )

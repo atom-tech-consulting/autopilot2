@@ -21,9 +21,12 @@ Configuration:
 - Trigger threshold: `AP2_IDEATION_TRIGGER_TASK_COUNT` (default 3).
   Ideation fires when the count of Ready+Backlog tasks is BELOW this
   threshold (and Active is empty as a hard SDK-contention gate). The
-  default of 3 matches the prompt's "Propose new tasks ONLY if Backlog
-  has fewer than 3 workable items" cap. Set to 1 for the legacy "fire
-  only when the working queue is fully empty" behavior.
+  threshold doubles as the per-cycle proposal-slot budget — TB-183
+  pre-computes `slots = max(0, threshold - workable)` and passes it
+  via the prompt's `## Current state` snapshot block (single source
+  of truth, no hardcoded magic number drifting from the env knob).
+  Set to 1 for the legacy "fire only when the working queue is fully
+  empty" behavior.
 - Max turns: `AP2_IDEATION_MAX_TURNS` (default 30 — bumped from the legacy
   cron-default 15 because the assessment + failure-review + proposal flow
   routinely needs ~10-15 turns and 15 was running close to the wire).
@@ -48,8 +51,11 @@ IDEATION_NAME = "ideation"
 IDEATION_MAX_TURNS_DEFAULT = 30
 IDEATION_COOLDOWN_DEFAULT_S = 7200  # 2h between fires when board stays empty
 # Trigger threshold: ideation fires when Ready+Backlog count is BELOW this
-# value (and Active is empty). Matches the prompt's "fewer than 3 workable
-# items" cap. Tunable via AP2_IDEATION_TRIGGER_TASK_COUNT.
+# value (and Active is empty). TB-183: also serves as the per-cycle
+# proposal-slot budget — `slots = max(0, threshold - workable)` flows into
+# the prompt's `## Current state` snapshot block so the agent reads it
+# from a single source of truth instead of a hardcoded magic-3 in the
+# prompt body. Tunable via AP2_IDEATION_TRIGGER_TASK_COUNT.
 IDEATION_TRIGGER_TASK_COUNT_DEFAULT = 3
 
 # TB-169: allowlist of event `type` values ideation actually keys off.
@@ -261,7 +267,7 @@ def _trigger_task_count() -> int:
     return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
 
 
-async def _run_ideation(cfg: Config, sdk, mcp_server) -> None:
+async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
     """Run the ideation control-agent unconditionally.
 
     All gating (disable knob, cooldown, queue-depth, Active hard gate)
@@ -272,6 +278,16 @@ async def _run_ideation(cfg: Config, sdk, mcp_server) -> None:
     helper so they emit the same `ideation_empty_board` /
     `ideation_timeout` / `ideation_error` event vocabulary, advance the
     same cooldown clock, and produce the same state-file commit.
+
+    `slots` is the per-cycle proposal-slot budget computed by the caller
+    (TB-183) — `max(0, AP2_IDEATION_TRIGGER_TASK_COUNT - workable_count)`.
+    It's appended into the `## Current state` snapshot block via the
+    `state_extras` mechanism (TB-151) so the agent can read it as a
+    single line: `- proposal slots this cycle: N`. The prompt body's
+    "propose at most N" instruction reads N from the same line, replacing
+    the hardcoded magic-3 that drifted out of sync with the env knob
+    (TB-160 introduced the env knob; the prompt body kept "fewer than 3"
+    until TB-183 closed the gap).
 
     Note: `ideation_empty_board` is the historical entry-marker name —
     kept for backward compatibility even though forced runs may fire
@@ -322,8 +338,17 @@ async def _run_ideation(cfg: Config, sdk, mcp_server) -> None:
     # signal density of the prompt doesn't degrade as observability
     # event volume grows. See `IDEATION_RELEVANT_EVENT_TYPES` for the
     # full list and rationale.
+    # TB-183: pre-computed proposal-slot count flows into the snapshot
+    # block as a single bulleted line the agent reads near the top of
+    # the prompt. Joined to any other state_extras consumers in the
+    # future via the same `## Current state` mechanism (TB-151 /
+    # TB-163). The prompt body's "propose at most N" instruction reads
+    # N from this line — single source of truth, no hardcoded magic
+    # number drifting out of sync with `AP2_IDEATION_TRIGGER_TASK_COUNT`.
+    state_extras = [f"- proposal slots this cycle: {slots}"]
     full_prompt = prompts.build_control_prompt(
         cfg, IDEATION_NAME, load_prompt(cfg),
+        state_extras=state_extras,
         include_board=False, include_commits=False,
         include_types=IDEATION_RELEVANT_EVENT_TYPES,
     )
@@ -371,6 +396,27 @@ async def _run_ideation(cfg: Config, sdk, mcp_server) -> None:
         _daemon._commit_state_files(cfg, "state: ideation", paths=touched)
 
 
+def _compute_slots(cfg: Config) -> tuple[int, int, int]:
+    """Return `(slots, queued, threshold)` for the current board.
+
+    TB-183: shared helper so `_maybe_ideate` (natural path) and
+    `force_ideate` (operator-forced path) compute the same per-cycle
+    proposal-slot budget. `slots = max(0, threshold - queued)` —
+    `queued` counts Ready+Backlog only (Pipeline Pending and Frozen do
+    not count, matching the existing trigger-gate semantics from
+    TB-160). The `max(0, ...)` clamp prevents negative slot counts
+    when `queued > threshold`.
+    """
+    board = Board.load(cfg.tasks_file)
+    queued = sum(
+        sum(1 for _ in board.iter_tasks(section=s))
+        for s in ("Ready", "Backlog")
+    )
+    threshold = _trigger_task_count()
+    slots = max(0, threshold - queued)
+    return slots, queued, threshold
+
+
 async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     """Fire ideation when the working queue is shallow and the cooldown elapsed.
 
@@ -378,13 +424,25 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     1. `AP2_IDEATION_DISABLED` opt-out (tests + manual-only projects).
     2. Active hard gate — non-empty Active means a task is in flight and
        sharing the SDK slot with a control agent is unsafe.
-    3. Ready+Backlog count below `AP2_IDEATION_TRIGGER_TASK_COUNT`
-       (default 3). Pipeline Pending and Frozen do not count.
+    3. Per-cycle proposal-slot budget (TB-183) —
+       `slots = max(0, AP2_IDEATION_TRIGGER_TASK_COUNT - (Ready+Backlog))`.
+       When `slots <= 0` the queue is already at the operator's
+       configured threshold, so there's nothing for the agent to fill;
+       we emit `ideation_skipped_no_slots` (so the no-op is visible in
+       events.jsonl) and advance the cooldown via `mark_run` (so a
+       broken board state can't hammer the gate every tick). This
+       subsumes the pre-TB-183 `queued >= threshold` silent-return
+       check — same trigger condition, but with explicit event +
+       cooldown advancement.
     4. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire.
 
     Delegates the actual SDK invocation + bookkeeping to `_run_ideation`
     so the forced-run path (`force_ideate`, TB-159) shares the same
-    event vocabulary, cooldown writeback, and state-file commit.
+    event vocabulary, cooldown writeback, and state-file commit. The
+    computed `slots` value flows into `_run_ideation` so the prompt's
+    `## Current state` block carries `- proposal slots this cycle: N`
+    (TB-183) — the agent reads N from there instead of the
+    pre-TB-183 hardcoded magic-3 in the prompt body.
 
     Set `AP2_IDEATION_DISABLED=1` to opt out entirely (the tests use this
     by default; it's also useful for projects that want to drive ideation
@@ -399,11 +457,20 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     # items there are.
     if next(board.iter_tasks(section="Active"), None) is not None:
         return
-    queued = sum(
-        sum(1 for _ in board.iter_tasks(section=s))
-        for s in ("Ready", "Backlog")
-    )
-    if queued >= _trigger_task_count():
+    slots, queued, threshold = _compute_slots(cfg)
+    if slots <= 0:
+        # TB-183: queue at-or-above threshold → no slots to fill. Emit
+        # the explicit skip event (so the no-op shows up in events.jsonl
+        # rather than vanishing into a silent return) and advance the
+        # cooldown so a wedged-at-threshold board doesn't hammer the
+        # gate on every tick.
+        events.append(
+            cfg.events_file,
+            "ideation_skipped_no_slots",
+            queued=queued,
+            threshold=threshold,
+        )
+        mark_run(cfg.cron_state_file, IDEATION_NAME)
         return
     state = load_state(cfg.cron_state_file)
     last = state.get(IDEATION_NAME, 0.0)
@@ -411,7 +478,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     now = time.time()
     if now - last < cooldown:
         return
-    await _run_ideation(cfg, sdk, mcp_server)
+    await _run_ideation(cfg, sdk, mcp_server, slots=slots)
 
 
 async def force_ideate(cfg: Config, sdk, mcp_server) -> None:
@@ -430,5 +497,15 @@ async def force_ideate(cfg: Config, sdk, mcp_server) -> None:
     before the next cron-driven fire. The `ideation_forced`
     audit event is emitted by the queue-drain side, not here, so this
     helper stays the single SDK-invocation path shared with `_maybe_ideate`.
+
+    TB-183: the per-cycle slot count flows through unchanged — forced
+    runs compute the same `max(0, threshold - workable)` against the
+    current board so the agent's `## Current state` snapshot still
+    carries `- proposal slots this cycle: N`. A forced run with
+    `slots=0` is intentional (the operator triggered the run knowing
+    the board was full); the prompt body's "if N is 0, do not propose"
+    rule still applies, so the agent does the assessment without
+    adding tasks.
     """
-    await _run_ideation(cfg, sdk, mcp_server)
+    slots, _, _ = _compute_slots(cfg)
+    await _run_ideation(cfg, sdk, mcp_server, slots=slots)
