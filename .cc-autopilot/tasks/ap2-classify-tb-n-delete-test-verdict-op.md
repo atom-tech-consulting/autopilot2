@@ -107,7 +107,7 @@ Module-level enum (`ap2/tools.py`):
 ## Verification
 
 - `uv run pytest -q ap2/tests/` — full regression gate passes.
-- `uv run python -c "from ap2.tools import IMPACT_VERDICTS; assert IMPACT_VERDICTS == (advanced-goal, pro-forma, unclear)"` — enum exposed and stable.
+- `uv run python -c "from ap2.tools import IMPACT_VERDICTS; assert IMPACT_VERDICTS == ('advanced-goal', 'pro-forma', 'unclear')"` — enum exposed and stable.
 - New unit test in `ap2/tests/test_cli.py::test_classify_writes_operator_log_line`
   pins that `ap2 classify TB-N --impact advanced-goal --reason "..."`
   exits 0 and queues a `classify` record that drains to the expected
