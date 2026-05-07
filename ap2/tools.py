@@ -518,6 +518,22 @@ _PROPOSAL_DECISION_KINDS = (
 )
 
 
+# TB-189: operator-authored retrospective verdict on a shipped proposal.
+# Three fixed values by intent — goal.md L61-70 names the impact
+# diagnostic ("if we delete this and the goal still ships, was it
+# useful?") and reserves a third bucket for proposals whose impact
+# isn't yet legible. Single source of truth: imported by the CLI
+# (cmd_classify validates `--impact <verdict>` against this), the
+# operator-queue drain (the `classify` op handler), and the tests.
+# Adding values is a one-line tuple edit; expanding via the operator's
+# CLI is the briefing's intentional follow-up.
+IMPACT_VERDICTS: tuple[str, ...] = (
+    "advanced-goal",
+    "pro-forma",
+    "unclear",
+)
+
+
 def reconcile_proposal_outcome(
     cfg: Config,
     tb_id: str,
@@ -1524,6 +1540,22 @@ OPERATOR_QUEUE_OPS = (
     # recommendation in their RESULT summary; the operator applies via
     # `ap2 update-goal`.
     "update_goal",
+    # TB-189: operator-authored retrospective verdict on a shipped
+    # proposal. The op carries `task_id`, `verdict` (one of
+    # `IMPACT_VERDICTS`), and an optional `reason`. The drain-side
+    # handler appends an `impact` block to the per-proposal record from
+    # TB-188 (`.cc-autopilot/ideation_proposals/<TB-N>.json`) AND writes
+    # the standard audit-line to operator_log.md (`<ts> — classified
+    # TB-N impact=<verdict>: <reason>`). Tolerates missing record file
+    # (legacy proposals from before TB-188 landed): the operator_log
+    # line is the authoritative trail; the per-proposal record is the
+    # structured signal feeding ideation's later track-record block.
+    # Goal anchor: this is the operator-authored signal stream goal.md
+    # L61-76 names — the strongest signal in the focus items signal-
+    # collection program because the operator IS the source of truth
+    # for the impact verdict. No LLM auto-classification path by
+    # design.
+    "classify",
 )
 
 
@@ -1742,6 +1774,47 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         # if the noise accumulates).
         force = bool(args.get("force"))
         rec_args = {"force": force}
+    elif op == "classify":
+        # TB-189: operator-authored retrospective verdict on a shipped
+        # proposal. The op carries `task_id`, `verdict` (one of
+        # `IMPACT_VERDICTS`), and an optional `reason`. No board-state
+        # mutation — this is a metadata-only op (writes the per-proposal
+        # record's `impact` block + an operator_log.md line at drain
+        # time). We DO snapshot-validate the task_id is on the board so
+        # an obviously wrong TB-N is rejected immediately at append
+        # time; the verb is meaningful regardless of section (the
+        # proposal may be Complete, Frozen post-failure, etc.) so we
+        # don't gate on section.
+        task_id = (args.get("task_id") or "").strip()
+        if not task_id:
+            return _err("task_id is required for classify")
+        verdict = (args.get("verdict") or "").strip()
+        if verdict not in IMPACT_VERDICTS:
+            return _err(
+                f"verdict must be one of {list(IMPACT_VERDICTS)}; "
+                f"got {verdict!r}"
+            )
+        raw_reason = args.get("reason")
+        reason = (raw_reason if raw_reason is not None else "").strip()
+        if reason:
+            err = _validate_single_line("reason", reason)
+            if err:
+                return _err(err)
+        # Snapshot validation under the board lock — symmetry with
+        # other task-keyed ops. The drain-side tolerates a missing
+        # per-proposal record (legacy / non-ideation tasks); but a
+        # totally unknown TB-N at append time is operator error and
+        # we surface it now.
+        with board_file_lock(cfg.tasks_file):
+            board = Board.load(cfg.tasks_file)
+            loc = board.find(task_id)
+        if loc is None:
+            return _err(f"{task_id} not on board")
+        rec_args = {
+            "task_id": task_id,
+            "verdict": verdict,
+            "reason": reason,
+        }
     elif op == "update_goal":
         # TB-193: full-file replacement of `goal.md`. The op carries the
         # full file content (no diff/patch — symmetric to how `add_*` ops
@@ -2015,6 +2088,32 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         op=op,
         task_id=rec_args.get("task_id", ""),
     )
+
+
+def classifications_last_30d_by_verdict(cfg: Config) -> dict[str, int]:
+    """Count `task_classified` events (TB-189) in the last 30 days, by
+    verdict. Always returns a dict with a key per `IMPACT_VERDICTS` value
+    (zeros when empty). Counts are based on the event's `ts` field; the
+    window endpoints use UTC (matches `events.append`'s _now()).
+
+    Reads up to 1000 recent events — comfortably more than any plausible
+    30-day classification volume even at one classification per shipped
+    proposal. The walk is O(N) over the tail; surfaced by `cmd_status`
+    which already pays for an event-tail read.
+    """
+    counts: dict[str, int] = {v: 0 for v in IMPACT_VERDICTS}
+    cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=30)
+    cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+    for evt in events.tail(cfg.events_file, n=1000):
+        if evt.get("type") != "task_classified":
+            continue
+        ts = str(evt.get("ts") or "")
+        if not ts or ts < cutoff_str:
+            continue
+        verdict = str(evt.get("verdict") or "")
+        if verdict in counts:
+            counts[verdict] += 1
+    return counts
 
 
 def operator_queue_pending_count(cfg: Config) -> int:
@@ -2378,6 +2477,86 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             bytes=len(goal_content),
         )
         return
+    if op == "classify":
+        # TB-189: operator-authored retrospective verdict. Two writes
+        # at drain time:
+        #   1. The audit-line to operator_log.md
+        #      (`<ts> — classified TB-N impact=<verdict>: <reason>`),
+        #      symmetric to the reject branch's richer audit line —
+        #      written by `_append_operator_audit_line`'s `classify`
+        #      branch using the verdict / reason from the queue record.
+        #      Standalone authoritative trail; ideation Step 0 reads
+        #      operator_log.md and learns from this line.
+        #   2. The per-proposal record's `impact` block under
+        #      `.cc-autopilot/ideation_proposals/<TB-N>.json` (TB-188).
+        #      Tolerates missing record file (legacy proposals from
+        #      before TB-188 landed; operator-driven adds without the
+        #      `review` marker; etc.) — emits `classify_record_missing`
+        #      to events.jsonl and proceeds. The operator_log line is
+        #      authoritative; the per-proposal record is a structured
+        #      signal feeding ideation's later track-record block.
+        # No board mutation — the verb is metadata-only. We still emit
+        # a `task_classified` event so events.jsonl carries a structured
+        # audit trail (read by `cmd_status` to count classifications in
+        # the last 30 days).
+        tid = args.get("task_id", "")
+        verdict = args.get("verdict", "")
+        reason = args.get("reason", "") or ""
+        if not tid:
+            raise RuntimeError("classify op missing task_id")
+        if verdict not in IMPACT_VERDICTS:
+            # Defensive — the queue-append handler validates this, but
+            # a hand-crafted record (legacy / partial-write recovery)
+            # could carry a bad verdict. Reject loudly here so a future
+            # ideation cycle doesn't read a corrupted `impact` block.
+            raise RuntimeError(
+                f"classify op verdict {verdict!r} not in IMPACT_VERDICTS"
+            )
+        events.append(
+            cfg.events_file,
+            "task_classified",
+            task=tid,
+            verdict=verdict,
+            reason=reason,
+        )
+        # Per-proposal record amend. Best-effort: a missing record
+        # (legacy TB-N from before TB-188 landed) is logged + skipped.
+        target = proposal_record_path(cfg, tid)
+        if not target.exists():
+            events.append(
+                cfg.events_file,
+                "classify_record_missing",
+                task=tid,
+                verdict=verdict,
+            )
+            return
+        try:
+            record = json.loads(target.read_text())
+        except (OSError, json.JSONDecodeError):
+            events.append(
+                cfg.events_file,
+                "classify_record_unreadable",
+                task=tid,
+                verdict=verdict,
+            )
+            return
+        if not isinstance(record, dict):
+            events.append(
+                cfg.events_file,
+                "classify_record_unreadable",
+                task=tid,
+                verdict=verdict,
+            )
+            return
+        record["impact"] = {
+            "verdict": verdict,
+            "classified_at": _dt.datetime.now(_dt.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            "reason": reason,
+        }
+        _atomic_write_json(target, record)
+        return
     if op == "approve":
         # TB-142: drain-side approve. Shares `_approve_review_token` with
         # `do_board_edit({"action":"approve",...})` (the idle-path entry)
@@ -2509,6 +2688,20 @@ def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
         lines.append(
             f"- {ts} — rejected ideation proposal{arrow}"
             f"{title_part}: {reason}\n"
+        )
+    if op == "classify":
+        # TB-189: in addition to the standard `applied operator-queued
+        # classify → TB-N` audit line above (so the classify vs. other
+        # ops distinction shows up in the verb), emit the richer
+        # `<ts> — classified TB-N impact=<verdict>: <reason>` line that
+        # future ideation cycles read as the operator-authored signal
+        # stream goal.md L61-76 names. Empty reason renders without a
+        # trailing colon-space-empty (collapses to just `impact=<verdict>`).
+        verdict = args.get("verdict", "") or ""
+        c_reason = (args.get("reason") or "").strip()
+        c_reason_part = f": {c_reason}" if c_reason else ""
+        lines.append(
+            f"- {ts} — classified {task} impact={verdict}{c_reason_part}\n"
         )
     with log_path.open("a") as f:
         for line in lines:

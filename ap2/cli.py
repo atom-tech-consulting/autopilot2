@@ -179,6 +179,17 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
 
     janitor_counts = _recent_finding_counts(cfg)
     janitor_findings = sum(janitor_counts.values())
+    # TB-189: count operator-authored impact verdicts (`task_classified`
+    # events) in the last 30 days, broken down by verdict. Operators
+    # learn faster when "we kept calling these proposals pro-forma" is
+    # visible at-a-glance — same surfacing pattern as
+    # `pending_review` / `janitor_findings` (counters operators glance
+    # at on every status check). Empty status (no classifications in
+    # the window) renders as zeros across all three keys in JSON; the
+    # text branch omits the line entirely so a fresh project doesn't
+    # grow zero-noise.
+    classifications_30d = tools.classifications_last_30d_by_verdict(cfg)
+    classifications_30d_total = sum(classifications_30d.values())
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -227,6 +238,13 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # ambiguous independently. Always all three keys, defaulting
             # to 0.
             "janitor_findings_by_verdict": janitor_counts,
+            # TB-189: operator-authored impact verdicts in the last 30
+            # days (sourced from `task_classified` events). Always all
+            # three keys (`advanced-goal` / `pro-forma` / `unclear`),
+            # defaulting to 0 — so machine consumers always see the
+            # full shape regardless of activity. The text branch below
+            # omits the line entirely when total is 0.
+            "classifications_last_30d_by_verdict": classifications_30d,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -261,6 +279,20 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(
             f"review:   {pending_review} pending — {ids_line}\n"
             f"          (`ap2 approve TB-N`)"
+        )
+    if classifications_30d_total:
+        # TB-189: render the impact-verdict counts as a single compact
+        # line so the operator sees the trend at-a-glance. Format
+        # mirrors the briefing's pin: `classifications last 30d:
+        # advanced-goal=<n>, pro-forma=<m>, unclear=<k>`. Only emitted
+        # when at least one verdict exists in the window — fresh
+        # projects don't grow a zero-line.
+        c = classifications_30d
+        print(
+            f"classifications last 30d: "
+            f"advanced-goal={c['advanced-goal']}, "
+            f"pro-forma={c['pro-forma']}, "
+            f"unclear={c['unclear']}"
         )
     if janitor_findings:
         # TB-177 + TB-178: surface stranded git state without making the
@@ -960,6 +992,63 @@ def cmd_reject(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_classify(cfg: Config, args: argparse.Namespace) -> int:
+    """Record an operator's retrospective impact verdict on a shipped
+    proposal (TB-189).
+
+    Routes through the operator queue rather than mutating
+    operator_log.md / per-proposal records directly because the daemon
+    drains the queue under `board_file_lock` between tick stages — the
+    same channel the other operator-authored verbs (reject / approve /
+    delete / update_goal) use, so the audit trail and conflict semantics
+    stay uniform. The drain-side handler:
+
+      - Writes `<ts> — classified TB-N impact=<verdict>: <reason>` to
+        operator_log.md (the standalone authoritative trail; ideation
+        Step 0 reads this).
+      - Appends an `impact` block to
+        `.cc-autopilot/ideation_proposals/<TB-N>.json` (the structured
+        signal feeding ideation's later track-record block — TB-188).
+        Tolerates missing record file (legacy / non-ideation tasks).
+      - Emits a `task_classified` event so events.jsonl carries the
+        structured audit trail; `ap2 status` reads recent events to
+        count classifications in the last 30 days.
+
+    `--impact` is required and must be one of `IMPACT_VERDICTS` (the CLI
+    exits non-zero before queueing on any other value). `--reason` is
+    optional but encouraged (the verdict by itself is signal; a reason
+    converts it into a learnable signal).
+
+    Operator authority by design: there is no LLM auto-classification
+    path. The operator IS the source of truth for the impact verdict —
+    that's the whole point of the surface (goal.md L61-76).
+    """
+    if args.impact not in tools.IMPACT_VERDICTS:
+        print(
+            f"ap2 classify: --impact must be one of "
+            f"{list(tools.IMPACT_VERDICTS)}; got {args.impact!r}",
+            file=sys.stderr,
+        )
+        return 1
+    payload: dict = {
+        "op": "classify",
+        "task_id": args.task_id,
+        "verdict": args.impact,
+    }
+    if args.reason is not None:
+        payload["reason"] = args.reason
+    res = tools.do_operator_queue_append(cfg, payload)
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print(
+        f"queued classify {args.task_id} impact={args.impact} "
+        f"(will land at next tick; verdict written to operator_log.md "
+        f"and the per-proposal record)"
+    )
+    return 0
+
+
 def cmd_ideate(cfg: Config, args: argparse.Namespace) -> int:
     """Manually trigger an ideation pass on the daemon's next tick (TB-159).
 
@@ -1551,6 +1640,38 @@ def build_parser() -> argparse.ArgumentParser:
              "placeholder, itself a signal to ideation.",
     )
     s.set_defaults(func=cmd_reject)
+
+    s = sub.add_parser(
+        "classify",
+        help="record an operator's retrospective impact verdict on a "
+             "shipped proposal (TB-189): writes "
+             "`<ts> — classified TB-N impact=<verdict>: <reason>` to "
+             "operator_log.md AND appends an `impact` block to the "
+             "per-proposal record from TB-188. The operator-authored "
+             "signal stream goal.md L61-76 anchors signal collection "
+             "to. Routed through the operator queue.",
+    )
+    s.add_argument("task_id")
+    s.add_argument(
+        "--impact",
+        required=True,
+        choices=list(tools.IMPACT_VERDICTS),
+        help="operator's verdict on the proposal's impact (one of: "
+             f"{', '.join(tools.IMPACT_VERDICTS)}). `advanced-goal` = "
+             "the proposal substantively moved the goal forward; "
+             "`pro-forma` = it satisfied validators but did not move "
+             "the goal forward (the failure mode goal.md L66-76 names); "
+             "`unclear` = impact not yet legible.",
+    )
+    s.add_argument(
+        "--reason",
+        default=None,
+        help="single-line reason captured in operator_log.md and the "
+             "per-proposal record's `impact.reason`. Optional but "
+             "encouraged — the verdict by itself is signal; a reason "
+             "converts it into a learnable signal.",
+    )
+    s.set_defaults(func=cmd_classify)
 
     s = sub.add_parser(
         "ideate",

@@ -1916,3 +1916,348 @@ def test_queue_append_update_goal_accepts_placeholder_anchors(cfg: Config):
         cfg, {"op": "update_goal", "goal_content": placeholder}
     )
     assert not res.get("isError"), res
+
+
+# ---------------------------------------------------------------------------
+# TB-189: `classify` op — operator-authored retrospective verdict on a
+# shipped proposal. Writes an audit line to operator_log.md AND appends
+# an `impact` block to the per-proposal record from TB-188. Tolerates
+# missing per-proposal record (legacy / non-ideation tasks).
+
+
+def test_operator_queue_ops_includes_classify():
+    """Pin the constant directly so a refactor can't silently drop the
+    op (TB-189)."""
+    assert "classify" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_impact_verdicts_stable():
+    """Pin `IMPACT_VERDICTS` directly — the per-proposal record's
+    `impact.verdict` field, the operator_log line shape, and the
+    status counter keys all rely on these literal strings."""
+    assert tools.IMPACT_VERDICTS == ("advanced-goal", "pro-forma", "unclear")
+
+
+def test_queue_append_classify_rejects_unknown_verdict(cfg: Config):
+    """Verdict must be one of `IMPACT_VERDICTS`; anything else gets
+    refused at append time with a message naming the valid set."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-1900", title="shipped")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "classify", "task_id": "TB-1900", "verdict": "bogus"},
+    )
+    assert res.get("isError")
+    text = res["content"][0]["text"]
+    assert "advanced-goal" in text
+    assert "pro-forma" in text
+    assert "unclear" in text
+
+
+def test_queue_append_classify_rejects_missing_task_id(cfg: Config):
+    """Symmetry with reject / delete — task_id is required."""
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "classify", "verdict": "advanced-goal"},
+    )
+    assert res.get("isError")
+    assert "task_id is required" in res["content"][0]["text"]
+
+
+def test_queue_append_classify_rejects_unknown_task(cfg: Config):
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": "TB-99999",
+            "verdict": "unclear",
+        },
+    )
+    assert res.get("isError")
+    assert "not on board" in res["content"][0]["text"]
+
+
+def test_queue_append_classify_rejects_multiline_reason(cfg: Config):
+    """TB-134 single-line gate fires for reason — a multi-line reason
+    would split the operator_log.md line shape."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-1901", title="shipped")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": "TB-1901",
+            "verdict": "advanced-goal",
+            "reason": "two\nlines",
+        },
+    )
+    assert res.get("isError")
+    assert "single line" in res["content"][0]["text"]
+
+
+def test_queue_append_classify_queues_record_with_verdict_and_reason(cfg: Config):
+    """The queue record carries verdict + reason + task_id so the drain-
+    side has everything it needs (no board re-lookup, no operator_log
+    re-grep)."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-1902", title="shipped")
+    board.save()
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": "TB-1902",
+            "verdict": "advanced-goal",
+            "reason": "closed the gap ideation flagged",
+        },
+    )
+    body = _unwrap(res)
+    assert body["op"] == "classify"
+    queue_path = tools.operator_queue_path(cfg)
+    lines = [
+        json.loads(ln)
+        for ln in queue_path.read_text().splitlines()
+        if ln.strip()
+    ]
+    assert len(lines) == 1
+    rec = lines[0]
+    assert rec["op"] == "classify"
+    assert rec["args"]["task_id"] == "TB-1902"
+    assert rec["args"]["verdict"] == "advanced-goal"
+    assert rec["args"]["reason"] == "closed the gap ideation flagged"
+
+
+def test_classify_drain_appends_to_proposal_record(cfg: Config):
+    """Briefing-spec verification: draining a `classify` op appends an
+    `impact` block (`verdict`, `classified_at`, `reason`) to
+    `.cc-autopilot/ideation_proposals/<TB-N>.json`."""
+    # Seed a per-proposal record so the drain has something to amend.
+    tb_id = "TB-1910"
+    record_path = tools.write_ideation_proposal_record(
+        cfg,
+        tb_id=tb_id,
+        blocked_on="review",
+        briefing_text=(
+            "# x\n\n## Goal\nfoo\n\nWhy now: bar baz qux quux quuz garply.\n\n"
+            "## Scope\n- f\n\n## Design\nd\n\n"
+            "## Verification\n- `:` — y\n\n## Out of scope\n- z\n"
+        ),
+        briefing_rel=".cc-autopilot/tasks/x.md",
+    )
+    assert record_path is not None and record_path.exists()
+    # Seed the task on the board so the queue-append snapshot accepts it.
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id=tb_id, title="shipped proposal")
+    board.save()
+
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": tb_id,
+            "verdict": "pro-forma",
+            "reason": "no measurable impact on the goal",
+        },
+    )
+    res = tools.drain_operator_queue(cfg)
+    assert res["applied"] == 1
+
+    record = json.loads(record_path.read_text())
+    assert "impact" in record
+    impact = record["impact"]
+    assert impact["verdict"] == "pro-forma"
+    assert impact["reason"] == "no measurable impact on the goal"
+    assert isinstance(impact["classified_at"], str)
+    assert impact["classified_at"].endswith("Z")
+
+
+def test_classify_drain_tolerates_missing_proposal_record(cfg: Config):
+    """Briefing-spec verification: draining a `classify` op for a TB-N
+    without a per-proposal record on disk completes successfully (logs
+    a warning, appends operator_log line, no exception). Legacy
+    proposals from before TB-188 landed are the canonical case."""
+    tb_id = "TB-1911"
+    # Note: no per-proposal record seeded; just the board entry.
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id=tb_id, title="legacy shipped")
+    board.save()
+    # Sanity: record really doesn't exist.
+    assert not tools.proposal_record_path(cfg, tb_id).exists()
+
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": tb_id,
+            "verdict": "unclear",
+            "reason": "downstream signal still maturing",
+        },
+    )
+    res = tools.drain_operator_queue(cfg)
+    assert res["applied"] == 1
+
+    # No record file got created (the drain skipped it gracefully).
+    assert not tools.proposal_record_path(cfg, tb_id).exists()
+    # Warning event landed.
+    evts = events.tail(cfg.events_file, 50)
+    misses = [e for e in evts if e["type"] == "classify_record_missing"]
+    assert any(e["task"] == tb_id for e in misses)
+    # And the operator_log line is still authoritative.
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert f"classified {tb_id} impact=unclear" in log
+    assert "downstream signal still maturing" in log
+
+
+def test_classify_drain_writes_audit_line_with_reason(cfg: Config):
+    """The drain handler writes `<ts> — classified TB-N impact=<verdict>:
+    <reason>` to operator_log.md — symmetric to the TB-152 reject
+    branch's richer audit line, the surface ideation Step 0 reads."""
+    tb_id = "TB-1920"
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id=tb_id, title="shipped")
+    board.save()
+
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": tb_id,
+            "verdict": "advanced-goal",
+            "reason": "moved cycle 12 toward done-when bullet 3",
+        },
+    )
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert (
+        f"classified {tb_id} impact=advanced-goal: "
+        "moved cycle 12 toward done-when bullet 3"
+    ) in log
+    # The standard `applied operator-queued classify → TB-N` line is
+    # also present (verb-vs-other-ops distinction in the audit trail).
+    assert f"applied operator-queued classify → {tb_id}" in log
+
+
+def test_classify_drain_no_reason_omits_reason_part(cfg: Config):
+    """A classify with empty reason renders `<ts> — classified TB-N
+    impact=<verdict>` (no trailing `: <reason>`). The bare verdict is
+    itself signal — operator who classified without a reason."""
+    tb_id = "TB-1921"
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id=tb_id, title="shipped")
+    board.save()
+
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "classify", "task_id": tb_id, "verdict": "pro-forma"},
+    )
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    # Render must be `classified TB-N impact=pro-forma\n` — no trailing
+    # colon-space. We assert the literal line ending so a future tweak
+    # introducing `: ` for empty reasons would trip this test.
+    assert f"classified {tb_id} impact=pro-forma\n" in log
+
+
+def test_classify_drain_emits_task_classified_event(cfg: Config):
+    """Drain emits `task_classified` so events.jsonl carries a
+    structured audit trail. `cmd_status` reads recent events to count
+    classifications in the last 30 days; the event is the source-of-
+    truth for that counter."""
+    tb_id = "TB-1925"
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id=tb_id, title="shipped")
+    board.save()
+
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": tb_id,
+            "verdict": "unclear",
+            "reason": "wait two cycles",
+        },
+    )
+    tools.drain_operator_queue(cfg)
+
+    evts = events.tail(cfg.events_file, 50)
+    classifications = [e for e in evts if e["type"] == "task_classified"]
+    assert any(
+        e["task"] == tb_id
+        and e["verdict"] == "unclear"
+        and e["reason"] == "wait two cycles"
+        for e in classifications
+    )
+
+
+def test_classify_drain_idempotent_on_uuid(cfg: Config):
+    """Replaying an already-applied `classify` record (e.g. crash
+    mid-drain) doesn't write a second `impact` block or a duplicate
+    operator_log line — the operator-queue uuid bookkeeping (TB-131)
+    fences the second drain from re-applying."""
+    tb_id = "TB-1930"
+    record_path = tools.write_ideation_proposal_record(
+        cfg,
+        tb_id=tb_id,
+        blocked_on="review",
+        briefing_text=(
+            "# x\n\n## Goal\nfoo\n\nWhy now: bar baz qux quux quuz garply.\n\n"
+            "## Scope\n- f\n\n## Design\nd\n\n"
+            "## Verification\n- `:` — y\n\n## Out of scope\n- z\n"
+        ),
+        briefing_rel=".cc-autopilot/tasks/x.md",
+    )
+    assert record_path is not None
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id=tb_id, title="shipped")
+    board.save()
+
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "classify",
+            "task_id": tb_id,
+            "verdict": "advanced-goal",
+        },
+    )
+    r1 = tools.drain_operator_queue(cfg)
+    assert r1["applied"] == 1
+    r2 = tools.drain_operator_queue(cfg)
+    assert r2["applied"] == 0
+
+    # Exactly one `task_classified` event total.
+    evts = events.tail(cfg.events_file, 50)
+    classifications = [e for e in evts if e["type"] == "task_classified"]
+    assert len(classifications) == 1
+
+
+def test_classifications_last_30d_by_verdict_aggregates(cfg: Config):
+    """The public helper aggregates `task_classified` events by verdict.
+    Drain three classifies (mixed verdicts) and assert the helper
+    returns the matching counts, plus zeros for unused verdicts."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-1940", title="a")
+    board.add("Complete", task_id="TB-1941", title="b")
+    board.add("Complete", task_id="TB-1942", title="c")
+    board.save()
+
+    for tid, verdict in (
+        ("TB-1940", "advanced-goal"),
+        ("TB-1941", "advanced-goal"),
+        ("TB-1942", "pro-forma"),
+    ):
+        tools.do_operator_queue_append(
+            cfg,
+            {"op": "classify", "task_id": tid, "verdict": verdict},
+        )
+    tools.drain_operator_queue(cfg)
+
+    counts = tools.classifications_last_30d_by_verdict(cfg)
+    assert counts == {
+        "advanced-goal": 2,
+        "pro-forma": 1,
+        "unclear": 0,
+    }

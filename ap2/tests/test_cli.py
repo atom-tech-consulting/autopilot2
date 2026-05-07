@@ -3013,3 +3013,207 @@ def test_cmd_update_goal_missing_file_errors(tmp_path: Path, capsys):
     assert rc == 1
     err = capsys.readouterr().err
     assert "ap2 update-goal" in err
+
+
+# ---------------------------------------------------------------------------
+# TB-189: cmd_classify — operator-authored retrospective verdict on a
+# shipped proposal. Routes through the operator queue; the drain-side
+# writes both an operator_log.md audit line AND an `impact` block to
+# the per-proposal record from TB-188.
+
+
+def test_classify_writes_operator_log_line(tmp_path: Path):
+    """Briefing-spec verification: `ap2 classify TB-N --impact
+    advanced-goal --reason "..."` exits 0, queues a `classify` record,
+    and drains to the expected operator_log.md line shape (`classified
+    TB-N impact=advanced-goal: ...`)."""
+    from ap2.cli import cmd_classify
+
+    cfg = _project(tmp_path)
+    # Seed the task on the board so the queue-append snapshot check
+    # accepts it (cmd_classify validates TB-N is on the board, same
+    # symmetry as reject / delete).
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-840", title="shipped proposal")
+    board.save()
+
+    rc = cmd_classify(
+        cfg,
+        Namespace(
+            task_id="TB-840",
+            impact="advanced-goal",
+            reason="closed the diagnostic gap that ideation flagged in cycle 12",
+        ),
+    )
+    assert rc == 0
+    _drain(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "classified TB-840 impact=advanced-goal" in log
+    assert "closed the diagnostic gap that ideation flagged in cycle 12" in log
+
+
+def test_classify_invalid_verdict_exits_nonzero(tmp_path: Path, capsys):
+    """Briefing-spec verification: `ap2 classify TB-N --impact bogus`
+    exits non-zero and does not queue any record. The CLI validates
+    against `IMPACT_VERDICTS` before reaching the queue-append handler."""
+    from ap2.cli import cmd_classify
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-841", title="any task")
+    board.save()
+
+    rc = cmd_classify(
+        cfg,
+        Namespace(task_id="TB-841", impact="bogus", reason=None),
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "advanced-goal" in err
+    assert "pro-forma" in err
+    # No queue file written (or the queue file is empty of classify ops).
+    queue_path = tools.operator_queue_path(cfg)
+    if queue_path.exists():
+        for line in queue_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            import json as _json
+            rec = _json.loads(line)
+            assert rec.get("op") != "classify", (
+                f"unexpectedly queued a classify rec on bogus verdict: {rec!r}"
+            )
+
+
+def test_classify_without_reason_omits_reason_part(tmp_path: Path):
+    """A classify with `--reason` omitted writes the operator_log line
+    without a trailing colon-space-empty: `classified TB-N
+    impact=<verdict>` (no `: <reason>`). Itself signal — operator who
+    classified without a reason."""
+    from ap2.cli import cmd_classify
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-842", title="quiet classification")
+    board.save()
+
+    rc = cmd_classify(
+        cfg,
+        Namespace(task_id="TB-842", impact="pro-forma", reason=None),
+    )
+    assert rc == 0
+    _drain(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    # The line must NOT carry `: ` after the verdict (no reason → no colon).
+    assert "classified TB-842 impact=pro-forma\n" in log
+
+
+def test_classify_unknown_task_returns_error(tmp_path: Path, capsys):
+    """Symmetry with reject / delete — unknown TB-N is operator error
+    surfaced at append time (the snapshot validation under the board
+    lock)."""
+    from ap2.cli import cmd_classify
+
+    cfg = _project(tmp_path)
+    rc = cmd_classify(
+        cfg,
+        Namespace(task_id="TB-9999", impact="advanced-goal", reason="x"),
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "not on board" in err
+
+
+def test_status_renders_classifications_30d(tmp_path: Path, capsys):
+    """Briefing-spec verification: `ap2 status --json` includes
+    `classifications_last_30d_by_verdict` with the three integer keys.
+    Always-present (zeros for fresh projects); populated after a
+    classify lands."""
+    from ap2.cli import cmd_status, cmd_classify
+    import json as _json
+
+    cfg = _project(tmp_path)
+    # Empty state: JSON carries the dict with zeros.
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    out = _json.loads(capsys.readouterr().out)
+    assert "classifications_last_30d_by_verdict" in out
+    assert out["classifications_last_30d_by_verdict"] == {
+        "advanced-goal": 0,
+        "pro-forma": 0,
+        "unclear": 0,
+    }
+
+    # Now land one classify and re-check.
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-850", title="for the count")
+    board.save()
+    cmd_classify(
+        cfg,
+        Namespace(task_id="TB-850", impact="pro-forma", reason="no diff"),
+    )
+    _drain(cfg)
+    # Drain the cmd_classify "queued classify..." print so capsys.out
+    # below contains ONLY the cmd_status JSON.
+    capsys.readouterr()
+
+    rc = cmd_status(cfg, Namespace(json=True))
+    assert rc == 0
+    out = _json.loads(capsys.readouterr().out)
+    counts = out["classifications_last_30d_by_verdict"]
+    assert counts["pro-forma"] == 1
+    assert counts["advanced-goal"] == 0
+    assert counts["unclear"] == 0
+
+
+def test_status_text_renders_classifications_line_when_present(
+    tmp_path: Path, capsys,
+):
+    """Text-mode status renders the `classifications last 30d:
+    advanced-goal=<n>, pro-forma=<m>, unclear=<k>` line when at least
+    one classification lives in the window. Empty windows skip the
+    line entirely (no zero-noise on fresh projects)."""
+    from ap2.cli import cmd_status, cmd_classify
+
+    cfg = _project(tmp_path)
+    # Empty window: the line is absent.
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "classifications last 30d" not in out
+
+    # Populated window: the line shows the counts.
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-851", title="advanced one")
+    board.add("Complete", task_id="TB-852", title="pro-forma one")
+    board.save()
+    cmd_classify(
+        cfg, Namespace(task_id="TB-851", impact="advanced-goal", reason="ok"),
+    )
+    cmd_classify(
+        cfg, Namespace(task_id="TB-852", impact="pro-forma", reason=None),
+    )
+    _drain(cfg)
+    # Drop the cmd_classify queued-classify prints from capsys so the
+    # status text comparison below is clean.
+    capsys.readouterr()
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "classifications last 30d:" in out
+    assert "advanced-goal=1" in out
+    assert "pro-forma=1" in out
+    assert "unclear=0" in out
+
+
+def test_impact_verdicts_enum_stable():
+    """Briefing-spec pin: the `IMPACT_VERDICTS` tuple is exposed and
+    the three values are exactly what goal.md L61-76 names. Adding
+    values is welcome (one-line tuple edit) but must not silently
+    rename or drop any of the three current values — downstream
+    consumers (per-proposal record `impact.verdict`, operator_log
+    line shape, status counter keys) rely on the literal strings."""
+    assert tools.IMPACT_VERDICTS == ("advanced-goal", "pro-forma", "unclear")

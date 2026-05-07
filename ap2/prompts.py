@@ -571,6 +571,38 @@ def build_mattermost_prompt(
         # `ap2/tools.py`) and the drain-side handler are already in
         # place; this bullet is the prompt-side teaching that routes a
         # chat mention through to a queued `ideate` op.
+        # TB-189: pinned phrasing — `tests/test_prompts.py` asserts the
+        # verb description appears in the prompt body so future edits
+        # can't silently drop chat parity with the
+        # `ap2 classify TB-N --impact <verdict>` CLI added in TB-189.
+        # The queue op (`OPERATOR_QUEUE_OPS` in `ap2/tools.py`) and the
+        # drain-side handler are already in place; this bullet is the
+        # prompt-side teaching that routes a chat mention through to a
+        # queued `classify` op. Verdict enum names (`advanced-goal` /
+        # `pro-forma` / `unclear`) come from `tools.IMPACT_VERDICTS` —
+        # adding values is a one-line tuple edit there + a phrasing
+        # update here.
+        "- **Operator impact verdict** (TB-189, parity with "
+        "`ap2 classify TB-N --impact <verdict> [--reason \"...\"]`): "
+        "if the user retroactively classifies a shipped proposal "
+        "(recognize: \"@claude-bot classify TB-N <verdict>\" / "
+        "\"@claude-bot classify TB-N <verdict> reason: ...\" / "
+        "paraphrases like \"call TB-N pro-forma\" / \"mark TB-N "
+        "advanced-goal\"), route via `operator_queue_append({\"op\": "
+        "\"classify\", \"task_id\": \"TB-N\", \"verdict\": \"<v>\", "
+        "\"reason\": \"...\"})`. `<verdict>` MUST be one of "
+        "`advanced-goal` (proposal substantively moved the goal "
+        "forward), `pro-forma` (proposal satisfied validators but did "
+        "not move the goal forward — the failure mode goal.md L66-76 "
+        "names), or `unclear` (impact not yet legible) — the queue-"
+        "append handler refuses any other value. The drain-side "
+        "writes `<ts> — classified TB-N impact=<verdict>: <reason>` "
+        "to operator_log.md (the operator-authored signal stream "
+        "goal.md L61-76 anchors signal collection to) AND appends an "
+        "`impact` block to the per-proposal record from TB-188. The "
+        "verb is operator-authored by design — never auto-classify; "
+        "if the user is asking a question (\"is TB-N pro-forma?\") "
+        "answer via `mattermost_reply`, do NOT route to `classify`.",
         "- **Manual ideation trigger** (TB-176, parity with `ap2 ideate [--force]` from TB-159): if the user asks to trigger an ideation pass (recognize: \"@claude-bot ideate\" / \"@claude-bot ideate force\" / \"@claude-bot ideate --force\" / paraphrases like \"trigger ideation now\" / \"run ideation\"), route via `operator_queue_append({\"op\": \"ideate\", \"force\": false})` for the unforced form OR `operator_queue_append({\"op\": \"ideate\", \"force\": true})` when the operator says `force` / `--force`. The verb is a manual ideation trigger that bypasses the natural cooldown / `AP2_IDEATION_DISABLED` / non-empty-Ready-or-Backlog gates. TB-194: the queue-append handler queues this op regardless of board state (Active included) — by drain time the loop topology guarantees Active is empty, and the previously-feared concurrent-SDK race is unreachable. The `force` flag is preserved as audit-only metadata on the queue payload; pass it through if the operator says `force` so the audit trail records their intent, but it no longer affects routing.",
         "- If the user asks for ops the queue doesn't cover (e.g. `freeze` → `move_to_frozen`, `move_to_complete`): reply via `mattermost_reply` explaining the request needs an operator CLI action.",
         "- If the user asks to pause/resume the daemon: use `daemon_control`.",

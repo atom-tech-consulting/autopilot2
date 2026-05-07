@@ -485,6 +485,52 @@ def test_mattermost_prompt_pins_approve_tb_n_recognition(tmp_path):
     assert "@blocked:review" in p
 
 
+def test_mattermost_prompt_pins_classify_verb_recognition(tmp_path):
+    """TB-189: the MM handler agent must recognize "classify TB-N
+    <verdict>" as an operator command (chat parity with the
+    `ap2 classify TB-N --impact <verdict>` CLI added in TB-189) and
+    route it through `operator_queue_append` with `op="classify"`,
+    the right `task_id`, `verdict`, and an optional `reason`. Pin the
+    cross-reference, the recognized phrasing, the queue-routing
+    instruction, AND the three verdict enum values so a future prompt
+    rewrite can't silently drop the chat surface or rename a verdict
+    out from under operators."""
+    cfg = _cfg(tmp_path)
+    msg = {
+        "id": "post-1",
+        "channel_id": "ch-abc",
+        "channel_name": "ap2",
+        "user": "li.zhang",
+        "text": "@claude-bot classify TB-9 advanced-goal",
+        "thread_id": "",
+    }
+    p = build_mattermost_prompt(cfg, msg)
+    # Cross-ref to the task.
+    assert "TB-189" in p
+    # The verb itself is named.
+    assert "classify TB-N" in p
+    # The op-name routing pin — same form as approve / reject / ideate pins.
+    assert '"classify"' in p or "op=\"classify\"" in p
+    # The queue is the routing channel (no separate MCP tool).
+    assert "operator_queue_append" in p
+    # All three verdict enum values must appear so the handler can
+    # pick the right one from the operator's literal phrasing.
+    assert "advanced-goal" in p
+    assert "pro-forma" in p
+    assert "unclear" in p
+    # Operator authority by design — the prompt must dissuade auto-
+    # classification (the verb is meaningful BECAUSE the operator is
+    # the source of truth; an LLM-inferred verdict isn't the same
+    # signal). Match a tolerant phrase covering "operator-authored" /
+    # "never auto-classify" — exact wording can drift but the intent
+    # must remain.
+    p_lower = p.lower()
+    assert "operator-authored" in p_lower or "never auto-classify" in p_lower
+    # operator_log.md is named so the handler knows where the verdict
+    # lands (and that goal.md L61-76 anchors signal collection there).
+    assert "operator_log.md" in p
+
+
 def test_mattermost_prompt_pins_ideate_verb_recognition(tmp_path):
     """TB-176: the MM handler agent must recognize "ideate" / "ideate force"
     as an operator command (chat parity with the `ap2 ideate [--force]`
