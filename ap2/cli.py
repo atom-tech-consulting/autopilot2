@@ -970,13 +970,14 @@ def cmd_ideate(cfg: Config, args: argparse.Namespace) -> int:
     (same pattern as `ap2 add` / `approve` / `reject` / `unfreeze` /
     `delete` / `update`).
 
-    `--force` overrides the Active-task refusal — by default `cmd_ideate`
-    refuses when a task is currently in flight (concurrent task-agent +
-    control-agent SDK runs share the same slot; TB-122 split
-    mattermost-handler vs task agent for exactly this reason). The
-    natural cooldown clock is still bumped after the forced run, so
-    repeated `ap2 ideate` invocations won't get lap the next natural
-    cron-driven fire.
+    TB-194: the queue-append handler no longer rejects this op when a
+    task happens to be Active. By the loop-topology invariant the
+    drain runs as `_tick`'s first stage with Active already cleared
+    by the previous tick's synchronous `run_task`, so the previously-
+    feared concurrent-SDK interleaving is unreachable. `--force` is
+    accepted as a no-op for the routing decision (audit-only metadata
+    on the queue payload); the flag is preserved for one release so
+    callers passing it don't break.
 
     The CLI is non-blocking: it returns immediately after the queue
     append; the daemon picks up the signal in the next tick (≤30s by
@@ -1556,21 +1557,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="manually trigger an ideation pass (TB-159): bypasses the "
              "natural empty-board / cooldown / `AP2_IDEATION_DISABLED` "
              "gates. Routed through the operator queue; the daemon "
-             "runs ideation on its next tick (≤30s). Refused when a "
-             "task is currently Active unless `--force` is passed "
-             "(concurrent task-agent + control-agent SDK runs share "
-             "the same slot). The natural cooldown clock still bumps "
-             "after the forced run, so back-to-back `ap2 ideate` "
-             "calls don't lap the next cron-driven fire.",
+             "runs ideation on its next tick (≤30s). TB-194: queues "
+             "regardless of board state — the prior Active-task "
+             "refusal was guarding a race the loop topology already "
+             "prevents (drain runs before task dispatch, with Active "
+             "cleared by the previous tick's synchronous `run_task`). "
+             "The natural cooldown clock still bumps after the forced "
+             "run, so back-to-back `ap2 ideate` calls don't lap the "
+             "next cron-driven fire.",
     )
     s.add_argument(
         "--force",
         action="store_true",
-        help="override the Active-task refusal — operator escape hatch "
-             "when you really need ideation to fire while a task is "
-             "in flight. The disable knob and cooldown are bypassed by "
-             "default (the verb's whole point); --force is purely for "
-             "the Active-section check.",
+        help="TB-194: no-op for the routing decision (kept on the "
+             "queue payload as audit metadata only). Pre-TB-194 this "
+             "overrode an at-append-time Active-task refusal that "
+             "has since been removed; the flag is preserved for one "
+             "release so callers passing it don't break.",
     )
     s.set_defaults(func=cmd_ideate)
 

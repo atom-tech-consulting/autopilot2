@@ -1304,13 +1304,19 @@ def test_drain_reject_audit_line_distinct_from_delete(cfg: Config):
 
 
 # ---------------------------------------------------------------------------
-# TB-159: `ideate` op — manual operator trigger for an ideation pass that
-# bypasses the natural empty-board / cooldown / `AP2_IDEATION_DISABLED`
-# gates. The queue-append handler enforces the Active-task gate (refused
-# without `force=true`); the drain-side records an `ideation_forced`
-# audit event AND signals the daemon (via `force_ideate=True` in the
-# return dict) to run `ideation.force_ideate` after the drain releases
-# the board lock.
+# TB-159 / TB-194: `ideate` op — manual operator trigger for an ideation
+# pass that bypasses the natural empty-board / cooldown /
+# `AP2_IDEATION_DISABLED` gates. TB-194 removed the at-append-time
+# Active-task gate: the queue-append handler now queues unconditionally
+# (no board-state read in the `ideate` branch), because the loop-topology
+# invariant guarantees Active is empty by drain time (the prior tick's
+# synchronous `run_task` cleared Active before the next tick's drain
+# runs, and the post-drain `force_ideate` SDK call is sequenced before
+# any new task dispatch in the same `_tick`). The `force` arg is now
+# audit-only metadata on the queue payload. The drain-side still
+# records an `ideation_forced` event AND signals the daemon (via
+# `force_ideate=True` in the return dict) to run `ideation.force_ideate`
+# after the drain releases the board lock.
 
 
 def test_operator_queue_ops_includes_ideate():
@@ -1349,31 +1355,55 @@ def test_queue_append_ideate_carries_force_flag(cfg: Config):
     assert rec["args"]["force"] is True
 
 
-def test_queue_append_ideate_refuses_when_active_present(cfg: Config):
-    """The Active hard gate is enforced at queue-append time (not just
-    in the CLI) so the chat-side `operator_queue_append({"op":"ideate"})`
-    surface gets the same refusal."""
+def test_queue_append_ideate_queues_with_active_present_no_force(cfg: Config):
+    """TB-194: with a task in Active, `ideate` (no `force`) now queues
+    successfully — the at-append-time Active gate has been removed.
+    The drain-side handles the rest; by drain time Active is empty by
+    loop-topology invariant. Pre-TB-194 this was a hard reject."""
     board = Board.load(cfg.tasks_file)
     board.add("Active", task_id="TB-2100", title="in flight")
     board.save()
 
     res = tools.do_operator_queue_append(cfg, {"op": "ideate"})
-    assert res.get("isError")
-    text = res["content"][0]["text"]
-    assert "Active" in text
-    assert "force" in text.lower()
-    # No queue record should have been appended.
+    body = _unwrap(res)
+    assert body["op"] == "ideate"
+
     queue_path = tools.operator_queue_path(cfg)
-    if queue_path.exists():
-        lines = [ln for ln in queue_path.read_text().splitlines() if ln.strip()]
-        assert lines == []
+    lines = [ln for ln in queue_path.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec["op"] == "ideate"
+    assert rec["args"] == {"force": False}
 
 
-def test_queue_append_ideate_force_overrides_active_gate(cfg: Config):
-    """`force=true` lets the operator override the Active-task refusal
-    (escape hatch). The queue record still lands."""
+def test_queue_append_ideate_with_active_drain_emits_forced_signal(cfg: Config):
+    """TB-194: queue an `ideate` while a task is Active, then drain.
+    The drain still emits `ideation_forced` and surfaces
+    `force_ideate=True` on the return dict — the routing pathway is
+    unchanged once the at-append-time gate is removed."""
     board = Board.load(cfg.tasks_file)
-    board.add("Active", task_id="TB-2110", title="in flight, forced")
+    board.add("Active", task_id="TB-2105", title="in flight")
+    board.save()
+
+    tools.do_operator_queue_append(cfg, {"op": "ideate"})
+    res = tools.drain_operator_queue(cfg)
+
+    assert res["applied"] == 1
+    assert res["force_ideate"] is True
+
+    evts = events.tail(cfg.events_file, 20)
+    forced = [e for e in evts if e["type"] == "ideation_forced"]
+    assert len(forced) == 1
+    assert forced[0]["force"] is False
+
+
+def test_queue_append_ideate_force_still_accepted_as_audit_metadata(cfg: Config):
+    """TB-194: `force=true` is now audit-only metadata on the queue
+    payload (no longer needed for the routing decision). The flag still
+    rides through — the operator's intent is preserved on the record
+    and surfaces on the `ideation_forced` event for grep-ability."""
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-2110", title="in flight, force-flagged")
     board.save()
 
     res = tools.do_operator_queue_append(

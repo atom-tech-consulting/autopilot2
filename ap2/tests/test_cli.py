@@ -2793,30 +2793,39 @@ def test_cmd_ideate_appends_queue_record_with_force_false_default(tmp_path: Path
     assert rec["args"] == {"force": False}
 
 
-def test_cmd_ideate_refuses_when_active_task_present(tmp_path: Path, capsys):
-    """Default refusal: a non-empty Active section (task in flight) blocks
-    forced ideate. The error message names `--force`. No queue record is
-    appended."""
+def test_cmd_ideate_queues_when_active_task_present_no_force(
+    tmp_path: Path, capsys
+):
+    """TB-194: with a task in Active, `ap2 ideate` (no `--force`) now
+    queues successfully — the at-append-time Active gate has been
+    removed (the loop topology already prevents the race the gate was
+    guarding). Pre-TB-194 this was a hard rc=1 reject."""
     cfg = _project(tmp_path)
     board = Board.load(cfg.tasks_file)
     board.add("Active", task_id="TB-2000", title="in flight")
     board.save()
 
     rc = cmd_ideate(cfg, Namespace(force=False))
-    assert rc == 1
+    assert rc == 0
     err = capsys.readouterr().err
-    assert "Active" in err
-    assert "--force" in err
+    assert err == ""
 
     queue_path = tools.operator_queue_path(cfg)
-    if queue_path.exists():
-        lines = [ln for ln in queue_path.read_text().splitlines() if ln.strip()]
-        assert lines == [], "no queue record should have been appended"
+    import json as _json
+
+    lines = [ln for ln in queue_path.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    rec = _json.loads(lines[0])
+    assert rec["op"] == "ideate"
+    assert rec["args"] == {"force": False}
 
 
-def test_cmd_ideate_force_overrides_active_refusal(tmp_path: Path):
-    """`ap2 ideate --force` bypasses the Active-task refusal and queues
-    the record. `force=true` rides on the queue payload."""
+def test_cmd_ideate_force_still_queues_with_active(tmp_path: Path):
+    """TB-194: `--force` is now a no-op for the routing decision but
+    still rides the queue payload as audit metadata. `ap2 ideate
+    --force` queues a record with `args.force=true` regardless of
+    board state — same outcome as no-force, with the operator-intent
+    flag preserved on the queue record."""
     cfg = _project(tmp_path)
     board = Board.load(cfg.tasks_file)
     board.add("Active", task_id="TB-2010", title="forced through")

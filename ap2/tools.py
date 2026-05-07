@@ -1495,10 +1495,15 @@ OPERATOR_QUEUE_OPS = (
     # would block the board lock for minutes); instead it records an
     # `ideation_forced` event and signals via `drain_operator_queue`'s
     # return dict that the daemon should run `force_ideate` on this
-    # tick after the drain completes. Pre-validation in
-    # `do_operator_queue_append` refuses the op when Active is
-    # non-empty (concurrent task-agent + control-agent SDK runs are
-    # unsafe — same precedent as TB-122) unless `force=true` is set.
+    # tick after the drain completes. TB-194: the queue-append handler
+    # has NO board-state read for `ideate` — Active-emptiness is a
+    # loop-topology invariant by drain time (the prior `_tick`'s
+    # synchronous `run_task` cleared Active back to Complete/Backlog/
+    # Frozen before the next `_tick`'s drain stage runs) and `_tick`
+    # sequences the post-drain `force_ideate` SDK call before any new
+    # task dispatch, so the previously-feared "concurrent task-agent +
+    # control-agent SDK runs" interleaving is unreachable. The `force`
+    # arg is preserved on the queue payload as audit metadata only.
     "ideate",
     # TB-193: full-file replacement of `goal.md`. Routed through the
     # queue (rather than letting the operator edit goal.md directly
@@ -1714,30 +1719,28 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             task_id=preallocated_task_id,
         )
     elif op == "ideate":
-        # TB-159: manual ideation trigger. The op carries no task_id —
-        # snapshot validation is purely the Active hard gate (concurrent
-        # task-agent + control-agent SDK runs share the same in-process
-        # slot; TB-122 split mattermost-handler vs task agent for
-        # exactly this reason). `force=true` overrides the Active check
-        # — operator escape hatch. The drain side does NOT invoke
+        # TB-159 / TB-194: manual ideation trigger. The op carries no
+        # task_id — append-time validation is intentionally minimal
+        # (no board-state read). The drain-side does NOT invoke
         # ideation (that would hold the board lock for minutes); it
         # only emits the `ideation_forced` audit event and signals the
         # daemon to run `force_ideate` after the drain completes.
+        #
+        # TB-194: the prior at-append-time Active hard gate (with
+        # `force=true` as escape hatch) has been removed. The
+        # rationale was guarding "concurrent task-agent + control-
+        # agent SDK runs share the same in-process slot", but the
+        # interleaving is benign by current loop topology: the drain
+        # runs as `_tick`'s first stage, BEFORE task dispatch, AFTER
+        # the previous tick's synchronous `run_task` already cleared
+        # Active back to Complete/Backlog/Frozen. The post-drain
+        # `force_ideate` SDK call also runs within the same `_tick`,
+        # sequentially before task dispatch — there's no path for it
+        # to overlap a task-agent SDK run on the same loop. The
+        # `force` arg is captured on the queue payload as audit-only
+        # metadata (kept for one release; deprecation can come later
+        # if the noise accumulates).
         force = bool(args.get("force"))
-        if not force:
-            with board_file_lock(cfg.tasks_file):
-                board = Board.load(cfg.tasks_file)
-                active_present = (
-                    next(board.iter_tasks(section="Active"), None) is not None
-                )
-            if active_present:
-                return _err(
-                    "a task is currently Active — refusing forced ideate "
-                    "without --force (concurrent task-agent + control-"
-                    "agent SDK runs share the same slot). Pass --force "
-                    "to override at your own risk, or wait for the task "
-                    "to land."
-                )
         rec_args = {"force": force}
     elif op == "update_goal":
         # TB-193: full-file replacement of `goal.md`. The op carries the

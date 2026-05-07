@@ -554,9 +554,11 @@ def test_mattermost_prompt_ideate_recognizes_force_phrasing(tmp_path):
     # three gates the CLI bypasses.
     p_lower = p.lower()
     assert "cooldown" in p_lower or "ap2_ideation_disabled" in p_lower
-    # The Active-task refusal is named so the agent doesn't misinterpret
-    # a drain-side error as a bug. The drain-side error message uses
-    # "Active" — pin that substring.
+    # TB-194 narrative: the prompt explains that the queue-append
+    # handler no longer rejects this op when a task is Active (so the
+    # agent doesn't carry stale "I might get rejected" reasoning into
+    # its mattermost_reply). "Active" must appear in the bullet so
+    # this teaching is preserved verbatim.
     assert "Active" in p
 
 
