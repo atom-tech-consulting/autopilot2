@@ -407,3 +407,9 @@
 - **Summary:** Prior commit 0701a35 already implemented TB-189 in full (CLI + chat verb + drain handler + status surfacing + 1187 tests pass); the only failing verifier bullet was a malformed-Python shell-bullet in the briefing (`(advanced-goal, pro-forma, unclear)` — unquoted, NameErrors on `advanced`). Added quotes so the verifier can actually evaluate the assertion against the (already-correct) enum.
 - **Files:** .cc-autopilot/tasks/ap2-classify-tb-n-delete-test-verdict-op.md
 - **Tests:** pass
+
+## [2026-05-07] TB-195: Backfill `.cc-autopilot/ideation_proposals/<TB-N>.json` records for historical ideation-authored proposals
+- **Commit:** `f356e20`
+- **Summary:** Added `ap2 backfill-proposals [--dry-run]` operator CLI + new `ap2/backfill.py` (parse_operator_log_lines + backfill_proposals) that scans operator_log.md, briefing files, and events.jsonl to write per-proposal records for ideation-authored TB-Ns missing them; reuses TB-188 helpers (extract_goal_anchor / extract_why_now / write_ideation_proposal_record / reconcile_proposal_outcome) and stamps proposed_at from the historical add_backlog audit line; idempotent + dry-run safe; 1193 tests pass and a real-project dry-run shows 14 candidates would be backfilled.
+- **Files:** ap2/backfill.py, ap2/cli.py, ap2/tools.py, ap2/tests/test_backfill_proposals.py
+- **Tests:** pass
