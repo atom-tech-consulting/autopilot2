@@ -401,3 +401,9 @@
 - **Summary:** Re-attempt of TB-188: prior 6fbcef5 already implemented the full feature (extract_goal_anchor / extract_why_now helpers, write_ideation_proposal_record at add_backlog with `review` blocker, reconcile_proposal_outcome wired into operator-queue approve/reject/delete + task_complete / verification_failed in run_task and _sweep_pipeline_pending, dir fenced via TASK_AGENT_FENCED_PATHS + bundled into _STATE_DIRS, plus 504-line test module) — all still in place. Only `test -d .cc-autopilot/ideation_proposals` shell-bullet failed because git doesn't track empty dirs and no proposal had been written yet. Fix: committed `.cc-autopilot/ideation_proposals/.gitkeep` sentinel so the dir always exists at verification time. Full pytest passes (1163/1163).
 - **Files:** .cc-autopilot/ideation_proposals/.gitkeep
 - **Tests:** pass
+
+## [2026-05-07] TB-189: `ap2 classify TB-N --delete-test <verdict>` — operator-authored retrospective verdict on shipped proposals
+- **Commit:** `a49763b`
+- **Summary:** Prior commit 0701a35 already implemented TB-189 in full (CLI + chat verb + drain handler + status surfacing + 1187 tests pass); the only failing verifier bullet was a malformed-Python shell-bullet in the briefing (`(advanced-goal, pro-forma, unclear)` — unquoted, NameErrors on `advanced`). Added quotes so the verifier can actually evaluate the assertion against the (already-correct) enum.
+- **Files:** .cc-autopilot/tasks/ap2-classify-tb-n-delete-test-verdict-op.md
+- **Tests:** pass
