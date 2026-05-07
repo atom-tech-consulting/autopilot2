@@ -413,3 +413,9 @@
 - **Summary:** Added `ap2 backfill-proposals [--dry-run]` operator CLI + new `ap2/backfill.py` (parse_operator_log_lines + backfill_proposals) that scans operator_log.md, briefing files, and events.jsonl to write per-proposal records for ideation-authored TB-Ns missing them; reuses TB-188 helpers (extract_goal_anchor / extract_why_now / write_ideation_proposal_record / reconcile_proposal_outcome) and stamps proposed_at from the historical add_backlog audit line; idempotent + dry-run safe; 1193 tests pass and a real-project dry-run shows 14 candidates would be backfilled.
 - **Files:** ap2/backfill.py, ap2/cli.py, ap2/tools.py, ap2/tests/test_backfill_proposals.py
 - **Tests:** pass
+
+## [2026-05-07] TB-196: Emit `ideation_proposal_recorded` + `ideation_proposal_reconciled` events when TB-188 records are written/amended
+- **Commit:** `c48b6cb`
+- **Summary:** Added ideation_proposal_recorded + ideation_proposal_reconciled emits inside write_ideation_proposal_record / reconcile_proposal_outcome (covers all forward + drain + daemon + backfill call sites automatically), added both types to IDEATION_RELEVANT_EVENT_TYPES, and added 7 new tests; uv run pytest -q ap2/tests/ → 1200 passed.
+- **Files:** ap2/tools.py, ap2/ideation.py, ap2/tests/test_ideation_proposals.py, ap2/tests/test_prompts.py
+- **Tests:** pass
