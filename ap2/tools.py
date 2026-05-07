@@ -476,6 +476,7 @@ def write_ideation_proposal_record(
     blocked_on: str,
     briefing_text: str,
     briefing_rel: str | None,
+    proposed_at: str | None = None,
 ) -> Path | None:
     """Seed a per-proposal record at ideation `add_backlog` time (TB-188).
 
@@ -486,6 +487,13 @@ def write_ideation_proposal_record(
     not happen in normal flow, but a re-write would clobber a previously
     reconciled `outcome` block).
 
+    `proposed_at` overrides the default `now()` stamp — used by the
+    TB-195 backfill to populate `proposed_at` from the historical
+    `applied operator-queued add_backlog → TB-N` line in
+    `operator_log.md` instead of "now". Forward writes (the proposal-
+    time path inside `do_board_edit`) leave it None and get the
+    real-time stamp.
+
     Returns the record path when written, None when skipped.
     """
     if not _blocked_on_has_review(blocked_on):
@@ -493,11 +501,12 @@ def write_ideation_proposal_record(
     target = proposal_record_path(cfg, tb_id)
     if target.exists():
         return None
+    stamp = proposed_at or _dt.datetime.now(_dt.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     payload = {
         "tb_id": tb_id,
-        "proposed_at": _dt.datetime.now(_dt.timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        ),
+        "proposed_at": stamp,
         "focus_anchor": extract_goal_anchor(
             briefing_text, cfg.project_root / "goal.md",
         ),

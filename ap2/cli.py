@@ -1295,6 +1295,42 @@ def cmd_rollback(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backfill_proposals(cfg: Config, args: argparse.Namespace) -> int:
+    """Backfill historical ideation proposal records (TB-195).
+
+    Operator-driven one-off: scans operator_log.md, briefing files, and
+    events.jsonl to identify every TB-N that came in via an ideation
+    `add_backlog` (briefing carries both a goal anchor and a Why-now
+    paragraph), then writes
+    `.cc-autopilot/ideation_proposals/<TB-N>.json` records for those
+    that lack them — reconciling outcomes from the board's Complete
+    section, the LAST `task_complete` event, and the operator log's
+    reject / delete / approve lines.
+
+    Idempotent: a TB-N whose record already exists is skipped, so the
+    daemon-driven prospective writes (TB-188) and operator-driven
+    backfill don't fight each other. Re-running after the daemon has
+    accumulated more prospective records is safe — the second pass
+    reports zero new records.
+
+    `--dry-run` prints what WOULD be written without touching disk;
+    operators can preview the impact before committing.
+    """
+    from . import backfill
+
+    report = backfill.backfill_proposals(cfg, dry_run=args.dry_run)
+    for line in report.summaries:
+        print(line)
+    label = "would write" if args.dry_run else "wrote"
+    print(
+        f"backfill: {label}={len(report.written)} "
+        f"skipped_existing={len(report.skipped_existing)} "
+        f"skipped_non_ideation={len(report.skipped_non_ideation)} "
+        f"skipped_no_briefing={len(report.skipped_no_briefing)}"
+    )
+    return 0
+
+
 def cmd_pause(cfg: Config, args: argparse.Namespace) -> int:
     cfg.pause_flag.parent.mkdir(parents=True, exist_ok=True)
     cfg.pause_flag.write_text((args.reason or "") + "\n")
@@ -1744,6 +1780,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--force", action="store_true",
                    help="proceed even with a dirty working tree (will discard)")
     s.set_defaults(func=cmd_rollback)
+
+    s = sub.add_parser(
+        "backfill-proposals",
+        help="backfill historical ideation proposal records (TB-195): "
+             "scans operator_log.md + briefing files + events.jsonl and "
+             "writes per-proposal records for every ideation-authored "
+             "TB-N that lacks one. Idempotent; safe to re-run. "
+             "Operator-driven one-off — not exposed via the operator "
+             "queue or daemon ticks.",
+    )
+    s.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print what would be written without touching disk",
+    )
+    s.set_defaults(func=cmd_backfill_proposals)
 
     s = sub.add_parser("pause", help="pause the daemon (sets a flag)")
     s.add_argument("--reason", default="")
