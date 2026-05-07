@@ -77,3 +77,6 @@ ideation won't re-propose decisions logged here._
 - 2026-05-07T00:17:09Z — applied operator-queued update → TB-189
 - 2026-05-07T00:17:15Z — applied operator-queued approve → TB-188
 - 2026-05-07T00:17:15Z — applied operator-queued approve → TB-189
+- 2026-05-07T01:57:58Z [TB-175] — TB-175-shape insight aggregator still in scope but defer re-proposal until ~3+ ideation cycles after TB-188 lands so per-proposal records and TB-189 impact verdicts accumulate enough to make the aggregator meaningful — do not re-propose before then.
+- 2026-05-07T04:08:05Z — applied operator-queued approve → TB-195
+- 2026-05-07T04:08:05Z — applied operator-queued approve → TB-196
