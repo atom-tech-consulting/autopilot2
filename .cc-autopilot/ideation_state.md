@@ -1,20 +1,21 @@
 # Ideation State
 
-_Last updated: 2026-05-07T11:29:27Z by ideation cron_
+_Last updated: 2026-05-07T13:31:50Z by ideation cron_
 
 ## Mission alignment
 
-~2h since prior cycle (09:27Z); ~7h since TB-196 landed (04:35Z).
-Zero new events in either window beyond ideation/status-report
-cron ticks. Mission alignment unchanged: foundation remains
-shipped 4-deep at TB-188 + TB-189 + TB-195 + TB-196, all anchored
-to goal.md L38-76 (ideation-quality signal collection); zero drift
-toward ap2-meta polish.
+~2h since prior cycle (11:29Z); ~9h since TB-196 landed (04:35Z).
+Zero new task_complete / operator_log_appended /
+ideation_proposal_recorded / cron_proposed events in either window.
+Mission alignment unchanged: foundation shipped 4-deep at TB-188 +
+TB-189 + TB-195 + TB-196, all anchored to goal.md L38-76 (ideation-
+quality signal collection); zero drift toward ap2-meta polish.
 
-This is the 4th consecutive 0-proposal cycle since TB-196 landed
-(05:24Z, 07:25Z, 09:27Z, now 11:29Z) — consistent with the
+This is the 5th consecutive 0-proposal cycle since TB-196 landed
+(05:24Z, 07:25Z, 09:27Z, 11:29Z, now 13:31Z) — consistent with the
 deliberate accumulation phase the operator pivoted into at
-2026-05-06T18:07:11Z.
+2026-05-06T18:07:11Z (goal.md commit 41bf85b: "the bottleneck is
+signal volume, not prompt-language craft").
 
 Latest 5 completes considered (carries; nothing newer exists):
 
@@ -35,36 +36,36 @@ Latest 5 completes considered (carries; nothing newer exists):
 
 - **Ideation quality signal collection (goal.md L38-76)**
   - Progress so far: Foundation shipped 4-deep. **TB-188**
-    (`93892da`) writes per-proposal records and reconciles
-    outcomes on `task_complete` / `task_deleted` / drained
-    `approve` / drained `reject`. **TB-189** (`a49763b`) gives
-    the operator a retrospective `--delete-test` verdict surface.
-    **TB-195** (`f356e20`) ships the backfill CLI to seed
-    records for ~14 historical ideation-authored TB-Ns
-    (operator-run dry-run on 2026-05-07 reported 14 candidates).
-    **TB-196** (`c48b6cb`) emits
+    (`93892da`) writes per-proposal records and reconciles outcomes
+    on `task_complete` / `task_deleted` / drained `approve` /
+    drained `reject`. **TB-189** (`a49763b`) gives the operator a
+    retrospective `--delete-test` verdict surface. **TB-195**
+    (`f356e20`) ships the backfill CLI to seed records for the
+    ~14 historical ideation-authored TB-Ns the operator's
+    2026-05-07 dry-run identified. **TB-196** (`c48b6cb`) emits
     `ideation_proposal_recorded` / `ideation_proposal_reconciled`
     events so record activity surfaces in events.jsonl, the web
     /events page, and ideation prompt event blocks.
   - Gaps:
     (1) **Volume**: `ideation_proposals/` still `.gitkeep`-only at
-    11:29Z (verified directly); 0 `ideation_proposal_recorded`
-    events in tail. Operator's call when to run
+    13:31Z (verified directly); 0 `ideation_proposal_recorded`
+    events in the events.jsonl tail. Operator's call when to run
     `ap2 backfill-proposals`.
     (2) **Track-record feedback into the ideation prompt header**
     (carries; TB-163-pattern) — wait-condition unchanged: TB-195
-    backfill landing + 2-3 cycles of organic growth. Backfill CLI
-    available but unrun; organic growth blocked on (1).
+    backfill landing + 2-3 cycles of organic record growth.
+    Backfill CLI available but unrun; organic growth blocked on
+    (1).
     (3) **Insight aggregator from records → `ideation_quality.md`**
     (TB-175-shape) — operator-acked deferral 2026-05-07T01:57:58Z
-    in operator_log.md. Numerically ~5 cycles since the deferral
-    (01:57→11:29 spans 5 ideation ticks), but the volume
-    precondition (records on disk + verdicts) is unsatisfied:
-    0 records, 0 verdicts. Stays off-table.
+    in operator_log.md. Numerically ~6 ideation cycles since the
+    deferral, but the volume precondition (records on disk +
+    verdicts) is unsatisfied: 0 records, 0 verdicts. Stays
+    off-table.
   - Status: `in-progress`
   - Reasoning: foundation shipped; remaining gaps all
     accumulation-blocked or operator-deferred. Nothing
-    structurally changed in 7h since TB-196.
+    structurally changed in 9h since TB-196.
 
 ## Non-goal risk check
 
@@ -80,9 +81,8 @@ judgment, multi-tenancy, real-time, or cross-project Non-goals.
   available; not run).
 - **`ap2 proposals [--unclassified]` operator CLI to list/filter
   records** (carries) — sibling of pending-review surface
-  (TB-151-shape). Risk: parallel-surface to file-cat; impact
-  gated on records existing on disk (0). Defer until ≥10 records
-  exist.
+  (TB-151-shape). Risk: parallel-surface to file-cat; impact gated
+  on records existing on disk (0). Defer until ≥10 records exist.
 - **Surface "unclassified proposals" count + TB-Ns in `ap2 status`
   + cron status-report** (carries) — TB-151-pattern. Gated on
   records on disk; pre-backfill the surface would always be empty.
@@ -123,7 +123,7 @@ this. With 0 proposals this cycle the filter isn't exercised.
 
 0 proposals.
 
-4th consecutive 0-proposal cycle post-TB-196. Foundation shipped
+5th consecutive 0-proposal cycle post-TB-196. Foundation shipped
 4-deep; all identified next-step gaps remain accumulation-blocked
 (0 records on disk, 0 verdicts) or operator-deferred (TB-175
 volume precondition unsatisfied). Proposing now would either:
