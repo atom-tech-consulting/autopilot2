@@ -136,3 +136,10 @@ the only write path.
   only NEW proposals get records.
 - Per-proposal record reads from the ideation prompt header
   (track-record block) — depends on signal volume; deferred.
+## Attempts
+
+### 2026-05-07 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `test -d .cc-autopilot/ideation_proposals` — directory created atfirst proposal (test fixtures populate this in unit tes
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260507T002033Z-TB-188.prompt.md`, `stream: .cc-autopilot/debug/20260507T002033Z-TB-188.stream.jsonl`, `messages: .cc-autopilot/debug/20260507T002033Z-TB-188.messages.jsonl`
