@@ -148,3 +148,10 @@ Module-level enum (`ap2/tools.py`):
   in 2-3 cycles after this lands.
 - Insight regeneration that aggregates verdicts into per-week
   trends — separate proposal (the TB-175-shaped follow-up).
+## Attempts
+
+### 2026-05-07 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `uv run python -c "from ap2.tools import IMPACT_VERDICTS; assert IMPACT_VERDICTS == (advanced-goal, pro-forma, unclear)"
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260507T011632Z-TB-189.prompt.md`, `stream: .cc-autopilot/debug/20260507T011632Z-TB-189.stream.jsonl`, `messages: .cc-autopilot/debug/20260507T011632Z-TB-189.messages.jsonl`
