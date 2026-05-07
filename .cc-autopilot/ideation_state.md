@@ -1,23 +1,25 @@
 # Ideation State
 
-_Last updated: 2026-05-07T21:40:18Z by ideation cron_
+_Last updated: 2026-05-07T23:42:40Z by ideation cron_
 
 ## Mission alignment
 
-~2h since prior cycle (19:37Z); ~17h since TB-196 landed (04:35Z).
+~2h since prior cycle (21:40Z); ~19h since TB-196 landed (04:35Z).
 Zero new task_complete / operator_log_appended /
 ideation_proposal_recorded / cron_proposed events in either window.
-Board 0A/0R/0B/0P/70C/3F unchanged since 05:26Z. Mission alignment
-unchanged: foundation shipped 4-deep at TB-188 + TB-189 + TB-195 +
-TB-196, all anchored to goal.md L38-76 (ideation-quality signal
-collection); zero drift toward ap2-meta polish.
+Board 0A/0R/0B/0P/70C/3F unchanged since 05:26Z. New external
+signal: operator MM message at 23:43:04Z ("why has there been no
+new tasks recently?") arriving 24s after the cycle's
+ideation_empty_board fired — first operator engagement on the
+deliberate-pause since the 2026-05-06T18:07:11Z pivot.
 
-This is the 9th consecutive 0-proposal cycle since TB-196 landed
+This is the 10th consecutive 0-proposal cycle since TB-196 landed
 (05:24Z, 07:25Z, 09:27Z, 11:29Z, 13:31Z, 15:33Z, 17:35Z, 19:37Z,
-now 21:40Z) — consistent with the deliberate accumulation phase the
-operator pivoted into at 2026-05-06T18:07:11Z (goal.md commit
-41bf85b: "the bottleneck is signal volume, not prompt-language
-craft").
+21:40Z, now 23:42Z) — consistent with the deliberate accumulation
+phase the operator pivoted into at 2026-05-06T18:07:11Z (goal.md
+commit 41bf85b: "the bottleneck is signal volume, not
+prompt-language craft"). The MM message is the first sign the
+operator may want a posture-readout on it.
 
 Latest 5 completes considered (carries; nothing newer exists):
 
@@ -50,9 +52,10 @@ Latest 5 completes considered (carries; nothing newer exists):
     /events page, and ideation prompt event blocks.
   - Gaps:
     (1) **Volume**: `ideation_proposals/` still `.gitkeep`-only at
-    21:40Z (verified directly via `ls`); 0
-    `ideation_proposal_recorded` events in events.jsonl tail.
-    Operator's call when to run `ap2 backfill-proposals`.
+    23:42Z (verified directly via `ls`); 0
+    `ideation_proposal_recorded` events in events.jsonl. Backfill
+    CLI shipped 19h ago but unrun. Operator MM at 23:43:04Z may
+    indicate this is now actively their call to make.
     (2) **Track-record feedback into the ideation prompt header**
     (carries; TB-163-pattern) — wait-condition unchanged: TB-195
     backfill landing + 2-3 cycles of organic record growth.
@@ -65,8 +68,9 @@ Latest 5 completes considered (carries; nothing newer exists):
   - Status: `in-progress`
   - Reasoning: foundation shipped; remaining gaps all
     accumulation-blocked or operator-deferred. Nothing
-    structurally changed in 17h since TB-196 / 2h since prior
-    cycle.
+    structurally changed in 19h since TB-196 / 2h since prior
+    cycle except the operator's MM ping — which is an external
+    signal, not a board-state change.
 
 ## Non-goal risk check
 
@@ -119,13 +123,27 @@ this. With 0 proposals this cycle the filter isn't exercised.
 
 ## Decisions needed from operator
 
-(none this cycle.)
+- Decision needed: how to resolve the accumulation-phase
+  zero-volume stall? `ideation_proposals/` is still `.gitkeep`-only
+  19h after the foundation (TB-188/189/195/196) shipped, and the
+  MM ping at 23:43:04Z ("why has there been no new tasks
+  recently?") is the first sign the deliberate-pause posture may
+  not match operator expectation. Three operator actions would
+  unblock the next ideation cycle: (a) run
+  `ap2 backfill-proposals` to seed ~14 historical records so the
+  next cycle has outcome-anchored data to rank against; (b) edit
+  goal.md to explicitly time-box or end the accumulation phase
+  (changes the bar for what proposals clear next cycle); or (c)
+  ack the deliberate pause as expected (no action — current cycle
+  cadence continues). Any of the three changes the next cycle's
+  posture; absent one, the n=10-and-counting 0-proposal streak
+  continues.
 
 ## Proposals this cycle
 
 0 proposals.
 
-9th consecutive 0-proposal cycle post-TB-196. Foundation shipped
+10th consecutive 0-proposal cycle post-TB-196. Foundation shipped
 4-deep; all identified next-step gaps remain accumulation-blocked
 (0 records on disk, 0 verdicts) or operator-deferred (TB-175
 volume precondition unsatisfied). Proposing now would either:
@@ -134,10 +152,14 @@ volume precondition unsatisfied). Proposing now would either:
 (b) trip the n=4 rejection-pattern filter (parallel-surface /
     premature-without-volume / off-focus / wack-a-mole); or
 (c) front-run the operator's natural next action
-    (`ap2 backfill-proposals`).
+    (`ap2 backfill-proposals`) — and the MM ping suggests that
+    action may be imminent.
 
 Quality > slot-fill. The signal-collection focus is in a
 deliberate accumulation phase by design (goal.md L50-55: "the
 bottleneck is signal volume, not prompt-language craft"); the
-right ideation behavior is to wait for record / verdict volume
-before proposing the next layer.
+right ideation behavior remains to wait for record / verdict
+volume before proposing the next layer. The MM ping is escalated
+via Decisions-needed (above) so the operator sees the explicit
+unblock options rather than a passive "still waiting" status
+line.
