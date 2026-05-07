@@ -502,3 +502,189 @@ def test_ideation_proposals_dir_in_fenced_paths():
     fence covers the soft-enforcement gap.
     """
     assert ".cc-autopilot/ideation_proposals" in tools.TASK_AGENT_FENCED_PATHS
+
+
+# ---------------------------------------------------------------------------
+# TB-196: `ideation_proposal_recorded` + `ideation_proposal_reconciled`
+# observability events. The two emit sites live inside
+# `write_ideation_proposal_record` and `reconcile_proposal_outcome` so
+# every call site (forward `do_board_edit` add_backlog, drain-side
+# reconcile branches, daemon `task_complete` reconcile, the TB-195
+# backfill) automatically surfaces the event. These tests pin the
+# emit shape — task_id, focus_anchor truncation, decision_kind /
+# decision_actor / commit fields — so a refactor that drops the kwargs
+# (or moves the emit out of the helper) breaks here loudly.
+
+
+def _events_of_type(cfg: Config, type_name: str) -> list[dict]:
+    """Return all events in events.jsonl whose `type` matches `type_name`."""
+    from ap2 import events as _events
+
+    return [e for e in _events.tail(cfg.events_file, n=1000) if e.get("type") == type_name]
+
+
+def test_record_write_emits_recorded_event(cfg: Config):
+    """`do_board_edit({"action": "add_backlog", "blocked_on": "review",
+    ...})` produces an `ideation_proposal_recorded` event in
+    events.jsonl with `task_id` set to the allocated TB-N and a non-
+    empty `focus_anchor`. (TB-196 verification bullet.)
+
+    The emit fires from inside `write_ideation_proposal_record` after
+    the atomic JSON write; this test exercises the full board-edit
+    surface so the wiring (forward path) is end-to-end-checked.
+    """
+    res = tools.do_board_edit(
+        cfg,
+        {
+            "action": "add_backlog",
+            "title": "an ideation proposal",
+            "blocked_on": "review",
+            "briefing": _BRIEFING,
+        },
+    )
+    body = _unwrap(res)
+    tb_id = body["task_id"]
+
+    matches = _events_of_type(cfg, "ideation_proposal_recorded")
+    assert len(matches) == 1, (
+        f"expected exactly one ideation_proposal_recorded event, got "
+        f"{len(matches)}: {matches}"
+    )
+    evt = matches[0]
+    assert evt["task_id"] == tb_id
+    # Anchor populated from the briefing's `## Goal` body matched
+    # against goal.md's `## Current focus` heading.
+    assert evt["focus_anchor"]
+    assert "ideation quality signal collection" in evt["focus_anchor"]
+    # Truncation cap: 80 chars max in the event payload (the full
+    # anchor is on disk in the record file).
+    assert len(evt["focus_anchor"]) <= 80
+    # `why_now_chars` is the post-marker rationale length — non-zero
+    # because `_BRIEFING` carries a real `Why now:` paragraph.
+    assert isinstance(evt["why_now_chars"], int)
+    assert evt["why_now_chars"] > 0
+
+
+def test_record_write_no_event_for_non_review_add_backlog(cfg: Config):
+    """A non-`review` `add_backlog` skips the record write (no
+    proposal record is an ideation proposal without the marker), so it
+    must also skip the `ideation_proposal_recorded` emit. Anti-
+    regression on a refactor that moves the emit BEFORE the
+    `_blocked_on_has_review` gate."""
+    res = tools.do_board_edit(
+        cfg,
+        {
+            "action": "add_backlog",
+            "title": "operator-driven add",
+            "blocked_on": "",
+            "briefing": _BRIEFING,
+        },
+    )
+    _unwrap(res)
+    assert _events_of_type(cfg, "ideation_proposal_recorded") == []
+
+
+def test_reconcile_emits_reconciled_event_on_complete(cfg: Config):
+    """A `task_complete` event for a previously-recorded TB-N produces
+    an `ideation_proposal_reconciled` event with `decision_kind ==
+    "completed"` and `commit` populated to the short SHA. (TB-196
+    verification bullet.)
+
+    Exercises the helper directly (the same surface the daemon's
+    `run_task` post-commit path calls).
+    """
+    tb_id = "TB-710"
+    _seed_proposal_record(cfg, tb_id)
+
+    written = tools.reconcile_proposal_outcome(
+        cfg, tb_id,
+        decision_kind="completed",
+        decision_actor="daemon",
+        commit="abc1234",
+    )
+    assert written is not None
+
+    matches = _events_of_type(cfg, "ideation_proposal_reconciled")
+    assert len(matches) == 1, matches
+    evt = matches[0]
+    assert evt["task_id"] == tb_id
+    assert evt["decision_kind"] == "completed"
+    assert evt["decision_actor"] == "daemon"
+    assert evt["commit"] == "abc1234"
+
+
+def test_reconcile_emits_reconciled_event_on_reject(cfg: Config):
+    """An operator-queue `reject TB-N` drain produces an
+    `ideation_proposal_reconciled` event with `decision_kind ==
+    "rejected"` and `decision_actor == "operator"`. (TB-196
+    verification bullet.)
+
+    Exercises the full operator-queue drain surface so the wiring
+    inside `_apply_operator_op` is checked end-to-end.
+    """
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id="TB-711",
+        title="rejected proposal",
+        meta={"blocked": "review"},
+    )
+    board.save()
+    _seed_proposal_record(cfg, "TB-711")
+
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "reject", "task_id": "TB-711", "reason": "no clear signal"},
+    )
+    tools.drain_operator_queue(cfg)
+
+    matches = _events_of_type(cfg, "ideation_proposal_reconciled")
+    assert len(matches) == 1, matches
+    evt = matches[0]
+    assert evt["task_id"] == "TB-711"
+    assert evt["decision_kind"] == "rejected"
+    assert evt["decision_actor"] == "operator"
+    # commit is None on operator-driven decisions (no source-code
+    # change was authored by the operator).
+    assert evt["commit"] is None
+
+
+def test_reconcile_no_event_when_record_missing(cfg: Config):
+    """No record on disk → reconcile is a silent no-op AND emits no
+    event. Anti-regression on a refactor that emits the event before
+    the `target.exists()` gate (which would produce false-positive
+    reconciled events for legacy / non-ideation TB-Ns)."""
+    written = tools.reconcile_proposal_outcome(
+        cfg, "TB-9998",
+        decision_kind="completed",
+        decision_actor="daemon",
+    )
+    assert written is None
+    assert _events_of_type(cfg, "ideation_proposal_reconciled") == []
+
+
+def test_reconcile_no_event_on_first_write_wins_no_op(cfg: Config):
+    """First-write-wins: a second reconcile call against an already-
+    reconciled record is a no-op and emits NO second event. Pinning
+    this prevents a refactor from double-emitting on idempotent calls
+    (which would silently double-count outcomes in any downstream
+    aggregator)."""
+    tb_id = "TB-712"
+    _seed_proposal_record(cfg, tb_id)
+
+    tools.reconcile_proposal_outcome(
+        cfg, tb_id,
+        decision_kind="approved",
+        decision_actor="operator",
+    )
+    # First call emits one event.
+    assert len(_events_of_type(cfg, "ideation_proposal_reconciled")) == 1
+
+    # Second call: different decision_kind. Must no-op AND emit nothing.
+    tools.reconcile_proposal_outcome(
+        cfg, tb_id,
+        decision_kind="completed",
+        decision_actor="daemon",
+        commit="def5678",
+    )
+    assert len(_events_of_type(cfg, "ideation_proposal_reconciled")) == 1

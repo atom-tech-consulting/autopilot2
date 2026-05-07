@@ -515,6 +515,26 @@ def write_ideation_proposal_record(
         "blocked_on": blocked_on,
     }
     _atomic_write_json(target, payload)
+    # TB-196: surface record creation in events.jsonl so the ideation
+    # cron's events block (TB-169 allowlist) and the web /events page can
+    # observe per-proposal record activity. Best-effort — if the events
+    # file is fenced or unwritable, swallow the error: the record on disk
+    # is the source of truth, the event is observability metadata. The
+    # `focus_anchor` field is truncated to 80 chars to keep the rendered
+    # events.jsonl line compact (the full anchor lives on disk in the
+    # record file).
+    try:
+        focus_anchor = payload.get("focus_anchor") or ""
+        why_now = payload.get("why_now") or ""
+        events.append(
+            cfg.events_file,
+            "ideation_proposal_recorded",
+            task_id=tb_id,
+            focus_anchor=focus_anchor[:80],
+            why_now_chars=len(why_now),
+        )
+    except OSError:
+        pass
     return target
 
 
@@ -591,6 +611,24 @@ def reconcile_proposal_outcome(
         "reason": reason,
     }
     _atomic_write_json(target, record)
+    # TB-196: surface outcome reconciliation in events.jsonl so the
+    # ideation cron's events block (TB-169 allowlist) and the web
+    # /events page can observe per-proposal record amends. Best-effort
+    # — if the events file is fenced or unwritable, swallow the error:
+    # the record on disk is the source of truth (matches the failure-
+    # isolation contract used by `write_ideation_proposal_record`'s
+    # sibling emit).
+    try:
+        events.append(
+            cfg.events_file,
+            "ideation_proposal_reconciled",
+            task_id=tb_id,
+            decision_kind=decision_kind,
+            decision_actor=decision_actor,
+            commit=commit,
+        )
+    except OSError:
+        pass
     return target
 
 

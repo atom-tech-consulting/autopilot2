@@ -101,6 +101,14 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
     # re-discovering a stale "we already self-reported exhausted"
     # signal across cycles).
     "ideation_skipped",
+    # Per-proposal record activity (TB-196) — emitted by
+    # `write_ideation_proposal_record` on seed-write and
+    # `reconcile_proposal_outcome` on outcome-block append. Surfaces
+    # TB-188's record substrate in the ideation prompt's events block
+    # so the next cycle can observe its own proposals' record
+    # creation + terminal-event reconciliation. Listed alphabetically.
+    "ideation_proposal_recorded",
+    "ideation_proposal_reconciled",
 )
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"

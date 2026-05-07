@@ -1194,3 +1194,43 @@ def test_build_control_prompt_default_omits_filter_for_status_report(tmp_path):
         assert f" {kind} " in events_block, (
             f"status-report (default) must keep {kind!r} in the events tail"
         )
+
+
+def test_ideation_proposal_event_types_in_ideation_block(tmp_path):
+    """TB-196: the new `ideation_proposal_recorded` and
+    `ideation_proposal_reconciled` event types are members of
+    `IDEATION_RELEVANT_EVENT_TYPES` and render in the events block when
+    the ideation allowlist is passed via `include_types`. Parallel to
+    the TB-169 allowlist tests above — pins the wiring so a future
+    rename / drop of these types fails loudly here instead of
+    silently hiding per-proposal record activity from the next
+    ideation cycle."""
+    from ap2.ideation import IDEATION_RELEVANT_EVENT_TYPES
+    from ap2.prompts import _events_block
+
+    # Membership: both types are in the allowlist.
+    assert "ideation_proposal_recorded" in IDEATION_RELEVANT_EVENT_TYPES
+    assert "ideation_proposal_reconciled" in IDEATION_RELEVANT_EVENT_TYPES
+
+    cfg = _cfg(tmp_path)
+    # Seed the two new types interleaved with a noise kind to prove
+    # the filter retains the new types AND drops noise.
+    _seed_events(
+        cfg,
+        [
+            "ideation_proposal_recorded",
+            "judge_call",
+            "ideation_proposal_reconciled",
+        ],
+    )
+
+    block = _events_block(cfg, include_types=IDEATION_RELEVANT_EVENT_TYPES)
+
+    assert " ideation_proposal_recorded " in block, (
+        "expected ideation_proposal_recorded in rendered events block"
+    )
+    assert " ideation_proposal_reconciled " in block, (
+        "expected ideation_proposal_reconciled in rendered events block"
+    )
+    # Noise (`judge_call`) still filtered out.
+    assert " judge_call " not in block
