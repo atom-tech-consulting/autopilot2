@@ -389,3 +389,9 @@
 - **Summary:** Added update_goal operator-queue op + ap2 update-goal CLI; goal.md is now safely refreshable via the queue (atomic write under board_file_lock at drain time, audit line, goal_updated event), added goal.md to _STATE_FILE_NAMES for rollback cohesion, MCP wrapper refuses update_goal so the verb stays operator-CLI-only; full test suite passes (1148 tests).
 - **Files:** ap2/tools.py, ap2/daemon.py, ap2/cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_cli.py, ap2/tests/test_tools.py
 - **Tests:** pass
+
+## [2026-05-07] TB-194: Defer operator-queue ideate Active-check from append time to drain time
+- **Commit:** `cb09e91`
+- **Summary:** Removed at-append-time Active hard gate from `do_operator_queue_append`'s `ideate` branch in `ap2/tools.py`; the branch now reduces to capture `force` (audit-only metadata) + build `rec_args`. Updated the TB-159 comment block above the branch to document the new TB-194 invariant (drain-time Active emptiness guaranteed by loop topology). Drain-side `_apply_operator_op` `ideate` branch unchanged in behavior (`ideation_forced` event + `force_ideate=True` signal still flow as before). CLI `cmd_ideate` docstring + `ap2 ideate` parser help + MM-handler prompt bullet (`prompts.py`) + README entry all rewritten to reflect that `--force` is now a no-op for routing. Tests updated: replaced `test_queue_append_ideate_refuses_when_active_present` and `test_cmd_ideate_refuses_when_active_task_present` with new tests asserting the queue-with-active behavior; added `test_queue_append_ideate_with_active_drain_emits_forced_signal` covering the end-to-end drain path with Active populated. All 1163 tests pass.
+- **Files:** ap2/tools.py, ap2/cli.py, ap2/prompts.py, ap2/README.md, ap2/tests/test_operator_queue.py, ap2/tests/test_cli.py, ap2/tests/test_prompts.py
+- **Tests:** pass
