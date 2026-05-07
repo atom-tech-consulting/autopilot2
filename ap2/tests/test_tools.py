@@ -2818,3 +2818,83 @@ def test_tb171_manual_bullet_check_in_sync_with_check_py():
     for s in samples_skip:
         assert not tools._MANUAL_BULLET_RE.match(s), s
         assert not check._MANUAL_BULLET_RE.match(s), s
+
+
+# ---------------------------------------------------------------------------
+# TB-193: the MCP-wrapper `operator_queue_append` refuses `update_goal`
+# so the verb is operator-CLI-only by design — no agent (MM handler,
+# control agent, ideation) can mutate goal.md via the queue. The
+# `do_operator_queue_append` direct-call path the CLI uses is unaffected.
+
+
+def test_mcp_operator_queue_append_refuses_update_goal(tmp_path):
+    """The MCP wrapper layered on top of `do_operator_queue_append`
+    refuses `op="update_goal"` with a CLI-pointing error message.
+    Pinned at the wrapper boundary so a future edit that drops the
+    refusal trips this test (rather than silently widening the surface
+    to MM-handler chat ops). The CLI path through
+    `do_operator_queue_append` is unaffected — that's the
+    operator-CLI-only entry point."""
+    import asyncio
+    from ap2.config import Config
+    from ap2.init import init_project
+
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+
+    srv = tools.build_mcp_server(cfg)
+    instance = srv["instance"]
+    from mcp import types as mcp_types
+    handler = instance.request_handlers[mcp_types.CallToolRequest]
+    # The MCP schema requires every listed field — pad the unused
+    # ones with empty strings (the wrapper's update_goal short-circuit
+    # fires before any field-content validation).
+    req = mcp_types.CallToolRequest(
+        method="tools/call",
+        params=mcp_types.CallToolRequestParams(
+            name="operator_queue_append",
+            arguments={
+                "op": "update_goal",
+                "task_id": "",
+                "title": "",
+                "tags": "",
+                "description": "",
+                "briefing": "",
+                "blocked_on": "",
+                "blocked": "",
+                "clear_tags": "",
+                "clear_blocked": "",
+                "force": "",
+                "goal_content": "# new goal\n\n## Mission\nx\n",
+            },
+        ),
+    )
+    result = asyncio.run(handler(req))
+    # The wrapper returns an error result; the message points at the CLI.
+    text = result.root.content[0].text
+    assert "operator-CLI-only" in text or "ap2 update-goal" in text, text
+    # And no queue line was written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_do_operator_queue_append_direct_call_accepts_update_goal(tmp_path):
+    """The CLI path calls `do_operator_queue_append` directly — the
+    function itself does NOT refuse `update_goal` (the MCP wrapper
+    does). Pinned so the asymmetry stays explicit."""
+    from ap2.config import Config
+    from ap2.init import init_project
+
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": "# Project Goals\n\n## Mission\nx\n",
+        },
+    )
+    assert not res.get("isError"), res

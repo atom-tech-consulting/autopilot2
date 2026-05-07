@@ -2869,3 +2869,138 @@ def test_cmd_ideate_is_non_blocking_no_sdk_invocation(
     assert elapsed < 2.0, (
         f"cmd_ideate should return immediately; took {elapsed:.3f}s"
     )
+
+
+# ---------------------------------------------------------------------------
+# TB-193: cmd_update_goal — refresh goal.md via the operator queue so
+# focus rotations don't require `ap2 daemon-control --pause`. The CLI
+# reads from --file <path> or --file - (stdin), then dispatches via
+# `do_operator_queue_append({"op":"update_goal", ...})`.
+
+
+_UPDATE_GOAL_PAYLOAD = (
+    "# Project Goals\n\n"
+    "## Mission\nShip ap2 hands-off-by-default.\n\n"
+    "## Done when\n- Operators can refresh goal.md without pausing.\n\n"
+    "## Current focus: ideation quality\n\nSignal collection.\n"
+)
+
+
+def test_cmd_update_goal_file_path_dispatches(tmp_path: Path):
+    """`--file <path>` reads from disk and queues an `update_goal` op.
+    Drain applies the write; goal.md on disk matches the payload."""
+    from ap2.cli import cmd_update_goal
+
+    cfg = _project(tmp_path)
+    payload_path = tmp_path / "new_goal.md"
+    payload_path.write_text(_UPDATE_GOAL_PAYLOAD)
+
+    rc = cmd_update_goal(
+        cfg,
+        Namespace(file=str(payload_path), reason=None),
+    )
+    assert rc == 0
+    # Pre-drain: queue line written but goal.md unchanged.
+    qpath = tools.operator_queue_path(cfg)
+    assert qpath.exists() and qpath.read_text().strip()
+
+    res = tools.drain_operator_queue(cfg)
+    assert res["applied"] == 1
+    assert (cfg.project_root / "goal.md").read_text() == _UPDATE_GOAL_PAYLOAD
+
+
+def test_cmd_update_goal_stdin_dispatches(tmp_path: Path, monkeypatch):
+    """`--file -` reads the goal payload from stdin (mirrors `ap2 add
+    --briefing-file -`)."""
+    from ap2.cli import cmd_update_goal
+    import io
+    import sys
+
+    cfg = _project(tmp_path)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(_UPDATE_GOAL_PAYLOAD))
+
+    rc = cmd_update_goal(
+        cfg,
+        Namespace(file="-", reason="rotated focus from migration"),
+    )
+    assert rc == 0
+    tools.drain_operator_queue(cfg)
+    assert (cfg.project_root / "goal.md").read_text() == _UPDATE_GOAL_PAYLOAD
+
+
+def test_cmd_update_goal_reason_plumbed_through(tmp_path: Path):
+    """`--reason "..."` rides on the queue payload and lands in the
+    operator-log audit line `<ts> — operator updated goal.md (<reason>)`."""
+    from ap2.cli import cmd_update_goal
+
+    cfg = _project(tmp_path)
+    payload_path = tmp_path / "goal_payload.md"
+    payload_path.write_text(_UPDATE_GOAL_PAYLOAD)
+
+    rc = cmd_update_goal(
+        cfg,
+        Namespace(
+            file=str(payload_path),
+            reason="rotate focus to ideation quality",
+        ),
+    )
+    assert rc == 0
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert (
+        "operator updated goal.md (rotate focus to ideation quality)" in log
+    )
+
+
+def test_cmd_update_goal_empty_payload_rejected(tmp_path: Path, capsys):
+    """Whitespace-only file is rejected with non-zero exit + a hint
+    message — the CLI defends against a path-vs-content typo before
+    reaching the queue-append validator."""
+    from ap2.cli import cmd_update_goal
+
+    cfg = _project(tmp_path)
+    empty = tmp_path / "empty.md"
+    empty.write_text("   \n\n")
+
+    rc = cmd_update_goal(
+        cfg, Namespace(file=str(empty), reason=None)
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "empty" in err.lower()
+    # No queue line written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_cmd_update_goal_too_large_rejected(tmp_path: Path, capsys):
+    """Soft 100KB cap surfaces a path-vs-content mistake (e.g. operator
+    pointed at a log file). Refused before the queue-append call."""
+    from ap2.cli import cmd_update_goal
+
+    cfg = _project(tmp_path)
+    big = tmp_path / "big.md"
+    big.write_text("# huge\n" + ("x" * 200_000))
+
+    rc = cmd_update_goal(
+        cfg, Namespace(file=str(big), reason=None)
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "100000" in err or "cap" in err.lower()
+
+
+def test_cmd_update_goal_missing_file_errors(tmp_path: Path, capsys):
+    """Bad path → non-zero exit + readable error. We don't want a stray
+    OSError traceback bubbling up to the operator."""
+    from ap2.cli import cmd_update_goal
+
+    cfg = _project(tmp_path)
+    rc = cmd_update_goal(
+        cfg,
+        Namespace(file=str(tmp_path / "does_not_exist.md"), reason=None),
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "ap2 update-goal" in err

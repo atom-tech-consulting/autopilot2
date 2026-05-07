@@ -300,34 +300,18 @@ def _why_now_paragraph(goal_body: str) -> str | None:
     return stripped
 
 
-def _goal_md_anchors(goal_md_path: "Path | None") -> set[str]:
-    """Derive substring anchors from `goal.md`.
+def _goal_md_anchors_from_text(text: str) -> set[str]:
+    """Pure text-input variant of `_goal_md_anchors` (TB-193).
 
-    Walks `##` headings; for each whose title starts with one of
-    `GOAL_ANCHOR_HEADINGS` (case-insensitive prefix match), the
-    normalized full heading title becomes an anchor. For `Done when`
-    sections only, each bullet's first 3-6 words become an additional
-    anchor — the briefing's `## Goal` body can cite either the heading
-    name (e.g. "current focus: ideation quality") or quote a Done-when
-    bullet ("an operator can point ap2 at"). Returns an empty set when
-    the file is missing, unreadable, all-placeholder, or contributes no
-    anchors — the validator falls back to "skip the check" in that case
-    so a fresh project without a real `goal.md` doesn't get its briefings
-    rejected.
+    Factored out so `do_operator_queue_append`'s `update_goal` branch
+    can sanity-check a goal.md payload BEFORE it lands on disk without
+    having to write the candidate to a tempfile first. Same anchor
+    rules as the file-input wrapper below: walks `##` headings, picks
+    the ones starting with a `GOAL_ANCHOR_HEADINGS` prefix, and emits
+    normalized titles + Done-when bullet phrases. Returns an empty set
+    when the text is all-placeholder.
     """
-    if goal_md_path is None or not goal_md_path.exists():
-        return set()
-    try:
-        text = goal_md_path.read_text()
-    except OSError:
-        return set()
     anchors: set[str] = set()
-    # Bare-prefix titles (e.g. `## Current focus` with no topic suffix)
-    # are dropped — they're the `init_project` template defaults and
-    # signal an unfilled goal.md. A real anchor must be more specific
-    # than just the heading prefix (`## Current focus: ideation quality`,
-    # or any Done-when bullet). This is the "all-placeholder skip"
-    # path the design calls out.
     bare_prefixes = {h.lower() for h in GOAL_ANCHOR_HEADINGS}
     matches = list(_GOAL_HEADING_RE.finditer(text))
     for i, m in enumerate(matches):
@@ -354,6 +338,33 @@ def _goal_md_anchors(goal_md_path: "Path | None") -> set[str]:
                 if phrase is not None:
                     anchors.add(phrase)
     return anchors
+
+
+def _goal_md_anchors(goal_md_path: "Path | None") -> set[str]:
+    """Derive substring anchors from `goal.md`.
+
+    Walks `##` headings; for each whose title starts with one of
+    `GOAL_ANCHOR_HEADINGS` (case-insensitive prefix match), the
+    normalized full heading title becomes an anchor. For `Done when`
+    sections only, each bullet's first 3-6 words become an additional
+    anchor — the briefing's `## Goal` body can cite either the heading
+    name (e.g. "current focus: ideation quality") or quote a Done-when
+    bullet ("an operator can point ap2 at"). Returns an empty set when
+    the file is missing, unreadable, all-placeholder, or contributes no
+    anchors — the validator falls back to "skip the check" in that case
+    so a fresh project without a real `goal.md` doesn't get its briefings
+    rejected.
+
+    TB-193: parsing logic moved to `_goal_md_anchors_from_text` so the
+    `update_goal` queue op can validate a candidate payload before write.
+    """
+    if goal_md_path is None or not goal_md_path.exists():
+        return set()
+    try:
+        text = goal_md_path.read_text()
+    except OSError:
+        return set()
+    return _goal_md_anchors_from_text(text)
 
 
 def _validate_briefing_structure(
@@ -1257,6 +1268,25 @@ OPERATOR_QUEUE_OPS = (
     # non-empty (concurrent task-agent + control-agent SDK runs are
     # unsafe — same precedent as TB-122) unless `force=true` is set.
     "ideate",
+    # TB-193: full-file replacement of `goal.md`. Routed through the
+    # queue (rather than letting the operator edit goal.md directly
+    # while the daemon is running) because ideation reads goal.md
+    # mid-cycle (anchors injected into the prompt; `_goal_md_anchors`
+    # consulted by `_validate_briefing_structure` at queue-append time
+    # for TB-161), and the per-task verifier (TB-69) reads it as part
+    # of the rollback-cohesion state surface — an in-place edit racing
+    # a snapshot-window write tears against any of those readers. The
+    # op carries the new file content + an optional reason; the drain-
+    # side performs an atomic tmpfile + `os.replace` write under
+    # `board_file_lock` and lands the change in the next `state:
+    # drained N operator op(s)` commit. Operator-CLI-only by design —
+    # the MM-handler `operator_queue_append` MCP wrapper refuses this
+    # op (same precedent as `cron_edit` / `board_edit` being CLI-only
+    # post-TB-146 / TB-145). `prompts.py` already documents the design
+    # intent: handlers that think goal.md needs updating raise the
+    # recommendation in their RESULT summary; the operator applies via
+    # `ap2 update-goal`.
+    "update_goal",
 )
 
 
@@ -1477,6 +1507,40 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                     "to land."
                 )
         rec_args = {"force": force}
+    elif op == "update_goal":
+        # TB-193: full-file replacement of `goal.md`. The op carries the
+        # full file content (no diff/patch — symmetric to how `add_*` ops
+        # carry the full briefing payload, atomic-write semantics are
+        # simpler than 3-way merge, and goal.md is small enough that the
+        # size cost is negligible). `reason` is optional, single-line per
+        # TB-134, and feeds the operator-log audit line.
+        goal_content = args.get("goal_content")
+        if not isinstance(goal_content, str) or not goal_content.strip():
+            return _err(
+                "goal_content is required for update_goal (non-empty "
+                "string; whitespace-only is rejected)"
+            )
+        # Parser sanity-check: a goal.md whose anchor extraction blows up
+        # would silently break TB-161 / ideation prompts later. Empty
+        # anchor list is OK — placeholder goal.md is a documented valid
+        # state per `check.py:226-271`; a parser exception is not.
+        try:
+            _goal_md_anchors_from_text(goal_content)
+        except Exception as e:  # noqa: BLE001
+            return _err(
+                f"goal_content failed to parse "
+                f"({type(e).__name__}: {e}); refusing to queue"
+            )
+        raw_reason = args.get("reason")
+        reason = (raw_reason if raw_reason is not None else "").strip()
+        if reason:
+            err = _validate_single_line("reason", reason)
+            if err:
+                return _err(err)
+        rec_args = {
+            "goal_content": goal_content,
+            "reason": reason,
+        }
     else:
         task_id = (args.get("task_id") or "").strip()
         if not task_id:
@@ -1832,6 +1896,15 @@ def drain_operator_queue(cfg: Config) -> dict:
                         ".cc-autopilot/tasks",
                     ]
                 )
+                # TB-193: `update_goal` writes the new goal.md content
+                # under the lock; surface the path so the drain-side
+                # `_commit_state_files` allowlist (TB-126) lands the
+                # change in the same `state: drained N operator op(s)`
+                # commit. Conditional rather than unconditional so a
+                # drain pass that didn't actually touch goal.md doesn't
+                # try to stage a clean working copy of it.
+                if rec.get("op") == "update_goal":
+                    touched.add("goal.md")
                 # TB-141: track the highest preallocated TB-N across the
                 # drain so we can bump CLAUDE.md once at the end (instead
                 # of once per `_allocate_id` call inside
@@ -2005,6 +2078,33 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             force=bool(args.get("force")),
         )
         return
+    if op == "update_goal":
+        # TB-193: full-file replacement of `goal.md`. Atomic write —
+        # tmpfile + `os.replace` — so a concurrent reader (ideation
+        # mid-cycle, the per-task verifier reading the rollback-cohesion
+        # state surface) can't observe a partial file. We hold
+        # `board_file_lock` for the full drain (caller's responsibility),
+        # so the rename plus the `state: drained N operator op(s)`
+        # commit together form a single observable transition for any
+        # subsequent reader.
+        goal_content = args.get("goal_content")
+        reason = args.get("reason") or ""
+        if not isinstance(goal_content, str) or not goal_content.strip():
+            raise RuntimeError(
+                "update_goal op missing non-empty goal_content"
+            )
+        target = cfg.project_root / "goal.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_text(goal_content)
+        os.replace(tmp, target)
+        events.append(
+            cfg.events_file,
+            "goal_updated",
+            reason=reason,
+            bytes=len(goal_content),
+        )
+        return
     if op == "approve":
         # TB-142: drain-side approve. Shares `_approve_review_token` with
         # `do_board_edit({"action":"approve",...})` (the idle-path entry)
@@ -2095,6 +2195,18 @@ def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
     lines: list[str] = [
         f"- {ts} — applied operator-queued {op}{arrow}{suffix}\n"
     ]
+    if op == "update_goal":
+        # TB-193: in addition to the standard `applied operator-queued
+        # update_goal` line above (the verb-vs-other-ops distinction),
+        # emit the richer `<ts> — operator updated goal.md (<reason>)`
+        # line that future ideation cycles read as a "goal drift event"
+        # signal. Empty reason collapses to `<ts> — operator updated
+        # goal.md` (no parens).
+        reason = (args.get("reason") or "").strip()
+        reason_part = f" ({reason})" if reason else ""
+        lines.append(
+            f"- {ts} — operator updated goal.md{reason_part}\n"
+        )
     if op == "reject":
         # TB-152: in addition to the standard `applied operator-queued
         # reject → TB-N` audit line above (so the reject vs. delete
@@ -2671,6 +2783,22 @@ def build_mcp_server(cfg: Config):
         # Normalize string-shaped args to the dict shape do_operator_queue_append
         # expects: tags is a comma-separated string here but a list inside.
         normalized = dict(args)
+        # TB-193: `update_goal` is operator-CLI-only. The MM handler /
+        # control agents have no path to mutate goal.md — `prompts.py`
+        # already documents the design intent ("operator-curated; if
+        # you think it needs updating, raise the recommendation in
+        # your RESULT summary; do NOT rewrite"). Refuse here at the
+        # MCP boundary so the op enum surfaced to the agent doesn't
+        # include this verb regardless of what `OPERATOR_QUEUE_OPS`
+        # advertises. Same precedent as `cron_edit` / `board_edit`
+        # being CLI-only after TB-145 / TB-146.
+        if (normalized.get("op") or "").strip() == "update_goal":
+            return _err(
+                "update_goal is operator-CLI-only "
+                "(`ap2 update-goal --file <path>`); refusing the MCP "
+                "surface. If you think goal.md needs updating, raise "
+                "the recommendation in your RESULT summary."
+            )
         raw_tags = normalized.get("tags")
         if isinstance(raw_tags, str):
             if raw_tags.strip():

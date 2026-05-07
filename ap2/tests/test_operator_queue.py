@@ -1642,3 +1642,247 @@ def test_queue_append_skip_flag_does_not_bypass_other_validators(
     )
     assert res.get("isError"), res
     assert "## Verification" in res["content"][0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# TB-193: `update_goal` op — full-file replacement of goal.md routed
+# through the operator queue so refreshing the project mission while the
+# daemon runs no longer requires `ap2 daemon-control --pause`. The
+# queue-append handler validates content + reason; the drain-side does
+# atomic write + audit line + touched_paths surfacing.
+
+
+_GOAL_PAYLOAD = (
+    "# Project Goals\n\n"
+    "## Mission\nShip ap2 hands-off-by-default.\n\n"
+    "## Done when\n"
+    "- An operator can refresh goal.md without pausing the daemon.\n\n"
+    "## Current focus: ideation quality\n\n"
+    "Track goal.md drift and convert into ideation signal.\n"
+)
+
+
+def test_operator_queue_ops_includes_update_goal():
+    """Pin the constant directly so a refactor can't silently drop the
+    op (TB-193)."""
+    assert "update_goal" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_queue_append_update_goal_rejects_empty_content(cfg: Config):
+    """Whitespace-only payloads are refused at queue-append time —
+    landing an empty goal.md would silently break ideation's anchor
+    extraction and the per-task verifier's rollback-cohesion read."""
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "update_goal", "goal_content": "   \n\n  "}
+    )
+    assert res.get("isError"), res
+    assert "goal_content" in res["content"][0]["text"]
+    # No queue line written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_queue_append_update_goal_rejects_missing_content(cfg: Config):
+    """Same gate fires when the arg is omitted entirely (not just
+    whitespace) — `goal_content` is required."""
+    res = tools.do_operator_queue_append(cfg, {"op": "update_goal"})
+    assert res.get("isError"), res
+    assert "goal_content" in res["content"][0]["text"]
+
+
+def test_queue_append_update_goal_rejects_multiline_reason(cfg: Config):
+    """TB-134 single-line gate fires for the reason field too — a
+    multi-line reason would split the operator_log.md line."""
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": _GOAL_PAYLOAD,
+            "reason": "two\nlines",
+        },
+    )
+    assert res.get("isError"), res
+    assert "single line" in res["content"][0]["text"]
+
+
+def test_queue_append_update_goal_queues_record_with_reason(cfg: Config):
+    """Happy path: a valid payload + reason queues a record carrying
+    both the content and the reason for the drain-side audit-line write."""
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": _GOAL_PAYLOAD,
+            "reason": "rotate focus to ideation quality",
+        },
+    )
+    body = _unwrap(res)
+    assert body["op"] == "update_goal"
+
+    qpath = tools.operator_queue_path(cfg)
+    lines = [
+        json.loads(ln) for ln in qpath.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 1
+    rec = lines[0]
+    assert rec["op"] == "update_goal"
+    assert rec["args"]["goal_content"] == _GOAL_PAYLOAD
+    assert rec["args"]["reason"] == "rotate focus to ideation quality"
+    # No task_id allocation for update_goal.
+    assert rec.get("preallocated_task_id") is None
+    # goal.md on disk is unchanged — the write is deferred to drain.
+    assert (cfg.project_root / "goal.md").read_text() != _GOAL_PAYLOAD
+
+
+def test_queue_append_update_goal_default_empty_reason(cfg: Config):
+    """`reason` is optional and defaults to empty string on the queue
+    record (the drain-side audit line collapses to `<ts> — operator
+    updated goal.md` without parens)."""
+    _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "update_goal", "goal_content": _GOAL_PAYLOAD}
+    ))
+    qpath = tools.operator_queue_path(cfg)
+    rec = json.loads(qpath.read_text().splitlines()[0])
+    assert rec["args"]["reason"] == ""
+
+
+def test_drain_update_goal_writes_atomic_replace(cfg: Config):
+    """Drain replaces goal.md with the queued content. We don't observe
+    the tmpfile (it's `os.replace`d in the same call), but the post-drain
+    file content should match the payload exactly."""
+    pre = (cfg.project_root / "goal.md").read_text()
+    assert pre != _GOAL_PAYLOAD  # template is the placeholder
+
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": _GOAL_PAYLOAD,
+            "reason": "narrow focus",
+        },
+    )
+    res = tools.drain_operator_queue(cfg)
+    assert res["applied"] == 1
+
+    post = (cfg.project_root / "goal.md").read_text()
+    assert post == _GOAL_PAYLOAD
+    # No leftover tmpfile.
+    assert not (cfg.project_root / "goal.md.tmp").exists()
+
+
+def test_drain_update_goal_emits_goal_updated_event(cfg: Config):
+    """The drain emits a `goal_updated` event with the reason snapshot
+    and content byte-count for diagnostics — post-mortems can grep
+    events.jsonl for goal-drift inflection points."""
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": _GOAL_PAYLOAD,
+            "reason": "rotate focus",
+        },
+    )
+    tools.drain_operator_queue(cfg)
+
+    evts = events.tail(cfg.events_file, 20)
+    updates = [e for e in evts if e["type"] == "goal_updated"]
+    assert len(updates) == 1
+    assert updates[0]["reason"] == "rotate focus"
+    assert updates[0]["bytes"] == len(_GOAL_PAYLOAD)
+
+
+def test_drain_update_goal_writes_audit_line_with_reason(cfg: Config):
+    """operator_log.md gets two lines per drained `update_goal`:
+    the standard `applied operator-queued update_goal` line AND the
+    richer `<ts> — operator updated goal.md (<reason>)` line that
+    future ideation cycles read as a goal-drift signal."""
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": _GOAL_PAYLOAD,
+            "reason": "narrow focus to ideation quality",
+        },
+    )
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "applied operator-queued update_goal" in log
+    assert (
+        "operator updated goal.md (narrow focus to ideation quality)" in log
+    )
+
+
+def test_drain_update_goal_audit_line_no_reason_no_parens(cfg: Config):
+    """Reason omitted → audit line collapses to `<ts> — operator
+    updated goal.md` (no parenthetical) per TB-193 design — the
+    placeholder has no signal value when the operator chose silence."""
+    tools.do_operator_queue_append(
+        cfg, {"op": "update_goal", "goal_content": _GOAL_PAYLOAD}
+    )
+    tools.drain_operator_queue(cfg)
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "operator updated goal.md\n" in log
+    # Pin the no-parens shape — only the bare `goal.md` line, no `(...)`.
+    assert "operator updated goal.md (" not in log
+
+
+def test_drain_update_goal_surfaces_goal_md_in_touched_paths(cfg: Config):
+    """`goal.md` rides on the drain's `touched_paths` so the daemon's
+    `_commit_state_files` allowlist (TB-126) lands the change in the
+    same `state: drained N operator op(s)` commit. Without this, the
+    queue-routed write would land dirty in the working tree (the
+    failure mode TB-192 catches for `_index.md`)."""
+    tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": _GOAL_PAYLOAD,
+            "reason": "x",
+        },
+    )
+    res = tools.drain_operator_queue(cfg)
+    assert "goal.md" in res["touched_paths"]
+
+
+def test_state_file_names_contains_goal_md():
+    """Defense in depth: `_STATE_FILE_NAMES` MUST contain `goal.md`
+    so `_filter_state_paths` accepts it on the drain-side commit. If
+    this regresses, the queue-routed write lands without a commit and
+    rollback past an `update_goal` would be incoherent."""
+    from ap2 import daemon as daemon_mod
+    assert "goal.md" in daemon_mod._STATE_FILE_NAMES
+
+
+def test_drain_update_goal_idempotent_via_uuid(cfg: Config):
+    """Replaying an already-applied `update_goal` record (e.g. crash
+    mid-drain) does not double-write — same idempotency contract as
+    every other queue op."""
+    tools.do_operator_queue_append(
+        cfg, {"op": "update_goal", "goal_content": _GOAL_PAYLOAD}
+    )
+    r1 = tools.drain_operator_queue(cfg)
+    assert r1["applied"] == 1
+    r2 = tools.drain_operator_queue(cfg)
+    assert r2["applied"] == 0
+
+    # Exactly one `goal_updated` event total.
+    evts = events.tail(cfg.events_file, 50)
+    updates = [e for e in evts if e["type"] == "goal_updated"]
+    assert len(updates) == 1
+
+
+def test_queue_append_update_goal_accepts_placeholder_anchors(cfg: Config):
+    """Empty anchor extraction is OK — the all-placeholder goal.md is a
+    documented valid state per `check.py:226-271`. The validator only
+    rejects payloads that EXPLODE the parser, not ones that contribute
+    no anchors. Pin via a placeholder-only payload."""
+    placeholder = (
+        "# Project Goals\n\n## Mission\n(stub)\n\n"
+        "## Current focus\n- (stub)\n"
+    )
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "update_goal", "goal_content": placeholder}
+    )
+    assert not res.get("isError"), res

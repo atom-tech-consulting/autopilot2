@@ -1671,6 +1671,19 @@ _STATE_FILE_NAMES = (
     ".cc-autopilot/cron.yaml",
     ".cc-autopilot/retry_state.json",
     ".cc-autopilot/operator_log.md",
+    # TB-193: `goal.md` becomes daemon-mutable via the `update_goal`
+    # operator-queue op so refreshing the project mission while the
+    # daemon runs no longer requires `ap2 daemon-control --pause`. Once
+    # mutable, rollback cohesion demands it be in the snapshot baseline
+    # — otherwise an `ap2 rollback` past an `update_goal` commit would
+    # leave goal.md at the new content while every other state file
+    # reverts (the same failure mode TB-192 catches for `_index.md`).
+    # Adding it here also means out-of-band edits during a pause get
+    # auto-picked up by the next snapshot/diff cron commit (acceptable:
+    # pause-edits are still rare post-TB-193 and the auto-commit
+    # eliminates an entire class of "operator forgot to commit goal.md"
+    # footgun).
+    "goal.md",
 )
 # Directories whose contents are also daemon-owned audit trail. Staged with
 # `git add <dir>` so new briefings (from `add_backlog` auto-fill, ideation

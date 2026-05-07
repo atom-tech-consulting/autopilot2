@@ -992,6 +992,61 @@ def cmd_ideate(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_update_goal(cfg: Config, args: argparse.Namespace) -> int:
+    """Refresh `goal.md` via the operator queue (TB-193).
+
+    Routes through the operator queue rather than mutating goal.md in
+    place because ideation reads the file mid-cycle (anchors injected
+    into the prompt; `_goal_md_anchors` consulted at queue-append time
+    for TB-161) and the per-task verifier (TB-69) reads it as part of
+    the rollback-cohesion state surface — an in-place edit racing a
+    snapshot-window write would tear against any of those readers. The
+    queue-routed write lands at a tick boundary, under
+    `board_file_lock`, in the same `state: drained N operator op(s)`
+    commit as any co-staged ops.
+
+    Symmetric to `ap2 add --briefing-file`: pass `--file <path>` to
+    read the new goal content from a path, or `--file -` to read from
+    stdin. `--reason` is optional and feeds the operator-log audit
+    line `<ts> — operator updated goal.md (<reason>)` future ideation
+    cycles read as a goal-drift signal.
+    """
+    try:
+        content = _read_briefing_file(args.file)
+    except OSError as e:
+        print(f"ap2 update-goal: {e}", file=sys.stderr)
+        return 1
+    if not content.strip():
+        print(
+            "ap2 update-goal: --file is empty — refusing.\n"
+            "  Pass a non-empty goal.md payload (whitespace-only is "
+            "rejected).",
+            file=sys.stderr,
+        )
+        return 1
+    # Soft client-side cap so a runaway file doesn't get queued. The
+    # daemon will accept whatever lands, but a goal.md > 100KB is
+    # almost certainly a path-vs-content mistake; bail early.
+    if len(content) > 100_000:
+        print(
+            f"ap2 update-goal: --file is {len(content)} bytes — "
+            f"refusing (cap 100000). goal.md is meant to be a short "
+            f"focus document; double-check you passed the goal "
+            f"content, not a log/dump.",
+            file=sys.stderr,
+        )
+        return 1
+    payload: dict = {"op": "update_goal", "goal_content": content}
+    if args.reason is not None:
+        payload["reason"] = args.reason
+    res = tools.do_operator_queue_append(cfg, payload)
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print("queued update_goal (lands at next tick)")
+    return 0
+
+
 def cmd_approve(cfg: Config, args: argparse.Namespace) -> int:
     """Strip the `(blocked on: review)` review-gate clause from a task
     (TB-121).
@@ -1518,6 +1573,32 @@ def build_parser() -> argparse.ArgumentParser:
              "the Active-section check.",
     )
     s.set_defaults(func=cmd_ideate)
+
+    s = sub.add_parser(
+        "update-goal",
+        help="refresh `goal.md` via the operator queue (TB-193): "
+             "queues a full-file replacement for the daemon to apply "
+             "at the next tick (≤30s) under `board_file_lock`. "
+             "Symmetric to `ap2 add --briefing-file` — pass --file "
+             "<path> (or `-` for stdin) to read the new goal content. "
+             "Operator-CLI-only by design; the MM handler has no path "
+             "to mutate goal.md.",
+    )
+    s.add_argument(
+        "--file",
+        required=True,
+        metavar="PATH",
+        help="path to the new goal.md content (or `-` to read from "
+             "stdin). Empty / whitespace-only payloads are rejected.",
+    )
+    s.add_argument(
+        "--reason",
+        default=None,
+        help="single-line reason captured in operator_log.md as "
+             "`<ts> — operator updated goal.md (<reason>)`. Future "
+             "ideation cycles read this as a goal-drift signal.",
+    )
+    s.set_defaults(func=cmd_update_goal)
 
     s = sub.add_parser(
         "rollback",
