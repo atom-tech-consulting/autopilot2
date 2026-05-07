@@ -383,3 +383,9 @@
 - **Summary:** Reordered `insights.maybe_regenerate_index(cfg)` in `_run_ideation` to run between `pre_snapshot` and `_run_control_agent` so a regenerated `_index.md` rides along in the `state: ideation` commit; added two regression tests (behavioral diff-list assertion + structural source-order pin). Full suite: 1126 passed.
 - **Files:** ap2/ideation.py, ap2/tests/test_ideation_trigger.py
 - **Tests:** pass
+
+## [2026-05-07] TB-193: Add update_goal as an operator queue op so goal.md can be safely refreshed while the daemon runs
+- **Commit:** `01e2d81`
+- **Summary:** Added update_goal operator-queue op + ap2 update-goal CLI; goal.md is now safely refreshable via the queue (atomic write under board_file_lock at drain time, audit line, goal_updated event), added goal.md to _STATE_FILE_NAMES for rollback cohesion, MCP wrapper refuses update_goal so the verb stays operator-CLI-only; full test suite passes (1148 tests).
+- **Files:** ap2/tools.py, ap2/daemon.py, ap2/cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_cli.py, ap2/tests/test_tools.py
+- **Tests:** pass

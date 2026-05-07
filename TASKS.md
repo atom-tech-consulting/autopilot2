@@ -10,7 +10,6 @@
 
 - [ ] **TB-188** **Capture per-proposal record at ideation `add_backlog`; reconcile outcome on terminal events** `#autopilot` `#ideation` `#signal-collection` `#observability` `@blocked:review` — Per-proposal JSON record at `.cc-autopilot/ideation_proposals/<TB-N>.json` written when ideation queues an `add_backlog` (blocked_on=review marker), reconciled with an `outcome` block on `task_complete` / `task_deleted` / operator-queue `approve` / `reject`. Foundational signal capture for the new "ideation quality signal collection" focus — closes the gap that proposal cycle context (focus_anchor, why_now) is captured only in briefing prose with no link back to outcome. [→ brief](.cc-autopilot/tasks/capture-per-proposal-record-at-ideation.md)
 - [ ] **TB-189** **`ap2 classify TB-N --delete-test <verdict>` — operator-authored retrospective verdict on shipped proposals** `#autopilot` `#ideation` `#signal-collection` `#operator-queue` `#cli` `#mattermost` `@blocked:review,TB-188` — Add `ap2 classify TB-N --delete-test {advanced-goal,pro-forma,unclear} [--reason ...]` (CLI + chat verb routed via operator_queue_append) to record the operator's retrospective delete-test verdict on a shipped proposal. Writes a structured line to operator_log.md and appends a `delete_test` block to the per-proposal record from TB-188. The operator-authored signal stream that goal.md L61-76 directly anchors signal collection to. Blocked on TB-188. [→ brief](.cc-autopilot/tasks/ap2-classify-tb-n-delete-test-verdict-op.md)
-- [ ] **TB-193** **Add update_goal as an operator queue op so goal.md can be safely refreshed while the daemon runs** `#operator-queue` `#goal` `#cli` [→ brief](.cc-autopilot/tasks/add-update-goal-as-an-operator-queue-op.md)
 
 ## Pipeline Pending
 
@@ -81,6 +80,7 @@
 - [x] **TB-190** **Resolve status-report target channel server-side — stop posting to town-square** [→ brief](.cc-autopilot/tasks/resolve-status-report-target-channel-ser.md)
 - [x] **TB-191** **Fix `## Open questions for operator` schema — require actionable decisions, add `## Cycle observations` with triage discipline** `#autopilot` `#ideation` `#prompts` `#bug-fix` [→ brief](.cc-autopilot/tasks/fix-open-questions-for-operator-schema-r.md)
 - [x] **TB-192** **Commit insights/_index.md after ideation-driven regeneration** `#ideation` `#insights` `#commit-cohesion` [→ brief](.cc-autopilot/tasks/commit-insights-index-md-after-ideation.md)
+- [x] **TB-193** **Add update_goal as an operator queue op so goal.md can be safely refreshed while the daemon runs** `#operator-queue` `#goal` `#cli` [→ brief](.cc-autopilot/tasks/add-update-goal-as-an-operator-queue-op.md)
 
 ## Frozen
 
