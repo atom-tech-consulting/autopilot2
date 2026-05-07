@@ -273,6 +273,7 @@ will reject `Edit`/`Write` on them — they're listed in `disallowed_tools`.
 - `.cc-autopilot/operator_log.md` — operator decision log; the operator owns it (`ap2 ack`) and the mattermost handler appends to it via the `operator_log_append` MCP tool.
 - `.cc-autopilot/operator_queue.jsonl` — operator-staged board ops (TB-131); the CLI / MM-handler write path appends to it and the daemon drains.
 - `.cc-autopilot/operator_queue_state.json` — applied-uuid bookkeeping for the operator queue; the daemon owns it.
+- `.cc-autopilot/ideation_proposals` — per-proposal records (TB-188), one JSON per ideation-authored proposal, written at `add_backlog` time and reconciled with an `outcome` block by the daemon on terminal events. Daemon-owned audit trail; an agent rewriting its own proposal's `focus_anchor` / `why_now` mid-run could otherwise mask scope drift.
 
 (TB-143: `events.jsonl` and `operator_queue.jsonl` are listed
 above for defense in depth — the SDK still rejects `Edit`/`Write`

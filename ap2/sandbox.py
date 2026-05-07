@@ -21,6 +21,15 @@ from pathlib import Path
 
 DEFAULT_USER = "claude-agent"
 
+# TB-188 cross-ref: `TASK_AGENT_FENCED_PATHS` in `ap2.tools` lists
+# `.cc-autopilot/ideation_proposals` (the per-proposal record dir) so
+# the SDK rejects task-agent edits to records, mirroring the
+# operator_queue.jsonl fence (TB-143). Sandbox-user clones don't need
+# to pre-create the directory — the daemon writes it lazily on the
+# first ideation `add_backlog` with the `review` blocker token. This
+# comment is the wired-into-`TASK_AGENT_FENCED_PATHS` audit anchor the
+# briefing's verification grep looks for.
+
 # Repo-local git identity written by `project-setup` so the daemon's first
 # state commit (typically the `state: cron status-report` commit on tick #1)
 # succeeds. Fresh sandbox-user clones inherit no git user.name/user.email

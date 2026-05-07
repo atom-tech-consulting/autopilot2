@@ -367,6 +367,208 @@ def _goal_md_anchors(goal_md_path: "Path | None") -> set[str]:
     return _goal_md_anchors_from_text(text)
 
 
+# TB-188: public helpers exposed for the per-proposal record path. Wraps
+# the TB-161 / TB-164 internals (`_goal_md_anchors`, `_briefing_section_body`,
+# `_normalize_anchor`, `_why_now_paragraph`) so the proposal-record writer
+# doesn't have to reach into private symbols and so signal-collection
+# follow-ups (TB-189 retrospective verdict, future track-record blocks)
+# share one parser surface with the queue-append validator. The pair is
+# deliberately read-only: extraction returns whatever the briefing carries,
+# even when the validator would have rejected the briefing — the record's
+# job is to capture seed context, not re-gate.
+def extract_goal_anchor(
+    briefing_text: str,
+    goal_md_path: "Path | None" = None,
+) -> str | None:
+    """Return the first goal.md anchor substring matched by the briefing's
+    `## Goal` body, or None when no anchor matches (or no anchors are
+    available from goal.md). Reuses the TB-161 substring matcher so the
+    per-proposal record's `focus_anchor` field reflects the same anchor
+    the validator would have credited at queue-append time. Iteration is
+    sorted for record-shape determinism — a briefing whose Goal body
+    contains multiple anchors (e.g. the heading title AND a quoted
+    Done-when bullet) records the lexicographically-first match.
+    """
+    if not briefing_text:
+        return None
+    anchors = _goal_md_anchors(goal_md_path)
+    if not anchors:
+        return None
+    goal_body = _briefing_section_body(briefing_text, "Goal")
+    if not goal_body:
+        return None
+    norm = _normalize_anchor(goal_body)
+    for a in sorted(anchors):
+        if a in norm:
+            return a
+    return None
+
+
+def extract_why_now(briefing_text: str) -> str | None:
+    """Return the line-anchored 'Why now' rationale paragraph from the
+    briefing's `## Goal` body, or None when no marker is present.
+    Reuses TB-164's `_why_now_paragraph` extractor against the Goal
+    section. Returns the rationale text post-marker / post-parenthetical
+    / post-separator, matching what the validator's length check sees —
+    so a record whose `why_now` field is shorter than `WHY_NOW_MIN_CHARS`
+    is by definition a briefing that bypassed the gate (e.g. operator-CLI
+    `--skip-goal-alignment`), and the per-proposal aggregation can spot
+    that without re-parsing the original briefing.
+    """
+    if not briefing_text:
+        return None
+    goal_body = _briefing_section_body(briefing_text, "Goal")
+    if not goal_body:
+        return None
+    return _why_now_paragraph(goal_body)
+
+
+# TB-188: per-proposal record path. One JSON file per ideation-authored
+# `add_backlog` (those whose `blocked_on` carries the `review` token —
+# the TB-121 ideation marker). Reconciled with an `outcome` block on
+# the first terminal event (task_complete with status complete /
+# verification_failed; operator-queue approve / reject / delete). Records
+# are committed alongside other daemon-owned audit trail (`tasks/`,
+# `insights/`) via the TB-126 narrowed state-commit path so signal-
+# collection follow-ups (TB-189 delete-test verdict, acceptance-rate
+# aggregation, retrospective classifier) can query history across cycles.
+IDEATION_PROPOSALS_DIR = ".cc-autopilot/ideation_proposals"
+
+
+def ideation_proposals_dir(cfg: Config) -> Path:
+    return cfg.project_root / IDEATION_PROPOSALS_DIR
+
+
+def proposal_record_path(cfg: Config, tb_id: str) -> Path:
+    return ideation_proposals_dir(cfg) / f"{tb_id}.json"
+
+
+def _atomic_write_json(target: Path, payload: dict) -> None:
+    """Write JSON atomically: tmpfile in the same dir + os.replace.
+    Mirrors `do_ideation_state_write` (TB-90 precedent) — same-directory
+    tmpfile so `os.replace` stays atomic on POSIX; same-suffix-plus-`.tmp`
+    naming so a crashed write leaves a recognizable orphan.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp, target)
+
+
+def _blocked_on_has_review(blocked_on: str) -> bool:
+    """True if `blocked_on` (raw codespan body) contains the literal
+    `review` token. Tolerates the TB-187 mixed-blocker shape
+    (`review,TB-N`) and case stylings — operator-driven adds via
+    `ap2 add` typically don't carry the marker, so this acts as the
+    "is this an ideation-authored proposal?" filter for record writes.
+    """
+    return "review" in [
+        tok.strip().lower()
+        for tok in (blocked_on or "").split(",")
+        if tok.strip()
+    ]
+
+
+def write_ideation_proposal_record(
+    cfg: Config,
+    *,
+    tb_id: str,
+    blocked_on: str,
+    briefing_text: str,
+    briefing_rel: str | None,
+) -> Path | None:
+    """Seed a per-proposal record at ideation `add_backlog` time (TB-188).
+
+    Skips silently when `blocked_on` does not carry the `review` token
+    (operator-driven adds aren't ideation proposals — see
+    `_blocked_on_has_review`). Skips when a record for `tb_id` already
+    exists (defensive against retries reissuing the same TB-N — should
+    not happen in normal flow, but a re-write would clobber a previously
+    reconciled `outcome` block).
+
+    Returns the record path when written, None when skipped.
+    """
+    if not _blocked_on_has_review(blocked_on):
+        return None
+    target = proposal_record_path(cfg, tb_id)
+    if target.exists():
+        return None
+    payload = {
+        "tb_id": tb_id,
+        "proposed_at": _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "focus_anchor": extract_goal_anchor(
+            briefing_text, cfg.project_root / "goal.md",
+        ),
+        "why_now": extract_why_now(briefing_text),
+        "briefing_path": briefing_rel,
+        "blocked_on": blocked_on,
+    }
+    _atomic_write_json(target, payload)
+    return target
+
+
+_PROPOSAL_DECISION_KINDS = (
+    "approved",
+    "rejected",
+    "deleted",
+    "completed",
+    "verification_failed",
+)
+
+
+def reconcile_proposal_outcome(
+    cfg: Config,
+    tb_id: str,
+    *,
+    decision_kind: str,
+    decision_actor: str,
+    commit: str | None = None,
+    reason: str = "",
+) -> Path | None:
+    """Append an `outcome` block to a per-proposal record (TB-188).
+
+    No-op when:
+      - the record file does not exist (legacy proposals from before
+        TB-188 landed; operator-driven adds without the `review`
+        marker; etc.),
+      - the record is unreadable / malformed JSON (defensive),
+      - the record already carries an `outcome` block (idempotent —
+        first terminal event wins, mirroring the briefing's "no
+        multi-amend" contract).
+
+    Returns the record path when reconciled, None when skipped.
+    """
+    if decision_kind not in _PROPOSAL_DECISION_KINDS:
+        # Defensive — callers in this module pass literals from the
+        # tuple above. A wrong literal silently no-ops rather than
+        # poisoning the record with an unknown kind.
+        return None
+    target = proposal_record_path(cfg, tb_id)
+    if not target.exists():
+        return None
+    try:
+        record = json.loads(target.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    if "outcome" in record:
+        return None
+    record["outcome"] = {
+        "decision_kind": decision_kind,
+        "decision_ts": _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "decision_actor": decision_actor,
+        "commit": commit,
+        "reason": reason,
+    }
+    _atomic_write_json(target, record)
+    return target
+
+
 def _validate_briefing_structure(
     briefing_text: str,
     *,
@@ -839,6 +1041,24 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 claude_md = cfg.project_root / "CLAUDE.md"
                 if claude_md.exists():
                     bump_next_task_id(claude_md, cfg.next_task_id)
+                # TB-188: seed a per-proposal record for ideation-authored
+                # `add_backlog` (`blocked_on` carries the `review` token).
+                # No-op for operator-driven adds (no review marker) and
+                # for non-backlog adds. Failures are swallowed so a bad
+                # write to the records dir doesn't unwind a successful
+                # board edit; the daemon's audit trail (events.jsonl)
+                # still carries the canonical `task_added` event.
+                if action == "add_backlog" and blocked_on:
+                    try:
+                        write_ideation_proposal_record(
+                            cfg,
+                            tb_id=new_id,
+                            blocked_on=blocked_on,
+                            briefing_text=briefing or "",
+                            briefing_rel=briefing_rel,
+                        )
+                    except OSError:
+                        pass
                 return _ok(
                     f"{action} {new_id} {title!r}",
                     task_id=new_id,
@@ -882,6 +1102,18 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 events.append(
                     cfg.events_file, "ideation_approved", task=t.id,
                 )
+                # TB-188: terminal-event reconciliation for the synchronous
+                # `do_board_edit` approve surface (matches the drain-side
+                # branch in `_apply_operator_op` so both approve routes
+                # land identical record-shape outcomes).
+                try:
+                    reconcile_proposal_outcome(
+                        cfg, t.id,
+                        decision_kind="approved",
+                        decision_actor="operator",
+                    )
+                except OSError:
+                    pass
                 return _ok(
                     f"approve {t.id}", task_id=t.id, section=t.section,
                 )
@@ -1894,6 +2126,15 @@ def drain_operator_queue(cfg: Config) -> dict:
                         ".cc-autopilot/retry_state.json",
                         ".cc-autopilot/operator_log.md",
                         ".cc-autopilot/tasks",
+                        # TB-188: drain-side `approve` / `reject` /
+                        # `delete` may amend the per-proposal record's
+                        # `outcome` block. Listed here unconditionally
+                        # so `_commit_state_files` lands the rewrite in
+                        # the same `state: drained N operator op(s)`
+                        # commit. `_filter_state_paths` drops the dir
+                        # when nothing inside it changed (the typical
+                        # case for ops on non-ideation tasks).
+                        ".cc-autopilot/ideation_proposals",
                     ]
                 )
                 # TB-193: `update_goal` writes the new goal.md content
@@ -2025,6 +2266,19 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             section=section,
             title=title,
         )
+        # TB-188: terminal-event reconciliation. No-op when no proposal
+        # record exists (legacy / non-ideation tasks); otherwise stamps
+        # `outcome.decision_kind=deleted` with the operator actor. Reason
+        # stays empty for `delete` — the matching operator_log.md line
+        # carries no free-text reason (the verb itself is the audit).
+        try:
+            reconcile_proposal_outcome(
+                cfg, args["task_id"],
+                decision_kind="deleted",
+                decision_actor="operator",
+            )
+        except OSError:
+            pass
         return
     if op == "reject":
         # TB-152: shares `delete`'s removal codepath — drop the row +
@@ -2061,6 +2315,22 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             section=section,
             title=title,
         )
+        # TB-188: terminal-event reconciliation. The reject path always
+        # carries a `reason` arg (snapshotted into the queue record at
+        # append time, defaulting to "(no reason given)"). Stamp it into
+        # the record's `outcome.reason` so the same operator-authored
+        # rationale lives in two places: the human-readable
+        # operator_log.md line AND the structured per-proposal record
+        # the signal-collection follow-ups (TB-189) query.
+        try:
+            reconcile_proposal_outcome(
+                cfg, tid,
+                decision_kind="rejected",
+                decision_actor="operator",
+                reason=str(args.get("reason") or ""),
+            )
+        except OSError:
+            pass
         return
     if op == "ideate":
         # TB-159: drain-side `ideate` is a signal, not an action. The
@@ -2116,6 +2386,20 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             raise RuntimeError("approve op missing task_id")
         _approve_review_token(board, tid)
         events.append(cfg.events_file, "ideation_approved", task=tid)
+        # TB-188: terminal-event reconciliation for the operator-approval
+        # path. The approve verb strips `@blocked:review` and lets the
+        # task become dispatchable — from the proposal's perspective the
+        # operator has weighed in and said "yes." Subsequent
+        # task_complete events for this TB-N find the outcome already
+        # set and silently no-op (idempotent first-write wins).
+        try:
+            reconcile_proposal_outcome(
+                cfg, tid,
+                decision_kind="approved",
+                decision_actor="operator",
+            )
+        except OSError:
+            pass
         return
     if op == "update":
         # TB-153: drain-side update. The queue-append handler already
@@ -3132,4 +3416,13 @@ TASK_AGENT_FENCED_PATHS = (
     # re-introducing the false-positive.
     ".cc-autopilot/operator_queue.jsonl",
     ".cc-autopilot/operator_queue_state.json",
+    # TB-188: per-proposal records (one JSON per ideation-authored
+    # proposal, written at `add_backlog` time and reconciled with an
+    # `outcome` block on the first terminal event). Daemon-owned audit
+    # trail — task agents must NOT edit a record (a malicious or
+    # confused agent could otherwise rewrite its own proposal's
+    # `focus_anchor` / `why_now` mid-run to cover scope drift). The
+    # directory is treated as a unit; the prompt-header rendering walks
+    # it so any individual `<TB-N>.json` under it is fenced.
+    ".cc-autopilot/ideation_proposals",
 )

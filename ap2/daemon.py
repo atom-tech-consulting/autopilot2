@@ -600,6 +600,30 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         commit=commit_hash,
         summary=parsed.summary[:300],
     )
+    # TB-188: terminal-event reconciliation for the per-proposal record
+    # (no-op when no record exists for this TB-N — legacy proposals from
+    # before TB-188 landed, or operator-driven adds without the `review`
+    # marker). Only the two terminal-from-the-proposal's-perspective
+    # statuses reconcile: `complete` (the task shipped) and
+    # `verification_failed` (the verifier rejected the agent's diff).
+    # `incomplete` / `blocked` / `failed` / timeout / state_violation
+    # all route the task back to Backlog with retries remaining — the
+    # proposal is still alive, so leave the record's `outcome` unset
+    # until a truly-terminal event fires.
+    if final_status == "complete":
+        tools.reconcile_proposal_outcome(
+            cfg, task.id,
+            decision_kind="completed",
+            decision_actor="daemon",
+            commit=(commit_hash or "")[:8] or None,
+        )
+    elif final_status == "verification_failed":
+        tools.reconcile_proposal_outcome(
+            cfg, task.id,
+            decision_kind="verification_failed",
+            decision_actor="verifier",
+            commit=(commit_hash or "")[:8] or None,
+        )
     # Commit state-file updates (TASKS.md, progress.md, retry_state.json,
     # the task's briefing) right after the task agent's own source-code
     # commit. Narrowed allowlist (TB-126) ensures unrelated dirty briefings
@@ -1698,6 +1722,17 @@ _STATE_FILE_NAMES = (
 _STATE_DIRS = (
     ".cc-autopilot/tasks",
     ".cc-autopilot/insights",
+    # TB-188: per-proposal records (one JSON per ideation-authored
+    # proposal, keyed on TB-N). Daemon-owned audit trail — written at
+    # `add_backlog` time and reconciled with an `outcome` block on the
+    # first terminal event (task_complete / operator approve / reject /
+    # delete). Bundled into the state-dirs set so signal-collection
+    # follow-ups (TB-189 delete-test verdict, acceptance-rate
+    # aggregation, retrospective classifier) can query history across
+    # cycles, and so an `ap2 rollback` past a state commit reverts the
+    # records alongside the board / progress / cron state they were
+    # paired with.
+    ".cc-autopilot/ideation_proposals",
 )
 
 
@@ -1853,6 +1888,26 @@ async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
             commit=result_summary.get("commit", ""),
             summary=(result_summary.get("summary") or "")[:300],
         )
+        # TB-188: terminal-event reconciliation, mirroring `run_task`.
+        # The pipeline_pending sweep is the second of two task_complete
+        # emission sites; both must reconcile so a proposal whose work
+        # rode through the pipeline path doesn't end up with an empty
+        # `outcome` block in its record.
+        sweep_commit = result_summary.get("commit", "") or ""
+        if final_status == "complete":
+            tools.reconcile_proposal_outcome(
+                cfg, task.id,
+                decision_kind="completed",
+                decision_actor="daemon",
+                commit=sweep_commit[:8] or None,
+            )
+        elif final_status == "verification_failed":
+            tools.reconcile_proposal_outcome(
+                cfg, task.id,
+                decision_kind="verification_failed",
+                decision_actor="verifier",
+                commit=sweep_commit[:8] or None,
+            )
         board_after = Board.load(cfg.tasks_file)
         loc = board_after.find(task.id)
         dest = loc[0] if loc else "?"
@@ -2047,6 +2102,13 @@ def _task_state_paths(task) -> list[str]:
     - `progress.md`: `_append_progress` on Complete.
     - `retry_state.json`: `bump_attempt` / `reset_attempt`.
     - The task's briefing: `_append_attempts` on every failure mode.
+    - The TB-188 proposal record (`.cc-autopilot/ideation_proposals/<TB-N>.json`):
+      `reconcile_proposal_outcome` appends an `outcome` block on
+      `task_complete` (status=complete or status=verification_failed).
+      The path is included unconditionally — `_filter_state_paths`
+      drops it for tasks without a record (legacy / non-ideation
+      proposals), and `git diff --cached --quiet` drops it for
+      no-op reconciliations.
 
     Files that exist but weren't actually modified are filtered downstream
     by `git diff --cached --quiet`, so passing a fixed superset is safe.
@@ -2055,6 +2117,7 @@ def _task_state_paths(task) -> list[str]:
         "TASKS.md",
         ".cc-autopilot/progress.md",
         ".cc-autopilot/retry_state.json",
+        f".cc-autopilot/ideation_proposals/{task.id}.json",
     ]
     if task.briefing:
         paths.append(str(task.briefing).replace("\\", "/"))
