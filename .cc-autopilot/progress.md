@@ -419,3 +419,9 @@
 - **Summary:** Added ideation_proposal_recorded + ideation_proposal_reconciled emits inside write_ideation_proposal_record / reconcile_proposal_outcome (covers all forward + drain + daemon + backfill call sites automatically), added both types to IDEATION_RELEVANT_EVENT_TYPES, and added 7 new tests; uv run pytest -q ap2/tests/ → 1200 passed.
 - **Files:** ap2/tools.py, ap2/ideation.py, ap2/tests/test_ideation_proposals.py, ap2/tests/test_prompts.py
 - **Tests:** pass
+
+## [2026-05-10] TB-197: Show next scheduled ideation time on the web overview
+- **Commit:** `b6488d9`
+- **Summary:** Added an always-rendered ideation gate-state card to the web overview (`/`) with five tinted variants (eligible / cooldown / active_running / queued_full / disabled) mirroring `_maybe_ideate`'s decision logic. Cooldown variant carries both an absolute next-eligible timestamp and a relative remaining duration; queued_full surfaces the count + threshold env knob inline; disabled names AP2_IDEATION_DISABLED verbatim. Nine new tests in test_web.py pin each state variant, gate-priority ordering, always-rendered shape, helper grep-visibility, and HTML escape defense; full ap2/tests/ suite passes (1210 tests).
+- **Files:** ap2/web.py, ap2/tests/test_web.py
+- **Tests:** pass
