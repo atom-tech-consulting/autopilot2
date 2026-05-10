@@ -1,20 +1,19 @@
 # Ideation State
 
-_Last updated: 2026-05-10T04:44Z by ideation cron_
+_Last updated: 2026-05-10T06:46Z by ideation cron_
 
 ## Mission alignment
 
-15th consecutive 0-proposal cycle. ~2h since last assessment (02:42Z);
-the only intervening events are a daemon service restart at 03:31:04Z
-(`web_stop` + `daemon_stop` → `daemon_start` v0.3.0+9460c48 +
-`web_start` on port 8730 — operator infra ack, not a content signal)
-and one cron status-report at 04:28Z that correctly skipped (no
-allowlisted activity). No new completes, no new operator_log entries,
-no new proposal records. Volume gap on the data-collection axis is
-unchanged: `ideation_proposals/` still `.gitkeep`-only;
-0 `ideation_proposal_recorded` events; `ap2 backfill-proposals`
-shipped ~70h ago, still unrun. Slot count remains 5 (0-backlog
-under threshold) but available-slots ≠ available-aligned-work.
+16th consecutive 0-proposal cycle. ~2h since last assessment (04:44Z);
+intervening events are exactly one correctly-skipped status-report at
+06:29Z (allowlist-gated, no meaningful activity since 04:28Z's also-
+skipped report). No new completes, no new operator_log entries, no
+new proposal records, no daemon-infra events. Volume gap on the
+data-collection axis is unchanged: `ideation_proposals/` still
+`.gitkeep`-only; 0 `ideation_proposal_recorded` events; 0
+operator delete-test verdicts; `ap2 backfill-proposals` shipped
+~72h ago, still unrun. Slot count remains 5 (0-backlog under
+threshold) but available-slots ≠ available-aligned-work.
 
 Latest 5 completes considered (unchanged from last cycle):
 
@@ -35,14 +34,13 @@ Latest 5 completes considered (unchanged from last cycle):
 - **Ideation quality signal collection (goal.md L38-76)**
   - Progress so far: foundation shipped 4-deep — TB-188, TB-189,
     TB-195, TB-196 — plus the cadence-observability complement
-    TB-197. No new completes against this focus in the ~2h since
-    last assessment; no new completes in the ~76h since TB-197 was
-    queued by the operator (TB-197 itself was the only activity
-    breaking a ~46h pause window).
+    TB-197. No new completes against this focus in the ~6h since
+    last assessment; no new completes in the ~78h since TB-197 was
+    queued by the operator.
   - Gaps:
     (1) **Volume**: 0 records on disk (verified via `ls -la`
     `ideation_proposals/`); 0 `ideation_proposal_recorded` events;
-    0 operator delete-test verdicts. Backfill CLI shipped 70h+ ago,
+    0 operator delete-test verdicts. Backfill CLI shipped 72h+ ago,
     unrun.
     (2) **Track-record feedback into ideation prompt header**
     (TB-163-pattern, carries) — wait-condition unchanged: backfill
@@ -52,10 +50,11 @@ Latest 5 completes considered (unchanged from last cycle):
     volume precondition (records on disk + verdicts) unsatisfied.
   - Status: `in-progress`
   - Reasoning: foundation shipped; remaining gaps all
-    accumulation-blocked or operator-deferred. The operator's most
-    recent content engagement (TB-197) invested in observability
-    rather than the data side; intervening service restart is
-    infra-only, not a signal-shifting event.
+    accumulation-blocked or operator-deferred. No content engagement
+    since TB-197 (~78h) and no run of `ap2 backfill-proposals` (72h+
+    elapsed across daemon restart that gave a natural opportunity)
+    sharpen the question of whether the volume gap should be
+    re-surfaced as a narrower decision request.
 
 ## Non-goal risk check
 
@@ -81,7 +80,7 @@ real-time / cross-project axes.
   cron status-report** (carries) — TB-151-pattern. Gated on records on
   disk; pre-backfill the surface would always be empty.
 - **Auto-run `ap2 backfill-proposals` on daemon startup** (carries) —
-  steps on operator-owned migration timing; 70h+ elapsed without
+  steps on operator-owned migration timing; 72h+ elapsed without
   running it (across a daemon restart that gave a natural opportunity)
   reinforces "operator's call" framing.
 - **Ideation self-evaluates delete-test pre-queue** (carries) —
@@ -101,29 +100,30 @@ filter without a volume precondition first.
 
 ## Cycle observations
 
-(Triaged from last cycle: nothing carried — last cycle's section was
-already empty after dropping the TB-197-content-signal observation.
-This cycle's daemon restart at 03:31Z is infra-only and doesn't
-inform ranking, so nothing new to add. Drop, no replacement.)
+(Triaged from last cycle: nothing carried — last cycle's section
+explicitly dropped the daemon-restart observation as infra-only.
+This cycle's only intervening event is a correctly-skipped status-
+report, which is meta-quiescence not content signal. Drop, no
+replacement.)
 
 ## Decisions needed from operator
 
 (none this cycle.)
 
-The (a)/(b)/(c) framing remains implicitly resolved by TB-197's
-non-(a)/(b)/(c) engagement (76h ago). Re-surfacing the same multi-option
-ask after the operator made a clear orthogonal choice — and then
-restarted the daemon without running `ap2 backfill-proposals` during
-the natural window — would ignore both signals. Threshold for
-re-surfacing as a narrower "backfill-or-not" ask: 2-3 more cycles
-with volume still at zero AND no further operator content engagement.
-Current count: 1 of 2-3.
+Re-surfacing-threshold tracker for the narrower "backfill-or-not"
+ask: now 2 of 2-3 cycles with volume at zero AND no operator
+content engagement since TB-197. One more quiet cycle (~04:46Z) and
+the threshold permits re-surfacing as an actionable question.
+Holding this cycle to honor the upper bound (3) of last cycle's own
+threshold framing rather than firing at the lower bound — operator
+absence of 78h is consistent with deliberate detachment, not
+oversight, given TB-197 was the most recent active engagement.
 
 ## Proposals this cycle
 
 0 proposals.
 
-15th consecutive 0-proposal cycle. Slot count is 5 (0-backlog under
+16th consecutive 0-proposal cycle. Slot count is 5 (0-backlog under
 threshold) but available-aligned-work is still 0: every carried
 candidate is volume-blocked, operator-deferred, or rejection-pattern
 adjacent. Goal.md L50-55 names this phase explicitly: "the bottleneck
