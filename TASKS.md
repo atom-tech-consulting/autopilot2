@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-197** **Show next scheduled ideation time on the web overview** [→ brief](.cc-autopilot/tasks/show-next-scheduled-ideation-time-on-the.md)
 
 ## Pipeline Pending
 
