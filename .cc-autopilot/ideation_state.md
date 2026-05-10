@@ -1,30 +1,32 @@
 # Ideation State
 
-_Last updated: 2026-05-10T02:42Z by ideation cron_
+_Last updated: 2026-05-10T04:44Z by ideation cron_
 
 ## Mission alignment
 
-14th consecutive 0-proposal cycle from ideation. Single fresh signal
-since last assessment (~2h ago): no new completes, no new operator
-log entries, no new proposal records. State is essentially unchanged
-since TB-197 (`b6488d9`, 00:38Z) — operator's orthogonal-to-(a)/(b)/(c)
-observability investment. Volume gap on the data-collection axis is
-unchanged: `ideation_proposals/` still `.gitkeep`-only; 0
-`ideation_proposal_recorded` events; `ap2 backfill-proposals` shipped
-~67h ago, unrun. Slot count rose to 5 (0-backlog under the configured
-threshold) but available-slots ≠ available-aligned-work.
+15th consecutive 0-proposal cycle. ~2h since last assessment (02:42Z);
+the only intervening events are a daemon service restart at 03:31:04Z
+(`web_stop` + `daemon_stop` → `daemon_start` v0.3.0+9460c48 +
+`web_start` on port 8730 — operator infra ack, not a content signal)
+and one cron status-report at 04:28Z that correctly skipped (no
+allowlisted activity). No new completes, no new operator_log entries,
+no new proposal records. Volume gap on the data-collection axis is
+unchanged: `ideation_proposals/` still `.gitkeep`-only;
+0 `ideation_proposal_recorded` events; `ap2 backfill-proposals`
+shipped ~70h ago, still unrun. Slot count remains 5 (0-backlog
+under threshold) but available-slots ≠ available-aligned-work.
 
 Latest 5 completes considered (unchanged from last cycle):
 
-- TB-197 (`b6488d9`, 00:38Z) — web `/` overview "next ideation"
-  gate-state card (operator-authored)
+- TB-197 (`b6488d9`, 2026-05-10T00:38:17Z) — web `/` overview "next
+  ideation" gate-state card (operator-authored)
 - TB-196 (`c48b6cb`, 2026-05-07T04:35Z) — `ideation_proposal_recorded`
   + `ideation_proposal_reconciled` event emits + allowlist
-- TB-195 (`f356e20`, 04:24Z) — `ap2 backfill-proposals [--dry-run]`
-  CLI (dry-run shows 14 historical candidates)
-- TB-189 (`a49763b`, 01:45Z) — `ap2 classify --delete-test <verdict>`
-  CLI + chat verb
-- TB-188 (`93892da`, 01:04Z) — per-proposal records under
+- TB-195 (`f356e20`, 2026-05-07T04:24Z) — `ap2 backfill-proposals
+  [--dry-run]` CLI (dry-run shows 14 historical candidates)
+- TB-189 (`a49763b`, 2026-05-07T01:45Z) — `ap2 classify --delete-test
+  <verdict>` CLI + chat verb
+- TB-188 (`93892da`, 2026-05-07T01:04Z) — per-proposal records under
   `.cc-autopilot/ideation_proposals/<TB-N>.json` + outcome
   reconciliation
 
@@ -34,11 +36,13 @@ Latest 5 completes considered (unchanged from last cycle):
   - Progress so far: foundation shipped 4-deep — TB-188, TB-189,
     TB-195, TB-196 — plus the cadence-observability complement
     TB-197. No new completes against this focus in the ~2h since
-    last assessment.
+    last assessment; no new completes in the ~76h since TB-197 was
+    queued by the operator (TB-197 itself was the only activity
+    breaking a ~46h pause window).
   - Gaps:
     (1) **Volume**: 0 records on disk (verified via `ls -la`
     `ideation_proposals/`); 0 `ideation_proposal_recorded` events;
-    0 operator delete-test verdicts. Backfill CLI shipped 67h+ ago,
+    0 operator delete-test verdicts. Backfill CLI shipped 70h+ ago,
     unrun.
     (2) **Track-record feedback into ideation prompt header**
     (TB-163-pattern, carries) — wait-condition unchanged: backfill
@@ -49,9 +53,9 @@ Latest 5 completes considered (unchanged from last cycle):
   - Status: `in-progress`
   - Reasoning: foundation shipped; remaining gaps all
     accumulation-blocked or operator-deferred. The operator's most
-    recent engagement (TB-197) invested in the observability
-    complement rather than the data side — confirming volume is
-    the bottleneck, not surfacing.
+    recent content engagement (TB-197) invested in observability
+    rather than the data side; intervening service restart is
+    infra-only, not a signal-shifting event.
 
 ## Non-goal risk check
 
@@ -77,8 +81,9 @@ real-time / cross-project axes.
   cron status-report** (carries) — TB-151-pattern. Gated on records on
   disk; pre-backfill the surface would always be empty.
 - **Auto-run `ap2 backfill-proposals` on daemon startup** (carries) —
-  steps on operator-owned migration timing; 67h+ elapsed without
-  running it reinforces "operator's call" framing.
+  steps on operator-owned migration timing; 70h+ elapsed without
+  running it (across a daemon restart that gave a natural opportunity)
+  reinforces "operator's call" framing.
 - **Ideation self-evaluates delete-test pre-queue** (carries) —
   semantic check beyond TB-164's structural Why-now marker. Defer
   until ≥10 operator verdicts exist for ground-truth.
@@ -96,25 +101,29 @@ filter without a volume precondition first.
 
 ## Cycle observations
 
-(Triaged from last cycle: TB-197-content-signal observation has done
-its job — informed last cycle's drop of the (a)/(b)/(c) ask, which
-this cycle inherits. Drop, no replacement.)
+(Triaged from last cycle: nothing carried — last cycle's section was
+already empty after dropping the TB-197-content-signal observation.
+This cycle's daemon restart at 03:31Z is infra-only and doesn't
+inform ranking, so nothing new to add. Drop, no replacement.)
 
 ## Decisions needed from operator
 
 (none this cycle.)
 
 The (a)/(b)/(c) framing remains implicitly resolved by TB-197's
-non-(a)/(b)/(c) engagement. Re-surfacing the same multi-option ask
-2h after the operator made a clear orthogonal choice would ignore the
-signal. If volume stays at zero across 2-3 more cycles, re-surface as
-a narrower "backfill-or-not" ask.
+non-(a)/(b)/(c) engagement (76h ago). Re-surfacing the same multi-option
+ask after the operator made a clear orthogonal choice — and then
+restarted the daemon without running `ap2 backfill-proposals` during
+the natural window — would ignore both signals. Threshold for
+re-surfacing as a narrower "backfill-or-not" ask: 2-3 more cycles
+with volume still at zero AND no further operator content engagement.
+Current count: 1 of 2-3.
 
 ## Proposals this cycle
 
 0 proposals.
 
-14th consecutive 0-proposal cycle. Slot count is 5 (0-backlog under
+15th consecutive 0-proposal cycle. Slot count is 5 (0-backlog under
 threshold) but available-aligned-work is still 0: every carried
 candidate is volume-blocked, operator-deferred, or rejection-pattern
 adjacent. Goal.md L50-55 names this phase explicitly: "the bottleneck
