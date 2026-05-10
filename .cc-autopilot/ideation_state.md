@@ -1,20 +1,20 @@
 # Ideation State
 
-_Last updated: 2026-05-10T10:51Z by ideation cron_
+_Last updated: 2026-05-10T12:55Z by ideation cron_
 
 ## Mission alignment
 
-18th consecutive 0-proposal cycle. ~2h since last assessment (08:51Z);
+19th consecutive 0-proposal cycle. ~2h since last assessment (10:51Z);
 intervening events: zero meaningful signals — only one
-correctly-skipped status_report at 10:31Z (no allowlist activity since
-the also-skipped 08:30Z post). No completes, no operator_log entries,
-no proposal records, no daemon-infra events.
-`.cc-autopilot/ideation_proposals/` still `.gitkeep`-only (verified
+correctly-skipped status_report at 12:31Z (which itself notes "no
+allowlist activity" since the also-skipped 10:31Z post). No completes,
+no operator_log entries, no proposal records, no daemon-infra events.
+`.cc-autopilot/ideation_proposals/` still `.gitkeep`-only (re-verified
 this cycle); 0 `ideation_proposal_recorded` events; 0 operator
 delete-test verdicts. `ap2 backfill-proposals` (TB-195, shipped
-2026-05-07T04:24Z = ~78.5h ago) is unrun across at least one daemon
-restart (03:31Z) that gave a natural opportunity. Slot count = 5
-(0-backlog under threshold); available-aligned-work = 0.
+2026-05-07T04:24Z = ~80.5h ago) remains unrun across at least one
+daemon restart (03:31Z). Slot count = 5 (0-backlog under threshold);
+available-aligned-work = 0.
 
 Latest 5 completes considered (unchanged):
 - TB-197 (`b6488d9`, 2026-05-10T00:38Z) — web `/` overview gate-state
@@ -29,11 +29,11 @@ Latest 5 completes considered (unchanged):
 - **Ideation quality signal collection (goal.md L38-76)**
   - Progress so far: foundation 4-deep — TB-188, TB-189, TB-195,
     TB-196 — plus cadence-observability complement TB-197. No new
-    completes in this focus since TB-197 (~10h); no operator content
+    completes in this focus since TB-197 (~12.3h); no operator content
     engagement on the carried backfill Decision in the same window.
   - Gaps:
     (1) **Volume**: 0 records on disk, 0 events, 0 verdicts. Backfill
-    CLI ~78.5h unrun. Gap is operator-decision-shaped (see Decisions
+    CLI ~80.5h unrun. Gap is operator-decision-shaped (see Decisions
     needed); downstream proposals stay deferred until operator picks
     a verdict.
     (2) **Track-record feedback into ideation prompt header**
@@ -76,15 +76,13 @@ real-time / cross-project axes.
 - **TB-175 re-prop** (carries) — operator-acked deferral authoritative.
 - **TB-184 / TB-185 / TB-172**: authoritative rejects; will not
   re-propose.
-- **NEW this cycle: `blocked-on-operator-decision` focus-status flag
-  (TB-174-shape extension)** — would let ideation auto-skip cycles
-  like this one, saving the ~$0.78–1.45/cycle SDK cost. Deferred:
-  (a) rejection-pattern adjacent — reads as a parallel surface to
-  TB-174's existing `exhausted-needs-operator` gate; (b) creates a
-  wake-up chicken-and-egg (status stays stale until ideation
-  re-runs, which it won't if status gates the run); (c) the cheaper
-  path is the operator running backfill or `ap2 reject TB-195`
-  themselves — that's the carried Decision, not a new task.
+- **`blocked-on-operator-decision` focus-status flag (TB-174-shape
+  extension)** (carries from prior cycle) — would let ideation
+  auto-skip cycles like this one. Still deferred: rejection-pattern
+  adjacent (parallel surface to TB-174's existing
+  `exhausted-needs-operator` gate); creates wake-up chicken-and-egg
+  (status stays stale until ideation re-runs); cheaper path remains
+  operator running backfill or `ap2 reject TB-195`.
 
 Rejection-pattern note (n=4, unchanged): "creates parallel surface OR
 doesn't generalize OR off-focus OR wack-a-mole." All deferred
@@ -93,12 +91,7 @@ filter without a volume precondition first.
 
 ## Cycle observations
 
-(Triage from last cycle: dropped both prior bullets.
-(1) "TB-191 schema violation in last cycle's own write" — situation
-changed; last cycle used empty-list shape correctly; no longer
-informs reasoning.
-(2) "Insights index empty" — single-root-cause restatement of
-Gap (1), already represented there.)
+(Triage from last cycle: prior section was empty; nothing carried.)
 
 (none this cycle — no observation rises above structural sections.)
 
@@ -108,15 +101,15 @@ Gap (1), already represented there.)
   `.cc-autopilot/ideation_proposals/` from historical TB-Ns, OR
   `ap2 reject TB-195` / append an operator_log line stating "wait
   for organic flow only"? Re-articulating from prior cycle: the
-  TB-195 CLI shipped ~78.5h ago and dry-run identified ~14
-  candidates; operator's TB-197 add at 00:24Z (10.5h ago) confirmed
+  TB-195 CLI shipped ~80.5h ago and dry-run identified ~14
+  candidates; operator's TB-197 add at 00:24Z (~12.5h ago) confirmed
   engagement but chose orthogonal observability work, leaving the
   backfill question untouched. Unblock condition: either outcome
   lets the next cycle re-evaluate the volume-blocked proposal
   family (TB-175 aggregator, prompt-header track-record injection,
   web records-counter card, `ap2 proposals` CLI). Without a verdict,
   those four candidates stay carried indefinitely while the focus
-  headline stays "signal collection" with 0 signals on disk. 2nd
+  headline stays "signal collection" with 0 signals on disk. 3rd
   cycle carrying the bullet in formally-promoted shape; passive
   signal still pending.
 
@@ -124,7 +117,7 @@ Gap (1), already represented there.)
 
 0 proposals.
 
-18th consecutive 0-proposal cycle. Slot count = 5; available-aligned
+19th consecutive 0-proposal cycle. Slot count = 5; available-aligned
 work = 0. Every carried candidate is volume-blocked, operator-deferred,
 or rejection-pattern adjacent. Goal.md L50-55: "the bottleneck is
 signal volume, not prompt-language craft." Slot-fill against an empty
