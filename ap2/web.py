@@ -468,6 +468,36 @@ _CSS = """<style>
                                       margin: 0 }
   .operator-decisions ul.od-entries li { padding: 0.15rem 0;
                                          font-size: 12px; color: #333 }
+  /* TB-197: at-a-glance ideation gate-state card on `/`. Always rendered
+     (when the daemon's cron-state file exists) so the operator can answer
+     "when does ideation next fire?" without grepping `cron_state.json` by
+     hand. Five state variants, each with a distinct tint:
+       eligible        — green:  about to fire on next tick
+       cooldown        — neutral grey: throttled, will fire when timer elapses
+       active_running  — yellow: blocked by Active task in flight
+       queued_full     — yellow: blocked by Ready+Backlog ≥ threshold
+       disabled        — grey:   AP2_IDEATION_DISABLED env opt-out
+     Compact 1-2 line shape so always-rendering doesn't crowd the page. */
+  .ideation-status { padding: 0.5rem 0.8rem; border-radius: 4px;
+                     margin: 0.5rem 0; font-size: 13px; line-height: 1.5;
+                     background: #f7f7f7; border-left: 4px solid #888 }
+  .ideation-status.is-eligible { background: #f0fff0;
+                                 border-left-color: #2a8 }
+  .ideation-status.is-cooldown { background: #f5f5f5;
+                                 border-left-color: #888 }
+  .ideation-status.is-blocked  { background: #fffbea;
+                                 border-left-color: #b87000 }
+  .ideation-status.is-disabled { background: #f0f0f0;
+                                 border-left-color: #aaa; color: #555 }
+  .ideation-status .is-header { font-weight: 600; margin-right: 0.4rem }
+  .ideation-status.is-eligible .is-header { color: #1a6f2a }
+  .ideation-status.is-cooldown .is-header { color: #444 }
+  .ideation-status.is-blocked  .is-header { color: #8a5a00 }
+  .ideation-status.is-disabled .is-header { color: #666 }
+  .ideation-status .is-body { color: #333 }
+  .ideation-status .is-meta { color: #888; font-size: 12px;
+                              font-family: ui-monospace, monospace;
+                              margin-left: 0.4rem }
   /* TB-181: /usage token-cost dashboard.
      Card-style layout — each section sits in a `.usage-card` container
      with a thin border so the chart / table content stays prominent.
@@ -1182,6 +1212,205 @@ def _render_pending_queue(cfg: Config) -> str:
         f'{len(entries)} operator op{plural} pending — '
         f'awaiting daemon drain (next tick)</div>'
         f'<ul class="pq-entries">{"".join(rows)}</ul>'
+        '</div>'
+    )
+
+
+# ------------- TB-197: ideation gate-state card on `/` -------------
+
+
+def _format_cooldown_remaining(seconds: int) -> str:
+    """Render `seconds` as a compact human-readable duration.
+
+    Used in the cooldown card so the operator can compute "is this soon?"
+    without doing the math themselves. Examples (rounded up to the nearest
+    minute, since 30s tick granularity makes sub-minute precision noise):
+      seconds=12     → "<1m"
+      seconds=120    → "2m"
+      seconds=1680   → "28m"
+      seconds=3660   → "1h 1m"
+      seconds=7200   → "2h"
+    """
+    if seconds <= 0:
+        return "0m"
+    if seconds < 60:
+        return "<1m"
+    minutes = (seconds + 59) // 60  # round up — operator-friendly upper bound
+    hours, minutes = divmod(minutes, 60)
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"
+
+
+def _ideation_gate_state(cfg: Config) -> dict:
+    """Resolve the current ideation gate state for the web overview.
+
+    Mirrors the gate-check sequence in `ideation._maybe_ideate` so the
+    rendered card matches the daemon's actual decision logic. The check
+    order (post-TB-186) is:
+
+      1. `AP2_IDEATION_DISABLED` env opt-out
+      2. Active task in flight (hard gate — sharing the SDK slot is unsafe)
+      3. Cooldown — `AP2_IDEATION_COOLDOWN_S` since the last fire
+      4. Per-cycle proposal-slot budget — Ready+Backlog ≥ threshold
+
+    Returns a dict whose `gate_status` field is the FIRST blocking gate
+    in that order (or `"eligible"` when none of them block). Reporting the
+    deepest blocker would be misleading — a blocked gate earlier in the
+    chain prevents later checks from being evaluated.
+
+    Reads `_cooldown_s` and `_trigger_task_count` from `ap2.ideation` so
+    the env-knob parsing rules stay in lockstep with the daemon. (If those
+    helpers ever drift, the comment above and the test fixture both need
+    updating in tandem.)
+
+    Tolerates missing/corrupt `cron_state.json` (treats `last_fire` as
+    None → "never fired") so the card renders cleanly on a fresh project.
+    """
+    # Lazy import — `ap2.ideation` pulls in board / events / cron, all of
+    # which are already in `ap2.web`'s import graph; the lazy form just
+    # mirrors `_render_operator_decisions`'s style and avoids any future
+    # cycle if `ap2.ideation` ever picks up a `web` reference.
+    from . import ideation as ideation_mod
+    from .cron import load_state
+
+    disabled = os.environ.get(
+        "AP2_IDEATION_DISABLED", ""
+    ).strip().lower() in ("1", "true", "yes")
+    threshold = ideation_mod._trigger_task_count()
+    cooldown_s = ideation_mod._cooldown_s()
+
+    board = Board.load(cfg.tasks_file)
+    active_count = sum(1 for _ in board.iter_tasks(section="Active"))
+    queued_count = sum(
+        sum(1 for _ in board.iter_tasks(section=s))
+        for s in ("Ready", "Backlog")
+    )
+
+    state = load_state(cfg.cron_state_file)
+    last_fire_unix = state.get(ideation_mod.IDEATION_NAME)
+    last_fire_ts: str | None = None
+    next_eligible_ts: str | None = None
+    seconds_until_eligible = 0
+    if last_fire_unix:
+        try:
+            last_dt = _dt.datetime.fromtimestamp(
+                float(last_fire_unix), _dt.timezone.utc
+            )
+            last_fire_ts = last_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            next_dt = last_dt + _dt.timedelta(seconds=cooldown_s)
+            next_eligible_ts = next_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            now_dt = _dt.datetime.now(_dt.timezone.utc)
+            delta = (next_dt - now_dt).total_seconds()
+            seconds_until_eligible = max(0, int(delta))
+        except (ValueError, TypeError, OverflowError, OSError):
+            # Corrupt timestamp in the cron state file — treat as never-fired.
+            last_fire_ts = None
+            next_eligible_ts = None
+            seconds_until_eligible = 0
+
+    # Gate-priority order matches the daemon's `_maybe_ideate` flow
+    # post-TB-186: disabled → active → cooldown → threshold. Reporting
+    # any deeper gate when an earlier one blocks would be misleading
+    # (the daemon never reaches the deeper check).
+    if disabled:
+        gate_status = "disabled"
+    elif active_count > 0:
+        gate_status = "active_running"
+    elif seconds_until_eligible > 0:
+        gate_status = "cooldown"
+    elif queued_count >= threshold:
+        gate_status = "queued_full"
+    else:
+        gate_status = "eligible"
+
+    return {
+        "disabled": disabled,
+        "threshold": threshold,
+        "cooldown_s": cooldown_s,
+        "active_count": active_count,
+        "queued_count": queued_count,
+        "last_fire_ts": last_fire_ts,
+        "next_eligible_ts": next_eligible_ts,
+        "seconds_until_eligible": seconds_until_eligible,
+        "gate_status": gate_status,
+    }
+
+
+def _render_ideation_status_block(cfg: Config) -> str:
+    """Render the ideation gate-state card for the `/` index page.
+
+    Always returns a non-empty string (in contrast to `_render_pending_queue`
+    and `_render_operator_decisions` which omit on empty) — the card is
+    1-2 lines, and "eligible" / "cooldown" are not noise but the operator's
+    answer to "when does ideation next fire?" without grepping
+    `cron_state.json` by hand.
+
+    Five state variants map to five tints + headlines:
+      eligible        — green   — "will fire on next tick (≤30s)"
+      cooldown        — neutral — shows absolute next-eligible ts AND
+                                  relative remaining duration so the
+                                  operator can answer "is this soon?"
+                                  at a glance without doing math.
+      active_running  — yellow  — "blocked: Active task in flight"
+      queued_full     — yellow  — names the threshold + actual count
+                                  (e.g. "5 ≥ threshold 5") so the env
+                                  knob is sanity-checkable inline.
+      disabled        — grey    — names the env knob verbatim so the
+                                  operator can grep their env file.
+    """
+    state = _ideation_gate_state(cfg)
+    status = state["gate_status"]
+    if status == "disabled":
+        return (
+            '<div class="ideation-status is-disabled">'
+            '<span class="is-header">Ideation</span>'
+            '<span class="is-body">'
+            'disabled (<code>AP2_IDEATION_DISABLED</code> set in env)'
+            '</span>'
+            '</div>'
+        )
+    if status == "active_running":
+        return (
+            '<div class="ideation-status is-blocked">'
+            '<span class="is-header">Ideation</span>'
+            '<span class="is-body">'
+            f'blocked: Active task in flight ({state["active_count"]} active)'
+            '</span>'
+            '</div>'
+        )
+    if status == "queued_full":
+        return (
+            '<div class="ideation-status is-blocked">'
+            '<span class="is-header">Ideation</span>'
+            '<span class="is-body">'
+            f'blocked: Ready+Backlog = {state["queued_count"]} '
+            f'≥ threshold {state["threshold"]} '
+            '(<code>AP2_IDEATION_TRIGGER_TASK_COUNT</code>)'
+            '</span>'
+            '</div>'
+        )
+    if status == "cooldown":
+        remaining = _format_cooldown_remaining(state["seconds_until_eligible"])
+        next_ts = state["next_eligible_ts"] or ""
+        return (
+            '<div class="ideation-status is-cooldown">'
+            '<span class="is-header">Ideation</span>'
+            '<span class="is-body">'
+            f'cooldown {html.escape(remaining)} remaining '
+            f'(next eligible {html.escape(next_ts)})'
+            '</span>'
+            '</div>'
+        )
+    # status == "eligible"
+    return (
+        '<div class="ideation-status is-eligible">'
+        '<span class="is-header">Ideation</span>'
+        '<span class="is-body">'
+        'eligible — will fire on next tick (≤30s)'
+        '</span>'
         '</div>'
     )
 
@@ -2075,6 +2304,14 @@ def _render_home(cfg: Config) -> str:
     # entirely on the steady-state happy path; non-empty queues get a
     # yellow card listing each pending op above the events table.
     pending_html = _render_pending_queue(cfg)
+    # TB-197: ideation gate-state card — always rendered (compact 1-2
+    # line shape) so the operator can answer "when does ideation next
+    # fire?" without grepping `cron_state.json`. Sits below the
+    # operator-decisions / pending-queue cards (which are demand-driven
+    # and therefore higher-priority when present) and above the events
+    # table (which is the historical record, lower priority than the
+    # forward-looking gate-state read).
+    ideation_status_html = _render_ideation_status_block(cfg)
 
     body = (
         f"<h1>ap2 — {html.escape(cfg.project_root.name)}</h1>"
@@ -2091,6 +2328,7 @@ def _render_home(cfg: Config) -> str:
         + "</div>"
         f"{operator_decisions_html}"
         f"{pending_html}"
+        f"{ideation_status_html}"
         f'<h2>events <span class="meta">— last 30, newest first '
         f'(<a href="/events">all</a>)</span></h2>'
         f"{_events_table(evts, cfg=cfg)}"

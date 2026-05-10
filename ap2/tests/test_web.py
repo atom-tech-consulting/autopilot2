@@ -2859,3 +2859,296 @@ def test_usage_layout_nav_includes_usage_link():
     so EVERY page (not just `/`) links to the dashboard."""
     page = web._layout("any title", "<p>body</p>")
     assert 'href="/usage"' in page
+
+
+# ---------------------------------------------------------------------------
+# TB-197: ideation gate-state card on `/`.
+#
+# `_render_ideation_status_block(cfg)` emits a compact 1-2 line card whose
+# tint and headline reflect the current ideation gate state — mirrors the
+# daemon's `_maybe_ideate` decision logic so the operator can answer
+# "when does ideation next fire?" without grepping `cron_state.json`. Five
+# state variants: eligible / cooldown / active_running / queued_full /
+# disabled. Tests below pin each variant's shape, the gate-priority
+# ordering when multiple gates would block, and the helper's grep-visibility.
+
+import json as _tb197_json
+import time as _tb197_time
+
+
+def _tb197_project(tmp_path: Path) -> Config:
+    """Fresh project with 0 Active + small Backlog — the steady-state shape
+    most TB-197 tests start from. Individual tests then layer on board
+    edits / cron state / env knobs as needed."""
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "- [ ] **TB-10** **first backlog item**\n"
+        "- [ ] **TB-11** **second backlog item**\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+    return cfg
+
+
+def _seed_cron_state_ideation(cfg: Config, *, seconds_ago: float) -> None:
+    """Write `cron_state.json` so `IDEATION_NAME` last fired
+    `seconds_ago` seconds ago. Mirrors `cron.mark_run`'s on-disk shape
+    (a flat `{name: unix_ts}` dict)."""
+    from ap2.ideation import IDEATION_NAME
+
+    cfg.cron_state_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.cron_state_file.write_text(
+        _tb197_json.dumps(
+            {IDEATION_NAME: _tb197_time.time() - seconds_ago},
+            indent=2, sort_keys=True,
+        )
+    )
+
+
+def test_ideation_status_card_cooldown_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Briefing pin: cron_state last-fire 30min ago + cooldown=2h + 0
+    Active + 2 queued (under threshold 5) → renders a `cooldown` card
+    that carries BOTH the absolute next-eligible timestamp AND a
+    relative remaining-duration string. Operator can compute "is this
+    soon?" without doing math."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _tb197_project(tmp_path)
+    _seed_cron_state_ideation(cfg, seconds_ago=30 * 60)  # 30 min ago
+
+    html_block = web._render_ideation_status_block(cfg)
+    assert 'class="ideation-status is-cooldown"' in html_block
+    # Relative duration: 7200 - 1800 = 5400s remaining = 90 min = "1h 30m".
+    # Round-up rounding and 30s-tick granularity make this a stable string
+    # but allow a small slop for the (now - last) read to slip a few seconds.
+    assert ("1h 30m" in html_block or "1h 29m" in html_block)
+    assert "remaining" in html_block
+    # Absolute next-eligible timestamp is present in ISO Z form so the
+    # operator can correlate against system time.
+    import re as _re
+    iso_z = _re.search(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", html_block,
+    )
+    assert iso_z, f"no ISO-Z timestamp in cooldown card: {html_block!r}"
+    # The card sits inside the rendered home page too.
+    page = web._render_home(cfg)
+    assert 'class="ideation-status is-cooldown"' in page
+
+
+def test_ideation_status_card_eligible_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Cooldown elapsed (last fire 3h ago, cooldown 2h) + 0 Active +
+    queued under threshold → eligible card. No "cooldown remaining"
+    wording leaks; "next tick" semantics surface."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _tb197_project(tmp_path)
+    _seed_cron_state_ideation(cfg, seconds_ago=3 * 3600)  # 3h ago
+
+    html_block = web._render_ideation_status_block(cfg)
+    assert 'class="ideation-status is-eligible"' in html_block
+    assert "next tick" in html_block
+    # No cooldown wording — would be misleading on an eligible card.
+    assert "cooldown" not in html_block.lower()
+    assert "remaining" not in html_block
+
+
+def test_ideation_status_card_active_running_blocker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """1 Active task + recent last-fire → active_running blocker
+    (the hard gate runs BEFORE cooldown / threshold). The card names
+    the blocker as "Active task in flight"; cooldown / queue wording
+    must not leak (they're irrelevant once Active blocks)."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _tb197_project(tmp_path)
+    # Add an Active task (replace TASKS.md with a board carrying one).
+    (cfg.project_root / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n- [ ] **TB-50** **in-flight task**\n"
+        "## Ready\n\n"
+        "## Backlog\n\n- [ ] **TB-51** **queued**\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    _seed_cron_state_ideation(cfg, seconds_ago=60)  # 1 min ago — well within cooldown
+
+    html_block = web._render_ideation_status_block(cfg)
+    assert 'class="ideation-status is-blocked"' in html_block
+    assert "Active task in flight" in html_block
+    # Cooldown / queue wording must not leak — those gates aren't reached
+    # once the active hard-gate fires.
+    assert "cooldown" not in html_block.lower()
+    assert "queue" not in html_block.lower()
+    assert "≥ threshold" not in html_block
+
+
+def test_ideation_status_card_queued_full_blocker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """0 Active + Ready+Backlog == threshold + cooldown elapsed →
+    queued_full blocker. Card surfaces both the actual count AND the
+    threshold value (e.g. "5 ≥ threshold 5") so the operator can
+    sanity-check `AP2_IDEATION_TRIGGER_TASK_COUNT` inline."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "3")
+    cfg = _tb197_project(tmp_path)
+    # 3 Backlog items — at-threshold.
+    (cfg.project_root / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "- [ ] **TB-60** **a**\n"
+        "- [ ] **TB-61** **b**\n"
+        "- [ ] **TB-62** **c**\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    _seed_cron_state_ideation(cfg, seconds_ago=10 * 3600)  # cooldown elapsed
+
+    html_block = web._render_ideation_status_block(cfg)
+    assert 'class="ideation-status is-blocked"' in html_block
+    # Both the count and the threshold appear in the same line so the
+    # operator can sanity-check the env knob without leaving the card.
+    assert "3" in html_block
+    assert "threshold 3" in html_block
+    assert "≥ threshold" in html_block
+    # Names the env knob so the operator knows which knob to tune.
+    assert "AP2_IDEATION_TRIGGER_TASK_COUNT" in html_block
+
+
+def test_ideation_status_card_disabled_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """`AP2_IDEATION_DISABLED=1` set in env → disabled card; the env
+    knob name surfaces VERBATIM so the operator can grep their env file
+    without guessing the exact variable name."""
+    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    cfg = _tb197_project(tmp_path)
+
+    html_block = web._render_ideation_status_block(cfg)
+    assert 'class="ideation-status is-disabled"' in html_block
+    assert "disabled" in html_block.lower()
+    assert "AP2_IDEATION_DISABLED" in html_block
+
+
+def test_ideation_status_card_gate_priority_disabled_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """When MULTIPLE gates would block (disabled AND active AND
+    cooldown not elapsed), the card reports ONLY the FIRST-checked gate
+    per `_maybe_ideate`'s order. Disabled wins over everything because
+    it short-circuits the daemon's gate chain at step 1 — reporting any
+    deeper gate would mislead the operator."""
+    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "3")
+    cfg = _tb197_project(tmp_path)
+    # Layer on an Active task AND recent last-fire so disabled is one of
+    # several would-be blockers. The daemon's `_maybe_ideate` returns at
+    # the first gate (disabled) and never evaluates the others — the
+    # card must mirror that semantics.
+    (cfg.project_root / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n- [ ] **TB-99** **active**\n"
+        "## Ready\n\n"
+        "## Backlog\n\n"
+        "## Pipeline Pending\n\n"
+        "## Complete\n\n"
+        "## Frozen\n"
+    )
+    _seed_cron_state_ideation(cfg, seconds_ago=60)  # well within cooldown
+
+    html_block = web._render_ideation_status_block(cfg)
+    # Disabled is the only state class that should appear.
+    assert "is-disabled" in html_block
+    assert "is-blocked" not in html_block
+    assert "is-cooldown" not in html_block
+    assert "is-eligible" not in html_block
+    # No "Active task" wording leaks — disabled is the only blocker reported.
+    assert "Active task in flight" not in html_block
+    assert "cooldown" not in html_block.lower()
+
+
+def test_ideation_status_card_omits_cooldown_when_never_fired(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """No `cron_state.json` on disk (never-fired project) and no other
+    blockers → eligible card. The daemon treats `last_fire_unix=None`
+    as "elapsed forever" so the card mirrors that semantics."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _tb197_project(tmp_path)
+    # Do NOT seed cron_state.json — fresh project, ideation never fired.
+    assert not cfg.cron_state_file.exists()
+
+    html_block = web._render_ideation_status_block(cfg)
+    assert 'class="ideation-status is-eligible"' in html_block
+
+
+def test_ideation_status_card_always_renders_on_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Briefing pin: the card is small (1-2 lines) and ALWAYS rendered
+    on `/`. No omit-on-empty path — even on the steady-state happy path
+    the operator gets a synchronous gate-state read."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    cfg = _tb197_project(tmp_path)
+
+    page = web._render_home(cfg)
+    body = page.split("</style>", 1)[1]
+    assert 'class="ideation-status' in body
+
+
+def test_ideation_status_helper_is_grep_visible():
+    """Mirrors `test_pending_queue_helper_is_grep_visible` and
+    `test_operator_decisions_helper_is_grep_visible` — the briefing's
+    verification bullets pin both the helper names AND the CSS class
+    name to web.py source so a refactor that drops any of them silently
+    breaks the operator-facing card."""
+    from pathlib import Path as _P
+
+    text = _P(web.__file__).read_text()
+    assert "def _render_ideation_status_block" in text
+    assert "def _ideation_gate_state" in text
+    assert "ideation-status" in text
+
+
+def test_ideation_status_card_escapes_html(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Defense-in-depth: the rendered card's dynamic fields (timestamps,
+    duration strings) flow through `html.escape` even though they're
+    derived from int/datetime computations today — guards against a
+    future refactor that introduces user-controlled content into the
+    card without re-auditing the escape path."""
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    cfg = _tb197_project(tmp_path)
+    _seed_cron_state_ideation(cfg, seconds_ago=30 * 60)
+
+    html_block = web._render_ideation_status_block(cfg)
+    # No raw `<script>` should ever land on the card; sanity check that
+    # the card body uses normal HTML tags only.
+    assert "<script>" not in html_block
+    assert "</script>" not in html_block
