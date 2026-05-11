@@ -3668,4 +3668,26 @@ TASK_AGENT_FENCED_PATHS = (
     # directory is treated as a unit; the prompt-header rendering walks
     # it so any individual `<TB-N>.json` under it is fenced.
     ".cc-autopilot/ideation_proposals",
+    # TB-198: per-task briefing markdown files (one `<slug>.md` per
+    # backlog entry, authored by `ap2 add` or by ideation via
+    # `do_board_edit`'s add-* branch). The per-task verifier reads
+    # `## Verification` from these files at verification time — a task
+    # agent rewriting its own briefing's Verification section mid-run
+    # could weaken the criteria the verifier evaluates against, and
+    # editing an unrelated task's briefing could silently corrupt a
+    # future verification gate. Mirrors the `ideation_proposals/` shape
+    # (whole-directory fence, content-dependent slug filenames make a
+    # per-file enumeration impossible).
+    ".cc-autopilot/tasks",
+    # TB-198: the auto-regenerated insights index. `insights.maybe_
+    # regenerate_index(cfg)` (pre-fire from `_maybe_ideate`) is the
+    # sole authorized writer; task-agent edits would corrupt the
+    # regeneration's input/output invariants and confuse ideation's
+    # Step 0.5 read. NOTE: the surrounding `.cc-autopilot/insights/`
+    # directory stays writable — `#evaluation`-tagged task agents
+    # legitimately CREATE / EDIT per-topic `<topic>.md` files per the
+    # ideation prompt's Step 0.5 contract. Only `_index.md` is daemon-
+    # owned, so the fence is a single-file path (not a directory like
+    # `tasks/` / `ideation_proposals/`).
+    ".cc-autopilot/insights/_index.md",
 )

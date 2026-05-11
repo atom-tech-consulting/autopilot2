@@ -130,6 +130,58 @@ def test_task_prompt_fenced_reminder_mentions_operator_queue_jsonl(tmp_path):
     assert "intentionally NOT fenced" not in p
 
 
+def test_task_prompt_fenced_reminder_mentions_tasks_dir_and_insights_index(tmp_path):
+    """TB-198: the rendered task-agent prompt's fenced-files reminder must
+    surface the two new fence entries (briefing dir + auto-regenerated
+    insights index) so the agent sees a literal "don't touch" cue
+    alongside the existing entries. The Python-side
+    `TASK_AGENT_FENCED_PATHS` tuple and the prompt-header prose
+    enumeration must stay in sync (TB-110 invariant).
+    """
+    cfg = _cfg(tmp_path)
+    t = Task(id="TB-99", title="x", section="Active")
+    p = build_task_prompt(cfg, t)
+    # tasks/ — the whole-directory fence anchor; reading the prompt the
+    # agent should see the directory path called out.
+    assert ".cc-autopilot/tasks" in p
+    # insights/_index.md — single-file fence; the prompt should call it
+    # out explicitly (not just `insights/`) so the agent knows the
+    # surrounding directory remains writable.
+    assert "insights/_index.md" in p
+
+
+def test_task_prompt_do_not_touch_bullet_count(tmp_path):
+    """TB-198: pin the count of bullets in the "do NOT touch"
+    enumeration. Catches accidental removals when future TBs touch the
+    list — every bullet maps to a `TASK_AGENT_FENCED_PATHS` entry that
+    the SDK enforces, and dropping one silently weakens defense in
+    depth.
+
+    Current expected list (count = 13):
+      TASKS.md, CLAUDE.md, goal.md, progress.md, events.jsonl,
+      ideation_state.md, cron.yaml, operator_log.md,
+      operator_queue.jsonl, operator_queue_state.json,
+      ideation_proposals (TB-188), tasks/ (TB-198),
+      insights/_index.md (TB-198).
+    """
+    cfg = _cfg(tmp_path)
+    t = Task(id="TB-99", title="x", section="Active")
+    p = build_task_prompt(cfg, t)
+    # Locate the "do NOT touch" section header and the next blank-line
+    # / paragraph boundary; count bullets in between.
+    marker = "## What the daemon and operator handle (do NOT touch)"
+    assert marker in p
+    section = p.split(marker, 1)[1]
+    # The section ends at the first double-newline followed by `(TB-`
+    # parenthetical — the next paragraph is the TB-143 callout.
+    body, _, _ = section.partition("\n\n(TB-143")
+    bullets = [ln for ln in body.splitlines() if ln.startswith("- `")]
+    assert len(bullets) == 13, (
+        f"expected 13 'do NOT touch' bullets after TB-198, got "
+        f"{len(bullets)}:\n" + "\n".join(bullets)
+    )
+
+
 def test_prompt_advertises_cron_propose_for_recurring_proposals(tmp_path):
     """TB-123: the `cron=` arg was lifted off `report_result` and into a
     dedicated `cron_propose` MCP tool. The prompt footer must surface the

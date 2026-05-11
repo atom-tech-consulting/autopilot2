@@ -671,6 +671,89 @@ def test_operator_queue_jsonl_in_task_agent_fenced_paths():
     assert ".cc-autopilot/operator_queue.jsonl" in tools.TASK_AGENT_FENCED_PATHS
 
 
+def test_tasks_dir_in_task_agent_fenced_paths():
+    """TB-198: `.cc-autopilot/tasks/` is a whole-directory fence — the
+    per-task briefing markdown files live here with content-dependent
+    slug filenames, so a per-file enumeration is impossible. The
+    directory itself is the fence anchor (same shape as
+    `ideation_proposals/` from TB-188). The verifier reads
+    `## Verification` from these files at verification time, so a
+    task agent rewriting its own briefing mid-run could weaken the
+    criteria the verifier evaluates against."""
+    assert ".cc-autopilot/tasks" in tools.TASK_AGENT_FENCED_PATHS
+
+
+def test_insights_index_in_task_agent_fenced_paths():
+    """TB-198: `.cc-autopilot/insights/_index.md` is a single-file
+    fence (NOT a directory fence). The auto-regenerated index is
+    daemon-owned (`insights.maybe_regenerate_index(cfg)`), but the
+    surrounding `insights/` directory is INTENTIONALLY left writable
+    — `#evaluation`-tagged task agents legitimately CREATE per-topic
+    `<topic>.md` files there per the ideation prompt's Step 0.5
+    contract. Only `_index.md` is fenced."""
+    assert ".cc-autopilot/insights/_index.md" in tools.TASK_AGENT_FENCED_PATHS
+    # The directory itself must NOT be fenced — that would break the
+    # legitimate per-topic insight write path.
+    assert ".cc-autopilot/insights" not in tools.TASK_AGENT_FENCED_PATHS
+    assert ".cc-autopilot/insights/" not in tools.TASK_AGENT_FENCED_PATHS
+
+
+def test_task_disallowed_tools_blocks_tasks_dir_edits():
+    """TB-198: SDK-level enforcement layer behind the prompt-header
+    fence — `Edit(.cc-autopilot/tasks)` and `Write(.cc-autopilot/tasks)`
+    must both land in `disallowed_tools`. Mirrors the TB-143 pattern
+    for `operator_queue.jsonl` and the TB-188 fence anchor for
+    `ideation_proposals/`. Given the directory entry, the SDK pattern
+    treats sub-paths like `.cc-autopilot/tasks/<slug>.md` as fenced
+    (the directory is the fence unit)."""
+    from ap2.daemon import _TASK_DISALLOWED_TOOLS, _task_disallowed_tools
+
+    blocks = _task_disallowed_tools()
+    assert "Edit(.cc-autopilot/tasks)" in blocks
+    assert "Write(.cc-autopilot/tasks)" in blocks
+    # Module-level constant baked at import time agrees — this is what
+    # `run_task` actually passes to the SDK.
+    assert "Edit(.cc-autopilot/tasks)" in _TASK_DISALLOWED_TOOLS
+    assert "Write(.cc-autopilot/tasks)" in _TASK_DISALLOWED_TOOLS
+
+
+def test_task_disallowed_tools_blocks_insights_index_edits():
+    """TB-198: SDK-level enforcement layer behind the prompt-header
+    fence — `Edit(.cc-autopilot/insights/_index.md)` and
+    `Write(.cc-autopilot/insights/_index.md)` must both land in
+    `disallowed_tools`. Single-file fence — does NOT extend to
+    `<topic>.md` files in the same directory (those are the legitimate
+    `#evaluation`-task write target per the ideation Step 0.5
+    contract)."""
+    from ap2.daemon import _TASK_DISALLOWED_TOOLS, _task_disallowed_tools
+
+    blocks = _task_disallowed_tools()
+    assert "Edit(.cc-autopilot/insights/_index.md)" in blocks
+    assert "Write(.cc-autopilot/insights/_index.md)" in blocks
+    assert "Edit(.cc-autopilot/insights/_index.md)" in _TASK_DISALLOWED_TOOLS
+    assert "Write(.cc-autopilot/insights/_index.md)" in _TASK_DISALLOWED_TOOLS
+
+
+def test_task_disallowed_tools_does_not_block_per_topic_insight_writes():
+    """TB-198: the per-topic `<topic>.md` write path stays OPEN —
+    `#evaluation`-tagged task agents create new insight files in
+    `.cc-autopilot/insights/` per the ideation prompt's Step 0.5
+    contract. The fence on `_index.md` MUST NOT spill over to sibling
+    files like `sharpe_floor.md`, and the directory itself must not
+    appear as an `Edit(...)` / `Write(...)` block."""
+    from ap2.daemon import _task_disallowed_tools
+
+    blocks = _task_disallowed_tools()
+    # Per-topic write target — not fenced.
+    assert "Edit(.cc-autopilot/insights/sharpe_floor.md)" not in blocks
+    assert "Write(.cc-autopilot/insights/sharpe_floor.md)" not in blocks
+    # The directory itself isn't fenced either (only the _index.md
+    # file within it is) — confirms the single-file vs whole-directory
+    # distinction holds at the SDK layer.
+    assert "Edit(.cc-autopilot/insights)" not in blocks
+    assert "Write(.cc-autopilot/insights)" not in blocks
+
+
 def test_task_complete_in_task_agent_tools_list():
     """Pin: the tool is in TASK_AGENT_TOOLS, not CONTROL_AGENT_TOOLS — task
     agents call it; control/cron/ideation agents don't have a use for it.
