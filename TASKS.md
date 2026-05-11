@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-198** **Fence `.cc-autopilot/tasks/` and `.cc-autopilot/insights/_index.md` from task-agent writes** [→ brief](.cc-autopilot/tasks/fence-cc-autopilot-tasks-and-cc-autopilo.md)
 
 ## Pipeline Pending
 
