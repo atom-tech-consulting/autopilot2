@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-198** **Fence `.cc-autopilot/tasks/` and `.cc-autopilot/insights/_index.md` from task-agent writes** [→ brief](.cc-autopilot/tasks/fence-cc-autopilot-tasks-and-cc-autopilo.md)
 
 ## Pipeline Pending
 
@@ -86,6 +85,7 @@
 - [x] **TB-195** **Backfill `.cc-autopilot/ideation_proposals/<TB-N>.json` records for historical ideation-authored proposals** `#autopilot` `#ideation` `#signal-collection` `#backfill` `#cli` — Add `ap2 backfill-proposals [--dry-run]` operator CLI that scans operator_log.md + briefing files + events.jsonl, identifies ideation-authored TB-Ns, and writes per-proposal records (with reconciled outcomes) for those that lack them — seeds TB-189 with ~50 historical proposals since TB-121 instead of starting at TB-N >= 195. [→ brief](.cc-autopilot/tasks/backfill-cc-autopilot-ideation-proposals.md)
 - [x] **TB-196** **Emit `ideation_proposal_recorded` + `ideation_proposal_reconciled` events when TB-188 records are written/amended** `#autopilot` `#ideation` `#signal-collection` `#events` `#observability` — Add two event emissions to TB-188's record-write and outcome-reconciliation paths so per-proposal record activity is visible in events.jsonl, the web /events page, and the ideation prompt's events block (TB-169 IDEATION_RELEVANT_EVENT_TYPES allowlist). [→ brief](.cc-autopilot/tasks/emit-ideation-proposal-recorded-ideation.md)
 - [x] **TB-197** **Show next scheduled ideation time on the web overview** [→ brief](.cc-autopilot/tasks/show-next-scheduled-ideation-time-on-the.md)
+- [x] **TB-198** **Fence `.cc-autopilot/tasks/` and `.cc-autopilot/insights/_index.md` from task-agent writes** [→ brief](.cc-autopilot/tasks/fence-cc-autopilot-tasks-and-cc-autopilo.md)
 
 ## Frozen
 

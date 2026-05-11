@@ -425,3 +425,9 @@
 - **Summary:** Added an always-rendered ideation gate-state card to the web overview (`/`) with five tinted variants (eligible / cooldown / active_running / queued_full / disabled) mirroring `_maybe_ideate`'s decision logic. Cooldown variant carries both an absolute next-eligible timestamp and a relative remaining duration; queued_full surfaces the count + threshold env knob inline; disabled names AP2_IDEATION_DISABLED verbatim. Nine new tests in test_web.py pin each state variant, gate-priority ordering, always-rendered shape, helper grep-visibility, and HTML escape defense; full ap2/tests/ suite passes (1210 tests).
 - **Files:** ap2/web.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-11] TB-198: Fence `.cc-autopilot/tasks/` and `.cc-autopilot/insights/_index.md` from task-agent writes
+- **Commit:** `0040f6b`
+- **Summary:** Added `.cc-autopilot/tasks` (whole-dir fence) and `.cc-autopilot/insights/_index.md` (single-file fence) to TASK_AGENT_FENCED_PATHS, mirrored the additions in the task-prompt header's "do NOT touch" enumeration, and pinned both layers with new tests (membership, generated Edit/Write disallowed_tools blocks, per-topic insight writes stay open, bullet-count = 13). Full ap2/tests/ regression: 1217 passed.
+- **Files:** ap2/tools.py, ap2/prompts.py, ap2/tests/test_tools.py, ap2/tests/test_prompts.py
+- **Tests:** pass
