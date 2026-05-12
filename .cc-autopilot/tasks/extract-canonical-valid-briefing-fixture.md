@@ -71,3 +71,12 @@ Sequencing risk: the migration is mechanical but touches >17 files. The fix is s
 - Migrating production code that builds briefings (e.g. `ap2/backfill.py`'s synthesis — that's not the test surface; different concerns).
 - Adding a pytest fixture decorator wrapper (the function-call shape is more composable and reads more obviously at the call site).
 - Renaming `BRIEFING_TEMPLATE` in `ap2/init.py` (orthogonal; the fixture sources defaults from it without renaming).
+## Attempts
+
+### 2026-05-12 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T191928Z-TB-204.prompt.md`, `stream: .cc-autopilot/debug/20260512T191928Z-TB-204.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T191928Z-TB-204.messages.jsonl`
