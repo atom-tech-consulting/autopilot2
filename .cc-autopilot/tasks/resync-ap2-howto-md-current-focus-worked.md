@@ -50,12 +50,12 @@ Test-helper exposure: if `_authoring_section` / `_blockquote_lines` become unuse
 
 - `uv run pytest -q ap2/tests/test_docs.py` — exits 0 (test_docs.py passes end-to-end).
 - `uv run pytest -q ap2/tests/` — full regression suite green (the project-wide gate that TB-203/TB-204/TB-205 tripped on is unblocked).
-- `! grep -n "Current focus: ideation quality signal collection" ap2/howto.md` — exit 0 (zero matches; the stale pre-pivot focus quote is gone).
-- `! grep -n "Current focus: code quality" ap2/howto.md` — exit 0 (zero matches; the post-pivot focus quote is ALSO gone — the howto must not name the live focus title at all, only the fictional one).
-- `grep -rn "test_worked_example_quotes_appear_verbatim_in_goal_md" ap2/` — exit 1 (test is fully removed; no references remain in the test suite or elsewhere).
-- `grep -n "goal_md_path=GOAL_PATH" ap2/tests/test_docs.py` — exit 1 (the reshaped test no longer uses the live goal.md path).
+- `! grep -n "Current focus: ideation quality signal collection" ap2/howto.md` — exit 0 (zero matches; the stale pre-pivot focus quote is gone). Idiom inverts the exit so the verifier sees pass-on-zero-matches per the TB-187 / TB-191 pattern.
+- `! grep -n "Current focus: code quality" ap2/howto.md` — exit 0 (zero matches; the post-pivot focus quote is ALSO gone — the howto must not name the live focus title at all, only the fictional one). Same idiom.
+- `! grep -rn "test_worked_example_quotes_appear_verbatim_in_goal_md" ap2/` — exit 0 (zero matches; test is fully removed; no references remain in the test suite or elsewhere). Same idiom — `grep` returns 1 on no-match, the `!` flips it to 0 so the verifier reads pass.
+- `! grep -n "goal_md_path=GOAL_PATH" ap2/tests/test_docs.py` — exit 0 (zero matches; the reshaped test no longer uses the live goal.md path). Same idiom.
 - `grep -nE "^### (Mission|Done when|Current focus|Non-goals|Constraints)$" ap2/howto.md` — exit 0 with 5 matches (all five worked-example subsection headings still present).
-- `grep -cE "^> " ap2/howto.md` — output ≥ 5 (at least 5 blockquoted lines remain across the five worked-example blocks; sanity bound, the actual blockquote count will be higher).
+- `[ "$(grep -cE '^> ' ap2/howto.md)" -ge 5 ]` — at least 5 blockquoted lines remain across the five worked-example blocks; sanity bound, the actual blockquote count will be higher. `[ ... ]` wrapper used so the exit reflects the numeric comparison, not raw `grep -c`'s match-count return semantics.
 - Prose: the chosen fictional project is used consistently across all five worked-example blocks — Mission names the project, Done-when's bullets describe its completion criteria, Current-focus names one of its themes, Non-goals names a rejected shape relevant to it, Constraints names a real constraint it operates under. Judge confirms via `Read` of the rewritten `## Authoring goal.md` section.
 - Prose: the section-header paragraph at `ap2/howto.md` L73-79 no longer contains the phrase `"this repo's own"` or equivalent claims that examples are from the live goal.md. Judge confirms via `Read`.
 
@@ -68,20 +68,20 @@ Test-helper exposure: if `_authoring_section` / `_blockquote_lines` become unuse
 - Adding an `ap2 check` warning or any new docs-drift gate beyond what `test_docs.py` already provides post-rewrite (TB-203's `test_docs_drift.py` covers the surface-name catalog; the residual `test_docs.py` covers structure; no parallel surface needed).
 - Unfreezing / re-dispatching TB-204 — that's the operator's call after this lands. TB-204's blocker is a separate briefing bug (`grep -lE` without `-r` in its Verification bullet #4) and needs its own fix.
 - Renaming or restructuring the worked-example block titles (`### Mission` etc.) — the section names are stable structural anchors.
+
 ## Attempts
 
 ### 2026-05-12 — verification_failed
 (no summary)
 - **kind:** per_task
-- **failed_criteria:** [fail] `grep -rn "test_worked_example_quotes_appear_verbatim_in_goal_md" ap2/` — exit 1 (test is fully removed; no references r; [fail] `grep -n "goal_md_path=GOAL_PATH" ap2/tests/test_docs.py` — exit 1 (the reshaped test no longer uses the live goal.md pa
+- **failed_criteria:** [fail] `grep -rn "test_worked_example_quotes_appear_verbatim_in_goal_md" ap2/` — exit 1 (test is fully removed); [fail] `grep -n "goal_md_path=GOAL_PATH" ap2/tests/test_docs.py` — exit 1 (no references)
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T232613Z-TB-206.prompt.md`, `stream: .cc-autopilot/debug/20260512T232613Z-TB-206.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T232613Z-TB-206.messages.jsonl`
+
 ### 2026-05-12 — verification_failed
 (no summary)
 - **kind:** per_task
-- **failed_criteria:** [fail] `grep -rn "test_worked_example_quotes_appear_verbatim_in_goal_md" ap2/` — exit 1 (test is fully removed; no references r; [fail] `grep -n "goal_md_path=GOAL_PATH" ap2/tests/test_docs.py` — exit 1 (the reshaped test no longer uses the live goal.md pa
+- **failed_criteria:** same two bullets as above
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T233607Z-TB-206.prompt.md`, `stream: .cc-autopilot/debug/20260512T233607Z-TB-206.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T233607Z-TB-206.messages.jsonl`
-### 2026-05-12 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `grep -rn "test_worked_example_quotes_appear_verbatim_in_goal_md" ap2/` — exit 1 (test is fully removed; no references r; [fail] `grep -n "goal_md_path=GOAL_PATH" ap2/tests/test_docs.py` — exit 1 (the reshaped test no longer uses the live goal.md pa
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T234300Z-TB-206.prompt.md`, `stream: .cc-autopilot/debug/20260512T234300Z-TB-206.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T234300Z-TB-206.messages.jsonl`
+
+### 2026-05-12 — operator briefing fix
+Verification bullets #5 and #6 were missing the `!` exit-inversion prefix — `grep -rn "test..."` and `grep -n "goal_md_path=GOAL_PATH"` correctly returned exit 1 on zero matches, but ap2/verify.py treats non-zero as fail without the `!` prefix. Same class of bug as TB-204's bullet #4. Added `!` prefix and flipped the expected-exit prose to "exit 0". Also reshaped bullet #8 from `grep -cE` (returns match-count) to a `[ ... ]` numeric test so the exit reflects the comparison, not the count. Existing commit 72f5933 should now pass all verification on re-dispatch.
