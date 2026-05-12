@@ -137,9 +137,8 @@ TB-161 anchor for that focus item.
 
 - **Bad:** "Make ap2 better in general." (no theme; nothing for a briefing
   to cite, nothing for ideation to assess against.)
-- **Good:** "Current focus: ideation quality signal collection" — a
-  discrete noun phrase that names a theme broader than one task but
-  narrower than the whole mission.
+- **Good:** "Current focus: code quality" — a discrete noun phrase that
+  names a theme broader than one task but narrower than the whole mission.
 
 Validator interaction: anchor surface for TB-161. Both the full heading
 title and any 4-6-word phrase from the body prose work as substring
@@ -148,12 +147,12 @@ cheap, unambiguous path.
 
 Worked example (this repo's `goal.md`):
 
-> ## Current focus: ideation quality signal collection
+> ## Current focus: code quality
 
 This heading title is the canonical anchor for every briefing that threads
 back to this focus — a briefing whose `## Goal` body contains the
-substring `Current focus: ideation quality signal collection` (case-
-insensitive after punctuation normalization) passes TB-161.
+substring `Current focus: code quality` (case-insensitive after
+punctuation normalization) passes TB-161.
 
 ### Non-goals
 
