@@ -437,3 +437,9 @@
 - **Summary:** Added `## Done when` section to GOAL_TEMPLATE between Mission and Current focus; placeholder body uses prose + `- (TODO)` stub so it contributes zero TB-161 anchors and preserves the day-one fresh-project skip path; new tests pin section presence, canonical order, criterion-mention, and a `_validate_briefing_structure` round-trip against the just-generated goal.md.
 - **Files:** ap2/init.py, ap2/tests/test_init.py
 - **Tests:** pass
+
+## [2026-05-12] TB-200: Add a goal.md authoring guide section to `ap2/howto.md`
+- **Commit:** `7d7c142`
+- **Summary:** Substantive work shipped in prior commit e70cddf (## Authoring goal.md section + 5 subsections + TB-161/TB-164 cites + ap2/tests/test_docs.py — 3 tests pass). The retry was triggered by a mistune-parsing bug in the briefing's first Verification bullet: `\`grep ... \\\`goal\\.md\\\` ...\`` truncates at the embedded backtick, yielding an unbalanced-quote shell command that exits 2 regardless of file content. Fixed by switching that bullet to double-backtick wrapping (TB-146 convention) — verifier now extracts the full grep, which matches the existing heading on line 58. All three shell bullets now exit 0; both prose criteria are satisfied by the existing test_docs.py.
+- **Files:** .cc-autopilot/tasks/add-a-goal-md-authoring-guide-section-to.md
+- **Tests:** pass
