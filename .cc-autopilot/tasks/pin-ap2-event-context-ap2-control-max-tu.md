@@ -51,3 +51,12 @@ Precedence test for `AP2_IDEATION_MAX_TURNS` vs `AP2_CONTROL_MAX_TURNS`: set bot
 - `AP2_JANITOR_*` knobs (already covered in `test_janitor.py`).
 - `AP2_VERIFY_JUDGE_*` knobs (already covered in `test_verify_retry_diff.py`).
 - `AP2_MM_*` knobs (operator-config rather than SDK-cost-shaping; covered separately by `test_mattermost.py` and out of focus for this cycle's testing-axis triage).
+## Attempts
+
+### 2026-05-12 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T195743Z-TB-205.prompt.md`, `stream: .cc-autopilot/debug/20260512T195743Z-TB-205.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T195743Z-TB-205.messages.jsonl`
