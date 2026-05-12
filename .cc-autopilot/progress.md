@@ -455,3 +455,9 @@
 - **Summary:** TB-202: added refuse-if-active pre-flight gate to cmd_backfill_proposals + new cmd_cron_edit (wires ap2 cron edit subparser, calls tools.do_cron_edit under the hood). Both refuse with stderr naming the active TB-N when board.Active is non-empty. 6 new tests in test_cli.py pin the refuse path, the fenced-state-untouched invariant for ideation_proposals/ and cron.yaml, and the empty-Active happy path. Full regression: 1246 passed.
 - **Files:** ap2/cli.py, ap2/tests/test_cli.py
 - **Tests:** pass
+
+## [2026-05-12] TB-203: Documentation drift coverage gate for `ap2/howto.md` + `ap2/architecture.md` — MCP tools, env knobs, event types
+- **Commit:** `452627e`
+- **Summary:** TB-203's main work landed in 1ed8a03 (4 docs-drift regression-pin tests + howto.md/architecture.md updates for MCP tools, env knobs, event types). That commit failed verification only because the operator's 17:02Z goal.md pivot (`Current focus: ideation quality signal collection` → `code quality`) silently broke the unrelated TB-200 anti-drift tests in test_docs.py; this follow-up commit refreshes the howto.md `### Current focus` worked example (Good-inline + blockquote + trailing substring reference) to quote the new heading, and rewrites the synthetic briefing in `test_worked_example_current_focus_satisfies_anchor_validator` to cite the `Current focus: code quality` anchor. `uv run pytest -q ap2/tests/` now passes 1267/1267; all briefing grep checks pass.
+- **Files:** ap2/howto.md, ap2/tests/test_docs.py
+- **Tests:** pass
