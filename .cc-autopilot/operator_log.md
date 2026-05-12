@@ -88,3 +88,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-12T07:35:02Z — applied operator-queued add_backlog → TB-202
 - 2026-05-12T17:02:31Z — applied operator-queued update_goal
 - 2026-05-12T17:02:31Z — operator updated goal.md (shift focus from data collection (now in place: reject reasons, classify, update-goal, proposal records, token accounting) to code quality consolidation: tests, docs, reusability, cleanness)
+- 2026-05-12T17:19:02Z — applied operator-queued ideate → (forced)
