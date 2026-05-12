@@ -68,3 +68,10 @@ Test-helper exposure: if `_authoring_section` / `_blockquote_lines` become unuse
 - Adding an `ap2 check` warning or any new docs-drift gate beyond what `test_docs.py` already provides post-rewrite (TB-203's `test_docs_drift.py` covers the surface-name catalog; the residual `test_docs.py` covers structure; no parallel surface needed).
 - Unfreezing / re-dispatching TB-204 — that's the operator's call after this lands. TB-204's blocker is a separate briefing bug (`grep -lE` without `-r` in its Verification bullet #4) and needs its own fix.
 - Renaming or restructuring the worked-example block titles (`### Mission` etc.) — the section names are stable structural anchors.
+## Attempts
+
+### 2026-05-12 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -rn "test_worked_example_quotes_appear_verbatim_in_goal_md" ap2/` — exit 1 (test is fully removed; no references r; [fail] `grep -n "goal_md_path=GOAL_PATH" ap2/tests/test_docs.py` — exit 1 (the reshaped test no longer uses the live goal.md pa
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T232613Z-TB-206.prompt.md`, `stream: .cc-autopilot/debug/20260512T232613Z-TB-206.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T232613Z-TB-206.messages.jsonl`
