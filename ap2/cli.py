@@ -1295,6 +1295,32 @@ def cmd_rollback(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _active_task_id(cfg: Config) -> str | None:
+    """TB-202 helper: return the first Active task's ID, or None if
+    Active is empty. Centralizes the board read; the literal "a task
+    is currently active" refusal phrasing lives at each call site so
+    the briefing's `grep -nE "a task is currently active" ap2/cli.py`
+    verification (≥2 hits) catches a regression where one of the two
+    refuse-if-active gates is dropped or weakened. (See
+    `cmd_backfill_proposals` and `cmd_cron_edit`.)
+
+    Why refuse-if-active rather than queue-routing both verbs: both
+    are rare operations (`backfill-proposals` is a one-off historical
+    seed; `cron edit` is operational tuning during project setup or
+    cadence-adjust, not routine). Queue-routing has architectural
+    overhead — register the op, add a drain-side handler, design the
+    queue payload — worth it for frequent surfaces like `ap2 ack`
+    (sibling TB-201) but not for these. The cheap mitigation: read
+    the board once, refuse if Active is non-empty, point the
+    operator at `ap2 status` and `ap2 pause` (with the caveat that
+    pause doesn't abort in-flight tasks; it only stops dispatch of
+    new ones).
+    """
+    board = Board.load(cfg.tasks_file)
+    active = list(board.iter_tasks("Active"))
+    return active[0].id if active else None
+
+
 def cmd_backfill_proposals(cfg: Config, args: argparse.Namespace) -> int:
     """Backfill historical ideation proposal records (TB-195).
 
@@ -1315,7 +1341,30 @@ def cmd_backfill_proposals(cfg: Config, args: argparse.Namespace) -> int:
 
     `--dry-run` prints what WOULD be written without touching disk;
     operators can preview the impact before committing.
+
+    TB-202: pre-flight refuse-if-active gate — if a task agent is
+    running, refuse rather than racing the fenced-path write against
+    the agent's TB-110 snapshot window and triggering a
+    false-positive rollback. `.cc-autopilot/ideation_proposals/` is
+    fenced (TB-188) and NOT exempt from the snapshot check; the
+    refusal is cheaper than queue-routing the (rare) backfill verb.
     """
+    active_id = _active_task_id(cfg)
+    if active_id is not None:
+        print(
+            f"ap2 backfill-proposals: a task is currently active "
+            f"({active_id}) — refusing.\n"
+            f"  backfill-proposals writes to fenced "
+            f"`.cc-autopilot/ideation_proposals/` and racing the active "
+            f"task would trigger a state_violation rollback.\n"
+            f"  Wait for the task to complete (see `ap2 status`) or pause "
+            f"the daemon, then retry. Note: `ap2 pause` halts dispatch of "
+            f"new tasks but does NOT abort the in-flight one; pause helps "
+            f"only for the NEXT slot.",
+            file=sys.stderr,
+        )
+        return 1
+
     from . import backfill
 
     report = backfill.backfill_proposals(cfg, dry_run=args.dry_run)
@@ -1354,6 +1403,55 @@ def cmd_cron_list(cfg: Config, args: argparse.Namespace) -> int:
         last = state.get(j.name, 0)
         last_str = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(last)) if last else "never"
         print(f"{j.name:30s} every {j.interval_s}s  last={last_str}  cond={j.active_when or '-'}")
+    return 0
+
+
+def cmd_cron_edit(cfg: Config, args: argparse.Namespace) -> int:
+    """Operator CLI for mutating `.cc-autopilot/cron.yaml` (TB-146 +
+    TB-202).
+
+    TB-146 retired `cron_edit` from every agent toolset — cron schedule
+    mutation is operator-CLI-only. The handler under the hood is
+    `tools.do_cron_edit`; this command is the operator-facing wrapper
+    invoked as `ap2 cron edit <action> <name> [...flags]`.
+
+    TB-202: pre-flight refuse-if-active gate — cron.yaml is fenced
+    and not exempt from the TB-110 post-hoc snapshot check, so a
+    mid-task `ap2 cron edit` would trigger a false-positive rollback.
+    The refuse-if-active gate is the cheap mitigation; queue-routing
+    is overkill for an operation that fires during project setup or
+    cadence-tuning, not routinely.
+    """
+    active_id = _active_task_id(cfg)
+    if active_id is not None:
+        print(
+            f"ap2 cron edit: a task is currently active "
+            f"({active_id}) — refusing.\n"
+            f"  cron edit writes to fenced `.cc-autopilot/cron.yaml` and "
+            f"racing the active task would trigger a state_violation "
+            f"rollback.\n"
+            f"  Wait for the task to complete (see `ap2 status`) or pause "
+            f"the daemon, then retry. Note: `ap2 pause` halts dispatch of "
+            f"new tasks but does NOT abort the in-flight one; pause helps "
+            f"only for the NEXT slot.",
+            file=sys.stderr,
+        )
+        return 1
+
+    payload: dict = {"action": args.action, "name": args.name}
+    if args.interval is not None:
+        payload["interval"] = args.interval
+    if args.prompt is not None:
+        payload["prompt"] = args.prompt
+    if args.active_when is not None:
+        payload["active_when"] = args.active_when
+    if args.max_turns is not None:
+        payload["max_turns"] = args.max_turns
+    res = tools.do_cron_edit(cfg, payload)
+    if res.get("isError"):
+        print(res["content"][0]["text"], file=sys.stderr)
+        return 1
+    print(res["content"][0]["text"])
     return 0
 
 
@@ -1848,6 +1946,25 @@ def build_parser() -> argparse.ArgumentParser:
     sub_cron = s.add_subparsers(dest="cron_cmd", required=True)
     sc = sub_cron.add_parser("list", help="list cron jobs")
     sc.set_defaults(func=cmd_cron_list)
+    # TB-146 + TB-202: operator-CLI-only cron registry mutation; agents
+    # never have `cron_edit` in their toolset. The TB-202 refuse-if-active
+    # gate lives in `cmd_cron_edit` so a mid-task invocation doesn't race
+    # the fenced cron.yaml write against the task agent's snapshot window.
+    sc = sub_cron.add_parser(
+        "edit",
+        help="add / remove / update a cron job (operator-CLI-only; "
+             "TB-146 retired the agent-side cron_edit tool)",
+    )
+    sc.add_argument("action", choices=["add", "remove", "update"])
+    sc.add_argument("name", help="cron job name")
+    sc.add_argument("--interval", default=None,
+                    help="interval string (e.g. '1h', '30m', '1d')")
+    sc.add_argument("--prompt", default=None, help="prompt body")
+    sc.add_argument("--active-when", dest="active_when", default=None,
+                    help="optional active_when condition")
+    sc.add_argument("--max-turns", dest="max_turns", default=None,
+                    help="optional max-turns cap (default 15)")
+    sc.set_defaults(func=cmd_cron_edit)
 
     s = sub.add_parser("sandbox", help="OS-level sandbox user + project helpers")
     s.set_defaults(func=lambda cfg, a: (s.print_help() or 0))

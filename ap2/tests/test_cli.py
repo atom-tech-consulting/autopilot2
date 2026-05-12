@@ -19,6 +19,7 @@ import pytest
 
 from ap2 import events, retry, tools
 from ap2.board import Board
+from ap2.cron import load_jobs
 from ap2.cli import (
     _require_oauth_token,
     cmd_add,
@@ -3447,3 +3448,207 @@ def test_operator_log_append_mcp_name_unchanged(tmp_path: Path):
     assert "mcp__autopilot__operator_log_append" in tools.CONTROL_AGENT_TOOLS
     # And it's NOT in TASK_AGENT_TOOLS — operator-mediated only.
     assert "mcp__autopilot__operator_log_append" not in tools.TASK_AGENT_TOOLS
+
+
+# ---------------------------------------------------------------------------
+# TB-202: `ap2 backfill-proposals` and `ap2 cron edit` both write fenced
+# files synchronously (bypassing the operator-queue routing pattern). If
+# the operator runs either while a task agent is in flight, the
+# TB-110 post-hoc snapshot diff detects the fenced-file mutation and
+# rolls the task back — same false-positive cascade as the pre-TB-201
+# `ap2 ack` path. TB-202's cheaper-than-queue-routing mitigation is a
+# pre-flight refuse-if-active check on both verbs; these tests pin the
+# refusal text, the exit code, and the "fenced state untouched on
+# refuse" invariant.
+
+
+def test_backfill_proposals_refuses_when_active_task_present(tmp_path: Path, capsys):
+    """TB-202: with a synthetic Active task on the board,
+    `cmd_backfill_proposals` exits non-zero and stderr names the
+    refuse-if-active rationale. Mirrors the pattern of TB-201's
+    `test_ack_no_state_violation_during_in_flight_task` — except here
+    the gate is at the CLI entry, not via queue deferral."""
+    from ap2.cli import cmd_backfill_proposals
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-77", title="running task")
+    board.save()
+
+    rc = cmd_backfill_proposals(cfg, Namespace(dry_run=False))
+    assert rc == 1
+
+    err = capsys.readouterr().err
+    # Briefing's verification pin: message names the verb, the
+    # current-task state, and the refusal verb.
+    assert "backfill-proposals" in err
+    assert "active" in err.lower()
+    assert "refusing" in err.lower()
+    # The Active task's TB-N is surfaced so the operator can map the
+    # refusal back to a concrete in-flight task.
+    assert "TB-77" in err
+
+
+def test_backfill_proposals_refuse_does_not_mutate_fenced_dir(tmp_path: Path):
+    """TB-202 invariant: the refuse path leaves
+    `.cc-autopilot/ideation_proposals/` untouched — no new records, no
+    file mtimes bumped. Pin captures the directory's file list before
+    and after the refuse fires and asserts it's identical.
+
+    Why this matters: the whole point of the gate is to prevent the
+    fenced-path write from racing the in-flight task's snapshot
+    window. A regression that bypasses the gate (e.g. running
+    `backfill_proposals` AFTER the refuse-fires check) would
+    re-introduce the rollback cascade."""
+    from ap2.cli import cmd_backfill_proposals
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-77", title="running task")
+    board.save()
+
+    proposals_dir = cfg.project_root / ".cc-autopilot" / "ideation_proposals"
+    proposals_dir.mkdir(parents=True, exist_ok=True)
+    before = sorted(p.name for p in proposals_dir.iterdir())
+
+    rc = cmd_backfill_proposals(cfg, Namespace(dry_run=False))
+    assert rc == 1
+
+    after = sorted(p.name for p in proposals_dir.iterdir())
+    assert before == after, (
+        f"backfill-proposals refuse path mutated "
+        f".cc-autopilot/ideation_proposals/: before={before} after={after}"
+    )
+
+
+def test_backfill_proposals_succeeds_with_empty_active(tmp_path: Path):
+    """TB-202 happy path: when board's Active section is empty, the
+    refuse-if-active gate falls through and `cmd_backfill_proposals`
+    runs normally. Uses the TB-195 zero-records baseline (no
+    operator_log entries / no briefings) so the underlying
+    `backfill_proposals` call is a no-op; what we pin is the gate not
+    blocking."""
+    from ap2.cli import cmd_backfill_proposals
+
+    cfg = _project(tmp_path)
+    # init_project leaves Active empty; explicit assertion documents
+    # the precondition.
+    board = Board.load(cfg.tasks_file)
+    assert list(board.iter_tasks("Active")) == []
+
+    rc = cmd_backfill_proposals(cfg, Namespace(dry_run=False))
+    assert rc == 0
+
+
+def test_cron_edit_refuses_when_active_task_present(tmp_path: Path, capsys):
+    """TB-202: `cmd_cron_edit` (the `ap2 cron edit ...` handler)
+    refuses with stderr naming the cron.yaml fenced path when a task
+    is Active. Symmetric to the backfill-proposals refuse pin."""
+    from ap2.cli import cmd_cron_edit
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-77", title="running task")
+    board.save()
+
+    rc = cmd_cron_edit(
+        cfg,
+        Namespace(
+            action="add",
+            name="weekly-perf",
+            interval="1d",
+            prompt="run perf",
+            active_when=None,
+            max_turns=None,
+        ),
+    )
+    assert rc == 1
+
+    err = capsys.readouterr().err
+    # Message names the verb ("cron edit"), the active state, and the
+    # refusal verb (verification bullet's literal expectations).
+    assert "cron" in err.lower()
+    assert "active" in err.lower()
+    assert "refusing" in err.lower()
+    assert "TB-77" in err
+
+
+def test_cron_edit_refuse_does_not_mutate_cron_yaml(tmp_path: Path):
+    """TB-202 invariant: the cron-edit refuse path leaves
+    `.cc-autopilot/cron.yaml` untouched. Mirrors the
+    backfill-proposals invariant — captures the file's content before
+    and after, assertions on equality. cron.yaml is fenced and is the
+    rollback-trigger surface for this CLI verb."""
+    from ap2.cli import cmd_cron_edit
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-77", title="running task")
+    board.save()
+
+    cron_yaml = cfg.cron_file
+    # Init writes a default cron.yaml; capture its bytes verbatim.
+    before_bytes = cron_yaml.read_bytes() if cron_yaml.exists() else None
+
+    rc = cmd_cron_edit(
+        cfg,
+        Namespace(
+            action="add",
+            name="weekly-perf",
+            interval="1d",
+            prompt="run perf",
+            active_when=None,
+            max_turns=None,
+        ),
+    )
+    assert rc == 1
+
+    after_bytes = cron_yaml.read_bytes() if cron_yaml.exists() else None
+    assert before_bytes == after_bytes, (
+        "cron edit refuse path mutated cron.yaml — the fenced-write "
+        "gate is leaking past the refuse-if-active check"
+    )
+
+
+def test_cron_edit_succeeds_with_empty_active(tmp_path: Path):
+    """TB-202 happy path: with empty Active, `cmd_cron_edit` falls
+    through the gate and mutates cron.yaml normally (the underlying
+    `do_cron_edit` handler — same one exercised in
+    `test_tools.test_cron_edit_add_and_remove`). Adds + removes a job
+    and asserts both ops return 0."""
+    from ap2.cli import cmd_cron_edit
+
+    cfg = _project(tmp_path)
+    # Default Active is empty.
+
+    rc = cmd_cron_edit(
+        cfg,
+        Namespace(
+            action="add",
+            name="tb-202-test",
+            interval="1h",
+            prompt="run a thing",
+            active_when=None,
+            max_turns=None,
+        ),
+    )
+    assert rc == 0
+
+    jobs = {j.name for j in load_jobs(cfg.cron_file)}
+    assert "tb-202-test" in jobs
+
+    rc = cmd_cron_edit(
+        cfg,
+        Namespace(
+            action="remove",
+            name="tb-202-test",
+            interval=None,
+            prompt=None,
+            active_when=None,
+            max_turns=None,
+        ),
+    )
+    assert rc == 0
+
+    jobs = {j.name for j in load_jobs(cfg.cron_file)}
+    assert "tb-202-test" not in jobs
