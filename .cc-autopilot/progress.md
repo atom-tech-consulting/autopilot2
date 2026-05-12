@@ -461,3 +461,9 @@
 - **Summary:** TB-203's main work landed in 1ed8a03 (4 docs-drift regression-pin tests + howto.md/architecture.md updates for MCP tools, env knobs, event types). That commit failed verification only because the operator's 17:02Z goal.md pivot (`Current focus: ideation quality signal collection` → `code quality`) silently broke the unrelated TB-200 anti-drift tests in test_docs.py; this follow-up commit refreshes the howto.md `### Current focus` worked example (Good-inline + blockquote + trailing substring reference) to quote the new heading, and rewrites the synthetic briefing in `test_worked_example_current_focus_satisfies_anchor_validator` to cite the `Current focus: code quality` anchor. `uv run pytest -q ap2/tests/` now passes 1267/1267; all briefing grep checks pass.
 - **Files:** ap2/howto.md, ap2/tests/test_docs.py
 - **Tests:** pass
+
+## [2026-05-12] TB-205: Pin `AP2_EVENT_CONTEXT`, `AP2_CONTROL_MAX_TURNS`, `AP2_IDEATION_MAX_TURNS`, `AP2_AGENT_MODEL` with happy + error path unit tests
+- **Commit:** `c13a07c`
+- **Summary:** Previously committed in c13a07c: ap2/tests/test_env_knobs.py (17 tests across the four knobs — AP2_EVENT_CONTEXT 4 / AP2_CONTROL_MAX_TURNS 3 / AP2_IDEATION_MAX_TURNS 5 incl. both precedence directions / AP2_AGENT_MODEL 5 incl. source-pin for run_task + _judge_prose_bullet). Re-verified post-retry: `uv run pytest -q ap2/tests/` → 1267 passed, `-k "event_context or control_max_turns or ideation_max_turns or agent_model"` → 17/17 passed, and `grep -rE "AP2_EVENT_CONTEXT|AP2_CONTROL_MAX_TURNS|AP2_IDEATION_MAX_TURNS|AP2_AGENT_MODEL" ap2/tests/` finds 52 hits in test_env_knobs.py (was 0 pre-TB-205). All briefing scope items + verification checks satisfied; the prior verification_failed appears to have been transient.
+- **Files:** ap2/tests/test_env_knobs.py
+- **Tests:** pass
