@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-199** **Add `## Done when` section to `ap2 init`'s `GOAL_TEMPLATE` (fix template/validator drift)** [→ brief](.cc-autopilot/tasks/add-done-when-section-to-ap2-init-s-goal.md)
 - [ ] **TB-200** **Add a goal.md authoring guide section to `ap2/howto.md`** [→ brief](.cc-autopilot/tasks/add-a-goal-md-authoring-guide-section-to.md)
 
 ## Pipeline Pending
@@ -88,6 +87,7 @@
 - [x] **TB-196** **Emit `ideation_proposal_recorded` + `ideation_proposal_reconciled` events when TB-188 records are written/amended** `#autopilot` `#ideation` `#signal-collection` `#events` `#observability` — Add two event emissions to TB-188's record-write and outcome-reconciliation paths so per-proposal record activity is visible in events.jsonl, the web /events page, and the ideation prompt's events block (TB-169 IDEATION_RELEVANT_EVENT_TYPES allowlist). [→ brief](.cc-autopilot/tasks/emit-ideation-proposal-recorded-ideation.md)
 - [x] **TB-197** **Show next scheduled ideation time on the web overview** [→ brief](.cc-autopilot/tasks/show-next-scheduled-ideation-time-on-the.md)
 - [x] **TB-198** **Fence `.cc-autopilot/tasks/` and `.cc-autopilot/insights/_index.md` from task-agent writes** [→ brief](.cc-autopilot/tasks/fence-cc-autopilot-tasks-and-cc-autopilo.md)
+- [x] **TB-199** **Add `## Done when` section to `ap2 init`'s `GOAL_TEMPLATE` (fix template/validator drift)** [→ brief](.cc-autopilot/tasks/add-done-when-section-to-ap2-init-s-goal.md)
 
 ## Frozen
 

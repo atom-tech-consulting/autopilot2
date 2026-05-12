@@ -431,3 +431,9 @@
 - **Summary:** Added `.cc-autopilot/tasks` (whole-dir fence) and `.cc-autopilot/insights/_index.md` (single-file fence) to TASK_AGENT_FENCED_PATHS, mirrored the additions in the task-prompt header's "do NOT touch" enumeration, and pinned both layers with new tests (membership, generated Edit/Write disallowed_tools blocks, per-topic insight writes stay open, bullet-count = 13). Full ap2/tests/ regression: 1217 passed.
 - **Files:** ap2/tools.py, ap2/prompts.py, ap2/tests/test_tools.py, ap2/tests/test_prompts.py
 - **Tests:** pass
+
+## [2026-05-12] TB-199: Add `## Done when` section to `ap2 init`'s `GOAL_TEMPLATE` (fix template/validator drift)
+- **Commit:** `e24f294`
+- **Summary:** Added `## Done when` section to GOAL_TEMPLATE between Mission and Current focus; placeholder body uses prose + `- (TODO)` stub so it contributes zero TB-161 anchors and preserves the day-one fresh-project skip path; new tests pin section presence, canonical order, criterion-mention, and a `_validate_briefing_structure` round-trip against the just-generated goal.md.
+- **Files:** ap2/init.py, ap2/tests/test_init.py
+- **Tests:** pass
