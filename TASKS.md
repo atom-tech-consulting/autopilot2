@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-201** **Queue-route `ap2 ack` + `operator_log_append` MCP tool (eliminate false-positive state violations on operator_log.md)** [→ brief](.cc-autopilot/tasks/queue-route-ap2-ack-operator-log-append.md)
+- [ ] **TB-202** **Refuse `ap2 backfill-proposals` and `ap2 cron edit` when a task is Active** [→ brief](.cc-autopilot/tasks/refuse-ap2-backfill-proposals-and-ap2-cr.md)
 
 ## Pipeline Pending
 
