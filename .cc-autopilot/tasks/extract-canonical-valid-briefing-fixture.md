@@ -80,3 +80,8 @@ Sequencing risk: the migration is mechanical but touches >17 files. The fix is s
 - **exit_code:** 1
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T191928Z-TB-204.prompt.md`, `stream: .cc-autopilot/debug/20260512T191928Z-TB-204.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T191928Z-TB-204.messages.jsonl`
+### 2026-05-12 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `[ "$(grep -lE 'from ap2.tests._briefing_fixtures import|from .._briefing_fixtures import|from ._briefing_fixtures impor
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T201921Z-TB-204.prompt.md`, `stream: .cc-autopilot/debug/20260512T201921Z-TB-204.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T201921Z-TB-204.messages.jsonl`
