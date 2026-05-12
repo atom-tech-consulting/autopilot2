@@ -55,6 +55,161 @@ CLAUDE.md                      # project conventions; daemon bumps Next task ID
 The 5-section board has a fixed order:
 **Active → Ready → Backlog → Complete → Frozen**.
 
+## Authoring goal.md
+
+`goal.md` is operator-curated. Ideation reads it every cycle as the source
+of truth for what the project is for and when it's done. Two queue-time
+validators key off its content, so both the section shape and the prose
+substance are load-bearing:
+
+- **TB-161 anchor validator** — every briefing's `## Goal` body must cite
+  (as a substring) text from goal.md's `## Current focus` or `## Done when`
+  headings/bullets. `_goal_md_anchors` mines anchors only from those two
+  sections; reword them so meaningful citations are possible.
+- **TB-164 Why-now validator** — independent of goal.md content; checks
+  the briefing itself has a `Why now:` line. goal.md doesn't need its own
+  Why-now section.
+
+Ideation reads goal.md in the order Mission → Done when → Current focus →
+Non-goals → Constraints (per `ap2/ideation.default.md`). What each section
+is for, how ideation reads it, and a worked example follow — the examples
+quote this repo's own `goal.md` so operators have a real filled-in model
+rather than a synthetic one. Fresh `ap2 init` projects ship a five-section
+placeholder (`GOAL_TEMPLATE` in `ap2/init.py`); use this repo's `goal.md`
+as the substance model when you replace the placeholders.
+
+### Mission
+
+One sentence: what is this project FOR? Frames every proposal; ideation
+reads it but doesn't quote-match against it.
+
+- **Bad:** "improve developer experience" (unmeasurable, no subject).
+- **Good:** "a Slack bot that ingests trade alerts and posts daily P&L
+  summaries" (concrete subject + scope).
+
+Validator interaction: NOT anchor surface for TB-161 — the matcher only
+mines `## Current focus` / `## Done when`.
+
+Worked example (this repo's `goal.md`):
+
+> ap2 is a meta-system: an autonomous development loop that drives a target
+> project toward its operator-stated goal with minimal human intervention.
+
+One sentence; names the subject (ap2), the activity (drives a target
+project), and the value (toward operator-stated goal). No measurable claim
+— that's `## Done when`'s job.
+
+### Done when
+
+Bulleted list of concrete completion criteria. **Load-bearing** for
+ideation's Step 0: when all criteria are met, the focus item flips to
+`exhausted-needs-operator` and ideation stops proposing. Without `## Done
+when` the only stop-signal is the operator intervening — which defeats
+the walk-away promise.
+
+- **Bad:** "the project is solid" (unmeasurable; nothing for ideation to
+  check against).
+- **Good:** "walks 1000 strategies through backtest at <10s/strategy on
+  the prod box" (measurable, falsifiable, observable threshold).
+
+Apply the **delete-test** to each bullet: remove it, and does the project's
+done-signal genuinely change? If no, the bullet is filler — cut it.
+
+Validator interaction: anchor surface for TB-161. The first 3-6 words of
+each bullet become substrings a briefing's `## Goal` body can cite.
+
+Worked example (this repo's `goal.md`):
+
+> - An operator can point ap2 at a fresh project, paste a `goal.md` (with
+>   Mission + `## Done when`), and walk away for a week without intervention.
+
+Measurable (paste + walk away for a week), names the unblock-condition
+(no intervention). The lead phrase "An operator can point ap2 at" is a
+usable TB-161 anchor — any briefing whose `## Goal` body quotes those six
+words satisfies the substring check.
+
+### Current focus
+
+Narrative paragraphs naming the active theme(s). Ideation's Step 0 emits a
+per-focus-item assessment (Progress / Gaps / Status / Reasoning) keyed on
+each Current-focus heading. The heading title doubles as the canonical
+TB-161 anchor for that focus item.
+
+- **Bad:** "Make ap2 better in general." (no theme; nothing for a briefing
+  to cite, nothing for ideation to assess against.)
+- **Good:** "Current focus: ideation quality signal collection" — a
+  discrete noun phrase that names a theme broader than one task but
+  narrower than the whole mission.
+
+Validator interaction: anchor surface for TB-161. Both the full heading
+title and any 4-6-word phrase from the body prose work as substring
+citations. Quote the heading title verbatim when in doubt — it's the
+cheap, unambiguous path.
+
+Worked example (this repo's `goal.md`):
+
+> ## Current focus: ideation quality signal collection
+
+This heading title is the canonical anchor for every briefing that threads
+back to this focus — a briefing whose `## Goal` body contains the
+substring `Current focus: ideation quality signal collection` (case-
+insensitive after punctuation normalization) passes TB-161.
+
+### Non-goals
+
+Bulleted list of explicit non-goals. Ideation's Step 0 includes a
+"non-goal risk check" — proposals straying into non-goal areas get flagged
+in the assessment. Frame each bullet as "we are NOT trying to X because Y"
+so the drift-detection signal is unambiguous.
+
+- **Bad:** "Don't be slow." (negated wish, not a non-goal.)
+- **Good:** "Generic task scheduler / project management tool: ap2 is
+  opinionated about agent-driven dev work." (names the rejected shape AND
+  the reason.)
+
+Validator interaction: NOT anchor surface for TB-161 — non-goal text
+doesn't feed the substring matcher.
+
+Worked example (this repo's `goal.md`):
+
+> - **Generic task scheduler / project management tool**: ap2 is opinionated
+>   about agent-driven dev work. Don't add features whose primary use case
+>   is "a human tracking their own todos" — those compete with existing
+>   tools and dilute the loop.
+
+Bold lede names the rejected shape; the body explains the reason
+("opinionated about agent-driven dev work") so ideation can flag a
+to-do-list proposal as off-goal in its per-cycle assessment.
+
+### Constraints
+
+Bulleted list of hard constraints — tech stack, deadlines, dependencies,
+blast-radius limits. Ideation respects constraints when ranking proposals
+(e.g., "no API-key features" if OAuth-only is a constraint).
+
+- **Bad:** "Try to keep things simple." (subjective; nothing to gate
+  against.)
+- **Good:** "OAuth auth (CLAUDE_CODE_OAUTH_TOKEN): not API-key. Features
+  that require API-key (custom betas) are out of reach." (names the
+  constraint AND the class of features it forbids.)
+
+Validator interaction: NOT anchor surface for TB-161 today. Constraint-
+specific TBs needing a goal-anchor citation have to thread their quote
+through `## Current focus` or `## Done when` — e.g., bake the constraint
+into a Current-focus narrative paragraph if you want it cite-able by
+every related briefing.
+
+Worked example (this repo's `goal.md`):
+
+> - **Single-process daemon, file-state-only**: shared state lives on disk
+>   under `.cc-autopilot/`. No database, no message broker. Recovery is
+>   always "read files, resume."
+
+Bold lede names the constraint; the body spells out what it forbids ("no
+database, no message broker") so a briefing proposing "add Redis state"
+can be vetoed unambiguously by the operator and called out by ideation's
+non-goal risk check.
+
 ## The task agent contract
 
 If you (the Claude session) are dispatched as a **task agent**, your
