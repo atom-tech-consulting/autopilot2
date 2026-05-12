@@ -8,6 +8,9 @@
 
 ## Backlog
 
+- [ ] **TB-203** **Documentation drift coverage gate for `ap2/howto.md` + `ap2/architecture.md` — MCP tools, env knobs, event types** `#autopilot` `#docs` `#code-quality` `#operator-surface` `#regression-pin` `@blocked:review` — Sync the MCP-tools / env-knobs / event-types reference sections in ap2/howto.md and ap2/architecture.md with current source-of-truth registries; add a regression-pin test that fails when a new source surface lacks a docs mention. [→ brief](.cc-autopilot/tasks/documentation-drift-coverage-gate-for-ap.md)
+- [ ] **TB-204** **Extract canonical-valid briefing fixture for tests; deduplicate inline duplicates across the test suite** `#autopilot` `#tests` `#code-quality` `#reusability` `#briefing` `@blocked:review` — Centralize the canonical-valid briefing template (Goal+Why-now+Scope+Design+Verification+Out-of-scope) into a single test-helper module; migrate the ~30+ inline duplicates in test_tools.py / test_cli.py / test_operator_queue.py / e2e tests to use it. Adding a future validator rule becomes a one-file fixture update instead of touching 17 files. [→ brief](.cc-autopilot/tasks/extract-canonical-valid-briefing-fixture.md)
+- [ ] **TB-205** **Pin `AP2_EVENT_CONTEXT`, `AP2_CONTROL_MAX_TURNS`, `AP2_IDEATION_MAX_TURNS`, `AP2_AGENT_MODEL` with happy + error path unit tests** `#autopilot` `#tests` `#code-quality` `#env-knobs` `#sdk-cost` `@blocked:review` — Four env knobs that affect SDK cost/behavior currently have zero test-file references in ap2/tests/. Add focused parse/default/override + invalid-value-fallback tests for each, so a future refactor can't silently break the contract. [→ brief](.cc-autopilot/tasks/pin-ap2-event-context-ap2-control-max-tu.md)
 
 ## Pipeline Pending
 

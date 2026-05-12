@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/documentation-drift-coverage-gate-for-ap.md",
+  "focus_anchor": "current focus code quality",
+  "proposed_at": "2026-05-12T17:42:26Z",
+  "tb_id": "TB-203",
+  "why_now": "today an operator reading `ap2/howto.md`'s `## Configuration knobs` (L447-466) sees 10 env knobs while source uses ~25 (`AP2_VERIFY_JUDGE_EFFORT`, `AP2_VERIFY_JUDGE_MAX_TURNS`, `AP2_STATUS_REPORT_EFFORT`, `AP2_WEB_PORT`, `AP2_WEB_DISABLED`, `AP2_JANITOR_*`, `AP2_AUTO_DIAGNOSE_*`, `AP2_AGENT_EFFORT`, `AP2_AGENT_MODEL`, `AP2_MM_*`, `AP2_REAL_SDK`, `AP2_EVENT_CONTEXT`, `AP2_CONTROL_MAX_TURNS`, `AP2_IDEATION_MAX_TURNS`, `AP2_VERIFY_TIMEOUT_S` missing or partially named), the `## Custom MCP tools (reference)` (L357-392) names ~7 control tools while source registers 11 plus `report_result` still listed with a `cron` field TB-123 dropped, `ap2/architecture.md`'s `CONTROL_AGENT_TOOLS` literal (L175-194) is missing `git_log_grep`/`operator_log_append`/`mattermost_thread_read`/`status_report_run`, and the `## Event schema` section (L394-414) omits ~10 newer event types (`ideation_proposal_recorded`/`_reconciled`, `judge_call`, `task_run_usage`, `control_run_usage`, `goal_updated`, `task_updated`, `web_start`/`_stop`/`_error`, `ideation_skipped`, `ideation_forced`, `task_deleted`). Without this work, the operator surface has no test net catching docs drift on the next refactor \u2014 the same failure mode goal.md L49-54 names."
+}

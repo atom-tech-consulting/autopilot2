@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/pin-ap2-event-context-ap2-control-max-tu.md",
+  "focus_anchor": "current focus code quality",
+  "proposed_at": "2026-05-12T17:43:44Z",
+  "tb_id": "TB-205",
+  "why_now": "ran `grep -rE \"AP2_EVENT_CONTEXT|AP2_CONTROL_MAX_TURNS|AP2_IDEATION_MAX_TURNS|AP2_AGENT_MODEL\" ap2/tests/` \u2192 empty. Compare with `AP2_AGENT_EFFORT` (covered in test_status_report_skip.py L1211-1334, test_verify_retry_diff.py L685-815 with explicit happy/override/invalid paths) and `AP2_VERIFY_TIMEOUT_S` (covered in e2e/test_verify.py L97-110). The four uncovered knobs are structurally identical to the covered ones \u2014 same `os.environ.get(...)` parse, same default-fallback path, same int-or-fallback-for-invalid shape. Goal.md's delete-test (\"would a regression risk become invisible if this test were deleted?\") answers YES here: today a typo flipping `AP2_AGENT_MODEL`'s default from claude-sonnet-4-5 to something else, or an off-by-one on `AP2_CONTROL_MAX_TURNS`'s int fallback, would ship silently with no test red."
+}
