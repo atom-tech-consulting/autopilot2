@@ -59,7 +59,7 @@ Sequencing risk: the migration is mechanical but touches >17 files. The fix is s
 - `uv run pytest -q ap2/tests/` — full regression suite green (no test should change behavior; only the inline strings consolidate).
 - `test -f ap2/tests/_briefing_fixtures.py` — fixture module file exists.
 - `grep -nE "^def canonical_briefing\(|^def minimal_briefing\(|^def briefing_missing\(|^def briefing_with_manual_bullet\(" ap2/tests/_briefing_fixtures.py` — exit 0 (all four public builders present).
-- `[ "$(grep -lE 'from ap2.tests._briefing_fixtures import|from .._briefing_fixtures import|from ._briefing_fixtures import' ap2/tests/ ap2/tests/e2e/ 2>/dev/null | wc -l)" -ge 10 ]` — at least 10 test files import the fixture (sanity bound; expected actual is 15+).
+- `[ "$(grep -rlE 'from ap2.tests._briefing_fixtures import|from .._briefing_fixtures import|from ._briefing_fixtures import' ap2/tests/ ap2/tests/e2e/ 2>/dev/null | wc -l)" -ge 10 ]` — at least 10 test files import the fixture (sanity bound; expected actual is 15+). `grep -rlE` recurses into the directory args (previously `grep -lE` without `-r` failed because BSD/GNU grep refuses directory args without recursion, leaving stdout empty and the wc count at 0).
 - `[ "$(grep -c '## Goal' ap2/tests/test_tools.py)" -le 20 ]` — inline `## Goal` markers in test_tools.py drop from 150 to ≤20 (most should now be inside the fixture or in genuinely-malformed test inputs).
 - `[ "$(grep -c 'Why now:' ap2/tests/test_tools.py)" -le 5 ]` — `Why now:` markers in test_tools.py drop from 26 to ≤5.
 - Prose: `ap2/tests/_briefing_fixtures.py` is module-internal (not re-exported from `ap2/__init__.py` or `ap2/tests/__init__.py`); confirm via grep the file isn't imported from `ap2/` non-test source (judge confirms via `Grep -r "_briefing_fixtures" ap2/` excluding `ap2/tests/`).
@@ -71,6 +71,7 @@ Sequencing risk: the migration is mechanical but touches >17 files. The fix is s
 - Migrating production code that builds briefings (e.g. `ap2/backfill.py`'s synthesis — that's not the test surface; different concerns).
 - Adding a pytest fixture decorator wrapper (the function-call shape is more composable and reads more obviously at the call site).
 - Renaming `BRIEFING_TEMPLATE` in `ap2/init.py` (orthogonal; the fixture sources defaults from it without renaming).
+
 ## Attempts
 
 ### 2026-05-12 — verification_failed
@@ -80,12 +81,17 @@ Sequencing risk: the migration is mechanical but touches >17 files. The fix is s
 - **exit_code:** 1
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T191928Z-TB-204.prompt.md`, `stream: .cc-autopilot/debug/20260512T191928Z-TB-204.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T191928Z-TB-204.messages.jsonl`
+
 ### 2026-05-12 — verification_failed
 (no summary)
 - **kind:** per_task
 - **failed_criteria:** [fail] `[ "$(grep -lE 'from ap2.tests._briefing_fixtures import|from .._briefing_fixtures import|from ._briefing_fixtures impor
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T201921Z-TB-204.prompt.md`, `stream: .cc-autopilot/debug/20260512T201921Z-TB-204.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T201921Z-TB-204.messages.jsonl`
+
 ### 2026-05-12 — blocked
 Work is complete in prior commit ecd5b2f (1267 tests pass; fixture file with all 4 builders exists at ap2/tests/_briefing_fixtures.py; 12 test files import it; test_tools.py '## Goal' count is 18 (≤20) and 'Why now:' count is 5 (≤5); no non-test imports). HOWEVER, briefing Verification bullet #4 (`[ "$(grep -lE 'from ap2.tests._briefing_fixtures import|...' ap2/tests/ ap2/tests/e2e/ 2>/dev/null | wc -l)" -ge 10 ]`) is literally unsatisfiable: BSD grep on macOS (and GNU grep) refuses to scan a directory argument without `-r` / `--directories=recurse`, emitting "Is a directory" to stderr (silenced by 2>/dev/null), leaving stdout empty so wc -l prints 0. Two prior verification runs failed on this same bullet for the same reason (per-task verdict criteria). Briefing is fenced from task-agent edits (.cc-autopilot/tasks/ in TASK_AGENT_FENCED_PATHS), and no env knob (GREP_OPTIONS, BASH_ENV) is set in the daemon's inherited env to coerce recursion. OPERATOR FIX: change the bullet to `grep -rlE ...` (or `grep -lE --directories=recurse ...`) — semantically equivalent, then re-promote TB-204; with the bug fix the existing commit will pass all six shell bullets immediately. Reporting blocked rather than complete because the daemon's per-task verifier will deterministically reject the existing commit on bullet #4 as written.
 - **commit:** ecd5b2f
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T203340Z-TB-204.prompt.md`, `stream: .cc-autopilot/debug/20260512T203340Z-TB-204.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T203340Z-TB-204.messages.jsonl`
+
+### 2026-05-12 — operator briefing fix
+Verification bullet #4 changed from `grep -lE` (broken — BSD/GNU grep won't recurse without `-r`) to `grep -rlE`. Existing commit `ecd5b2f` should now pass all bullets on re-dispatch.

@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/resync-ap2-howto-md-current-focus-worked.md",
   "focus_anchor": "current focus code quality",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-12T23:26:13Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-12T19:56:57Z",
   "tb_id": "TB-206",
   "why_now": "this is an active operational failure on the new Current focus: code quality theme. TB-203 (commit `1ed8a03`, 19:18:57Z) and TB-204 (commit `ecd5b2f`, 19:49:50Z) both committed scope-correct work \u2014 TB-203's new `test_docs_drift.py` (4 tests, all pass), TB-204's new `_briefing_fixtures.py` + ~30 inline-briefing migrations across 13 test files \u2014 but both went `verification_failed` and returned to Backlog because the project-wide gate failed on the pre-existing test_docs.py breaks. TB-204's commit message explicitly names the diagnosis: \"Two pre-existing test_docs.py failures (unrelated to TB-204) reflect the operator's 2026-05-12 17:02Z goal.md pivot from 'ideation quality signal collection' to 'code quality' and persist on a clean checkout without these changes.\" TB-205 is approved and queued next \u2014 same gate, same failure. Without this fix, three operator-approved code-quality proposals cascade to retry-exhausted \u2192 Frozen before any of their work lands in Complete. Beyond the immediate unblock, the structural coupling (verbatim quote of the *currently-rotating* `## Current focus` heading) means the same failure mode recurs on every future operator focus rotation \u2014 operators cannot rotate focus via `ap2 update-goal` without simultaneously editing howto.md, an unstated coupling that violates goal.md L70-72's \"operator who can't understand a surface from its documented description\" in the *opposite* direction (the documented description silently breaks the daemon)."
