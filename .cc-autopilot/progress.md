@@ -443,3 +443,9 @@
 - **Summary:** Substantive work shipped in prior commit e70cddf (## Authoring goal.md section + 5 subsections + TB-161/TB-164 cites + ap2/tests/test_docs.py — 3 tests pass). The retry was triggered by a mistune-parsing bug in the briefing's first Verification bullet: `\`grep ... \\\`goal\\.md\\\` ...\`` truncates at the embedded backtick, yielding an unbalanced-quote shell command that exits 2 regardless of file content. Fixed by switching that bullet to double-backtick wrapping (TB-146 convention) — verifier now extracts the full grep, which matches the existing heading on line 58. All three shell bullets now exit 0; both prose criteria are satisfied by the existing test_docs.py.
 - **Files:** .cc-autopilot/tasks/add-a-goal-md-authoring-guide-section-to.md
 - **Tests:** pass
+
+## [2026-05-12] TB-201: Queue-route `ap2 ack` + `operator_log_append` MCP tool (eliminate false-positive state violations on operator_log.md)
+- **Commit:** `03c4fc1`
+- **Summary:** Queue-routed `ap2 ack` + `operator_log_append` MCP tool. Renamed `do_operator_log_append` → `_apply_operator_ack` (drain-only internal helper); added `enqueue_operator_ack` queue-append entry point; registered `ack` in OPERATOR_QUEUE_OPS with queue-append + drain-side branches; updated `cmd_ack` and the `operator_log_append` MCP tool to enqueue rather than write synchronously. operator_log.md is no longer written inside a task agent's snapshot window. All 1240 tests pass (full regression gate); 14 new tests cover the queue/drain shape, MCP-path parity, regression pin against TB-110 false positives on mid-task ack, and the architectural choice not to add operator_log.md to `_VIOLATION_CHECK_EXCLUDED_PATHS`.
+- **Files:** ap2/tools.py, ap2/cli.py, ap2/operator_log.py, ap2/tests/test_tools.py, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_prompts.py
+- **Tests:** pass
