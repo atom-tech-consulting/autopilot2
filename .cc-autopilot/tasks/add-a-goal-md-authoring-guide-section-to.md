@@ -49,7 +49,7 @@ A short callout box (or bulleted list) summarizing the two validators that key o
 
 ## Verification
 
-- `grep -nE "^## Authoring goal\.md|^## Authoring \`goal\.md\`" ap2/howto.md` — the new section heading exists.
+- ``grep -nE "^## Authoring goal\.md|^## Authoring `goal\.md`" ap2/howto.md`` — the new section heading exists. (Double-backtick wrapping per TB-146 — single-backticks would let mistune treat the embedded `` ` `` as a delimiter, truncating the command and silently failing verification regardless of file content.)
 - `grep -qE "^### Done when|^### Current focus|^### Non-goals|^### Constraints|^### Mission" ap2/howto.md` — at least one subsection heading per section is present (≥5 matches).
 - `grep -qE "TB-161|TB-164" ap2/howto.md` — the new section references the two validators by TB-N so readers can grep back to the implementing code.
 - prose: a test (or a manual `ap2 check`-style sanity check in CI) confirms the section's worked-example block quotes verbatim text from THIS repo's `goal.md` — so when this repo's goal.md changes, the docs don't drift silently. Implementation hint: a `test_docs.py` test reads the worked-example block out of `ap2/howto.md` and asserts every quoted line still appears verbatim in `goal.md`. Future-proofs against silent drift.
