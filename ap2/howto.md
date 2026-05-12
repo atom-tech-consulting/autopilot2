@@ -247,8 +247,11 @@ report_result(
 )
 ```
 
-Optional: `cron='[{"action": "add", "name": "...", "interval": "1h", "prompt": "..."}]'`
-to register a recurring job; `add` requires action+name+interval+prompt.
+To surface "this should fire on a schedule" without bundling it into the
+result reporting, call the dedicated `cron_propose(name, schedule, prompt,
+rationale)` tool one or more times (TB-123 lifted the legacy `cron='...'`
+argument out of `report_result`). Proposals queue for operator review;
+they do NOT mutate `cron.yaml`.
 
 If you forget to call the tool, the daemon reads `git log -1`. If HEAD's
 subject starts with `<TASK_ID>:` it's salvaged as Complete; otherwise
@@ -360,8 +363,14 @@ The daemon registers the `autopilot` MCP server. Two pools, partitioned
 by allowlist:
 
 **Task agents** (`TASK_AGENT_TOOLS`):
-- `report_result(status, commit, summary, files_changed, tests_passed, cron)`
-- `pipeline_task_start(name, command)` (TB-115)
+- `report_result(status, commit, summary, files_changed, tests_passed)` —
+  the completion signal. TB-123 dropped the legacy `cron` argument;
+  scheduling proposals now go through the dedicated `cron_propose` tool.
+- `pipeline_task_start(name, command)` (TB-115) — detach long-running
+  work (sweeps, data fetches, ML training); the daemon parks the
+  launching task in Pipeline Pending until the pid dies.
+- `cron_propose(name, schedule, prompt, rationale)` (TB-123) — emit a
+  `cron_proposed` event for operator review. Does NOT mutate `cron.yaml`.
 - Plus regular `Read`/`Glob`/`Grep`/`Bash`/`Edit`/`Write` (with the
   fenced paths blocked).
 
@@ -382,6 +391,22 @@ shell-redirect-into-fenced-file corruption surface).
 - `operator_log_append(note, task_id)` — append to
   `.cc-autopilot/operator_log.md` (mattermost handler uses this on
   `@claude-bot done: ...` messages)
+- `operator_queue_append(op, ...)` (TB-131) — queue a board op (add /
+  move / unfreeze / delete / approve / update_goal / ideate); the
+  daemon drains the queue between ticks so in-flight task windows
+  never observe the mutation mid-run. The MM handler uses this in
+  place of `board_edit` (TB-145).
+- `status_report_run(channel, force)` (TB-144) — fire the
+  status-report routine on demand (the same routine the cron job
+  invokes). The MM handler exposes it for `@claude-bot status`.
+
+**Mattermost handler only** (`MM_HANDLER_TOOLS` =
+`CONTROL_AGENT_TOOLS` minus `ideation_state_write` + `board_edit`,
+plus one handler-specific tool — TB-145, TB-149):
+- `mattermost_thread_read(channel, thread_id, limit)` — fetch prior
+  messages in the current thread for context. Not in
+  `CONTROL_AGENT_TOOLS` because cron and ideation have no thread to
+  read.
 
 Operator-only (NOT in any agent toolset, TB-146):
 - `cron_edit(action, name, interval, prompt, active_when, max_turns)` —
@@ -398,19 +423,45 @@ ISO-8601) + `type`; other fields vary. Categories:
 
 **Lifecycle.** `daemon_start`, `daemon_stop`, `daemon_pause`,
 `daemon_resume`, `task_start`, `task_complete`, `cron_start`,
-`cron_complete`, `ideation_empty_board`, `ideation_complete`.
+`cron_complete`, `cron_skipped` (status-report no-op when there's
+nothing new to summarize, TB-153), `cron_bootstrap` (first-run
+seeding of `cron.yaml` from `cron.default.yaml`), `ideation_empty_board`
+(skip — no slots OR cooldown), `ideation_forced` (operator forced via
+`ap2 ideate --force`), `ideation_skipped` / `ideation_skipped_no_slots`,
+`ideation_complete`, `ideation_state_updated`, `web_start`, `web_stop`.
+Per-run cost/usage: `task_run_usage` (per task agent run, TB-180),
+`control_run_usage` (per cron / ideation / MM-handler run, TB-179),
+`judge_call` (per per-task-verifier prose-bullet judge invocation,
+TB-69 + TB-181).
 
-**Failure.** `task_error`, `task_timeout`, `verification_failed` (per-
-task or project-wide), `verification_partial`, `retry_exhausted`,
+**Failure.** `task_error`, `task_timeout`, `task_state_violation` (TB-110
+post-hoc fenced-file check tripped), `task_rollback` (TB-110
+rollback to pre-task state), `verification_failed` (per-task or
+project-wide), `verification_partial`, `retry_exhausted`,
 `cron_error`, `cron_timeout`, `ideation_error`, `ideation_timeout`,
 `mattermost_error`, `mattermost_timeout`, `mm_poll_error`,
-`state_commit_error`.
+`state_commit_error`, `rollback_error`, `web_error`,
+`pipeline_pending_sweep_error`, `operator_queue_error` /
+`operator_queue_drain_error`, `auto_diagnose_error` /
+`auto_diagnose_post_error` / `auto_diagnose_no_destination`,
+`classify_record_missing` / `classify_record_unreadable` (TB-194/195
+post-task classify routine couldn't find or read its record).
 
 **State / observability.** `task_implicit_commit` (HEAD-salvage),
-`task_unfrozen`, `backlog_auto_promoted`, `cron_proposed`,
-`cron_proposal_error`, `ideation_state_updated`, `pipeline_start`,
+`task_pipeline_pending` (TB-115 launching task parked while pipelines
+run), `task_unfrozen`, `task_deleted` (TB-138 `ap2 delete`),
+`task_updated` (TB-141 queue-routed update), `task_classified` (TB-194
+post-task auto-classifier verdict), `backlog_auto_promoted`,
+`cron_proposed`, `cron_proposal_error`, `pipeline_start`,
 `orphan_recovery`, `board_malformed_line`, `mattermost`,
-`auto_diagnose_fired`.
+`mattermost_reply` (handler emitted a reply), `auto_diagnose_fired`,
+`janitor_finding` (TB-178 chore-judge surfaced a candidate), `goal_updated`
+(TB-189 operator-queued `update_goal` op landed), `pending_review_reminder`
+(TB-184 unadopted cron-proposal nudge), `operator_ack` (TB-141
+`@claude-bot ack: …`), `operator_queue_append` /
+`operator_queue_drained`, `ideation_approved` (TB-121 operator
+`ap2 approve TB-N` promoted a proposed task), `ideation_proposal_recorded`
+/ `ideation_proposal_reconciled` (TB-188 per-proposal audit trail).
 
 `diagnose.MEANINGFUL_EVENT_TYPES` is what the watchdog counts as "the
 daemon making progress"; `FAILURE_EVENT_TYPES` is what counts as broken.
@@ -447,23 +498,82 @@ visually rather than ask the session to summarize.
 ## Configuration knobs
 
 Set in shell, in `<project>/.cc-autopilot/env`, or in
-`~claude-agent/.zshenv`. A few that matter for understanding behavior:
+`~claude-agent/.zshenv`. The full set the ap2 source consults
+(`grep -nE 'AP2_[A-Z_]+' ap2/*.py` is the source-of-truth — the
+`test_every_env_knob_documented` gate in `ap2/tests/test_docs_drift.py`
+fails CI if a new knob is added and not listed here):
 
-- `AP2_TICK_S` (30) — daemon tick interval.
+**Loop cadence + per-run timeouts.**
+- `AP2_TICK_S` (30) — main-loop tick interval.
+- `AP2_MM_TICK_S` (10) — Mattermost polling tick interval (separate
+  loop, TB-122).
 - `AP2_TASK_TIMEOUT_S` (1200) — per-task SDK query timeout.
 - `AP2_TASK_MAX_TURNS` (50) — max turns per task agent.
-- `AP2_CONTROL_TIMEOUT_S` (300) — per-control-agent timeout.
+- `AP2_CONTROL_TIMEOUT_S` (300) — per-control-agent timeout (cron,
+  ideation, MM handler).
+- `AP2_CONTROL_MAX_TURNS` (15) — max turns per control agent (cron
+  + MM handler share this default; ideation has its own).
+- `AP2_IDEATION_MAX_TURNS` (30) — max turns for the ideation agent
+  (bumped from the legacy `AP2_CONTROL_MAX_TURNS` default because
+  ideation's Step 0 / 0.5 / 1.5 chain runs deeper than other control
+  jobs).
 - `AP2_MAX_RETRIES` (3) — failed-task retries before Frozen.
-- `AP2_VERIFY_CMD` — project-wide regression gate (e.g. `uv run pytest -q`).
+- `AP2_EVENT_CONTEXT` (50) — count of recent events inlined into agent
+  prompts.
+
+**Agent model + effort.** Per-run knobs that override the per-job default.
+- `AP2_AGENT_MODEL` (`claude-opus-4-7`) — model for task agents and
+  the SDK-judge plumbing (verifier, janitor).
+- `AP2_AGENT_EFFORT` (`xhigh`) — global effort level. Each
+  sub-job has its own override that falls back here:
+  `AP2_STATUS_REPORT_EFFORT`, `AP2_VERIFY_JUDGE_EFFORT`,
+  `AP2_JANITOR_JUDGE_EFFORT`.
+- `AP2_VERIFY_JUDGE_MAX_TURNS` (20), `AP2_JANITOR_JUDGE_MAX_TURNS` (12)
+  — max turns for the per-bullet prose-judge and the janitor chore-judge.
+
+**Verification.**
+- `AP2_VERIFY_CMD` — project-wide regression gate (e.g.
+  `uv run pytest -q`). Unset = no project-wide gate.
+- `AP2_VERIFY_TIMEOUT_S` (600) — timeout for the project-wide gate.
+
+**Ideation.**
 - `AP2_IDEATION_DISABLED` — set to `1`/`true` to opt out of empty-board
-  ideation.
+  ideation entirely.
 - `AP2_IDEATION_COOLDOWN_S` (7200) — minimum gap between ideation runs.
 - `AP2_IDEATION_TRIGGER_TASK_COUNT` (3) — fire ideation when Ready+Backlog
   count is BELOW this threshold (Active is still a hard gate). Set to
   `1` for the legacy "fire only when the working queue is fully empty"
   behavior; raise it (e.g. `5`) for projects with very fluid scope.
   Invalid (non-int, non-positive) values fall back to the default.
-- `AP2_MM_CHANNELS` — comma-separated MM channel IDs to poll.
+
+**Watchdog (auto-diagnose).**
+- `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` (10800 = 3h) — idle duration
+  before the watchdog posts a `DiagnoseReport`.
+- `AP2_AUTO_DIAGNOSE_COOLDOWN_S` (21600 = 6h) — minimum gap between
+  watchdog posts (re-fire spam guard).
+
+**Janitor (chore-judge, TB-178).**
+- `AP2_JANITOR_MAX_FINDINGS_LLM` (10) — cap on per-cycle findings sent
+  to the SDK judge. `0` disables the judge call entirely (the janitor
+  emits rule-based findings only).
+
+**Mattermost.**
+- `AP2_MM_CHANNELS` — comma-separated MM channel IDs to poll for
+  `@claude-bot` mentions.
+- `AP2_MM_REPORT_CHANNEL` (TB-190) — explicit channel ID for
+  status-report posts. Unset → falls back to `AP2_MM_CHANNELS[0]`.
+- `AP2_MM_MENTION` (`@claude-bot`) — pattern that triggers handler
+  dispatch.
+- `AP2_MM_BOT_USER_ID` — bot's user ID (used for self-message
+  filtering so the handler doesn't loop on its own replies).
+- `AP2_MM_TEAM_ID` — Mattermost team ID (sandbox install-channel
+  helper uses this).
+
+**Local web UI (`ap2 web`, daemon-spawned read-only HTTP).**
+- `AP2_WEB_PORT` (7820) — bind port. Malformed values fall back to
+  the default rather than crashing daemon startup.
+- `AP2_WEB_DISABLED` — set to `1`/`true`/`yes`/`on` to skip starting
+  the daemon-spawned web UI.
 
 Plus required: `CLAUDE_CODE_OAUTH_TOKEN`. Daemon refuses to start
 without it.

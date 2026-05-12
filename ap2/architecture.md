@@ -186,11 +186,22 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__log_event",
     "mcp__autopilot__daemon_control",
     "mcp__autopilot__ideation_state_write",
+    "mcp__autopilot__git_log_grep",          # TB-126: replaces `Bash("git log --grep=…")`
+    "mcp__autopilot__operator_log_append",   # TB-141: append to operator_log.md (MM `done: …`)
+    "mcp__autopilot__operator_queue_append", # TB-131: queue-routed board mutation
+    "mcp__autopilot__status_report_run",     # TB-144: on-demand status-report routine
 ]
+
+# MM_HANDLER_TOOLS = CONTROL_AGENT_TOOLS minus { ideation_state_write,
+# board_edit } (TB-145), plus the handler-only `mattermost_thread_read`
+# (TB-149) — cron / ideation have no thread to read so it's never
+# widened into CONTROL_AGENT_TOOLS.
 
 TASK_AGENT_TOOLS = [
     "Read", "Glob", "Grep", "Bash", "Edit", "Write",
     "mcp__autopilot__pipeline_task_start",
+    "mcp__autopilot__report_result",   # TB-101: the completion-signal call
+    "mcp__autopilot__cron_propose",    # TB-123: surface "this should fire on a schedule"
 ]
 ```
 
