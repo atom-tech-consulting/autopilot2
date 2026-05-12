@@ -1,21 +1,20 @@
 # Ideation State
 
-_Last updated: 2026-05-12T05:31:38Z by ideation cron_
+_Last updated: 2026-05-12T07:33:35Z by ideation cron_
 
 ## Mission alignment
 
-39th consecutive 0-proposal cycle. ~2h since prior assessment
-(03:31Z); intervening event was a correctly-skipped status-report
-at 04:45Z (no allowlist activity). No operator activity in the
-gap — TB-198/199/200 burst window has now been quiet ~5h since
-TB-200 Complete at 00:39Z. Carried backfill Decision now ~121h
-since TB-195 shipped (~53h since TB-197 added).
+40th consecutive 0-proposal cycle. ~2h since prior assessment
+(05:31Z); intervening tick(s) included no operator activity and no
+new ideation-relevant events. Operator burst (TB-198/199/200) is
+now ~7h dormant since TB-200 Complete at 00:39Z. Carried backfill
+Decision now ~127h since TB-195 shipped (~59h since TB-197 added).
 `.cc-autopilot/ideation_proposals/` still `.gitkeep`-only; 0
 `ideation_proposal_recorded` events ever in events.jsonl tail.
 Insights index empty. Slot count = 5 (0-backlog under threshold);
 available-aligned work = 0.
 
-Latest 5 completes considered (unchanged since 01:29Z assessment):
+Latest 5 completes considered (unchanged since 05:31Z assessment):
 - TB-200 (`7d7c142`, 2026-05-12T00:39Z) — `## Authoring goal.md`
   in `ap2/howto.md` (operator-authored)
 - TB-199 (`e24f294`, 2026-05-12T00:23Z) — `## Done when` in
@@ -33,14 +32,14 @@ Latest 5 completes considered (unchanged since 01:29Z assessment):
 - **Ideation quality signal collection (goal.md L38-76)**
   - Progress so far: foundation 4-deep — TB-188, TB-189, TB-195,
     TB-196 — plus cadence-observability complement TB-197. No new
-    completes in this focus since TB-197 (~53h); the operator
+    completes in this focus since TB-197 (~59h); the operator
     burst (TB-198/199/200) is upstream of signal volume (better
     goal.md authoring → better future ideation inputs) but does
     not itself add records to disk.
   - Gaps:
     (1) **Volume**: 0 records on disk, 0
     `ideation_proposal_recorded` events, 0 delete-test verdicts.
-    `ap2 backfill-proposals` ~121h unrun. Operator-decision-shaped
+    `ap2 backfill-proposals` ~127h unrun. Operator-decision-shaped
     (CLI exists, only operator runs it).
     (2) **Track-record feedback into ideation prompt header**
     (TB-163-pattern, carries) — gated on Gap (1).
@@ -50,7 +49,7 @@ Latest 5 completes considered (unchanged since 01:29Z assessment):
   - Status: `in-progress`
   - Reasoning: foundation shipped; remaining work blocked on
     volume gap; recent operator burst confirmed engagement
-    bandwidth (now ~5h dormant) but routed it to authoring
+    bandwidth (now ~7h dormant) but routed it to authoring
     quality, not backfill. NOT `exhausted-needs-operator` —
     that gate (TB-174) skips ideation indefinitely; the present
     deadlock is "volume-blocked", not "exhausted."
@@ -86,17 +85,12 @@ multi-tenancy / real-time / cross-project axes.
 - **TB-184 / TB-185 / TB-172**: authoritative rejects; will not
   re-propose.
 - **`blocked-on-operator-decision` focus-status flag (TB-174-shape
-  extension)** (carries) — parallel surface to existing
-  exhausted-needs-operator gate; cheaper path remains operator
-  running backfill or `ap2 reject TB-195`.
+  extension)** (carries) — parallel surface; cheaper path remains
+  operator running backfill or `ap2 reject TB-195`.
 - **Verifier escaping fix for embedded backticks in shell bullets**
-  (carries) — TB-172-rejection-shape (enumerates one shell-quoting
-  case without generalizing); orthogonal to signal-collection
-  focus. Operator awareness only. Note: TB-200's first retry hit
-  this exact failure (mistune-parse on `` `grep ... \`goal.md\`
-  ` ``) — datapoint reinforces the issue's recurrence but the
-  rejection-pattern guard still holds: a per-pitfall fix doesn't
-  generalize.
+  (carries) — TB-172-rejection-shape; orthogonal to signal focus.
+  TB-200's first retry datapoint noted; rejection-pattern guard
+  still holds.
 
 Rejection-pattern note (n=4, unchanged): "creates parallel surface
 OR doesn't generalize OR off-focus OR wack-a-mole." All deferred
@@ -105,12 +99,12 @@ the filter without a volume precondition first.
 
 ## Cycle observations
 
-(Triage from prior cycle: no carried bullets — prior cycle dropped
-the bandwidth-vs-routing-preference observation when the
-TB-198/199/200 burst went quiet. That call still holds: 5h of
-no-operator-activity confirms the burst was a routed-elsewhere
-event, not sustained bandwidth available for backfill. No new
-agent-internal observations this cycle that don't fit elsewhere.)
+(Triage from prior cycle: prior cycle had no carried bullets and
+explicitly justified dropping the bandwidth-vs-routing observation
+after 5h of operator silence. 7h on, that call still holds —
+TB-200's authoring-quality routing was a one-burst event, not a
+window of bandwidth available for backfill. No new agent-internal
+observations this cycle that don't fit elsewhere.)
 
 - (no carried bullets this cycle)
 
@@ -119,8 +113,8 @@ agent-internal observations this cycle that don't fit elsewhere.)
 - Decision needed: run `ap2 backfill-proposals` to seed
   `.cc-autopilot/ideation_proposals/` from historical TB-Ns, OR
   `ap2 reject TB-195` / append an operator_log line stating
-  "wait for organic flow only"? 23rd cycle in promoted shape;
-  the TB-195 CLI shipped ~121h ago and dry-run identified ~14
+  "wait for organic flow only"? 24th cycle in promoted shape;
+  the TB-195 CLI shipped ~127h ago and dry-run identified ~14
   candidates. Unblock condition: either outcome lets the next
   cycle re-evaluate the volume-blocked proposal family (TB-175
   aggregator, prompt-header track-record injection, web
@@ -133,7 +127,7 @@ agent-internal observations this cycle that don't fit elsewhere.)
 
 0 proposals.
 
-39th consecutive 0-proposal cycle. Slot count = 5;
+40th consecutive 0-proposal cycle. Slot count = 5;
 available-aligned work = 0. Every carried candidate is
 volume-blocked, operator-deferred, or rejection-pattern adjacent.
 Goal.md L50-55: "the bottleneck is signal volume, not
