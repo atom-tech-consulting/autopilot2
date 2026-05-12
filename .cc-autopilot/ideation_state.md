@@ -1,16 +1,17 @@
 # Ideation State
 
-_Last updated: 2026-05-12T03:29:55Z by ideation cron_
+_Last updated: 2026-05-12T05:31:38Z by ideation cron_
 
 ## Mission alignment
 
-38th consecutive 0-proposal cycle. ~2h since prior assessment
-(01:29Z); intervening event was a correctly-skipped status-report
-at 02:45Z (no allowlist activity). No operator activity in the
-gap — TB-198/199/200 burst window has gone quiet. Carried
-backfill Decision now ~119h since TB-195 shipped (~50h since
-TB-197 added). `.cc-autopilot/ideation_proposals/` still
-`.gitkeep`-only; 0 `ideation_proposal_recorded` events ever.
+39th consecutive 0-proposal cycle. ~2h since prior assessment
+(03:31Z); intervening event was a correctly-skipped status-report
+at 04:45Z (no allowlist activity). No operator activity in the
+gap — TB-198/199/200 burst window has now been quiet ~5h since
+TB-200 Complete at 00:39Z. Carried backfill Decision now ~121h
+since TB-195 shipped (~53h since TB-197 added).
+`.cc-autopilot/ideation_proposals/` still `.gitkeep`-only; 0
+`ideation_proposal_recorded` events ever in events.jsonl tail.
 Insights index empty. Slot count = 5 (0-backlog under threshold);
 available-aligned work = 0.
 
@@ -31,16 +32,16 @@ Latest 5 completes considered (unchanged since 01:29Z assessment):
 
 - **Ideation quality signal collection (goal.md L38-76)**
   - Progress so far: foundation 4-deep — TB-188, TB-189, TB-195,
-    TB-196 — plus cadence-observability complement TB-197.
-    No new completes in this focus since TB-197 (~50h); the recent
-    operator burst (TB-198/199/200) is upstream of signal volume
-    (better goal.md authoring → better future ideation inputs)
-    but does not itself add records to disk.
+    TB-196 — plus cadence-observability complement TB-197. No new
+    completes in this focus since TB-197 (~53h); the operator
+    burst (TB-198/199/200) is upstream of signal volume (better
+    goal.md authoring → better future ideation inputs) but does
+    not itself add records to disk.
   - Gaps:
     (1) **Volume**: 0 records on disk, 0
     `ideation_proposal_recorded` events, 0 delete-test verdicts.
-    `ap2 backfill-proposals` ~119h unrun. Operator-decision
-    -shaped (CLI exists, only operator runs it).
+    `ap2 backfill-proposals` ~121h unrun. Operator-decision-shaped
+    (CLI exists, only operator runs it).
     (2) **Track-record feedback into ideation prompt header**
     (TB-163-pattern, carries) — gated on Gap (1).
     (3) **Insight aggregator records → `ideation_quality.md`**
@@ -48,10 +49,11 @@ Latest 5 completes considered (unchanged since 01:29Z assessment):
     — gated on Gap (1).
   - Status: `in-progress`
   - Reasoning: foundation shipped; remaining work blocked on
-    volume gap; recent operator burst confirms engagement
-    bandwidth exists but is being routed elsewhere. NOT
-    `exhausted-needs-operator` — that would skip ideation
-    indefinitely (TB-174 gate).
+    volume gap; recent operator burst confirmed engagement
+    bandwidth (now ~5h dormant) but routed it to authoring
+    quality, not backfill. NOT `exhausted-needs-operator` —
+    that gate (TB-174) skips ideation indefinitely; the present
+    deadlock is "volume-blocked", not "exhausted."
 
 ## Non-goal risk check
 
@@ -90,7 +92,11 @@ multi-tenancy / real-time / cross-project axes.
 - **Verifier escaping fix for embedded backticks in shell bullets**
   (carries) — TB-172-rejection-shape (enumerates one shell-quoting
   case without generalizing); orthogonal to signal-collection
-  focus. Operator awareness only.
+  focus. Operator awareness only. Note: TB-200's first retry hit
+  this exact failure (mistune-parse on `` `grep ... \`goal.md\`
+  ` ``) — datapoint reinforces the issue's recurrence but the
+  rejection-pattern guard still holds: a per-pitfall fix doesn't
+  generalize.
 
 Rejection-pattern note (n=4, unchanged): "creates parallel surface
 OR doesn't generalize OR off-focus OR wack-a-mole." All deferred
@@ -99,11 +105,12 @@ the filter without a volume precondition first.
 
 ## Cycle observations
 
-(Triage from prior cycle: one bullet on operator-bandwidth-vs
--routing-preference. Re-evaluating: TB-198/199/200 burst window
-has gone quiet for ~3h; the bandwidth-was-available observation
-is now harder to evidence freshly. Drop — if engagement resumes
-without a backfill verdict, re-promote with concrete cite.)
+(Triage from prior cycle: no carried bullets — prior cycle dropped
+the bandwidth-vs-routing-preference observation when the
+TB-198/199/200 burst went quiet. That call still holds: 5h of
+no-operator-activity confirms the burst was a routed-elsewhere
+event, not sustained bandwidth available for backfill. No new
+agent-internal observations this cycle that don't fit elsewhere.)
 
 - (no carried bullets this cycle)
 
@@ -112,8 +119,8 @@ without a backfill verdict, re-promote with concrete cite.)
 - Decision needed: run `ap2 backfill-proposals` to seed
   `.cc-autopilot/ideation_proposals/` from historical TB-Ns, OR
   `ap2 reject TB-195` / append an operator_log line stating
-  "wait for organic flow only"? 22nd cycle in promoted shape;
-  the TB-195 CLI shipped ~119h ago and dry-run identified ~14
+  "wait for organic flow only"? 23rd cycle in promoted shape;
+  the TB-195 CLI shipped ~121h ago and dry-run identified ~14
   candidates. Unblock condition: either outcome lets the next
   cycle re-evaluate the volume-blocked proposal family (TB-175
   aggregator, prompt-header track-record injection, web
@@ -126,7 +133,7 @@ without a backfill verdict, re-promote with concrete cite.)
 
 0 proposals.
 
-38th consecutive 0-proposal cycle. Slot count = 5;
+39th consecutive 0-proposal cycle. Slot count = 5;
 available-aligned work = 0. Every carried candidate is
 volume-blocked, operator-deferred, or rejection-pattern adjacent.
 Goal.md L50-55: "the bottleneck is signal volume, not
