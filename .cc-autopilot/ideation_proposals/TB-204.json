@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/extract-canonical-valid-briefing-fixture.md",
   "focus_anchor": "current focus code quality",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-12T19:09:40Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-12T17:43:09Z",
   "tb_id": "TB-204",
   "why_now": "when TB-164 added the `Why now:` requirement, the implementing commit touched 17 test files (`ap2/tests/test_cli.py`, `test_check.py`, `test_operator_queue.py`, `test_rollback.py`, `test_tb132_verification.py`, `test_tb135_verification.py`, `test_tools.py`, `e2e/test_mattermost_cron.py`, `e2e/test_operator_queue_tick.py`, `e2e/test_review_gate.py`, `e2e/test_tb142_mm_queue_routing.py`, `e2e/test_verify.py`, `e2e/test_verify_per_task.py` per the TB-164 progress entry); `test_tools.py` alone has 26 `Why now:` occurrences and 150 occurrences of `## Goal`/`## Scope`/`Verification` markers in inline briefing strings. Future validator additions (TB-138-shape Manual-bullet detector extensions, hypothetical Design-body min-length, hypothetical Out-of-scope structure check) all face the same 17-file churn cost. The threshold goal.md L74-77 names is three+ call sites with structural similarity \u2014 this is >>3, and the duplicates are byte-near-identical (only TB-N and 1-2 prose lines differ). Without this work, every validator-rule task pays a tax goal.md L91-92 (\"Reusable helpers reduce the volume of code that needs testing and documenting\") flags as anti-pattern."
