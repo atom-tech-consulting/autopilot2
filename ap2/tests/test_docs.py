@@ -1,14 +1,18 @@
-"""Tests for the `## Authoring goal.md` section in `ap2/howto.md` (TB-200).
+"""Tests for the `## Authoring goal.md` section in `ap2/howto.md` (TB-200, TB-206).
 
-Two anti-drift gates:
+Anti-drift gates after TB-206's structural decoupling:
 
-1. Every quoted blockquote line in the Authoring-section's worked-example
-   blocks still appears verbatim in this repo's `goal.md`. Catches silent
-   drift the day someone edits goal.md without re-checking the howto.
-2. A synthetic briefing whose `## Goal` body cites the Current-focus
-   heading from the worked example passes `_validate_briefing_structure`.
-   Pins the contract the docs sell: if a reader follows the example, the
-   result actually clears the queue-append gate.
+1. Heading + all five subsections + both validator TB-N references are present
+   in `ap2/howto.md`. These are stable structural anchors; a reader who greps
+   for them lands in a valid section.
+2. The Current-focus worked example's `## Current focus: <theme>` heading is
+   itself usable as a TB-161 anchor: a synthetic briefing whose `## Goal` body
+   cites that heading text passes `_validate_briefing_structure` against a
+   synthetic `goal.md` carrying only that heading. This pins the contract the
+   docs sell — if a reader follows the example, the result actually clears
+   the queue-append gate — WITHOUT coupling to this repo's live `goal.md`
+   content (the coupling that cascaded operator focus rotations into
+   project-wide pytest failures pre-TB-206).
 """
 from __future__ import annotations
 
@@ -19,39 +23,43 @@ from ap2.tools import _validate_briefing_structure
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOWTO_PATH = REPO_ROOT / "ap2" / "howto.md"
-GOAL_PATH = REPO_ROOT / "goal.md"
 
 
-def _authoring_section(text: str) -> str:
-    """Slice howto.md to the `## Authoring goal.md` section body."""
-    start_marker = "## Authoring goal.md"
-    start = text.find(start_marker)
-    assert start != -1, "missing `## Authoring goal.md` heading in howto.md"
-    rest = text[start + len(start_marker):]
-    # Stop at the next `##`-level heading (any sibling section).
-    next_h2 = rest.find("\n## ")
-    return rest[:next_h2] if next_h2 != -1 else rest
+def _current_focus_worked_example_heading(howto_text: str) -> str:
+    """Return the blockquoted `## Current focus: <theme>` line from the
+    howto's `### Current focus` worked-example block.
 
-
-def _blockquote_lines(section: str) -> list[str]:
-    """Every `>`-prefixed line in the section with the marker stripped.
-
-    Standard blockquote shape: `>` + one space + body. We strip exactly
-    that so nested indentation inside the quoted bullet (the 2-space
-    continuation indent of a markdown bullet) survives intact and matches
-    goal.md's actual leading whitespace verbatim.
+    The Current-focus worked example is the one block whose blockquoted
+    content must carry a real `##`-level heading (the whole point of the
+    block is to demonstrate the heading shape). We pull that line so the
+    anchor-validator test can build its synthetic fixture from it, keeping
+    the test in sync with whatever fictional theme the howto names without
+    hard-coding the string in two places.
     """
-    out: list[str] = []
+    start_marker = "### Current focus"
+    start = howto_text.find(start_marker)
+    assert start != -1, "missing `### Current focus` heading in howto.md"
+    rest = howto_text[start + len(start_marker):]
+    # Stop at the next `###`-level (sibling subsection) or `##`-level heading.
+    next_h3 = rest.find("\n### ")
+    next_h2 = rest.find("\n## ")
+    stop = min(x for x in (next_h3, next_h2) if x != -1) if (
+        next_h3 != -1 or next_h2 != -1
+    ) else len(rest)
+    section = rest[:stop]
     for raw in section.splitlines():
         line = raw.lstrip()
         if not line.startswith(">"):
             continue
         body = line[1:]
-        # Drop at most one separator space so `>   continuation` → `  continuation`.
         if body.startswith(" "):
             body = body[1:]
-        out.append(body)
-    return out
+        if body.startswith("## Current focus:"):
+            return body.rstrip()
+    raise AssertionError(
+        "no `## Current focus:` line in `### Current focus` worked-example "
+        "blockquote of howto.md"
+    )
 
 
 def test_authoring_section_present():
@@ -71,38 +79,36 @@ def test_authoring_section_present():
     assert "TB-164" in text
 
 
-def test_worked_example_quotes_appear_verbatim_in_goal_md():
-    """Anti-drift gate: every quoted line in the worked-example blocks
-    still appears verbatim in this repo's `goal.md`. If someone edits
-    goal.md (or rewords a quote in howto.md) and forgets to keep them in
-    sync, this test fails loudly rather than letting the example silently
-    drift into fiction.
-    """
-    section = _authoring_section(HOWTO_PATH.read_text())
-    goal_text = GOAL_PATH.read_text()
-    quoted = _blockquote_lines(section)
-    assert quoted, "expected at least one blockquoted worked-example line"
-    for line in quoted:
-        if not line.strip():
-            # Blank `>` lines preserve paragraph breaks; not searchable text.
-            continue
-        assert line in goal_text, (
-            f"worked-example quote not found verbatim in goal.md: {line!r}"
-        )
-
-
-def test_worked_example_current_focus_satisfies_anchor_validator():
+def test_worked_example_current_focus_satisfies_anchor_validator(tmp_path):
     """The Current-focus worked example MUST itself be usable as a TB-161
     anchor: a synthetic briefing whose `## Goal` body cites the worked-
     example's Current-focus heading text passes `_validate_briefing_structure`.
-    Pins the contract the docs sell — if a reader follows the example, the
-    result actually clears the queue-append gate (both the TB-161 goal-
-    anchor check and the TB-164 Why-now check fire here unchanged).
+
+    Self-contained: builds a tmp `goal.md` carrying ONLY the howto's quoted
+    Current-focus heading (so the validator can mine an anchor from it) and
+    a synthetic briefing whose `## Goal` body cites that heading. Decoupled
+    from this repo's live `goal.md` per TB-206 — the prior coupling fired
+    on every operator focus rotation and cascaded into project-wide pytest
+    failures despite the rotating content being legitimate.
     """
+    heading_line = _current_focus_worked_example_heading(HOWTO_PATH.read_text())
+    # e.g. "## Current focus: webhook reliability" → "Current focus: webhook reliability"
+    assert heading_line.startswith("## Current focus:"), (
+        f"expected `## Current focus:` line; got {heading_line!r}"
+    )
+    heading_title = heading_line[len("## "):].strip()
+
+    tmp_goal = tmp_path / "goal.md"
+    tmp_goal.write_text(
+        "# Project Goals\n\n"
+        "## Mission\n\nFictional project for docs-test fixture.\n\n"
+        f"{heading_line}\n\nNarrative naming the theme.\n"
+    )
+
     briefing = (
         "# TB-TEST: synthetic anchor test\n\n"
         "## Goal\n\n"
-        "Extend test coverage for the `Current focus: code quality` theme "
+        f"Extend test coverage for the `{heading_title}` theme "
         "so future refactors land with a confident regression net in "
         "place.\n\n"
         "Why now: closes the failure mode where a behavior tweak silently "
@@ -116,5 +122,5 @@ def test_worked_example_current_focus_satisfies_anchor_validator():
         "## Out of scope\n\n"
         "- Anything else.\n"
     )
-    err = _validate_briefing_structure(briefing, goal_md_path=GOAL_PATH)
+    err = _validate_briefing_structure(briefing, goal_md_path=tmp_goal)
     assert err is None, f"synthetic briefing rejected: {err!r}"

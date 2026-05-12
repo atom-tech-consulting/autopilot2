@@ -73,10 +73,12 @@ substance are load-bearing:
 Ideation reads goal.md in the order Mission → Done when → Current focus →
 Non-goals → Constraints (per `ap2/ideation.default.md`). What each section
 is for, how ideation reads it, and a worked example follow — the examples
-quote this repo's own `goal.md` so operators have a real filled-in model
-rather than a synthetic one. Fresh `ap2 init` projects ship a five-section
-placeholder (`GOAL_TEMPLATE` in `ap2/init.py`); use this repo's `goal.md`
-as the substance model when you replace the placeholders.
+are illustrative (a fictional Slack-bot-for-trade-alerts project threaded
+through all five sections) so they teach the section's shape and validator
+interaction without coupling docs tests to this repo's live `goal.md`
+content. Fresh `ap2 init` projects ship a five-section placeholder
+(`GOAL_TEMPLATE` in `ap2/init.py`); replace the placeholders with content
+specific to your project.
 
 ### Mission
 
@@ -90,14 +92,15 @@ reads it but doesn't quote-match against it.
 Validator interaction: NOT anchor surface for TB-161 — the matcher only
 mines `## Current focus` / `## Done when`.
 
-Worked example (this repo's `goal.md`):
+Worked example (fictional Slack-bot project, threaded through all five
+sections below):
 
-> ap2 is a meta-system: an autonomous development loop that drives a target
-> project toward its operator-stated goal with minimal human intervention.
+> A Slack bot that ingests trade alerts from a broker webhook and posts
+> daily P&L summaries to a configured channel by 17:00 ET each weekday.
 
-One sentence; names the subject (ap2), the activity (drives a target
-project), and the value (toward operator-stated goal). No measurable claim
-— that's `## Done when`'s job.
+One sentence; names the subject (the bot), the activity (ingest alerts
+and post summaries), and the value (daily P&L visibility by a deadline).
+No measurable reliability claim — that's `## Done when`'s job.
 
 ### Done when
 
@@ -118,15 +121,17 @@ done-signal genuinely change? If no, the bullet is filler — cut it.
 Validator interaction: anchor surface for TB-161. The first 3-6 words of
 each bullet become substrings a briefing's `## Goal` body can cite.
 
-Worked example (this repo's `goal.md`):
+Worked example (fictional Slack-bot project):
 
-> - An operator can point ap2 at a fresh project, paste a `goal.md` (with
->   Mission + `## Done when`), and walk away for a week without intervention.
+> - The bot posts a P&L summary by 17:00 ET on 30 consecutive trading
+>   days without operator intervention.
+> - An operator can swap the broker integration without touching the
+>   alert-routing or summary-rendering code paths.
 
-Measurable (paste + walk away for a week), names the unblock-condition
-(no intervention). The lead phrase "An operator can point ap2 at" is a
-usable TB-161 anchor — any briefing whose `## Goal` body quotes those six
-words satisfies the substring check.
+Both bullets are measurable (30 consecutive trading days; swap without
+touching named code paths) and falsifiable. The lead phrase "The bot
+posts a P&L summary" is a usable TB-161 anchor — any briefing whose
+`## Goal` body quotes those six words satisfies the substring check.
 
 ### Current focus
 
@@ -137,21 +142,27 @@ TB-161 anchor for that focus item.
 
 - **Bad:** "Make ap2 better in general." (no theme; nothing for a briefing
   to cite, nothing for ideation to assess against.)
-- **Good:** "Current focus: code quality" — a discrete noun phrase that
-  names a theme broader than one task but narrower than the whole mission.
+- **Good:** "Current focus: webhook reliability" — a discrete noun phrase
+  that names a theme broader than one task but narrower than the whole
+  mission.
 
 Validator interaction: anchor surface for TB-161. Both the full heading
 title and any 4-6-word phrase from the body prose work as substring
 citations. Quote the heading title verbatim when in doubt — it's the
 cheap, unambiguous path.
 
-Worked example (this repo's `goal.md`):
+Worked example (fictional Slack-bot project):
 
-> ## Current focus: code quality
+> ## Current focus: webhook reliability
+>
+> The broker webhook is the bot's single ingestion path — alerts dropped
+> here never reach the summary. The focus is on retry semantics, dead-
+> letter handling, and observability of webhook delivery so a missed
+> alert is visible within minutes rather than discovered the next morning.
 
 This heading title is the canonical anchor for every briefing that threads
 back to this focus — a briefing whose `## Goal` body contains the
-substring `Current focus: code quality` (case-insensitive after
+substring `Current focus: webhook reliability` (case-insensitive after
 punctuation normalization) passes TB-161.
 
 ### Non-goals
@@ -169,16 +180,17 @@ so the drift-detection signal is unambiguous.
 Validator interaction: NOT anchor surface for TB-161 — non-goal text
 doesn't feed the substring matcher.
 
-Worked example (this repo's `goal.md`):
+Worked example (fictional Slack-bot project):
 
-> - **Generic task scheduler / project management tool**: ap2 is opinionated
->   about agent-driven dev work. Don't add features whose primary use case
->   is "a human tracking their own todos" — those compete with existing
->   tools and dilute the loop.
+> - **Generic Slack notification framework**: the bot is opinionated about
+>   trade alerts and P&L summaries. Don't add features whose primary use
+>   case is "post arbitrary messages to a channel" — those compete with
+>   native Slack incoming webhooks and dilute the bot's purpose.
 
 Bold lede names the rejected shape; the body explains the reason
-("opinionated about agent-driven dev work") so ideation can flag a
-to-do-list proposal as off-goal in its per-cycle assessment.
+("opinionated about trade alerts and P&L summaries") so ideation can
+flag a generic-notification proposal as off-goal in its per-cycle
+assessment.
 
 ### Constraints
 
@@ -198,16 +210,16 @@ through `## Current focus` or `## Done when` — e.g., bake the constraint
 into a Current-focus narrative paragraph if you want it cite-able by
 every related briefing.
 
-Worked example (this repo's `goal.md`):
+Worked example (fictional Slack-bot project):
 
-> - **Single-process daemon, file-state-only**: shared state lives on disk
->   under `.cc-autopilot/`. No database, no message broker. Recovery is
->   always "read files, resume."
+> - **Single broker webhook ingestion path**: alerts arrive through one
+>   broker-owned webhook endpoint; no shared ingestion bus and no polling
+>   fallback. Recovery is always "replay the broker's webhook log."
 
 Bold lede names the constraint; the body spells out what it forbids ("no
-database, no message broker") so a briefing proposing "add Redis state"
-can be vetoed unambiguously by the operator and called out by ideation's
-non-goal risk check.
+shared ingestion bus and no polling fallback") so a briefing proposing
+"add a backup polling fetcher" can be vetoed unambiguously by the
+operator and called out by ideation's non-goal risk check.
 
 ## The task agent contract
 
