@@ -63,3 +63,10 @@ A short callout box (or bulleted list) summarizing the two validators that key o
 - Internationalization or translation. English-only for v1.
 - A video walkthrough or screencast. Text-only for v1.
 - Promoting the worked example into a `templates/goal-example.md` file shipped alongside `ap2 init`. The template (`GOAL_TEMPLATE` in `ap2/init.py`) is the shipped scaffold; the doc references this repo's filled-in goal.md as the model for substance. Keep template and example separate to avoid drift.
+## Attempts
+
+### 2026-05-12 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "^## Authoring goal\.md|^## Authoring \`goal.md`" ap2/howto.md` — the new section heading exists.
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T002401Z-TB-200.prompt.md`, `stream: .cc-autopilot/debug/20260512T002401Z-TB-200.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T002401Z-TB-200.messages.jsonl`
