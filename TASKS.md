@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-202** **Refuse `ap2 backfill-proposals` and `ap2 cron edit` when a task is Active** [→ brief](.cc-autopilot/tasks/refuse-ap2-backfill-proposals-and-ap2-cr.md)
 
 ## Pipeline Pending
 
@@ -90,6 +89,7 @@
 - [x] **TB-199** **Add `## Done when` section to `ap2 init`'s `GOAL_TEMPLATE` (fix template/validator drift)** [→ brief](.cc-autopilot/tasks/add-done-when-section-to-ap2-init-s-goal.md)
 - [x] **TB-200** **Add a goal.md authoring guide section to `ap2/howto.md`** [→ brief](.cc-autopilot/tasks/add-a-goal-md-authoring-guide-section-to.md)
 - [x] **TB-201** **Queue-route `ap2 ack` + `operator_log_append` MCP tool (eliminate false-positive state violations on operator_log.md)** [→ brief](.cc-autopilot/tasks/queue-route-ap2-ack-operator-log-append.md)
+- [x] **TB-202** **Refuse `ap2 backfill-proposals` and `ap2 cron edit` when a task is Active** [→ brief](.cc-autopilot/tasks/refuse-ap2-backfill-proposals-and-ap2-cr.md)
 
 ## Frozen
 

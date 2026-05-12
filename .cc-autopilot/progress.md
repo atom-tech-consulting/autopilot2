@@ -449,3 +449,9 @@
 - **Summary:** Queue-routed `ap2 ack` + `operator_log_append` MCP tool. Renamed `do_operator_log_append` → `_apply_operator_ack` (drain-only internal helper); added `enqueue_operator_ack` queue-append entry point; registered `ack` in OPERATOR_QUEUE_OPS with queue-append + drain-side branches; updated `cmd_ack` and the `operator_log_append` MCP tool to enqueue rather than write synchronously. operator_log.md is no longer written inside a task agent's snapshot window. All 1240 tests pass (full regression gate); 14 new tests cover the queue/drain shape, MCP-path parity, regression pin against TB-110 false positives on mid-task ack, and the architectural choice not to add operator_log.md to `_VIOLATION_CHECK_EXCLUDED_PATHS`.
 - **Files:** ap2/tools.py, ap2/cli.py, ap2/operator_log.py, ap2/tests/test_tools.py, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_prompts.py
 - **Tests:** pass
+
+## [2026-05-12] TB-202: Refuse `ap2 backfill-proposals` and `ap2 cron edit` when a task is Active
+- **Commit:** `b09e3bc`
+- **Summary:** TB-202: added refuse-if-active pre-flight gate to cmd_backfill_proposals + new cmd_cron_edit (wires ap2 cron edit subparser, calls tools.do_cron_edit under the hood). Both refuse with stderr naming the active TB-N when board.Active is non-empty. 6 new tests in test_cli.py pin the refuse path, the fenced-state-untouched invariant for ideation_proposals/ and cron.yaml, and the empty-Active happy path. Full regression: 1246 passed.
+- **Files:** ap2/cli.py, ap2/tests/test_cli.py
+- **Tests:** pass
