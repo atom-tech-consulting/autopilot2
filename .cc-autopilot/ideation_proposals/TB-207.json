@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/add-operator-cli-verbs-reference-section.md",
+  "focus_anchor": "current focus code quality",
+  "proposed_at": "2026-05-12T22:04:19Z",
+  "tb_id": "TB-207",
+  "why_now": "the docs-drift gate primitive already exists post-TB-203\n(`ap2/tests/test_docs_drift.py::test_every_env_knob_documented`,\n`test_every_mcp_tool_documented`, `test_every_event_type_documented`\neach enumerate the source-of-truth registry and assert each entry\nappears in `ap2/howto.md`); adding a `test_every_cli_verb_documented`\ngate is a same-shape extension that costs ~20 LOC and closes the\nlast operator-surface anti-drift hole symmetric to the three TB-203\nalready pinned. Without this, the next CLI-verb addition (the operator\nlog shows 6 new verbs landed since 2026-05-04: `approve`, `reject`,\n`classify`, `ack`, `ideate`, `update-goal`, `backfill-proposals`,\n`update`) silently ships without a documentation entry, and the\ninconsistency between \"MCP tools / env knobs / events have a\nreference table + drift gate\" and \"CLI verbs don't\" itself becomes\na code-quality smell. The four-axis focus's \"delete-test\" check\n(goal.md L92-97 \"would the codebase get noticeably less confidently\nmodifiable if this work didn't ship?\") passes: an operator\nencountering a Mattermost mention of `ap2 classify` today has to\nopen `cli.py` to learn the verdict values \u2014 that's the exact\n\"can't understand a surface from its documented description and\nhas to read source\" failure mode L70 names."
+}
