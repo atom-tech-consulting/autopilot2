@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-199** **Add `## Done when` section to `ap2 init`'s `GOAL_TEMPLATE` (fix template/validator drift)** [→ brief](.cc-autopilot/tasks/add-done-when-section-to-ap2-init-s-goal.md)
+- [ ] **TB-200** **Add a goal.md authoring guide section to `ap2/howto.md`** [→ brief](.cc-autopilot/tasks/add-a-goal-md-authoring-guide-section-to.md)
 
 ## Pipeline Pending
 
