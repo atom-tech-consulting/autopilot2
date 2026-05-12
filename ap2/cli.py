@@ -1358,20 +1358,37 @@ def cmd_cron_list(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_ack(cfg: Config, args: argparse.Namespace) -> int:
-    """Append an operator-decision line to .cc-autopilot/operator_log.md
-    (TB-106). Used to communicate "I did X" / "I decided Y" back to ap2
-    so ideation stops re-proposing actions whose effects aren't visible
+    """Queue an operator-decision line for the daemon to append to
+    `.cc-autopilot/operator_log.md` at the next tick (TB-106, TB-201).
+
+    Used to communicate "I did X" / "I decided Y" back to ap2 so
+    ideation stops re-proposing actions whose effects aren't visible
     on the filesystem (e.g. "considered FRAGILE plist retention,
     decided to keep them"). Optional `-t TB-N` ties the ack to a task.
+
+    TB-201: routed through the operator queue rather than mutating
+    operator_log.md synchronously. The pre-TB-201 in-place write
+    raced with running task agents — operator_log.md is fenced and
+    NOT exempt from the TB-110 post-hoc snapshot check, so a mid-task
+    `ap2 ack` tripped a false-positive state violation and rolled
+    back the task's legitimate work (cost ~$12.55 on post-train at
+    2026-05-12T06:40-07:14Z; that incident is the proximate motivator
+    for this retrofit). The drain-side `_apply_operator_ack` performs
+    the actual operator_log.md write at tick boundary, under the
+    daemon's board lock — never inside a task agent's snapshot
+    window. Slight UX change from the immediate "appended to
+    operator_log.md" of yesteryear; consistent with the rest of the
+    queue-routed CLI verbs (`approve` / `reject` / `classify` /
+    `update-goal` / `add` / etc.).
     """
-    res = tools.do_operator_log_append(
+    res = tools.enqueue_operator_ack(
         cfg,
         {"note": args.note, "task_id": args.task or ""},
     )
     if res.get("isError"):
         print(res["content"][0]["text"], file=sys.stderr)
         return 1
-    print(json.loads(res["content"][0]["text"])["line"])
+    print("queued ack (will land at next tick)")
     return 0
 
 

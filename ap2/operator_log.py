@@ -1,10 +1,11 @@
 """Read-only helpers for `.cc-autopilot/operator_log.md`.
 
-The operator log is written by `tools.py::do_operator_log_append` and
-`tools.py::_append_operator_audit_line` (operator-`ack` notes plus the
-per-queued-op audit lines, including TB-152's `rejected ideation
-proposal → TB-N (<title>): <reason>` line). This module is the read-side
-counterpart — pure functions that parse the log without mutating it.
+The operator log is written by `tools.py::_apply_operator_ack` (TB-201;
+the drain-side handler invoked by `drain_operator_queue` for queued
+`ack` ops) and `tools.py::_append_operator_audit_line` (per-queued-op
+audit lines, including TB-152's `rejected ideation proposal → TB-N
+(<title>): <reason>` line). This module is the read-side counterpart —
+pure functions that parse the log without mutating it.
 
 TB-163: `tail_rejections` is the first reader. It surfaces recent
 rejection lines so `prompts.build_control_prompt` can render them as a

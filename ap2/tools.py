@@ -1433,9 +1433,9 @@ def do_git_log_grep(cfg: Config, args: dict) -> dict:
     )
 
 
-def do_operator_log_append(cfg: Config, args: dict) -> dict:
-    """Append a timestamped operator-decision line to
-    `.cc-autopilot/operator_log.md` (TB-106).
+def _apply_operator_ack(cfg: Config, args: dict) -> dict:
+    """Apply a queued `ack` op at drain time — append a timestamped
+    operator-decision line to `.cc-autopilot/operator_log.md` (TB-106).
 
     Operator-owned channel for decisions ideation can't observe via the
     filesystem (e.g. "decided to keep FRAGILE plists as references" or
@@ -1443,10 +1443,14 @@ def do_operator_log_append(cfg: Config, args: dict) -> dict:
     reads the log in Step 0 and treats logged items as authoritative —
     won't re-propose them in subsequent cycles.
 
-    Two write paths share this handler:
-      - operator-side: `ap2 ack [-t TB-N] "<note>"` (CLI)
-      - mattermost-handler-side: `operator_log_append` MCP tool when the
-        operator sends `@claude-bot done: ...` style messages.
+    TB-201: this is a drain-only internal helper. The two write paths
+    (`ap2 ack` CLI + `operator_log_append` MCP tool) used to call this
+    function synchronously, which wrote operator_log.md mid-task and
+    tripped TB-110's post-hoc fenced-file snapshot check — burning real
+    SDK cost on false-positive rollbacks. They now route through the
+    operator queue (`enqueue_operator_ack`); only `drain_operator_queue`
+    invokes this helper, which runs at tick boundary under the daemon's
+    board lock and never races a task agent's snapshot window.
 
     Each call appends one bullet line. The file is created with a
     short header on first append. `operator_ack` event emitted for
@@ -1479,6 +1483,35 @@ def do_operator_log_append(cfg: Config, args: dict) -> dict:
         payload["task"] = task_id
     events.append(cfg.events_file, "operator_ack", **payload)
     return _ok(f"appended to {log_path.name}", line=line.strip())
+
+
+def enqueue_operator_ack(cfg: Config, args: dict) -> dict:
+    """Queue an operator ack for the daemon to apply at the next tick
+    (TB-201). Mirrors the TB-189 `classify` / TB-193 `update_goal`
+    retrofits — surface-vs-apply split.
+
+    Shared by both ack write paths post-TB-201:
+      - operator-side: `ap2 ack [-t TB-N] "<note>"` (CLI)
+      - mattermost-handler-side: `operator_log_append` MCP tool when the
+        operator sends `@claude-bot done: ...` style messages.
+
+    Validates `note` (required) and forwards to
+    `do_operator_queue_append` with `op="ack"`. The synchronous
+    operator_log.md write that used to fire here is deferred to drain
+    time in `_apply_operator_ack` — that's the whole point of the
+    routing change. Pre-TB-201 the synchronous write would land
+    mid-task and trip TB-110's post-hoc fenced-file snapshot check,
+    rolling back legitimate task work and burning the SDK cost (the
+    bug was demonstrated live at 2026-05-12T06:40-07:14Z on post-train:
+    three runs / ~$12.55 lost to false-positive rollbacks).
+    """
+    note = str(args.get("note") or "").strip()
+    if not note:
+        return _err("note is required")
+    task_id = str(args.get("task_id") or "").strip()
+    return do_operator_queue_append(
+        cfg, {"op": "ack", "note": note, "task_id": task_id}
+    )
 
 
 # ---------------- operator queue (TB-131) ----------------
@@ -1603,6 +1636,23 @@ OPERATOR_QUEUE_OPS = (
     # for the impact verdict. No LLM auto-classification path by
     # design.
     "classify",
+    # TB-201: operator decision-log append (the `ap2 ack` / chat
+    # `@claude-bot done:` / `@claude-bot decided:` surface). Was
+    # `do_operator_log_append` writing operator_log.md synchronously
+    # — but operator_log.md is in TASK_AGENT_FENCED_PATHS (and NOT in
+    # rollback._VIOLATION_CHECK_EXCLUDED_PATHS), so a mid-task ack
+    # tripped TB-110's post-hoc snapshot check and rolled back the
+    # task's legitimate work, burning the SDK cost. Routing through
+    # the queue defers the write to drain time (tick boundary, under
+    # the daemon's board lock); a task agent's snapshot window never
+    # encloses the operator_log.md write again. The drain-side
+    # `_apply_operator_ack` performs the actual append + emits
+    # `operator_ack`; the standard `applied operator-queued ack →
+    # TB-N` audit line is ALSO emitted (so a single ack produces two
+    # lines: the operator's rich note and the verb-vs-other-ops
+    # audit pointer). Mirrors TB-189 (`classify`) / TB-193
+    # (`update_goal`) retrofit shape.
+    "ack",
 )
 
 
@@ -1617,14 +1667,15 @@ def operator_queue_state_path(cfg: Config) -> Path:
 def do_operator_queue_append(cfg: Config, args: dict) -> dict:
     """Append an operator board op to the daemon-drained queue (TB-131).
 
-    Two write paths share this handler, mirroring how
-    `do_operator_log_append` shares CLI + MCP today:
+    Two write paths share this handler:
       - operator-side: `ap2 add` / `ap2 backlog` / `ap2 unfreeze` /
-        `ap2 delete` route here instead of mutating TASKS.md directly.
+        `ap2 delete` / `ap2 ack` (TB-201) route here instead of
+        mutating TASKS.md / operator_log.md directly.
       - MM-handler-side: the `operator_queue_append` MCP tool — for
         when @claude-bot is asked to add/move/unfreeze/delete a task
         during an in-flight run, where direct `board_edit` exposes the
-        change to `git reset --hard <pre_run_head>` rollback.
+        change to `git reset --hard <pre_run_head>` rollback. The
+        TB-201 `operator_log_append` MCP tool also funnels here (op=ack).
 
     For `add_*` ops, this briefly takes the board lock to (a) write
     the briefing file, (b) pre-allocate a TB-N via `_allocate_id`
@@ -1896,6 +1947,29 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             "goal_content": goal_content,
             "reason": reason,
         }
+    elif op == "ack":
+        # TB-201: operator decision-log append. Routed through the
+        # queue (rather than letting the CLI / MCP tool body write
+        # operator_log.md synchronously) because operator_log.md is in
+        # TASK_AGENT_FENCED_PATHS and NOT in
+        # `rollback._VIOLATION_CHECK_EXCLUDED_PATHS`, so a mid-task
+        # ack would trip TB-110's post-hoc snapshot check and roll
+        # back the task agent's legitimate work — burning real SDK
+        # cost (the failure mode was demonstrated live on post-train
+        # at 2026-05-12T06:40-07:14Z: three runs / ~$12.55 lost).
+        # The op carries the operator's `note` (required) and an
+        # optional `task_id` reference; the drain-side handler
+        # `_apply_operator_ack` performs the actual operator_log.md
+        # write + emits `operator_ack` at tick boundary, under the
+        # daemon's board lock. The `note` field is treated as opaque
+        # prose — no `_validate_single_line` (an ack genuinely can be
+        # a paragraph; the historical synchronous write did not gate
+        # on shape either).
+        note = (args.get("note") or "").strip()
+        if not note:
+            return _err("note is required for ack")
+        task_id = (args.get("task_id") or "").strip()
+        rec_args = {"note": note, "task_id": task_id}
     else:
         task_id = (args.get("task_id") or "").strip()
         if not task_id:
@@ -2604,6 +2678,26 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
         }
         _atomic_write_json(target, record)
         return
+    if op == "ack":
+        # TB-201: drain-side ack. Performs the actual operator_log.md
+        # append the pre-TB-201 synchronous `do_operator_log_append`
+        # used to do, but at tick boundary under the daemon's board
+        # lock — never inside a task agent's snapshot window, so the
+        # write no longer trips TB-110's post-hoc fenced-file check.
+        # `_apply_operator_ack` writes the bullet line and emits the
+        # `operator_ack` event; the standard `applied operator-queued
+        # ack → TB-N` audit line lands separately via
+        # `_append_operator_audit_line`. Two lines total per drained
+        # ack: the operator's rich note (the actionable content) +
+        # the verb-vs-other-ops audit pointer.
+        result = _apply_operator_ack(cfg, args)
+        if result.get("isError"):
+            raise RuntimeError(
+                result["content"][0]["text"]
+                if result.get("content")
+                else "ack op failed"
+            )
+        return
     if op == "approve":
         # TB-142: drain-side approve. Shares `_approve_review_token` with
         # `do_board_edit({"action":"approve",...})` (the idle-path entry)
@@ -3219,17 +3313,26 @@ def build_mcp_server(cfg: Config):
 
     @tool(
         "operator_log_append",
-        "Append a timestamped operator-decision line to "
-        ".cc-autopilot/operator_log.md (TB-106). Use ONLY for "
-        "operator-mediated messages — e.g. when an operator says "
-        "`@claude-bot done: <action>` or `@claude-bot decided: <choice>`. "
-        "Args: note (required, one sentence), task_id (optional TB-N). "
-        "Ideation reads this log in Step 0 and treats entries as "
-        "authoritative; logged decisions are not re-proposed.",
+        "Queue a timestamped operator-decision line for the daemon to "
+        "append to .cc-autopilot/operator_log.md at the next tick "
+        "(TB-106, TB-201). Use ONLY for operator-mediated messages — "
+        "e.g. when an operator says `@claude-bot done: <action>` or "
+        "`@claude-bot decided: <choice>`. Args: note (required, one "
+        "sentence), task_id (optional TB-N). Ideation reads this log "
+        "in Step 0 and treats entries as authoritative; logged decisions "
+        "are not re-proposed. "
+        "TB-201: the call queues an `ack` op on the operator queue "
+        "rather than writing operator_log.md synchronously. Pre-TB-201 "
+        "the synchronous write raced running task agents (operator_log.md "
+        "is fenced and not exempt from TB-110's post-hoc snapshot check), "
+        "tripping false-positive state violations and rolling back "
+        "legitimate task work. The drain-side handler performs the actual "
+        "write at tick boundary under the daemon's board lock. The MCP "
+        "tool's external name and arg shape are unchanged from pre-TB-201.",
         {"note": str, "task_id": str},
     )
     async def operator_log_append(args):
-        return do_operator_log_append(cfg, args)
+        return enqueue_operator_ack(cfg, args)
 
     @tool(
         "operator_queue_append",

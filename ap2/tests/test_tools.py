@@ -587,62 +587,155 @@ def test_git_log_grep_in_control_agent_tools_only():
 
 
 def test_operator_log_append_creates_file_on_first_call(cfg):
-    res = tools.do_operator_log_append(cfg, {"note": "abandoned TB-91"})
+    """TB-201: the public surface (`enqueue_operator_ack`) queues an
+    `ack` op rather than writing operator_log.md synchronously. Drain
+    the queue and assert the post-drain state matches the historical
+    write semantics — file created with header, bullet line appended."""
+    res = tools.enqueue_operator_ack(cfg, {"note": "abandoned TB-91"})
     body = _unwrap(res)
-    assert "appended to operator_log.md" in body["message"]
+    # Pre-drain: queue carries one ack record; operator_log.md is
+    # untouched.
     log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    assert not log.exists()
+    assert body["op"] == "ack"
+    # Drain → applies _apply_operator_ack under the daemon's lock.
+    tools.drain_operator_queue(cfg)
     assert log.exists()
     text = log.read_text()
     assert "# Operator log" in text
     assert "abandoned TB-91" in text
-    # Timestamped bullet line.
-    assert text.rstrip().endswith("— abandoned TB-91")
+    # The ack bullet (operator's note) is among the appended lines —
+    # the drain ALSO emits the standard `applied operator-queued ack`
+    # audit line, so we don't pin "ends with the note", just "the note
+    # is in the file."
+    assert "— abandoned TB-91" in text
 
 
 def test_operator_log_append_includes_task_id_when_given(cfg):
-    res = tools.do_operator_log_append(
+    res = tools.enqueue_operator_ack(
         cfg, {"note": "LaunchAgent loaded", "task_id": "TB-139"}
     )
     body = _unwrap(res)
-    assert "[TB-139]" in body["line"]
+    assert body["op"] == "ack"
+    tools.drain_operator_queue(cfg)
     log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
-    assert "[TB-139]" in log.read_text()
+    text = log.read_text()
+    assert "[TB-139]" in text
+    assert "LaunchAgent loaded" in text
 
 
 def test_operator_log_append_omits_tag_when_no_task_id(cfg):
-    tools.do_operator_log_append(cfg, {"note": "no task ref"})
+    tools.enqueue_operator_ack(cfg, {"note": "no task ref"})
+    tools.drain_operator_queue(cfg)
     log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
     text = log.read_text()
-    # No "[TB-...]" tag in the bullet line.
+    # The operator's bullet line has no "[TB-...]" tag. The standard
+    # `applied operator-queued ack` audit line also has no arrow when
+    # task_id is absent — so the file as a whole carries no `[TB-` /
+    # `→ TB-` substring either.
     assert "[TB-" not in text
+    assert "→ TB-" not in text
 
 
 def test_operator_log_append_appends_subsequent_calls(cfg):
-    tools.do_operator_log_append(cfg, {"note": "first decision"})
-    tools.do_operator_log_append(cfg, {"note": "second decision"})
+    tools.enqueue_operator_ack(cfg, {"note": "first decision"})
+    tools.enqueue_operator_ack(cfg, {"note": "second decision"})
+    tools.drain_operator_queue(cfg)
     log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
     text = log.read_text()
     assert "first decision" in text
     assert "second decision" in text
-    # Header written exactly once on first call.
+    # Header written exactly once across both drained acks.
     assert text.count("# Operator log") == 1
 
 
 def test_operator_log_append_requires_note(cfg):
-    res = tools.do_operator_log_append(cfg, {"note": "  "})
+    res = tools.enqueue_operator_ack(cfg, {"note": "  "})
     assert res.get("isError"), res
     assert "note is required" in res["content"][0]["text"]
 
 
 def test_operator_log_append_emits_operator_ack_event(cfg):
     from ap2 import events
-    tools.do_operator_log_append(
+    tools.enqueue_operator_ack(
         cfg, {"note": "ate the frog", "task_id": "TB-9"}
     )
-    evts = events.tail(cfg.events_file, 5)
+    tools.drain_operator_queue(cfg)
+    evts = events.tail(cfg.events_file, 10)
     ack = next(e for e in evts if e["type"] == "operator_ack")
     assert ack["note"] == "ate the frog"
     assert ack["task"] == "TB-9"
+
+
+def test_operator_log_append_queues_not_writes(cfg):
+    """TB-201 regression pin: the public ack surface must NOT write
+    operator_log.md synchronously. Pre-drain the file is unmodified;
+    only after `drain_operator_queue` does the write land. The whole
+    point of the TB-201 retrofit — and the regression bar going
+    forward."""
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    pre = log.exists()
+    res = tools.enqueue_operator_ack(
+        cfg, {"note": "must defer", "task_id": "TB-200"}
+    )
+    assert not res.get("isError"), res
+    # Pre-drain: operator_log.md unchanged.
+    assert log.exists() == pre
+    if pre:
+        # No new bullet matching this note.
+        assert "must defer" not in log.read_text()
+    # Queue carries the ack record.
+    queue_path = tools.operator_queue_path(cfg)
+    assert queue_path.exists()
+    recs = [
+        json.loads(ln)
+        for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    ack_recs = [r for r in recs if r.get("op") == "ack"]
+    assert len(ack_recs) == 1
+    assert ack_recs[0]["args"]["note"] == "must defer"
+    assert ack_recs[0]["args"]["task_id"] == "TB-200"
+
+
+def test_apply_operator_ack_is_internal_drain_helper(cfg):
+    """TB-201: `_apply_operator_ack` is the drain-only internal helper
+    invoked by `_apply_operator_op`'s `ack` branch. Call it directly
+    (simulating what the drain would do under the lock) and assert the
+    synchronous append semantics + event emission match what the old
+    public `do_operator_log_append` used to do."""
+    from ap2 import events as _events
+    res = tools._apply_operator_ack(
+        cfg, {"note": "drain-applied", "task_id": "TB-201"}
+    )
+    body = _unwrap(res)
+    assert "appended to operator_log.md" in body["message"]
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    text = log.read_text()
+    assert "[TB-201] — drain-applied" in text
+    evt = next(
+        e for e in _events.tail(cfg.events_file, 5)
+        if e["type"] == "operator_ack"
+    )
+    assert evt["note"] == "drain-applied"
+
+
+def test_ack_in_operator_queue_ops(cfg):
+    """TB-201 pin: `ack` is registered in the queue-op enum so the
+    queue-append handler accepts it and the drain-side dispatcher
+    knows how to route it."""
+    assert "ack" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_do_operator_log_append_name_removed(cfg):
+    """TB-201 pin: the old public name is gone — only the drain-only
+    `_apply_operator_ack` (rename) and the queue-surface
+    `enqueue_operator_ack` (new entry point) are exposed. Documents
+    the public-API break (no external callers existed; locate via
+    `grep -rn "do_operator_log_append" --include="*.py"` pre-rename
+    confirmed only ap2/ depends on it)."""
+    assert not hasattr(tools, "do_operator_log_append")
+    assert hasattr(tools, "_apply_operator_ack")
+    assert hasattr(tools, "enqueue_operator_ack")
 
 
 def test_operator_log_append_in_control_agent_tools():

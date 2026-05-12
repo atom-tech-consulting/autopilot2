@@ -2261,3 +2261,134 @@ def test_classifications_last_30d_by_verdict_aggregates(cfg: Config):
         "pro-forma": 1,
         "unclear": 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# TB-201: `ack` op — operator decision-log append routed through the
+# queue. The pre-TB-201 synchronous `do_operator_log_append` raced
+# running task agents (operator_log.md is fenced and not exempt from
+# TB-110's post-hoc snapshot check). Routing through the queue defers
+# the write to drain time, under the daemon's board lock.
+
+
+def test_queue_append_ack_validates_note_required(cfg: Config):
+    """Symmetry with the historical synchronous-write validation —
+    `note` is required (whitespace-only is rejected)."""
+    res = tools.do_operator_queue_append(cfg, {"op": "ack", "note": "  "})
+    assert res.get("isError"), res
+    assert "note is required" in res["content"][0]["text"]
+
+
+def test_queue_append_ack_queues_record_with_args(cfg: Config):
+    """`op="ack"` appends a single record carrying the note + task_id."""
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "ack", "note": "decided to keep FRAGILE plists", "task_id": "TB-50"},
+    )
+    body = _unwrap(res)
+    assert body["op"] == "ack"
+    queue_path = tools.operator_queue_path(cfg)
+    recs = [
+        json.loads(ln)
+        for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    ack_recs = [r for r in recs if r.get("op") == "ack"]
+    assert len(ack_recs) == 1
+    args = ack_recs[0]["args"]
+    assert args["note"] == "decided to keep FRAGILE plists"
+    assert args["task_id"] == "TB-50"
+
+
+def test_queue_drain_ack_writes_operator_log_and_audit_line(cfg: Config):
+    """The drain-side handler invokes `_apply_operator_ack` (which
+    writes the ack bullet + emits `operator_ack`), then
+    `_append_operator_audit_line` adds the standard `applied
+    operator-queued ack → TB-N` audit pointer. Two lines per drained
+    ack — same pattern as other queue-routed ops."""
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "ack", "note": "operator decided to keep plist refs", "task_id": "TB-42"},
+    )
+    out = tools.drain_operator_queue(cfg)
+    assert out["applied"] == 1
+
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    # The operator's rich bullet line.
+    assert "[TB-42] — operator decided to keep plist refs" in log
+    # The standard verb-vs-other-ops audit line.
+    assert "applied operator-queued ack → TB-42" in log
+
+
+def test_queue_drain_ack_without_task_id_omits_arrow(cfg: Config):
+    """Without `task_id`, the rich line has no `[TB-N]` tag and the
+    audit line has no `→ TB-N` arrow — symmetry with how other
+    task-keyed ops render their audit lines."""
+    tools.do_operator_queue_append(
+        cfg, {"op": "ack", "note": "no task ref ack"}
+    )
+    tools.drain_operator_queue(cfg)
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "no task ref ack" in log
+    # No bracketed task tag.
+    assert "[TB-" not in log
+    # No arrow on the audit line.
+    assert "→ TB-" not in log
+    # The audit line still names the op verb.
+    assert "applied operator-queued ack" in log
+
+
+def test_queue_drain_ack_emits_operator_ack_event(cfg: Config):
+    """The `operator_ack` event lands in events.jsonl with the note +
+    task fields — same shape as the pre-TB-201 synchronous path's
+    event (ideation prompt readers + audit-trail consumers stay
+    unchanged across the retrofit)."""
+    tools.do_operator_queue_append(
+        cfg,
+        {"op": "ack", "note": "yes I did the thing", "task_id": "TB-101"},
+    )
+    tools.drain_operator_queue(cfg)
+    evts = events.tail(cfg.events_file, 20)
+    ack_evts = [e for e in evts if e["type"] == "operator_ack"]
+    assert len(ack_evts) == 1
+    assert ack_evts[0]["note"] == "yes I did the thing"
+    assert ack_evts[0]["task"] == "TB-101"
+
+
+def test_queue_drain_ack_is_idempotent_across_drains(cfg: Config):
+    """An already-applied `ack` op is skipped on a second drain — the
+    standard operator_queue_state.json bookkeeping covers `ack` the
+    same as every other queue-routed op."""
+    tools.do_operator_queue_append(
+        cfg, {"op": "ack", "note": "once", "task_id": ""}
+    )
+    tools.drain_operator_queue(cfg)
+    log_text = (
+        cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    ).read_text()
+    once_count_after_first = log_text.count("— once")
+    assert once_count_after_first == 1
+
+    # Second drain: no new ops, no new writes.
+    tools.drain_operator_queue(cfg)
+    log_text_2 = (
+        cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    ).read_text()
+    assert log_text_2.count("— once") == 1
+
+
+def test_ack_op_in_operator_queue_ops_enum(cfg: Config):
+    """Pin: `ack` is the registered verb (the queue-append handler
+    rejects any op not in the enum)."""
+    assert "ack" in tools.OPERATOR_QUEUE_OPS
+
+
+def test_operator_log_md_not_in_violation_check_excluded_paths():
+    """TB-201 architectural pin: operator_log.md is NOT exempted from
+    TB-110's post-hoc fenced-file snapshot check. The briefing's
+    design section calls out why we DO NOT add it to
+    `_VIOLATION_CHECK_EXCLUDED_PATHS`: queue-routing is the
+    architectural fix; an exclusion would mask future regressions if
+    some new code path forgot to queue-route. Keep the exclusion
+    list minimal."""
+    from ap2.rollback import _VIOLATION_CHECK_EXCLUDED_PATHS
+    assert ".cc-autopilot/operator_log.md" not in _VIOLATION_CHECK_EXCLUDED_PATHS

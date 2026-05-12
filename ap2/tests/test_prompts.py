@@ -736,9 +736,10 @@ def _seed_operator_log(cfg: Config, lines: list[str]) -> None:
     """Write a fixture operator_log.md at `cfg.project_root /
     .cc-autopilot/operator_log.md` with the given body lines (one per
     list item, no trailing newline). The file's header matches what
-    `tools.py::do_operator_log_append` writes on first append — keeping
-    the fixture realistic so future readers can't accidentally couple
-    to a stripped-down shape."""
+    `tools.py::_apply_operator_ack` writes on first append (TB-201
+    renamed it from `do_operator_log_append`) — keeping the fixture
+    realistic so future readers can't accidentally couple to a
+    stripped-down shape."""
     log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     header = (

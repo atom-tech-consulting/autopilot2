@@ -3217,3 +3217,233 @@ def test_impact_verdicts_enum_stable():
     consumers (per-proposal record `impact.verdict`, operator_log
     line shape, status counter keys) rely on the literal strings."""
     assert tools.IMPACT_VERDICTS == ("advanced-goal", "pro-forma", "unclear")
+
+
+# ---------------------------------------------------------------------------
+# TB-201: cmd_ack — operator-decision channel for ideation. Routes
+# through the operator queue rather than writing operator_log.md
+# synchronously (the pre-TB-201 in-place write tripped TB-110's
+# post-hoc fenced-file snapshot check on any task agent running
+# concurrently with the operator's `ap2 ack`).
+
+
+def test_ack_queues_and_does_not_write_operator_log(tmp_path: Path, capsys):
+    """Briefing-spec verification: `cmd_ack` exits 0, queues exactly one
+    record with `op="ack"` carrying the supplied note + task_id, leaves
+    `operator_log.md` UNMODIFIED (write happens at drain time), and prints
+    the documented "queued ack" shape (≤200 chars, contains 'queued')."""
+    from ap2.cli import cmd_ack
+    import json as _json
+
+    cfg = _project(tmp_path)
+    log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    pre_existed = log_path.exists()
+    pre_text = log_path.read_text() if pre_existed else ""
+
+    rc = cmd_ack(
+        cfg,
+        Namespace(
+            note="closed TB-200 follow-up — retried on dev box, no repro",
+            task=None,
+        ),
+    )
+    assert rc == 0
+
+    # operator_log.md is unchanged (regression bar — the whole point of
+    # the TB-201 retrofit).
+    assert log_path.exists() == pre_existed
+    if pre_existed:
+        assert log_path.read_text() == pre_text
+
+    # The queue carries exactly one `ack` record with the note verbatim.
+    queue_path = tools.operator_queue_path(cfg)
+    recs = [
+        _json.loads(ln)
+        for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    ack_recs = [r for r in recs if r.get("op") == "ack"]
+    assert len(ack_recs) == 1
+    assert ack_recs[0]["args"]["note"].startswith("closed TB-200 follow-up")
+    assert ack_recs[0]["args"]["task_id"] == ""
+
+    # CLI output matches the "queued ack" UX shape.
+    out = capsys.readouterr().out.strip()
+    assert "queued" in out
+    assert len(out) <= 200
+
+
+def test_ack_with_task_id_records_task_id_on_queue_record(tmp_path: Path):
+    """Briefing-spec verification: `-t TB-N` rides on the queued
+    record's args as `task_id`; the drain-side picks it up to render
+    the `[TB-N]` tag in operator_log.md."""
+    from ap2.cli import cmd_ack
+    import json as _json
+
+    cfg = _project(tmp_path)
+    rc = cmd_ack(
+        cfg,
+        Namespace(note="LaunchAgent installed", task="TB-139"),
+    )
+    assert rc == 0
+    queue_path = tools.operator_queue_path(cfg)
+    recs = [
+        _json.loads(ln)
+        for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    ack_recs = [r for r in recs if r.get("op") == "ack"]
+    assert ack_recs[0]["args"]["task_id"] == "TB-139"
+
+    # Drain → operator_log.md gets the bullet with `[TB-139]`.
+    _drain(cfg)
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert "[TB-139] — LaunchAgent installed" in log
+
+
+def test_ack_drain_writes_operator_log_and_event(tmp_path: Path):
+    """Briefing-spec verification: synthesize a queued ack, run
+    `drain_operator_queue`, assert (a) `operator_log.md` carries the
+    bullet line in the documented `- <ts> [TB-N] — <note>` shape, (b)
+    events.jsonl carries an `operator_ack` event with the note + task
+    fields, (c) the audit line `applied operator-queued ack → TB-N`
+    is also written to operator_log.md (the verb-vs-other-ops audit
+    pointer that other queue-routed ops also emit)."""
+    from ap2 import events as _events
+    cfg = _project(tmp_path)
+    res = tools.enqueue_operator_ack(
+        cfg, {"note": "operator ate the frog", "task_id": "TB-9"}
+    )
+    assert not res.get("isError"), res
+
+    _drain(cfg)
+
+    log = (
+        cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    ).read_text()
+    # (a) ack bullet line in the historical shape.
+    import re
+    bullet_re = re.compile(
+        r"^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \[TB-9\] — operator ate the frog$",
+        re.MULTILINE,
+    )
+    assert bullet_re.search(log), (
+        f"ack bullet not found in operator_log.md:\n{log}"
+    )
+    # (c) the standard `applied operator-queued ack → TB-9` audit line
+    # is ALSO present — same shape as every other queue-routed op.
+    audit_re = re.compile(
+        r"^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — "
+        r"applied operator-queued ack → TB-9$",
+        re.MULTILINE,
+    )
+    assert audit_re.search(log), (
+        f"applied-audit line not found in operator_log.md:\n{log}"
+    )
+
+    # (b) events.jsonl carries the `operator_ack` event with the
+    # note + task fields.
+    evts = _events.tail(cfg.events_file, 20)
+    ack_evts = [e for e in evts if e["type"] == "operator_ack"]
+    assert len(ack_evts) == 1
+    assert ack_evts[0]["note"] == "operator ate the frog"
+    assert ack_evts[0]["task"] == "TB-9"
+
+
+def test_ack_mcp_tool_path_queues_same_record(tmp_path: Path):
+    """Briefing-spec verification: invoke the `operator_log_append` MCP
+    tool body (`enqueue_operator_ack`) — the chat-handler entry point —
+    and assert it produces the same queue-append record as the CLI
+    path. Verifies the post-TB-201 MCP tool body queues rather than
+    writing operator_log.md synchronously."""
+    import json as _json
+
+    cfg = _project(tmp_path)
+    res = tools.enqueue_operator_ack(
+        cfg,
+        {"note": "chat-handler ack from claude-bot", "task_id": "TB-77"},
+    )
+    assert not res.get("isError"), res
+
+    queue_path = tools.operator_queue_path(cfg)
+    recs = [
+        _json.loads(ln)
+        for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    ack_recs = [r for r in recs if r.get("op") == "ack"]
+    assert len(ack_recs) == 1
+    assert ack_recs[0]["args"]["note"] == "chat-handler ack from claude-bot"
+    assert ack_recs[0]["args"]["task_id"] == "TB-77"
+
+    # Pre-drain: operator_log.md is NOT written. The TB-201 regression
+    # bar — chat-driven acks (the MCP path) must defer the write the
+    # same way the CLI path does, since the same false-positive
+    # state_violation cascade applies regardless of which surface
+    # initiated the ack.
+    log_path = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    if log_path.exists():
+        assert "chat-handler ack from claude-bot" not in log_path.read_text()
+
+
+def test_ack_no_state_violation_during_in_flight_task(tmp_path: Path):
+    """TB-201 regression pin (the load-bearing test): synthesize a
+    state where a task agent's run window encloses an `ap2 ack` call.
+    Pre-TB-201 this rolled the task back via TB-110's post-hoc
+    fenced-file snapshot check. Post-TB-201 the ack is in the queue,
+    NOT in operator_log.md — the file's hash is unchanged until the
+    drain runs (which the daemon runs at tick boundary, BEFORE
+    dispatching the next task).
+
+    Concretely: take `rollback.snapshot_fenced_files` (the daemon's
+    pre-task snapshot), run `cmd_ack`, take the post snapshot via
+    `rollback.detect_fenced_violations` — assert NO change to
+    `.cc-autopilot/operator_log.md` is detected."""
+    from ap2 import rollback
+    from ap2.cli import cmd_ack
+    from ap2.board import Board
+
+    cfg = _project(tmp_path)
+    # Seed a fake Active task to make the scenario realistic — the
+    # operator's "I just acked while TB-77 is running" case.
+    board = Board.load(cfg.tasks_file)
+    board.add("Active", task_id="TB-77", title="running task")
+    board.save()
+
+    # Pre-task snapshot — what `daemon._run_task` takes before
+    # dispatching the agent.
+    pre = rollback.snapshot_fenced_files(cfg)
+
+    # Operator runs `ap2 ack` while TB-77 is running. Pre-TB-201 this
+    # would write operator_log.md synchronously; post-TB-201 it
+    # queues an op instead.
+    rc = cmd_ack(
+        cfg,
+        Namespace(
+            note="thinking out loud while TB-77 runs — looks fine so far",
+            task=None,
+        ),
+    )
+    assert rc == 0
+
+    # Post-task snapshot — the violation detector compares the two.
+    violations = rollback.detect_fenced_violations(cfg, pre)
+
+    # operator_log.md is the file the pre-TB-201 path would dirty.
+    # Assert it's NOT in the violation list — the regression bar.
+    assert ".cc-autopilot/operator_log.md" not in violations, (
+        f"operator_log.md tripped TB-110's post-hoc snapshot check "
+        f"even though the ack went through the queue (violations={violations})"
+    )
+
+
+def test_operator_log_append_mcp_name_unchanged(tmp_path: Path):
+    """TB-201 backwards-compat pin: the `operator_log_append` MCP
+    tool's external name (the string chat handlers send when invoking
+    `@claude-bot done: ...`) stays unchanged from pre-TB-201. Only
+    the tool's body changes — to call `enqueue_operator_ack` instead
+    of `do_operator_log_append`. Pinning the name keeps chat-side
+    callers working without recompiling their tool-call dispatch."""
+    # The tool name lands in CONTROL_AGENT_TOOLS prefixed with
+    # `mcp__autopilot__`. The bare tool name (what `@tool(...)`
+    # registers) is what chat handlers see.
+    assert "mcp__autopilot__operator_log_append" in tools.CONTROL_AGENT_TOOLS
+    # And it's NOT in TASK_AGENT_TOOLS — operator-mediated only.
+    assert "mcp__autopilot__operator_log_append" not in tools.TASK_AGENT_TOOLS
