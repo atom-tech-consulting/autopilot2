@@ -29,6 +29,7 @@ from ap2.board import Board
 from ap2.cli import cmd_approve
 from ap2.daemon import _tick
 
+from ap2.tests._briefing_fixtures import canonical_briefing
 from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg, tool_call_respond
 
 
@@ -153,15 +154,14 @@ def _ideation_proposes_n_gated(cfg, n: int):
                     "action": "add_backlog",
                     "title": f"ideation proposal #{i + 1}",
                     "tags": ["proposed"],
-                    "briefing": (
-                        f"# Ideation proposal {i + 1}\n\n"
-                        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-                        "## Scope\n\n- foo.py\n\n"
-                        "## Design\n\nstub\n\n"
-                        "## Verification\n\n"
-                        "- `true` — placeholder shell bullet so the briefing "
-                        "satisfies TB-135 / TB-138 (auto-verifiable).\n\n"
-                        "## Out of scope\n\n- nothing\n"
+                    "briefing": canonical_briefing(
+                        f"TB-PROP{i + 1}",
+                        title=f"Ideation proposal {i + 1}",
+                        verification=(
+                            "- `true` — placeholder shell bullet so the "
+                            "briefing satisfies TB-135 / TB-138 "
+                            "(auto-verifiable).\n"
+                        ),
                     ),
                     # Load-bearing: the prompt's TB-121 gate instructs
                     # every add_backlog call to set blocked_on="review".

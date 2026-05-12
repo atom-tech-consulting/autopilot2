@@ -14,6 +14,7 @@ from ap2 import events
 from ap2.board import Board
 from ap2.daemon import _tick
 
+from ap2.tests._briefing_fixtures import canonical_briefing
 from ap2.tests.e2e._fakes import FakeSDK, text_respond, tool_call_respond
 
 
@@ -451,14 +452,7 @@ def test_add_backlog_preserves_explicit_briefing():
         # briefing payload is preserved on disk verbatim, NOT
         # auto-filled with the template) survives — we just need
         # canonical-shape input for the gate to let the call through.
-        custom = (
-            "# Custom\n\n"
-            "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-            "## Scope\n\n- foo.py\n\n"
-            "## Design\n\nstub\n\n"
-            "## Verification\n- `uv run pytest -q`\n\n"
-            "## Out of scope\n\n- nothing\n"
-        )
+        custom = canonical_briefing("TB-900", title="Custom")
         res = do_board_edit(cfg, {
             "action": "add_backlog",
             "title": "explicit briefing",

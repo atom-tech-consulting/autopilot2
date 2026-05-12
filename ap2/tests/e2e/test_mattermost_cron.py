@@ -19,6 +19,7 @@ from ap2.daemon import _tick, handle_message
 from ap2.mattermost import check_new_messages
 from ap2.tools import do_board_edit
 
+from ap2.tests._briefing_fixtures import canonical_briefing
 from ap2.tests.e2e._fakes import FakeSDK, _FakeMsg, text_respond, tool_call_respond
 
 
@@ -59,15 +60,12 @@ def _mm_handler_adds_pipeline(cfg):
                 # the e2e fixture's working tree to carry a real pytest
                 # target. This test is about the mm-add → cron-unfreeze
                 # → pipeline-complete chain, not the verifier itself.
-                "briefing": (
-                    "# Pipeline\n\n"
-                    "## Goal\nKick the pipeline.\n\n"
-                    "Why now: closes the failure mode the briefing "
-                    "scope names (TB-164).\n\n"
-                    "## Scope\n- pipeline\n\n"
-                    "## Design\nStub.\n\n"
-                    "## Verification\n- `true` — trivially passes\n\n"
-                    "## Out of scope\n- nothing\n"
+                "briefing": canonical_briefing(
+                    "TB-PIPELINE",
+                    title="Pipeline",
+                    scope="- pipeline\n",
+                    design="Stub.\n",
+                    verification="- `true` — trivially passes\n",
                 ),
             },
         )

@@ -14,6 +14,7 @@ from ap2 import events, tools
 from ap2.board import Board
 from ap2.daemon import _tick
 
+from ap2.tests._briefing_fixtures import canonical_briefing
 from ap2.tests.e2e._fakes import FakeSDK, tool_call_respond
 
 
@@ -29,14 +30,8 @@ def test_tick_drains_operator_queue_before_task(e2e_project):
             "title": "queued by operator",
             # TB-135: briefing is required for every add_*; the CLI
             # passes the buffer it read from --briefing-file.
-            "briefing": (
-                "# queued by operator\n\n"
-                "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-                "## Scope\n\n- foo.py\n\n"
-                "## Design\n\nstub\n\n"
-                "## Verification\n"
-                "- `uv run pytest -q` — gates pass\n\n"
-                "## Out of scope\n\n- nothing\n"
+            "briefing": canonical_briefing(
+                "TB-600", title="queued by operator",
             ),
         },
     )
@@ -119,14 +114,8 @@ def test_operator_queue_append_does_not_appear_in_fenced_snapshot(e2e_project):
         {
             "op": "add_backlog",
             "title": "queued during run",
-            "briefing": (
-                "# brief\n\n"
-                "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-                "## Scope\n\n- foo.py\n\n"
-                "## Design\n\nstub\n\n"
-                "## Verification\n"
-                "- `uv run pytest -q` — gates pass\n\n"
-                "## Out of scope\n\n- nothing\n"
+            "briefing": canonical_briefing(
+                "TB-601", title="queued during run",
             ),
         },
     )
@@ -182,14 +171,8 @@ def test_tb139_scenario_mid_run_ap2_add_does_not_trip_violation(e2e_project):
                 {
                     "op": "add_backlog",
                     "title": "operator typed this mid-run",
-                    "briefing": (
-                        "# operator brief\n\n"
-                        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-                        "## Scope\n\n- foo.py\n\n"
-                        "## Design\n\nstub\n\n"
-                        "## Verification\n"
-                        "- `uv run pytest -q` — gates pass\n\n"
-                        "## Out of scope\n\n- nothing\n"
+                    "briefing": canonical_briefing(
+                        "TB-602", title="operator brief",
                     ),
                 },
             )

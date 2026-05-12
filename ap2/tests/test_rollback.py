@@ -10,6 +10,7 @@ import pytest
 
 from ap2 import events, rollback
 from ap2.config import Config
+from ap2.tests._briefing_fixtures import canonical_briefing
 
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
@@ -142,15 +143,7 @@ def test_detect_violations_ignores_operator_queue_append_between_snapshots(tmp_p
         {
             "op": "add_backlog",
             "title": "queued mid-run",
-            "briefing": (
-                "# brief\n\n"
-                "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-                "## Scope\n\n- foo.py\n\n"
-                "## Design\n\nedit foo\n\n"
-                "## Verification\n"
-                "- `uv run pytest -q` — gates pass\n\n"
-                "## Out of scope\n\n- nothing\n"
-            ),
+            "briefing": canonical_briefing("TB-500", title="queued mid-run"),
         },
     )
     assert not res.get("isError")

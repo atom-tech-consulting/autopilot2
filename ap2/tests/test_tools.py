@@ -13,6 +13,11 @@ import pytest
 from ap2.board import Board
 from ap2.config import Config
 from ap2 import tools
+from ap2.tests._briefing_fixtures import (
+    briefing_missing,
+    briefing_with_manual_bullet,
+    canonical_briefing,
+)
 
 
 @pytest.fixture
@@ -33,15 +38,7 @@ def _unwrap(res: dict) -> dict:
     return json.loads(res["content"][0]["text"])
 
 
-_DEFAULT_BRIEFING = (
-    "# Brand new\n\n"
-    "## Goal\n\nDoes a thing.\n\n"
-    "Why now: closes the missing-thing failure mode the briefing names.\n\n"
-    "## Scope\n\n- foo.py\n\n"
-    "## Design\n\nStraightforward edit.\n\n"
-    "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-    "## Out of scope\n\n- nothing\n"
-)
+_DEFAULT_BRIEFING = canonical_briefing("TB-200", title="Brand new")
 
 
 def test_board_edit_add_ready_assigns_id(cfg, tmp_path):
@@ -1152,14 +1149,7 @@ def test_board_edit_add_with_briefing_text_succeeds(cfg, tmp_path):
     briefing payload themselves — they're unaffected by TB-135 as long
     as they pass a non-empty `briefing`. Pin the happy path.
     """
-    body = (
-        "# Real briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-201", title="Real briefing")
     res = tools.do_board_edit(
         cfg,
         {"action": "add_backlog", "title": "ideation-style", "briefing": body},
@@ -1184,14 +1174,7 @@ def test_board_edit_non_empty_briefing_payload_unaffected_for_daemon_callers(cfg
     `*_requires_briefing` tests above: they prove empty briefings are
     rejected; this one proves non-empty briefings still go through.
     """
-    body = (
-        "# Daemon-built briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-202", title="Daemon-built briefing")
     for action, expected_section in (
         ("add_ready", "Ready"),
         ("add_backlog", "Backlog"),
@@ -1222,14 +1205,7 @@ def test_operator_queue_append_non_empty_briefing_payload_succeeds(cfg, tmp_path
     callers (MM handler, future ideation operator-queue use) pass a
     real briefing payload; the queue accepts every add_* op and
     materializes the briefing under .cc-autopilot/tasks/."""
-    body = (
-        "# MM-style briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-203", title="MM-style briefing")
     for action in ("add_ready", "add_backlog", "add_frozen"):
         res = tools.do_operator_queue_append(
             cfg,
@@ -1295,14 +1271,7 @@ def test_operator_queue_append_add_with_briefing_text_succeeds(cfg, tmp_path):
     """MM-handler / ideation pass the briefing as a payload field. Pin
     the happy path: the queue gets one record, the briefing bytes land
     on disk under .cc-autopilot/tasks/."""
-    body = (
-        "# MM-handler briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-204", title="MM-handler briefing")
     res = tools.do_operator_queue_append(
         cfg,
         {"op": "add_backlog", "title": "mm-style", "briefing": body},
@@ -1358,14 +1327,7 @@ def test_operator_queue_append_does_not_write_claude_md(cfg, tmp_path):
     pre_text = claude_md.read_text()
     pre_mtime = claude_md.stat().st_mtime_ns
 
-    body = (
-        "# briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-205", title="briefing")
     res = tools.do_operator_queue_append(
         cfg,
         {"op": "add_backlog", "title": "deferred", "briefing": body},
@@ -1388,14 +1350,7 @@ def test_two_back_to_back_queue_appends_allocate_sequential_ids(cfg, tmp_path):
     claude_md = tmp_path / "CLAUDE.md"
     pre_text = claude_md.read_text()
 
-    body = (
-        "# briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-206", title="briefing")
     r1 = _unwrap(tools.do_operator_queue_append(
         cfg, {"op": "add_backlog", "title": "first", "briefing": body},
     ))
@@ -1416,14 +1371,7 @@ def test_drain_bumps_claude_md_once_to_highest_allocated_plus_one(cfg, tmp_path)
     drain-time write is the corollary that keeps CLAUDE.md in sync
     without the in-flight fence collision.
     """
-    body = (
-        "# briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-207", title="briefing")
     r1 = _unwrap(tools.do_operator_queue_append(
         cfg, {"op": "add_backlog", "title": "drain-1", "briefing": body},
     ))
@@ -1782,13 +1730,8 @@ def test_cron_edit_handler_still_callable_from_python(cfg):
 # tasks with zero scope-specific verification. These tests pin the
 # four reject paths plus the canonical happy path.
 
-_TB154_CANONICAL_BRIEFING = (
-    "# TB-154 anchor briefing\n\n"
-    "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-    "## Scope\n\n- foo.py\n\n"
-    "## Design\n\nstub\n\n"
-    "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
-    "## Out of scope\n\n- nothing\n"
+_TB154_CANONICAL_BRIEFING = canonical_briefing(
+    "TB-154", title="anchor briefing",
 )
 
 
@@ -1824,12 +1767,8 @@ def test_tb154_validate_briefing_structure_rejects_missing_verification(
     queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
     before_queue = queue_path.read_text() if queue_path.exists() else ""
 
-    body = (
-        "# no-verification\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-154", title="no-verification", drop="Verification",
     )
     res = tools.do_operator_queue_append(
         cfg,
@@ -1853,13 +1792,13 @@ def test_tb154_validate_briefing_structure_rejects_acceptance_for_verification(
     silent `parse_verification_section -> None` skip path is the bug
     we're closing."""
     before_claude = (tmp_path / "CLAUDE.md").read_text()
-    body = (
-        "# acceptance-renamed\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Acceptance\n\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
+    # Canonical scaffold with `## Verification` renamed to `## Acceptance`
+    # — the TB-153 failure mode we're closing.
+    body = briefing_missing(
+        "TB-154", title="acceptance-renamed", drop="Verification",
+    ).replace(
+        "## Out of scope",
+        "## Acceptance\n\n- `uv run pytest -q` — gates pass\n\n## Out of scope",
     )
     res = tools.do_operator_queue_append(
         cfg,
@@ -1878,13 +1817,8 @@ def test_tb154_validate_briefing_structure_rejects_empty_verification(cfg):
     per-task verifier would have nothing to score against the agent's
     diff. Reject at the queue-append boundary instead of letting the
     verifier silently skip."""
-    body = (
-        "# empty-verification\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = canonical_briefing(
+        "TB-154", title="empty-verification", verification="",
     )
     res = tools.do_operator_queue_append(
         cfg,
@@ -1898,13 +1832,7 @@ def test_tb154_validate_briefing_structure_rejects_missing_goal(cfg):
     """Same gate covers any missing canonical section, not just
     `## Verification`. Drop `## Goal` and the validator names it in the
     error so the operator knows what to fix."""
-    body = (
-        "# no-goal\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = briefing_missing("TB-154", title="no-goal", drop="Goal")
     res = tools.do_operator_queue_append(
         cfg,
         {"op": "add_backlog", "title": "no goal", "briefing": body},
@@ -1920,14 +1848,13 @@ def test_tb154_validate_briefing_structure_extra_sections_allowed(cfg):
     allowed — the validator checks for omission/rename of the canonical
     set, not for an exact match. Pin so future tightening doesn't
     accidentally start rejecting authoring extensions."""
-    body = (
-        "# canonical + extras\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Decision log\n\n- decided X\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+    # Canonical scaffold plus an extra `## Decision log` section spliced
+    # between Design and Verification — the validator must still accept.
+    body = canonical_briefing(
+        "TB-154", title="canonical + extras",
+    ).replace(
+        "## Verification",
+        "## Decision log\n\n- decided X\n\n## Verification",
     )
     res = tools.do_operator_queue_append(
         cfg,
@@ -1944,12 +1871,9 @@ def test_tb154_validate_briefing_structure_fires_for_do_board_edit(cfg, tmp_path
     restricted; the gate-at-both-surfaces invariant is what prevents
     a future toolset relaxation from silently re-opening the hole."""
     before_claude = (tmp_path / "CLAUDE.md").read_text()
-    body = (
-        "# no-verification via board_edit\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-154", title="no-verification via board_edit",
+        drop="Verification",
     )
     res = tools.do_board_edit(
         cfg,
@@ -1993,13 +1917,11 @@ def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
     # cfg's TB-5 lives in Backlog (idle section, fence doesn't fire).
     # Briefing is None on the seeded task — the legacy / pre-TB-135
     # branch exercises the same validator before allocating a slug.
-    bad_acceptance = (
-        "# tb-153 reprised\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Acceptance\n\n- `pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+    bad_acceptance = briefing_missing(
+        "TB-153", title="reprised", drop="Verification",
+    ).replace(
+        "## Out of scope",
+        "## Acceptance\n\n- `pytest -q`\n\n## Out of scope",
     )
     pre_tasks_dir = sorted(
         p.name for p in (cfg.tasks_dir).glob("*.md")
@@ -2022,12 +1944,8 @@ def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
     assert not qpath.exists() or qpath.read_text() == ""
 
     # The same gate covers a missing-Verification briefing on `update`.
-    missing_verif = (
-        "# missing-verif via update\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Out of scope\n\n- nothing\n"
+    missing_verif = briefing_missing(
+        "TB-154", title="missing-verif via update", drop="Verification",
     )
     res2 = tools.do_operator_queue_append(
         cfg,
@@ -2038,13 +1956,8 @@ def test_tb154_validate_briefing_structure_fires_for_update_op(cfg, tmp_path):
     assert "## Verification" in res2["content"][0]["text"]
 
     # Empty-Verification (heading present, zero bullets) is rejected too.
-    empty_verif = (
-        "# empty-verif via update\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n\n"
-        "## Out of scope\n\n- nothing\n"
+    empty_verif = canonical_briefing(
+        "TB-154", title="empty-verif via update", verification="",
     )
     res3 = tools.do_operator_queue_append(
         cfg,
@@ -2165,15 +2078,12 @@ def test_validate_briefing_skips_anchor_check_when_goal_md_missing(tmp_path):
     get every proposal rejected."""
     missing = tmp_path / "no-goal-here.md"
     assert not missing.exists()
-    body = (
-        "# off-anchor\n\n"
-        "## Goal\n\nPolish ap2's internal logging shape.\n\n"
-        "Why now: closes the missing-X failure mode the briefing "
-        "scope names (TB-164).\n\n"
-        "## Scope\n\n- daemon.py\n\n"
-        "## Design\n\nRework logs.\n\n"
-        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-161",
+        title="off-anchor",
+        drop="goal-anchor",
+        scope="- daemon.py\n",
+        design="Rework logs.\n",
     )
     err = tools._validate_briefing_structure(body, goal_md_path=missing)
     assert err is None, f"expected None (skip), got: {err!r}"
@@ -2194,15 +2104,10 @@ def test_validate_briefing_skips_anchor_check_when_goal_md_all_placeholder(tmp_p
         "## Non-goals\n- (explicit non-goals)\n\n"
         "## Constraints\n- (hard constraints)\n"
     )
-    body = (
-        "# placeholder-friendly\n\n"
-        "## Goal\n\nGenerically polish ap2.\n\n"
-        "Why now: closes the failure mode the briefing scope names "
-        "(TB-164).\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nA thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-161",
+        title="placeholder-friendly",
+        drop="goal-anchor",
     )
     err = tools._validate_briefing_structure(
         body, goal_md_path=placeholder,
@@ -2217,15 +2122,10 @@ def test_validate_briefing_anchor_check_unit_function_default_is_skip():
     keyword arg → backward-compat: skips the goal-anchor check. Pins
     that callers that haven't been updated to pass the path don't
     accidentally start rejecting briefings they used to accept."""
-    body = (
-        "# no-goal-md-arg\n\n"
-        "## Goal\n\nMeta-polish only.\n\n"
-        "Why now: closes the failure mode the briefing scope names "
-        "(TB-164).\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nA thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-161",
+        title="no-goal-md-arg",
+        drop="goal-anchor",
     )
     assert tools._validate_briefing_structure(body) is None
 
@@ -2238,13 +2138,12 @@ def test_validate_briefing_anchor_check_fires_via_operator_queue_append(
     no queue line / briefing file is written. Mirrors the
     TB-154-style "no leak on reject" pin."""
     _write_goal_md(tmp_path)
-    body = (
-        "# off-anchor via queue\n\n"
-        "## Goal\n\nPolish ap2 logs for nicer terminal output.\n\n"
-        "## Scope\n\n- daemon.py\n\n"
-        "## Design\n\nRework logs.\n\n"
-        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-161",
+        title="off-anchor via queue",
+        drop="goal-anchor",
+        scope="- daemon.py\n",
+        design="Rework logs.\n",
     )
     pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
     res = tools.do_operator_queue_append(
@@ -2302,14 +2201,7 @@ def test_validate_briefing_rejects_goal_without_why_now():
     knows what to fix. The rule fires regardless of whether goal.md is
     supplied — the delete-test is intrinsic to the briefing contract,
     distinct from the TB-161 anchor-skip path."""
-    body = (
-        "# no-why-now\n\n"
-        "## Goal\n\nA prose-only goal that never says the magic words.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nA thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = briefing_missing("TB-164", title="no-why-now", drop="Why now")
     err = tools._validate_briefing_structure(body)
     assert err is not None, "expected non-None error string"
     assert "Why now" in err, err
@@ -2339,16 +2231,7 @@ def test_validate_briefing_accepts_goal_with_why_now_paragraph():
     """A `## Goal` body whose `Why now` paragraph is ≥`WHY_NOW_MIN_CHARS`
     chars passes the delete-test gate. Pin the accept-side so the rule
     doesn't quietly inflate the threshold without test coverage."""
-    body = (
-        "# good-why-now\n\n"
-        "## Goal\n\nA goal that names the failure mode.\n\n"
-        "Why now: closes the silent-skip failure mode operators can't "
-        "catch in time without a queue-append-time guard (TB-164).\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nA thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-164", title="good-why-now")
     err = tools._validate_briefing_structure(body)
     assert err is None, f"expected None, got: {err!r}"
 
@@ -2404,13 +2287,12 @@ def test_validate_briefing_why_now_check_fires_via_operator_queue_append(
     briefing routed through `do_operator_queue_append` is rejected and
     no queue line / briefing file is written. Mirrors the
     TB-154/TB-161-style "no leak on reject" pin."""
-    body = (
-        "# off-rationale via queue\n\n"
-        "## Goal\n\nA prose-only goal that never names Why now.\n\n"
-        "## Scope\n\n- daemon.py\n\n"
-        "## Design\n\nRework logs.\n\n"
-        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-164",
+        title="off-rationale via queue",
+        drop="Why now",
+        scope="- daemon.py\n",
+        design="Rework logs.\n",
     )
     pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
     res = tools.do_operator_queue_append(
@@ -2581,12 +2463,8 @@ def test_validate_briefing_skip_goal_alignment_still_fires_other_checks(
     (e.g. `## Scope`) is still rejected. Pinning at least the missing-
     Verification case per the briefing's verification scope."""
     # 1. Missing `## Verification` — TB-154 canonical-sections gate.
-    missing_verif = (
-        "# missing-verif via skip\n\n"
-        "## Goal\n\nFix a one-line typo.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Out of scope\n\n- nothing\n"
+    missing_verif = briefing_missing(
+        "TB-170", title="missing-verif via skip", drop="Verification",
     )
     err = tools._validate_briefing_structure(
         missing_verif, skip_goal_alignment=True,
@@ -2597,13 +2475,8 @@ def test_validate_briefing_skip_goal_alignment_still_fires_other_checks(
     assert "## Verification" in err
 
     # 2. Empty Verification — TB-138 / TB-154 parseable-but-empty gate.
-    empty_verif = (
-        "# empty-verif via skip\n\n"
-        "## Goal\n\nFix a one-line typo.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n\n"
-        "## Out of scope\n\n- nothing\n"
+    empty_verif = canonical_briefing(
+        "TB-170", title="empty-verif via skip", verification="",
     )
     err2 = tools._validate_briefing_structure(
         empty_verif, skip_goal_alignment=True,
@@ -2612,12 +2485,8 @@ def test_validate_briefing_skip_goal_alignment_still_fires_other_checks(
     assert "empty" in err2.lower()
 
     # 3. Missing `## Scope` — covers the broader canonical-sections gate.
-    missing_scope = (
-        "# missing-scope via skip\n\n"
-        "## Goal\n\nFix a one-line typo.\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+    missing_scope = briefing_missing(
+        "TB-170", title="missing-scope via skip", drop="Scope",
     )
     err3 = tools._validate_briefing_structure(
         missing_scope, skip_goal_alignment=True,
@@ -2631,13 +2500,8 @@ def test_validate_briefing_skip_goal_alignment_default_preserves_behavior():
     the kwarg sees the same TB-161/164 enforcement as before TB-170.
     Concretely: a no-why-now briefing is rejected when the kwarg is
     omitted, identical to the pre-TB-170 contract."""
-    body = (
-        "# default-still-strict\n\n"
-        "## Goal\n\nA prose-only goal that never says the magic words.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nA thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+    body = briefing_missing(
+        "TB-170", title="default-still-strict", drop="Why now",
     )
     err = tools._validate_briefing_structure(body)
     assert err is not None
@@ -2729,12 +2593,8 @@ def test_queue_append_skip_flag_does_not_bypass_other_validators(
     set, and a multi-line title is still rejected. The flag only
     covers TB-161 + TB-164."""
     # Missing Verification — canonical-sections gate must still fire.
-    missing_verif = (
-        "# missing-verif via queue + skip\n\n"
-        "## Goal\n\nFix a one-line typo.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Out of scope\n\n- nothing\n"
+    missing_verif = briefing_missing(
+        "TB-170", title="missing-verif via queue + skip", drop="Verification",
     )
     res = tools.do_operator_queue_append(
         cfg,

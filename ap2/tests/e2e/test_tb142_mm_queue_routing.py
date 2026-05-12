@@ -32,6 +32,7 @@ from ap2 import events, tools
 from ap2.board import Board
 from ap2.daemon import _tick
 
+from ap2.tests._briefing_fixtures import canonical_briefing
 from ap2.tests.e2e._fakes import FakeSDK, tool_call_respond
 
 
@@ -91,14 +92,8 @@ def test_mm_handler_queue_routes_around_state_violation(e2e_project):
                 {
                     "op": "add_backlog",
                     "title": "queued by MM handler",
-                    "briefing": (
-                        "# brief\n\n"
-                        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-                        "## Scope\n\n- foo.py\n\n"
-                        "## Design\n\nstub\n\n"
-                        "## Verification\n"
-                        "- `uv run pytest -q` — gates pass\n\n"
-                        "## Out of scope\n\n- nothing\n"
+                    "briefing": canonical_briefing(
+                        "TB-700", title="queued by MM handler",
                     ),
                 },
             )

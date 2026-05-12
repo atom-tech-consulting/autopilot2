@@ -18,6 +18,7 @@ from ap2 import events, retry
 from ap2.board import Board
 from ap2.daemon import _tick
 
+from ap2.tests._briefing_fixtures import canonical_briefing
 from ap2.tests.e2e._fakes import FakeSDK, text_respond, tool_call_respond
 
 
@@ -174,14 +175,7 @@ def test_cli_no_verify_flag_writes_tag(e2e_project):
     # TB-135: --briefing-file is required; stage one on disk so the
     # --no-verify plumb is what's under test, not the briefing gate.
     brief = cfg.project_root / "_test_brief.md"
-    brief.write_text(
-        "# docs-only change\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    brief.write_text(canonical_briefing("TB-800", title="docs-only change"))
     args = Namespace(
         section="Backlog",
         tags=None,

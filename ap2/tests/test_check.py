@@ -13,6 +13,10 @@ import pytest
 from ap2 import check
 from ap2.config import Config
 from ap2.init import init_project
+from ap2.tests._briefing_fixtures import (
+    briefing_missing,
+    canonical_briefing,
+)
 
 
 @pytest.fixture
@@ -206,6 +210,10 @@ def test_briefing_with_manual_verification_bullet_is_warning(cfg):
     it before dispatch without blocking the rest of `ap2 check`.
     """
     brief = cfg.tasks_dir / "tb-99-manual.md"
+    # Construct via fixture but drop Scope/Design so we exercise the
+    # `Manual:` warning specifically (the structure lint emits a separate
+    # warning for missing sections, but the test only asserts the
+    # `Manual` warning's presence — both warnings coexist cleanly).
     brief.write_text(
         "# TB-99 — example\n\n"
         "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
@@ -278,14 +286,11 @@ def test_manual_bullet_outside_verification_section_not_flagged(cfg):
     # which would otherwise drown out the test's actual claim (that the
     # `Manual:` lint scopes correctly).
     brief.write_text(
-        "# TB-102 — example\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\n"
-        "- Manual: this prose-bullet is fine in design notes\n\n"
-        "## Verification\n\n"
-        "- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+        canonical_briefing(
+            "TB-102",
+            title="example",
+            design="- Manual: this prose-bullet is fine in design notes\n",
+        )
     )
     report = check.check_project(cfg)
     assert not any(
@@ -314,14 +319,7 @@ def test_briefing_template_carries_auto_verifiable_rule():
 # new non-canonical briefings; this lint surfaces legacy entries the
 # operator can opportunistically fix.
 
-_TB154_CANONICAL_BRIEFING = (
-    "# TB-X — example\n\n"
-    "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-    "## Scope\n\n- foo.py\n\n"
-    "## Design\n\nstub\n\n"
-    "## Verification\n\n- `uv run pytest -q`\n\n"
-    "## Out of scope\n\n- nothing\n"
-)
+_TB154_CANONICAL_BRIEFING = canonical_briefing("TB-X", title="example")
 
 
 def test_tb154_check_briefing_structure_warns_on_missing_section(cfg):
@@ -331,11 +329,7 @@ def test_tb154_check_briefing_structure_warns_on_missing_section(cfg):
     `ap2 check` going red."""
     brief = cfg.tasks_dir / "tb-200-no-verification.md"
     brief.write_text(
-        "# TB-200 — no verification\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Out of scope\n\n- nothing\n"
+        briefing_missing("TB-200", title="no verification", drop="Verification")
     )
     report = check.check_project(cfg)
     # Warning, not error — non-fatal so legacy briefings don't block
@@ -408,12 +402,13 @@ def test_check_briefing_emits_goal_off_anchor_warning(cfg):
     (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
     brief = cfg.tasks_dir / "tb-300-off-anchor.md"
     brief.write_text(
-        "# TB-300 — off-anchor briefing\n\n"
-        "## Goal\n\nPolish ap2's internal logging shape — make daemon.log nicer.\n\n"
-        "## Scope\n\n- daemon.py\n\n"
-        "## Design\n\nRework logs.\n\n"
-        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
+        briefing_missing(
+            "TB-300",
+            title="off-anchor briefing",
+            drop="goal-anchor",
+            scope="- daemon.py\n",
+            design="Rework logs.\n",
+        )
     )
     report = check.check_project(cfg)
     # Warning, not error — the lint is non-fatal.
@@ -434,13 +429,16 @@ def test_check_briefing_no_goal_anchor_warning_when_briefing_cites_anchor(cfg):
     (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
     brief = cfg.tasks_dir / "tb-301-anchored.md"
     brief.write_text(
-        "# TB-301 — well-anchored briefing\n\n"
-        "## Goal\n\nReinforces the Done-when bullet that operators can "
-        "run the full pipeline without intervention.\n\n"
-        "## Scope\n\n- ap2/verify.py\n\n"
-        "## Design\n\nDo the thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+        canonical_briefing(
+            "TB-301",
+            title="well-anchored briefing",
+            goal_anchor=(
+                "Done-when bullet that operators can run the full pipeline "
+                "without intervention"
+            ),
+            scope="- ap2/verify.py\n",
+            design="Do the thing.\n",
+        )
     )
     report = check.check_project(cfg)
     assert not any(
@@ -459,12 +457,9 @@ def test_check_briefing_anchor_lint_skipped_when_goal_md_all_placeholder(cfg):
     # cfg's goal.md is already the placeholder template from init_project.
     brief = cfg.tasks_dir / "tb-302-day-one.md"
     brief.write_text(
-        "# TB-302 — day-one briefing\n\n"
-        "## Goal\n\nGeneric meta-polish prose.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nA thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+        briefing_missing(
+            "TB-302", title="day-one briefing", drop="goal-anchor",
+        )
     )
     report = check.check_project(cfg)
     assert not any(
@@ -492,13 +487,17 @@ def test_check_briefing_emits_why_now_warning(cfg):
     (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
     brief = cfg.tasks_dir / "tb-400-no-why-now.md"
     brief.write_text(
-        "# TB-400 — no why-now rationale\n\n"
-        "## Goal\n\nReinforces the Done-when bullet that operators "
-        "can run the full pipeline without intervention.\n\n"
-        "## Scope\n\n- daemon.py\n\n"
-        "## Design\n\nRework logs.\n\n"
-        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
+        briefing_missing(
+            "TB-400",
+            title="no why-now rationale",
+            drop="Why now",
+            goal_anchor=(
+                "Done-when bullet that operators can run the full pipeline "
+                "without intervention"
+            ),
+            scope="- daemon.py\n",
+            design="Rework logs.\n",
+        )
     )
     report = check.check_project(cfg)
     # Warning, not error — the lint is non-fatal.
@@ -544,16 +543,16 @@ def test_check_briefing_no_why_now_warning_when_rationale_present(cfg):
     (cfg.project_root / "goal.md").write_text(_TB161_GOAL_MD)
     brief = cfg.tasks_dir / "tb-402-well-formed.md"
     brief.write_text(
-        "# TB-402 — well-formed briefing\n\n"
-        "## Goal\n\nReinforces the Done-when bullet that operators "
-        "can run the full pipeline without intervention.\n\n"
-        "Why now: closes the silent-skip failure mode operators "
-        "can't catch in time without a queue-append-time guard "
-        "(TB-164).\n\n"
-        "## Scope\n\n- ap2/verify.py\n\n"
-        "## Design\n\nDo the thing.\n\n"
-        "## Verification\n\n- `uv run pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
+        canonical_briefing(
+            "TB-402",
+            title="well-formed briefing",
+            goal_anchor=(
+                "Done-when bullet that operators can run the full pipeline "
+                "without intervention"
+            ),
+            scope="- ap2/verify.py\n",
+            design="Do the thing.\n",
+        )
     )
     report = check.check_project(cfg)
     assert not any(

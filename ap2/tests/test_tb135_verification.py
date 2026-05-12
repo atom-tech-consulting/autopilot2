@@ -81,6 +81,7 @@ from ap2.board import Board
 from ap2.cli import cmd_add
 from ap2.config import Config
 from ap2.init import init_project
+from ap2.tests._briefing_fixtures import canonical_briefing
 
 
 # ---------------------------------------------------------------------------
@@ -276,14 +277,7 @@ def test_tb135_tools_do_board_edit_non_empty_briefing_payload_still_succeeds(
     drain reconstructing add_*) build the briefing themselves. Pin the
     happy path: a non-empty `briefing` text payload still succeeds for
     every add_* action — only empty/missing briefings are rejected."""
-    body = (
-        "# Daemon-built briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    body = canonical_briefing("TB-135", title="Daemon-built briefing")
     for action, expected_section in (
         ("add_ready", "Ready"),
         ("add_backlog", "Backlog"),

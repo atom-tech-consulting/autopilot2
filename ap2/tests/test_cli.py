@@ -32,6 +32,10 @@ from ap2.cli import (
 )
 from ap2.config import Config
 from ap2.init import init_project
+from ap2.tests._briefing_fixtures import (
+    briefing_missing,
+    canonical_briefing,
+)
 
 
 def _project(tmp_path: Path) -> Config:
@@ -1182,14 +1186,7 @@ def test_add_strips_tbn_prefix_from_h1(tmp_path: Path):
     task's title — strip the `TB-N — ` prefix on parse."""
     cfg = _project(tmp_path)
     brief = tmp_path / "prefixed.md"
-    brief.write_text(
-        "# TB-99 — Real title here\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nedit\n\n"
-        "## Verification\n- `uv run pytest -q` — passes\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    brief.write_text(canonical_briefing("TB-99", title="Real title here"))
 
     rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
 
@@ -1932,15 +1929,7 @@ def test_cmd_update_briefing_file_round_trips(tmp_path: Path):
     _seed(cfg, task_id="TB-507", briefing=rel)
 
     new_brief = tmp_path / "new.md"
-    new_brief.write_text(
-        "# Updated\n\n"
-        "## Goal\n\nbetter\n\n"
-        "Why now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nedit\n\n"
-        "## Verification\n- `pytest`\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    new_brief.write_text(canonical_briefing("TB-507", title="Updated"))
     rc = cmd_update(cfg, _update_args("TB-507", briefing_file=str(new_brief)))
     assert rc == 0
     _drain(cfg)
@@ -1963,15 +1952,7 @@ def test_cmd_update_briefing_file_stdin(tmp_path: Path, monkeypatch):
     rel = str(bp.relative_to(cfg.project_root))
     _seed(cfg, task_id="TB-508", briefing=rel)
 
-    new_briefing = (
-        "# Stdin briefing\n\n"
-        "## Goal\n\ng\n\n"
-        "Why now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- f\n\n"
-        "## Design\n\nd\n\n"
-        "## Verification\n- `t`\n\n"
-        "## Out of scope\n\n- n\n"
-    )
+    new_briefing = canonical_briefing("TB-508", title="Stdin briefing")
     monkeypatch.setattr("sys.stdin", io.StringIO(new_briefing))
 
     rc = cmd_update(cfg, _update_args("TB-508", briefing_file="-"))

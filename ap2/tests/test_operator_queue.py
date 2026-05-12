@@ -24,6 +24,10 @@ from ap2 import events, retry, tools
 from ap2.board import Board
 from ap2.config import Config
 from ap2.init import init_project
+from ap2.tests._briefing_fixtures import (
+    briefing_missing,
+    canonical_briefing,
+)
 
 
 @pytest.fixture
@@ -44,15 +48,7 @@ def _unwrap(res: dict) -> dict:
 # care about the briefing's contents (the queue handler treats it as
 # opaque bytes), but they need to pass a non-empty one to clear the
 # new gate. Helper to keep the call sites short.
-_BRIEFING = (
-    "# Test briefing\n\n"
-    "## Goal\n\nA thing happens.\n\n"
-    "Why now: closes the missing-thing failure mode the briefing names.\n\n"
-    "## Scope\n\n- foo.py\n\n"
-    "## Design\n\nDirect edit.\n\n"
-    "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-    "## Out of scope\n\n- nothing\n"
-)
+_BRIEFING = canonical_briefing("TB-300", title="Test briefing")
 
 
 def _add(op: str = "add_backlog", title: str = "t", **extra) -> dict:
@@ -420,14 +416,7 @@ def test_cmd_add_prints_queued_message(cfg: Config, capsys, tmp_path: Path):
     from ap2.cli import cmd_add
 
     brief = tmp_path / "brief.md"
-    brief.write_text(
-        "# hello world\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Verification\n- `uv run pytest -q` — gates pass\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    brief.write_text(canonical_briefing("TB-301", title="hello world"))
 
     rc = cmd_add(
         cfg,
@@ -792,15 +781,7 @@ def test_update_briefing_round_trips(cfg: Config):
     rel = str(brief_path.relative_to(cfg.project_root))
     _seed_backlog_task(cfg, briefing=rel)
 
-    new_briefing = (
-        "# Updated\n\n"
-        "## Goal\n\nBetter goal.\n\n"
-        "Why now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nedit\n\n"
-        "## Verification\n- `pytest -q`\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    new_briefing = canonical_briefing("TB-400", title="Updated")
     tools.do_operator_queue_append(
         cfg,
         {"op": "update", "task_id": "TB-400", "briefing": new_briefing},
@@ -1052,14 +1033,7 @@ def test_update_briefing_for_legacy_task_allocates_slug(cfg: Config):
     allocated from their CURRENT title at queue-append time."""
     _seed_backlog_task(cfg, title="Legacy task", briefing=None)
 
-    new_briefing = (
-        "# Legacy briefing\n\n"
-        "## Goal\n\nstub\n\nWhy now: closes the failure mode named in the briefing scope.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nedit\n\n"
-        "## Verification\n- `pytest`\n\n"
-        "## Out of scope\n\n- nothing\n"
-    )
+    new_briefing = canonical_briefing("TB-400", title="Legacy briefing")
     tools.do_operator_queue_append(
         cfg,
         {"op": "update", "task_id": "TB-400", "briefing": new_briefing},
@@ -1654,12 +1628,10 @@ def test_queue_append_skip_flag_does_not_bypass_other_validators(
     still rejected even with the flag set, and the canonical-sections
     gate (TB-154) keeps firing. Pin via the missing-Verification case
     per the briefing's verification scope."""
-    missing_verif = (
-        "# missing-verif via queue + skip\n\n"
-        "## Goal\n\nFix a one-line typo.\n\n"
-        "## Scope\n\n- foo.py\n\n"
-        "## Design\n\nstub\n\n"
-        "## Out of scope\n\n- nothing\n"
+    missing_verif = briefing_missing(
+        "TB-170",
+        title="missing-verif via queue + skip",
+        drop="Verification",
     )
     res = tools.do_operator_queue_append(
         cfg,
@@ -2039,11 +2011,7 @@ def test_classify_drain_appends_to_proposal_record(cfg: Config):
         cfg,
         tb_id=tb_id,
         blocked_on="review",
-        briefing_text=(
-            "# x\n\n## Goal\nfoo\n\nWhy now: bar baz qux quux quuz garply.\n\n"
-            "## Scope\n- f\n\n## Design\nd\n\n"
-            "## Verification\n- `:` — y\n\n## Out of scope\n- z\n"
-        ),
+        briefing_text=canonical_briefing(tb_id, title="x"),
         briefing_rel=".cc-autopilot/tasks/x.md",
     )
     assert record_path is not None and record_path.exists()
@@ -2203,11 +2171,7 @@ def test_classify_drain_idempotent_on_uuid(cfg: Config):
         cfg,
         tb_id=tb_id,
         blocked_on="review",
-        briefing_text=(
-            "# x\n\n## Goal\nfoo\n\nWhy now: bar baz qux quux quuz garply.\n\n"
-            "## Scope\n- f\n\n## Design\nd\n\n"
-            "## Verification\n- `:` — y\n\n## Out of scope\n- z\n"
-        ),
+        briefing_text=canonical_briefing(tb_id, title="x"),
         briefing_rel=".cc-autopilot/tasks/x.md",
     )
     assert record_path is not None
