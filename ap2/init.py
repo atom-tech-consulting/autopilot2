@@ -151,10 +151,42 @@ def render_briefing(
     )
 
 
+# TB-199: `## Done when` sits between Mission and Current focus so the
+# strategic framing (Mission + Done-when = what success looks like) is
+# grouped before the tactical state (Current focus + Constraints).
+# Mirrors this project's own goal.md ordering. The section is load-
+# bearing for TWO surfaces:
+#   - ideation's done-signal — all-met Done-when criteria are how
+#     ideation recognizes "stop proposing here" on a finished project.
+#   - the TB-161 goal-anchor validator — `_goal_md_anchors` mines
+#     Done-when bullets for substring anchors a briefing's `## Goal`
+#     body must cite. Pre-TB-199 the shipped template omitted the
+#     section, so fresh `ap2 init` projects could only anchor against
+#     `## Current focus` until an operator hand-added Done-when.
+#
+# Placeholder body shape is deliberate: explanatory prose describing
+# what belongs (mentions "criterion", names the "stop proposing here"
+# done-signal, gives an example, references the model) followed by a
+# single `- (TODO)` stub bullet. The stub keeps the "bulleted list"
+# hint visible but its body normalizes to <3 words, so
+# `_bullet_anchor_phrase` rejects it — the placeholder template
+# contributes zero live anchors. That preserves the TB-161 day-one
+# fresh-project skip path: a project whose `goal.md` is still the
+# all-placeholder template doesn't reject every proposal on day one.
+# Anchors emerge naturally the moment the operator replaces the stub
+# with real shipped-when criteria (the section is "live" the instant
+# real content lands; the placeholder is just inert).
 GOAL_TEMPLATE = (
     "# Project Goals\n\n"
     "## Mission\n"
     "(one-sentence statement of what this project is FOR)\n\n"
+    "## Done when\n"
+    "(Fill in a bulleted list of concrete \"the project ships when X\"\n"
+    "criteria — e.g. \"the API handles N requests/sec at p99 latency\n"
+    "Xms in production\". Ideation reads these as the done-signal:\n"
+    "all-met criteria mean \"stop proposing here\". See goal-draft.md's\n"
+    "own Done-when examples for shape.)\n\n"
+    "- (TODO)\n\n"
     "## Current focus\n"
     "- (area or theme actively in flight now)\n\n"
     "## Non-goals\n"

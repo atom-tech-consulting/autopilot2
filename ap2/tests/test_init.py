@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ap2.config import Config
 from ap2.init import (
+    GOAL_TEMPLATE,
     NESTED_GITIGNORE_BLOCKS,
     ROOT_GITIGNORE_BLOCKS,
     init_project,
@@ -272,16 +273,112 @@ def test_ideation_state_md_idempotent(tmp_path: Path):
 
 def test_creates_goal_md_when_missing(tmp_path: Path):
     """Fresh project gets a templated goal.md so the ideation cron has an
-    explicit project-level anchor to read (TB-70)."""
+    explicit project-level anchor to read (TB-70). TB-199 adds the
+    `## Done when` section so the TB-161 anchor validator's Done-when
+    surface is populated out of the box."""
     report = init_project(tmp_path)
     goal = tmp_path / "goal.md"
     assert goal.exists()
     assert report.goal_md_created is True
     text = goal.read_text()
-    # Pin the four sections the ideation prompt expects to find.
-    for section in ("# Project Goals", "## Mission", "## Current focus",
-                    "## Non-goals", "## Constraints"):
+    # Pin the five sections the ideation prompt and the TB-161 anchor
+    # validator expect to find.
+    for section in ("# Project Goals", "## Mission", "## Done when",
+                    "## Current focus", "## Non-goals", "## Constraints"):
         assert section in text
+    # Placeholder body mentions "criterion" / "criteria" (TB-199's
+    # verification: "criterion (or equivalent)") so an operator reading
+    # the template learns what belongs in Done-when without consulting
+    # docs.
+    done_when_idx = text.index("## Done when")
+    current_focus_idx = text.index("## Current focus")
+    done_when_body = text[done_when_idx:current_focus_idx].lower()
+    assert "criterion" in done_when_body or "criteria" in done_when_body, (
+        f"Done-when placeholder must explain what belongs there "
+        f"(mention criterion / criteria); got:\n{done_when_body!r}"
+    )
+
+
+def test_goal_template_section_order_is_canonical():
+    """TB-199: section order pins Mission → Done when → Current focus →
+    Non-goals → Constraints. Strategic framing (Mission + Done-when =
+    what success looks like) is grouped before the tactical state
+    (Current focus + Constraints). Order is load-bearing — a future
+    refactor that reshuffles the template should explicitly update this
+    test rather than silently drift."""
+    sections = (
+        "## Mission",
+        "## Done when",
+        "## Current focus",
+        "## Non-goals",
+        "## Constraints",
+    )
+    positions = [GOAL_TEMPLATE.index(s) for s in sections]
+    assert positions == sorted(positions), (
+        f"GOAL_TEMPLATE sections out of canonical order: {sections} "
+        f"resolved to positions {positions}"
+    )
+
+
+def test_goal_template_round_trips_through_briefing_validator(tmp_path: Path):
+    """TB-199 round-trip: `init_project` writes goal.md from
+    GOAL_TEMPLATE; a minimal briefing whose `## Goal` body quotes the
+    Done-when placeholder text verbatim passes
+    `_validate_briefing_structure`. Pins the day-one fresh-project
+    contract: the all-placeholder goal.md (with the new Done-when
+    section) is anchor-empty so the validator's TB-161 anchor check
+    short-circuits to skip rather than reject every minimal briefing.
+    Anchors emerge the moment an operator replaces the `(TODO)` stub
+    with real shipped-when criteria — at which point briefings must
+    cite them, exactly as for any operator-filled `## Current focus`.
+    """
+    # Lazy import — `tools` pulls in MCP machinery that's heavier than
+    # the rest of test_init needs.
+    from ap2 import tools
+
+    init_project(tmp_path)
+    goal_md = tmp_path / "goal.md"
+    assert goal_md.exists()
+
+    # Sanity-check the day-one fresh-project property: the template
+    # itself contributes zero anchors so the TB-161 validator falls
+    # through to skip on a freshly-initialized project. If a future
+    # refactor adds anchoring text to the placeholder, this assertion
+    # fires first (clear error) before the downstream validator-accept
+    # check fails in a more confusing way.
+    from ap2.tools import _goal_md_anchors
+    assert _goal_md_anchors(goal_md) == set(), (
+        "fresh init_project goal.md must contribute zero anchors so the "
+        "TB-161 validator skips on day one; placeholder body has drifted"
+    )
+
+    # Quote the placeholder text verbatim in the briefing's `## Goal`
+    # body — the round-trip case the TB-199 verification description
+    # names. With the all-placeholder skip path active, the validator
+    # accepts regardless of whether the briefing cites the Done-when
+    # text or not; this test still pins the explicit shape an operator
+    # would author on day one (no anchor obligation, but the briefing
+    # nonetheless references the Done-when surface).
+    briefing = (
+        "# tb-199-roundtrip\n\n"
+        "## Goal\n\n"
+        "Quoting the fresh template's `## Done when` placeholder: "
+        "fill in a bulleted list of concrete \"the project ships when "
+        "X\" criteria — e.g. \"the API handles N requests/sec at p99 "
+        "latency Xms in production\".\n\n"
+        "Why now: closes the template/validator drift the briefing "
+        "names — fresh projects had no Done-when surface at all.\n\n"
+        "## Scope\n\n- ap2/init.py\n\n"
+        "## Design\n\nGrow GOAL_TEMPLATE with a Done-when section.\n\n"
+        "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        "## Out of scope\n\n- nothing\n"
+    )
+    err = tools._validate_briefing_structure(briefing, goal_md_path=goal_md)
+    assert err is None, (
+        f"briefing quoting the GOAL_TEMPLATE Done-when placeholder "
+        f"should pass the validator on a freshly-initialized project; "
+        f"got: {err!r}"
+    )
 
 
 def test_does_not_overwrite_existing_goal_md(tmp_path: Path):
