@@ -50,3 +50,12 @@ The four tests share a tiny helper module-local set of constants but otherwise s
 - Mirroring the drift gate into `ap2/check.py` (defer; one surface per cycle).
 - Decomposing `ap2/howto.md` itself (it's 503 lines but operator-readable as one page; no boundary signal yet).
 - Auto-generating the docs from source (would risk drift in the other direction — docs lose the WHY commentary goal.md L70-72 names as the failure mode for paraphrased docs).
+## Attempts
+
+### 2026-05-12 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260512T190940Z-TB-203.prompt.md`, `stream: .cc-autopilot/debug/20260512T190940Z-TB-203.stream.jsonl`, `messages: .cc-autopilot/debug/20260512T190940Z-TB-203.messages.jsonl`
