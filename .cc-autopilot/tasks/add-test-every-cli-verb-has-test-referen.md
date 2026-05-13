@@ -56,3 +56,8 @@ Why now: TB-208 just landed (`e2179b9`, 2026-05-13T01:35:43Z) with an explicit d
 - **kind:** per_task
 - **failed_criteria:** [fail] `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" (the lines 41-
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T044038Z-TB-209.prompt.md`, `stream: .cc-autopilot/debug/20260513T044038Z-TB-209.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T044038Z-TB-209.messages.jsonl`
+### 2026-05-13 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" (the lines 41-
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T044854Z-TB-209.prompt.md`, `stream: .cc-autopilot/debug/20260513T044854Z-TB-209.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T044854Z-TB-209.messages.jsonl`
