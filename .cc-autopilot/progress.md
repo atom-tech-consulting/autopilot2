@@ -491,3 +491,9 @@
 - **Summary:** Previously committed in 5d1d197; re-verified after operator briefing fix to bullet #4 (literal backtick → `.` regex). Section heading present at howto.md L430, 35 verb rows (≥20), test_every_cli_verb_documented at test_docs_drift.py L273, 13 mentions of the 8 recently-added verbs (≥8), `uv run pytest -q ap2/tests/test_docs_drift.py` → 5 passed, full suite 1270 passed; section opens with CLI/MCP/chat-verb distinction and excludes argparse.SUPPRESS subparsers in both prose and the `_collect_cli_verbs` walk.
 - **Files:** ap2/howto.md, ap2/tests/test_docs_drift.py
 - **Tests:** pass
+
+## [2026-05-13] TB-209: Add `test_every_cli_verb_has_test_reference` to `test_coverage_drift.py`; extract `_collect_cli_verbs` to a shared helper (3rd-site threshold trigger)
+- **Commit:** `1a54d14`
+- **Summary:** Previously committed in 1a54d14; re-verified full briefing scope on fixed briefing shape: (1) `_collect_cli_verbs` extracted verbatim to `ap2/tests/_source_registry.py` (preserves docstring, argparse.SUPPRESS exclusion, group-vs-leaf walk); `test_docs_drift.py` imports from there. (2) `test_every_cli_verb_has_test_reference` added to `test_coverage_drift.py`, mirrors the three sibling tests' shape, reuses the single shared `_COVERAGE_DRIFT_EXEMPT_SURFACES` frozenset, scans `ap2/tests/` via `_read_all_test_text()`. (3) Module docstring lines 41-47 rewritten — "deferred" language gone, replaced by explicit threshold-three-trip narrative. (4) `test_cli_verb_gate_catches_missing_verb` pins the gate's failure path end-to-end via monkey-patch. All verifier bullets pass: pytest coverage_drift (5/5), docs_drift (5/5), full ap2/tests (1272/1272); grep checks all exit 0; exactly one module-level `_collect_cli_verbs` definition under `ap2/tests/`.
+- **Files:** ap2/tests/_source_registry.py, ap2/tests/test_coverage_drift.py, ap2/tests/test_docs_drift.py
+- **Tests:** pass
