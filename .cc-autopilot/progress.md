@@ -497,3 +497,9 @@
 - **Summary:** Previously committed in 1a54d14; re-verified full briefing scope on fixed briefing shape: (1) `_collect_cli_verbs` extracted verbatim to `ap2/tests/_source_registry.py` (preserves docstring, argparse.SUPPRESS exclusion, group-vs-leaf walk); `test_docs_drift.py` imports from there. (2) `test_every_cli_verb_has_test_reference` added to `test_coverage_drift.py`, mirrors the three sibling tests' shape, reuses the single shared `_COVERAGE_DRIFT_EXEMPT_SURFACES` frozenset, scans `ap2/tests/` via `_read_all_test_text()`. (3) Module docstring lines 41-47 rewritten — "deferred" language gone, replaced by explicit threshold-three-trip narrative. (4) `test_cli_verb_gate_catches_missing_verb` pins the gate's failure path end-to-end via monkey-patch. All verifier bullets pass: pytest coverage_drift (5/5), docs_drift (5/5), full ap2/tests (1272/1272); grep checks all exit 0; exactly one module-level `_collect_cli_verbs` definition under `ap2/tests/`.
 - **Files:** ap2/tests/_source_registry.py, ap2/tests/test_coverage_drift.py, ap2/tests/test_docs_drift.py
 - **Tests:** pass
+
+## [2026-05-13] TB-210: Pin `AP2_TASK_MAX_TURNS`, `AP2_JANITOR_JUDGE_EFFORT`, `AP2_JANITOR_JUDGE_MAX_TURNS`, `AP2_MM_TEAM_ID` with happy + error path unit tests (TB-208 coverage-debt closure)
+- **Commit:** `843b379`
+- **Summary:** Added ap2/tests/test_tb210_env_knobs.py with 14 default/override/invalid/precedence tests pinning AP2_TASK_MAX_TURNS (daemon.run_task), AP2_JANITOR_JUDGE_EFFORT + AP2_JANITOR_JUDGE_MAX_TURNS (janitor._judge_finding), and AP2_MM_TEAM_ID (sandbox._install_channel_for_project / resolve_mm_channel); each test references the call-site module symbol. Replaced the four-knob shim block in test_coverage_drift.py L385-389 with a one-line audit comment pointing at the new module — drift gate stays green. Full ap2 suite 1286/1286 passing.
+- **Files:** ap2/tests/test_tb210_env_knobs.py, ap2/tests/test_coverage_drift.py
+- **Tests:** pass
