@@ -382,11 +382,11 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 # stays satisfied by that test (the comment here becomes redundant
 # but harmless).
 #
-# Env knobs (4) — sibling to TB-205's four:
-#   - AP2_TASK_MAX_TURNS         (daemon.py — task-agent `max_turns`)
-#   - AP2_JANITOR_JUDGE_EFFORT   (janitor.py — judge effort cap)
-#   - AP2_JANITOR_JUDGE_MAX_TURNS(janitor.py — judge `max_turns`)
-#   - AP2_MM_TEAM_ID             (mattermost.py — MM API team scope)
+# Env knobs: TB-210 closed the four-knob debt (AP2_TASK_MAX_TURNS,
+# AP2_JANITOR_JUDGE_EFFORT, AP2_JANITOR_JUDGE_MAX_TURNS, AP2_MM_TEAM_ID)
+# by landing `ap2/tests/test_tb210_env_knobs.py` — the substring drift
+# gate now resolves all four via that real test module rather than this
+# comment block. The shim entries were removed when TB-210 landed.
 #
 # Event types (8) — emitter sites that lack a dedicated assertion test:
 #   - auto_diagnose_error            (daemon.py — auto-diagnose failure)
