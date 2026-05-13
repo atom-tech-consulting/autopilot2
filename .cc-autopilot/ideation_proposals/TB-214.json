@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/pin-4-sandbox-install-cli-verbs-ap2-sand.md",
+  "focus_anchor": "current focus code quality",
+  "proposed_at": "2026-05-13T10:35:58Z",
+  "tb_id": "TB-214",
+  "why_now": "TB-209's docstring names this gap as a closed-set follow-up at exactly 12 entries that bifurcate cleanly along verb-family \u2014 4 daemon-lifecycle (TB-213, in flight) + 4 sandbox install-* (this TB) + 4 sandbox audit/setup (sibling TB). The install-* verbs are the operator's first-touch surface on a fresh project (statusline + howto + MM creds + MM channel \u2014 each is the only path to wire one of those subsystems), with high blast-radius if a refactor silently breaks them. Without real assertions, every future refactor of `cli.cmd_sandbox_install_*` handlers or the underlying sandbox helpers they wrap can silently break operator onboarding while the drift gate stays green via the shim. Replacing the shim with real tests closes the sandbox install-* subset of the testing-axis gap that TB-209 explicitly tagged as \"coverage debt, not exemptions\" in one shot."
+}

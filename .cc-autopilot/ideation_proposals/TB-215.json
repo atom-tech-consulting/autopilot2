@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/pin-4-sandbox-audit-setup-cli-verbs-ap2.md",
+  "focus_anchor": "current focus code quality",
+  "proposed_at": "2026-05-13T10:36:36Z",
+  "tb_id": "TB-215",
+  "why_now": "TB-209's docstring names this gap as a closed-set follow-up at exactly 12 entries that bifurcate cleanly along verb-family \u2014 4 daemon-lifecycle (TB-213, in flight) + 4 sandbox install-* (TB-214, sibling) + 4 sandbox audit/setup (this TB). Together with the two siblings, this TB closes the 12-verb debt in one drop. The audit/setup verbs are the pre-onboarding readiness-check surface (project-audit / user-audit return WARN/FAIL diagnostics before a daemon ever starts; project-setup / user-setup are the corresponding fix paths). Without real assertions, every future refactor of `cli.cmd_sandbox_project_audit` / `cmd_sandbox_user_audit` and the underlying `sandbox.project_audit` / `sandbox.user_audit` helpers can silently break the readiness-check contract (e.g. a check that should FAIL stops FAILing, or a fix path stops fixing) while the drift gate stays green via the shim. Replacing the shim with real tests closes the sandbox audit/setup subset of the testing-axis gap that TB-209 explicitly tagged as \"coverage debt, not exemptions\" \u2014 finalizing TB-209's enumerated closure."
+}
