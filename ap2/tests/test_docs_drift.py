@@ -16,11 +16,10 @@ test with a precise diff, not a cascade.
 """
 from __future__ import annotations
 
-import argparse
 import re
 from pathlib import Path
 
-from ap2.cli import build_parser
+from ap2.tests._source_registry import _collect_cli_verbs
 from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS, TASK_AGENT_TOOLS
 
 
@@ -120,52 +119,6 @@ def _collect_event_types() -> set[str]:
     for path in _iter_source_files():
         types.update(pat.findall(path.read_text()))
     return types - _DOCS_DRIFT_EXEMPT_EVENT_TYPES
-
-
-def _collect_cli_verbs() -> set[str]:
-    """Walk `build_parser()`'s subparser tree and return every
-    non-suppressed leaf verb as `"ap2 <verb>"` (top-level) or
-    `"ap2 <group> <sub>"` (nested under `cron` / `sandbox`).
-
-    Argparse marks a subparser as hidden by setting its `help` to
-    `argparse.SUPPRESS` (rendered as the literal `"==SUPPRESS=="`); those
-    entries are NOT operator-facing (e.g. `ap2 _run`, the backgrounded
-    daemon entrypoint forked by `cmd_start`), so they're dropped here.
-    The howto-side wording in `## Operator CLI verbs (reference)` mirrors
-    the same exclusion explicitly so the table and the gate agree on
-    what counts as a verb.
-
-    Group nodes (`ap2 cron`, `ap2 sandbox`) themselves are skipped — the
-    operator-facing leaves are the nested sub-verbs, and the howto table
-    documents one row per leaf rather than a redundant row for the
-    group root.
-    """
-    verbs: set[str] = set()
-
-    def walk(parser: argparse.ArgumentParser, prefix: str) -> None:
-        for action in parser._actions:
-            if not isinstance(action, argparse._SubParsersAction):
-                continue
-            # `_choices_actions` carries the help string per visible subparser;
-            # entries with `help=argparse.SUPPRESS` show `'==SUPPRESS=='` here.
-            help_by_name = {ca.dest: ca.help for ca in action._choices_actions}
-            for name, sub in action.choices.items():
-                help_str = help_by_name.get(name)
-                if help_str == argparse.SUPPRESS:
-                    continue
-                full = f"{prefix} {name}".strip()
-                has_nested = any(
-                    isinstance(a, argparse._SubParsersAction)
-                    for a in sub._actions
-                )
-                if has_nested:
-                    # Group node — recurse to leaves; don't emit the group itself.
-                    walk(sub, full)
-                else:
-                    verbs.add(full)
-
-    walk(build_parser(), "ap2")
-    return verbs
 
 
 def _all_agent_mcp_tool_short_names() -> set[str]:

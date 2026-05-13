@@ -1,4 +1,4 @@
-"""Test-presence drift gate (TB-208).
+"""Test-presence drift gate (TB-208, TB-209).
 
 Symmetric counterpart to the docs-drift gate in
 `ap2/tests/test_docs_drift.py` (TB-203), but on the **testing axis**
@@ -6,10 +6,12 @@ rather than the docs axis: every operator-tunable / surface-area
 identifier that the autopilot codebase registers — MCP tool short
 names registered in `CONTROL_AGENT_TOOLS` / `TASK_AGENT_TOOLS` /
 `MM_HANDLER_TOOLS`, every `AP2_*` env knob referenced in `ap2/*.py`,
-every event-type string passed to `events.append(...)` — must have at
-least one substring reference somewhere under `ap2/tests/`. A future
-source addition (new env knob, new MCP tool, new event-type) trips
-one of these tests until a test file mentions the surface by name.
+every event-type string passed to `events.append(...)`, every
+non-suppressed `ap2 <verb>` subcommand in `build_parser()` — must
+have at least one substring reference somewhere under `ap2/tests/`.
+A future source addition (new env knob, new MCP tool, new event-type,
+new CLI verb) trips one of these tests until a test file mentions
+the surface by name.
 
 Goal anchor: this gate closes the structural gap on the current focus's
 **Testing coverage** axis (goal.md L58-63: "every shipped CLI verb,
@@ -36,24 +38,24 @@ default is "if it's registered, it's tested." The exempt list is
 grep-friendly; an audit of "what opted out and why" is a single
 `grep _COVERAGE_DRIFT_EXEMPT_`.
 
-CLI-verb fourth surface deferred: TB-207 (just landed; introduced
-`_collect_cli_verbs` in `test_docs_drift.py`) is the natural follow-up
-that lets a `test_every_cli_verb_has_test_reference` slot in here
-with the same shape. A separate follow-up task adds that fourth test
-once the helper's `_collect_cli_verbs` walk is reusable across both
-gates — until then the goal.md L74-77 threshold-three rule keeps the
-helper inlined in `test_docs_drift.py` rather than extracted (only
-two parallel gates today).
+CLI-verb fourth surface (TB-209): `test_every_cli_verb_has_test_reference`
+mirrors the three sibling tests' shape on the CLI-verb axis. The
+`_collect_cli_verbs` walk is imported from the shared
+`ap2/tests/_source_registry.py` module — the 3rd-call-site threshold
+(docs gate + coverage gate + howto-table source-of-truth from TB-207)
+flipped goal.md L74-77's threshold-three rule from "premature
+abstraction" to "structurally appropriate extraction."
 
-Why inlined regex (not shared with `test_docs_drift.py`): goal.md
-L74-77's threshold-three rule for shared-helper extraction isn't met
-with only two call sites. If a third parallel gate ever lands (e.g.
-an architecture.md-side test-presence branch, or the deferred CLI-verb
-test here), the threshold flips and a shared `_source_registry.py`
-extraction becomes the right move; until then, inlined regex is the
-cheaper read.
+Why other helpers stay inlined (not yet shared with `test_docs_drift.py`):
+goal.md L74-77's threshold-three rule isn't met for `_collect_env_knobs`,
+`_collect_event_types`, `_all_agent_mcp_tool_short_names` — those are
+2-call-site today (docs gate + coverage gate). If a third parallel
+reader ever lands (e.g. an architecture.md-side test-presence branch,
+an operator-CLI surface audit), the threshold flips and those move to
+`_source_registry.py` too; until then, inlined regex is the cheaper
+read.
 
-The three tests share a tiny module-local set of constants but
+The four tests share a tiny module-local set of constants but
 otherwise stay independent — a future single-surface addition fails
 exactly one test with a precise diff-shaped error, not a cascade.
 """
@@ -62,6 +64,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from ap2.tests._source_registry import _collect_cli_verbs
 from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS, TASK_AGENT_TOOLS
 
 
@@ -210,7 +213,7 @@ def _read_all_test_text() -> str:
 
 
 # ---------------------------------------------------------------------------
-# The three tests.
+# The four tests.
 
 
 def test_every_mcp_tool_has_test_reference():
@@ -282,10 +285,91 @@ def test_every_event_type_has_test_reference():
     )
 
 
+def test_every_cli_verb_has_test_reference():
+    """Every non-suppressed `ap2 <verb>` subcommand in `build_parser()`
+    appears as a substring (`"ap2 <verb>"`) in at least one file under
+    `ap2/tests/`. Mirrors the three sibling tests' shape on the
+    CLI-verb axis (TB-209): a future verb addition that ships without
+    any test reference trips this gate at CI rather than waiting for
+    ideation enumeration to surface it.
+
+    The walk is imported from `ap2/tests/_source_registry.py` rather
+    than re-implemented here — same set the docs-drift gate
+    (`test_every_cli_verb_documented`) and the howto.md
+    `## Operator CLI verbs (reference)` table (TB-207) consume, so
+    the docs and testing axes can't drift on what counts as a verb.
+    """
+    blob = _read_all_test_text()
+    verbs = _collect_cli_verbs() - _COVERAGE_DRIFT_EXEMPT_SURFACES
+    assert verbs, "no CLI verbs collected from build_parser() — walk regressed"
+    missing = sorted(v for v in verbs if v not in blob)
+    assert not missing, (
+        "Add at least one substring reference under `ap2/tests/` for the "
+        "following CLI verbs registered in `ap2/cli.py`'s `build_parser()`: "
+        f"{missing}. Ideally each verb gets a focused test that exercises "
+        "its happy path AND at least one error path (the pattern across "
+        "`test_cli.py`, `test_approve.py`, `test_rollback.py`, etc.). If "
+        "the verb is intentionally untested (dev-only / smoke-only), add "
+        "it to `_COVERAGE_DRIFT_EXEMPT_SURFACES` with a one-line comment. "
+        "Hidden / dev-only subparsers (`help=argparse.SUPPRESS`, e.g. "
+        "`ap2 _run`) are already dropped by `_collect_cli_verbs` — mark "
+        "the parser entry suppressed rather than exempting here if the "
+        "verb shouldn't be operator-facing at all."
+    )
+
+
+def test_cli_verb_gate_catches_missing_verb(monkeypatch):
+    """Pin the `test_every_cli_verb_has_test_reference` gate end-to-end:
+    monkey-patch the imported `_collect_cli_verbs` to return a single
+    fake verb that is guaranteed not to appear anywhere under
+    `ap2/tests/`, then invoke the gate and assert it raises
+    `AssertionError` whose message names the missing verb.
+
+    Without this pin, a future refactor that silently softens the
+    assertion (e.g. flips the negation, swaps `not missing` for
+    `missing`, drops the substring scan) would still pass at landing
+    because the four-test happy path covers every real verb. The
+    monkey-patch test exercises the FAILURE path of the gate itself —
+    necessary because the gate's whole purpose IS the failure path.
+
+    The fake verb is constructed at runtime via string concatenation
+    so the literal never appears as a single token in this file — a
+    stray match against the source-walk substring check (which scans
+    `ap2/tests/` and would include THIS file) would otherwise pollute
+    the fixture invariant.
+    """
+    import pytest
+
+    # Build the fake verb at runtime so no literal substring appears
+    # anywhere under `ap2/tests/` (including this very file). The
+    # tokens are individually generic and would only assemble to a
+    # gate-tripping verb by deliberate construction.
+    fake_verb = "ap2 " + "fake" + "v" + "erb_" + "x" + "yz_209"
+
+    # Sanity: the assembled verb must not already appear under `ap2/tests/`.
+    assert fake_verb not in _read_all_test_text(), (
+        "fixture invariant broken: the assembled fake verb leaked into "
+        "the test tree; further obscure the construction"
+    )
+
+    monkeypatch.setattr(
+        "ap2.tests.test_coverage_drift._collect_cli_verbs",
+        lambda: {fake_verb},
+    )
+
+    with pytest.raises(AssertionError) as excinfo:
+        test_every_cli_verb_has_test_reference()
+
+    assert fake_verb in str(excinfo.value), (
+        f"gate's failure message must name the missing verb; got: "
+        f"{excinfo.value!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
-# Discovered-at-landing coverage deficits (TB-208).
+# Discovered-at-landing coverage deficits (TB-208, TB-209).
 #
-# When TB-208 landed, the three tests above flagged the following
+# When each gate landed, the tests above flagged the following
 # already-shipped surfaces as lacking ANY substring reference under
 # `ap2/tests/`. They are the residual TB-205-shape gap on top of the
 # four env knobs TB-205 itself closed. Listing the names here gives
@@ -313,6 +397,20 @@ def test_every_event_type_has_test_reference():
 #   - mattermost_timeout             (mattermost.py — handler timeout)
 #   - mm_poll_error                  (mattermost.py — poll-loop exception)
 #   - pipeline_pending_sweep_error   (daemon.py — pipeline-sweep exception)
+#
+# CLI verbs (12) — TB-209-landed gap on the CLI-verb axis:
+#   - ap2 pause                      (cli.py — daemon-pause control)
+#   - ap2 resume                     (cli.py — daemon-resume control)
+#   - ap2 sandbox install-channel    (cli.py — sandbox MM channel install)
+#   - ap2 sandbox install-howto      (cli.py — sandbox howto install)
+#   - ap2 sandbox install-mm         (cli.py — sandbox MM creds install)
+#   - ap2 sandbox install-statusline (cli.py — sandbox statusline install)
+#   - ap2 sandbox project-audit      (cli.py — sandbox per-project audit)
+#   - ap2 sandbox project-setup      (cli.py — sandbox per-project setup)
+#   - ap2 sandbox user-audit         (cli.py — sandbox per-user audit)
+#   - ap2 sandbox user-setup         (cli.py — sandbox per-user setup)
+#   - ap2 stop                       (cli.py — daemon-stop control)
+#   - ap2 unfreeze                   (cli.py — frozen-task unfreeze)
 #
 # Follow-up: a separate TB closes each of these with the same
 # happy-path + error-path shape TB-205 used. Tracking here rather than
