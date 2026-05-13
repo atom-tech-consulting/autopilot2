@@ -44,3 +44,10 @@ Why now: TB-208 just landed (`e2179b9`, 2026-05-13T01:35:43Z) with an explicit d
 - AST-walk semantics tightening for any of the four `test_coverage_drift.py` tests (substring → "imports the symbol AND asserts against it"). Deferred until the substring gate is observed missing a real pro-forma gap, per TB-208's docstring.
 - Adding any new CLI verb to the parser, or modifying any existing verb's behavior. Pure test-infrastructure refactor + new gate.
 - A parallel howto.md docs-side change. The howto's `## Operator CLI verbs (reference)` table already exists (TB-207); this task only closes the testing-axis mirror.
+## Attempts
+
+### 2026-05-13 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" (the lines 41-
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T043107Z-TB-209.prompt.md`, `stream: .cc-autopilot/debug/20260513T043107Z-TB-209.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T043107Z-TB-209.messages.jsonl`
