@@ -1,153 +1,59 @@
 # Ideation State
 
-_Last updated: 2026-05-13T00:08:24Z by ideation cron_
+_Last updated: 2026-05-13T02:15:30Z by ideation cron_
 
 ## Mission alignment
 
-TB-206 just shipped on its post-unfreeze pass at 00:08:24Z, resolving
-the self-coupling between `ap2/howto.md`'s worked-example blocks and
-`goal.md` that cascaded this morning's project-wide pytest failure;
-the prior cycle's "Decisions needed" #2 is now closed. Recent
-Completes all serve the post-2026-05-12T17:02Z **code quality**
-focus:
+Five Completes since the prior cycle, all serving the post-2026-05-12T17:02Z **code quality** focus; both axes targeted last cycle (testing + docs) shipped:
 
-- TB-206 (`72f5933`, complete at 00:08:24Z) — docs axis: full Shape B
-  decoupling shipped (5 worked-example blocks rewritten as fictional
-  Slack-bot-for-trade-alerts, programmatic anchor read from goal.md,
-  verbatim-quote helpers dropped).
-- TB-205 (`c13a07c`, 2026-05-12T20:33Z) — testing axis: 17 unit tests
-  pin `AP2_EVENT_CONTEXT` / `AP2_CONTROL_MAX_TURNS` /
-  `AP2_IDEATION_MAX_TURNS` / `AP2_AGENT_MODEL` (pre-TB-205: 0 test
-  refs).
-- TB-203 (`452627e`; original `1ed8a03`, 2026-05-12T20:18Z) — docs
-  axis: docs-drift gate (`test_docs_drift.py`) for MCP tools / env
-  knobs / event types.
-- TB-204 (`ecd5b2f`, Frozen 2026-05-12T20:42Z) — reusability axis:
-  fixture + 13-file migration in HEAD; briefing now fixed by operator
-  (23:25:52Z update changed `grep -lE` to `grep -rlE`); awaits
-  `ap2 unfreeze TB-204`.
-- TB-202 (`b09e3bc`, 2026-05-12T08:02Z) — Active-gate for
-  `backfill-proposals` / `cron edit`.
+- TB-208 (`e2179b9`, 2026-05-13T01:35:43Z) — testing axis: `ap2/tests/test_coverage_drift.py` shipped with three regression-pin tests (`test_every_mcp_tool/env_knob/event_type_has_test_reference`); empty `_COVERAGE_DRIFT_EXEMPT_SURFACES`. Author explicitly deferred a 4th CLI-verb test slot in the module docstring (lines 41-46) as a follow-up.
+- TB-207 (`5d1d197`, complete 2026-05-13T02:09:58Z after operator briefing fix at 02:03:16Z) — docs axis: `## Operator CLI verbs (reference)` (35 verbs) + `_collect_cli_verbs` helper in `test_docs_drift.py` walking `build_parser()`. Three retries failed on bullet #4 (literal-backtick truncation in regex anchor); operator unfroze after switching the bullet's `\`...\`` fence to `.` regex.
+- TB-206 (`72f5933`, 2026-05-13T00:08:24Z) — docs axis: `ap2/howto.md` worked-example decoupling from goal.md.
+- TB-205 (`c13a07c`, 2026-05-12T20:33Z) — testing axis: 17 unit tests pinning 4 SDK-cost env knobs (pre-TB-205: 0 refs).
+- TB-204 (`ecd5b2f`, complete 2026-05-13T00:13:22Z after operator unfreeze) — reusability axis: `ap2/tests/_briefing_fixtures.py` + 13-file migration.
 
-Slot count = 4 (Backlog=1: TB-207 awaiting review). Insights index
-empty. No unadopted `cron_proposed` events.
+Slot count = 5 (Backlog/Ready/Active/Pipeline all empty; insights index empty; no unadopted `cron_proposed`).
 
 ## Current focus assessment
 
 - **Current focus: code quality (goal.md L38-97, four axes)**
   - Progress so far:
-    - Docs axis: TB-203 landed howto.md/architecture.md reference
-      tables + `test_docs_drift.py` gate; TB-206 decoupled
-      worked-example blocks from goal.md content; TB-207 (Backlog
-      awaiting review) extends the gate to CLI verbs.
-    - Testing axis: TB-205 closed 4 env-knob test gaps with 17 unit
-      tests in `test_env_knobs.py`.
-    - Reusability axis: TB-204 (`ecd5b2f`) introduced
-      `ap2/tests/_briefing_fixtures.py` with 4 builders + 13-file
-      migration in HEAD; awaits operator `ap2 unfreeze TB-204`
-      now that bullet #4 is fixed.
-    - Cleanness axis: untouched (goal.md L86-87 anti-speculative-
-      refactor guardrail unchanged).
+    - Docs axis: TB-203 reference tables for MCP tools / env knobs / event types; TB-207 added the CLI-verb table + `_collect_cli_verbs` walk; TB-206 decoupled worked examples from goal.md.
+    - Testing axis: TB-205 closed 4 SDK-cost env-knob test gaps; TB-208 mechanical drift gate covers MCP tools / env knobs / event types in `test_coverage_drift.py`.
+    - Reusability axis: TB-204 introduced `_briefing_fixtures.py` (4 builders + 13-file migration in HEAD).
+    - Cleanness axis: untouched (goal.md L86-87 anti-speculative-refactor guardrail unchanged).
   - Gaps:
-    (1) **Test-presence drift gate** — TB-205 is the canonical
-    missed-coverage case: 4 env knobs shipped with ZERO `ap2/tests/`
-    references and only surfaced when ideation Step 1.5 enumerated
-    untested SDK-cost knobs. The docs-drift gate (TB-203's
-    `test_docs_drift.py::test_every_env_knob_documented`,
-    `_mcp_tool_documented`, `_event_type_documented`) catches the
-    same gap shape on the docs axis; the symmetric test-axis gate
-    doesn't exist yet. Proposed as TB-208 this cycle.
-    (2) **Cleanness axis (untouched)** — three named long modules
-    past threshold; deferred per goal.md L86-87 (anti-speculative-
-    refactor guardrail). Unchanged from prior cycles.
-    (3) **TB-207 disposition** — Backlog item from prior cycle,
-    awaits operator review. Mechanically surfaced by `ap2 status`
-    (TB-151 / TB-173); not a fresh gap.
+    (1) **CLI-verb 4th surface in `test_coverage_drift.py`** — TB-208's module docstring (lines 41-46) explicitly defers `test_every_cli_verb_has_test_reference` as a follow-up: "A separate follow-up task adds that fourth test once the helper's `_collect_cli_verbs` walk is reusable across both gates." The reusability axis (goal.md L74-77 threshold-three rule) flips with this third call site — `_collect_cli_verbs` would have 3 readers (docs gate, coverage gate, plus the howto table source) and become extraction-eligible. Single proposal addresses gap (1) on the testing axis AND triggers the deferred extraction on the reusability axis. Proposed as TB-209 this cycle.
+    (2) **TB-207-shape briefing pitfall: literal-backtick truncation in shell-bullet regex anchors** — n=2 incidents now (TB-204 bullet #4 grep, TB-207 bullet #4 regex anchor). Pattern is "agent writes a `\`...\`` fence inside a bullet meant as a verbatim regex anchor; validator/operator-fix needed both times." Briefing-validator lint of this specific shape would re-trip the TB-172 wack-a-mole rejection pattern; the structural alternative is the briefing-skill prose itself documenting the pitfall (already in user MEMORY.md), which is a doc-only change with no enforceable gate. Defer until n=3 OR an operator-driven structural ask.
+    (3) **Cleanness axis (untouched)** — three named long modules past threshold; deferred per goal.md L86-87 (anti-speculative-refactor guardrail). Unchanged.
   - Status: `in-progress`
-  - Reasoning: focus is ~7h old; 3 of 4 axes (docs, testing,
-    reusability) have shipped or are in retry; cleanness axis is
-    guardrailed; one fresh gap (test-presence gate, axis 1) is
-    today's TB-208 target.
+  - Reasoning: 3 of 4 axes shipped concrete work this week; cleanness guardrailed; one fresh gap (axis 1 + axis 3 dual-anchor) is today's TB-209 target.
 
 ## Non-goal risk check
 
-None. TB-208 stays inside ap2's own test infrastructure
-(`ap2/tests/test_coverage_drift.py`, sibling to existing
-`test_docs_drift.py`) — no drift into generic-task-scheduler,
-replace-operator-judgment, multi-tenancy, real-time, or
-cross-project axes.
+None. TB-209 stays inside ap2's own test infrastructure — no drift into generic-task-scheduler, replace-operator-judgment, multi-tenancy, real-time, or cross-project axes.
 
 ## Considered & deferred this cycle
 
-- **Enumerative env-knob coverage extensions** (`AP2_VERIFY_JUDGE_*`,
-  `AP2_JANITOR_*`, `AP2_AUTO_DIAGNOSE_*`, `AP2_MM_*`,
-  `AP2_VERIFY_TIMEOUT_S`) — re-trips the n=4 operator-rejection
-  wack-a-mole pattern (TB-172 / TB-185 shape); TB-208's mechanical
-  gate is the structural alternative (catches them all + future
-  additions with one test).
-- **Module decomposition** for `ap2/tools.py` / `ap2/web.py` /
-  `ap2/daemon.py` / `ap2/cli.py` — explicit goal.md L86-87
-  anti-speculative-refactor guardrail; no operator-reported
-  confidence-to-modify regression yet.
-- **Per-op handler extraction in `_apply_operator_op`** (tools.py
-  L2431, 9+ ops in an if/elif chain) — goal.md L74-77 threshold-three
-  not yet met (each op has materially different validation logic;
-  helper factoring needs a real triggering case).
-- **`# TB-N:` comment-tag sweep** (goal.md L80-84) — exactly the
-  enumerative shape rejected before; defer until a concrete
-  reading-friction signal surfaces.
-- **`ap2 <verb> --help` quality regression-pin** — goal.md L68 names
-  `--help` as a documented surface, but no observed
-  empty-or-trivial-help signal; speculative without that.
-- **TB-204 follow-up dedup sweep** — TB-204 covered 13 of ~17 files
-  named in its briefing scope. Wait for unfreeze + Complete before
-  scoping a follow-up against residual count.
-- **TB-172/TB-175/TB-184/TB-185** — authoritative rejects; will not
-  re-propose. Rejection pattern (n=4, unchanged): "creates parallel
-  surface OR enumerative wack-a-mole OR off-focus." TB-208 below
-  avoids each: closed-set completeness check (not enumerative);
-  extends an approved existing primitive (TB-203's
-  `test_docs_drift.py`); axis-1 testing-coverage goal-anchored.
+- **TB-204 follow-up dedup sweep** (residual ~4 of 17 files in TB-204's briefing scope) — TB-204 is now Complete. Sampling intent: confirm whether the 4 unmigrated files genuinely lack the canonical-valid-briefing shape (skip) or are eligible (low-priority follow-up). Defer until a concrete file count surfaces in a regression — speculative dedup absent observed pain re-trips the n=4 enumerative-wack-a-mole pattern.
+- **Briefing pitfall lint** (TB-207-shape literal-backtick truncation) — see Gap (2). Routes to TB-172's authoritative reject pattern.
+- **Module decomposition** for `tools.py` / `daemon.py` / `cli.py` — explicit goal.md L86-87 anti-speculative-refactor guardrail; no operator-reported confidence-to-modify regression.
+- **`# TB-N:` comment-tag sweep / `--help` quality regression-pin / per-op handler extraction** — same dispositions as prior cycle; no new signal.
+- **TB-172/TB-175/TB-184/TB-185** — authoritative rejects; will not re-propose. n=4 unchanged. TB-209 below avoids each pattern: closed-set completeness check (not enumerative); extends TB-208's approved primitive (not parallel surface); dual-axis goal-anchored (testing + reusability).
 
 ## Cycle observations
 
-(Triage from prior cycle: prior carried one observation — the
-no-`-r` `grep DIR/` shell-bullet pitfall, n=1. Drop: operator
-resolved it inline by editing TB-204's bullet #4; same shape hasn't
-recurred in any other briefing's verification; no n=2 signal to
-act on.)
+(Triage from prior cycle: prior carried two observations — (a) AST-walk escalation pin if substring-presence misses a real TB-205-shape recurrence, (b) TB-206 4-attempt landing as single-incident. Drop (a): TB-208 just landed; no recurrence yet to act on; pin lives in TB-208's docstring naturally now. Drop (b): TB-207 was a 4-attempt landing too, but the failure mode was different (briefing bullet truncation, not implementation), so no n=2 pattern across implementation incidents.)
 
-- TB-208 itself hedges against a recurring TB-205-shape gap
-  (registered surface shipped without test refs). Today's count is
-  n=1 (TB-205's 4 env knobs). If the same shape recurs after TB-208
-  lands and the gate misses it, substring-presence is the wrong
-  granularity and an AST-walk escalation is the right move — pin
-  to revisit if recurrence happens.
-- TB-206 took 4 attempts before landing; failure cascade was
-  briefing-bullet shape (missing `!` exit-inversion on bullets
-  #5/#6), not implementation. Single-incident observation; no
-  pattern yet. Drop unless n=2 surfaces.
+- TB-207's failure cascade adds an n=2 data point on a specific shell-bullet shape — literal-backtick fences inside regex/grep-anchor bullets get truncated mid-pattern by the validator's quote pairing. Resolved inline by operator both times. If n=3 surfaces, the structural fix is documenting "regex anchors must not contain backticks; use `.` or POSIX classes" in the briefing-skill prose, NOT a validator lint (that's the TB-172 wack-a-mole shape).
 
 ## Decisions needed from operator
 
-(None this cycle. The prior cycle's two open items — TB-204 unfreeze
-and TB-206 disposition — both resolved: TB-206 shipped via the
-operator's update + unfreeze pass, and TB-204's briefing is now
-fixed and just awaits the mechanical `ap2 unfreeze TB-204` already
-surfaced by `ap2 status`.)
+(None this cycle. All prior open items resolved: TB-204 unfrozen + Complete, TB-206 Complete, TB-207 Complete, TB-208 Complete.)
 
 ## Proposals this cycle
 
-1 proposal (slots=4):
-- TB-208 — `ap2/tests/test_coverage_drift.py`: parallel to TB-203's
-  docs-drift gate on the testing axis. Three regression-pin tests
-  assert every registered MCP tool / `AP2_*` env knob / event type
-  has at least one substring reference in `ap2/tests/` (Gap 1,
-  axis 1 testing coverage).
+1 proposal (slots=5):
+- TB-209 — Add `test_every_cli_verb_has_test_reference` to `test_coverage_drift.py` and extract `_collect_cli_verbs` to a shared helper module (3rd call site triggers goal.md L74-77 threshold-three extraction). Closes Gap (1): both the testing-axis 4th surface and the reusability-axis deferred extraction in one task.
 
-Slots 2-4 intentionally unused: remaining candidates fall into the
-n=4 rejection patterns (enumerative wack-a-mole, anti-speculative-
-refactor, parallel-surface) or lack a concrete observed-gap signal
-(`--help` quality check, TB-204 dedup follow-up). Land TB-208,
-observe operator dispositions on TB-204 unfreeze + TB-207 review +
-TB-208 review, re-derive next cycle against settled state.
+Slots 2-5 intentionally unused: remaining candidates fall into the n=4 rejection patterns (wack-a-mole / parallel-surface / anti-speculative-refactor) or lack a concrete observed-gap signal. Land TB-209, observe operator disposition, re-derive next cycle against settled state.

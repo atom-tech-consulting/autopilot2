@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-209** **Add `test_every_cli_verb_has_test_reference` to `test_coverage_drift.py`; extract `_collect_cli_verbs` to a shared helper (3rd-site threshold trigger)** `#autopilot` `#tests` `#code-quality` `#regression-pin` `#reusability` `@blocked:review` — Add the deferred 4th surface to TB-208's test-presence drift gate (CLI verbs alongside MCP tools / env knobs / event types) and, in the same task, extract `_collect_cli_verbs` from `test_docs_drift.py` into a shared helper that both gates import — the 3rd call site (docs gate, coverage gate, howto-table source) flips goal.md L74-77's threshold-three rule. [→ brief](.cc-autopilot/tasks/add-test-every-cli-verb-has-test-referen.md)
 
 ## Pipeline Pending
 

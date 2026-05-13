@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/add-test-every-cli-verb-has-test-referen.md",
+  "focus_anchor": "current focus code quality",
+  "proposed_at": "2026-05-13T02:20:25Z",
+  "tb_id": "TB-209",
+  "why_now": "TB-208 just landed (`e2179b9`, 2026-05-13T01:35:43Z) with an explicit deferred-task pointer in its module docstring; TB-207 just landed (`5d1d197`, 2026-05-13T02:09:58Z) introducing the `_collect_cli_verbs` walk that this task extracts. Both predecessors are settled in the current cycle, and adding the third call site is the specific event that flips goal.md L74-77's threshold-three rule. Without this task, the next CLI-verb addition can ship with zero test references (the exact TB-205-shape regression the coverage-drift gate exists to catch) and only surface via ideation enumeration weeks later."
+}
