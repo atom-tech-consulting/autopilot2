@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/test-presence-drift-gate-assert-every-re.md",
   "focus_anchor": "current focus code quality",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-13T01:15:59Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-13T00:14:39Z",
   "tb_id": "TB-208",
   "why_now": "TB-205 (commit `c13a07c`, 2026-05-12) shipped 17 unit tests for\nfour env knobs that had been in production with no test references \u2014\nonly surfaced when ideation Step 1.5 happened to enumerate untested\nSDK-cost knobs. Without a mechanical gate, the next TB-205-shape\nregression (new env knob, MCP tool, or event type landing without test\nrefs) stays invisible until a human notices, typically weeks later. The\ndocs-drift gate (`test_docs_drift.py::test_every_env_knob_documented`,\n`_mcp_tool_documented`, `_event_type_documented`) WOULD catch the same\ngap on the docs axis if the same surfaces were also docs-stale \u2014 that\nsymmetric value is what TB-208 captures on the test axis. The gate is\na one-shot mechanical primitive (~30 LOC parallel to the docs-drift\ntests), not enumerative pitfall hunting."
