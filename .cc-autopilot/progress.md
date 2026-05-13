@@ -485,3 +485,9 @@
 - **Summary:** Added ap2/tests/test_coverage_drift.py — three regression-pin tests (test_every_mcp_tool/env_knob/event_type_has_test_reference) mirroring TB-203's docs-drift gate on the testing axis. Empty `_COVERAGE_DRIFT_EXEMPT_SURFACES` per briefing; 12 discovered-at-landing coverage gaps (4 env knobs + 8 event types) tracked as a trailing comment block (coverage debt for follow-up TBs, not exemptions). All 1270 tests pass.
 - **Files:** ap2/tests/test_coverage_drift.py
 - **Tests:** pass
+
+## [2026-05-13] TB-207: Add `## Operator CLI verbs (reference)` section to `ap2/howto.md`; gate with docs-drift test against the live CLI parser
+- **Commit:** `5d1d197`
+- **Summary:** Previously committed in 5d1d197; re-verified after operator briefing fix to bullet #4 (literal backtick → `.` regex). Section heading present at howto.md L430, 35 verb rows (≥20), test_every_cli_verb_documented at test_docs_drift.py L273, 13 mentions of the 8 recently-added verbs (≥8), `uv run pytest -q ap2/tests/test_docs_drift.py` → 5 passed, full suite 1270 passed; section opens with CLI/MCP/chat-verb distinction and excludes argparse.SUPPRESS subparsers in both prose and the `_collect_cli_verbs` walk.
+- **Files:** ap2/howto.md, ap2/tests/test_docs_drift.py
+- **Tests:** pass
