@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/reject-titles-containing-literal-asteris.md",
+  "focus_anchor": "current focus code quality",
+  "proposed_at": "2026-05-13T12:42:26Z",
+  "tb_id": "TB-216",
+  "why_now": "TB-214 (ideation-authored at 2026-05-13T10:35:58Z; title\n`Pin 4 sandbox install-* CLI verbs (...)`) is currently dead-letter on\ndisk. The literal `*` in `install-*` collides with TASK_LINE_RE's title\ngroup; `Board.find('TB-214')` returns `None`; `ap2 approve TB-214`,\n`ap2 update TB-214`, and `ap2 delete TB-214` all raise `KeyError`; the\ntask is only visible via a `board_malformed_line` event in\n`events.jsonl` that operators have to grep for. `ap2 status --json`\nsilently reports `pending_review: 4` with `pending_review_ids: [\"TB-211\",\n\"TB-212\", \"TB-213\", \"TB-215\"]` against 5 Backlog rows \u2014 TB-214 disappears\nfrom the operator-facing surface entirely. Without this gate, the trap\nrecurs every cycle an ideation proposal (or `ap2 add`) names a glob,\nwildcard, or footnote-marker literally in the title. The fix is a\nsingle field-specific extension to one existing helper; the failure\nmode is concrete, reproduced in production, and would otherwise need\nhand-edit recovery every recurrence."
+}
