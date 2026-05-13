@@ -8,8 +8,8 @@
 
 ## Backlog
 
-- [ ] **TB-207** **Add `## Operator CLI verbs (reference)` section to `ap2/howto.md`; gate with docs-drift test against the live CLI parser** `#autopilot` `#docs` `#code-quality` `#operator-surface` `#regression-pin` — Mirror TB-203's MCP-tools / env-knobs / event-types pattern: a single `## Operator CLI verbs (reference)` table in howto.md + a `test_docs_drift.py` gate that fails CI when a new `ap2 <verb>` subcommand is added without a docs entry. [→ brief](.cc-autopilot/tasks/add-operator-cli-verbs-reference-section.md)
 - [ ] **TB-208** **Test-presence drift gate: assert every registered MCP tool / env knob / event type has a reference in `ap2/tests/`** `#autopilot` `#tests` `#code-quality` `#regression-pin` — Mirror TB-203's docs-drift coverage gate (`ap2/tests/test_docs_drift.py`) onto the testing axis: a new `ap2/tests/test_coverage_drift.py` with three regression-pin tests asserting every registered MCP tool short name, `AP2_*` env knob, and `events.append` event type has at least one substring reference under `ap2/tests/` — catches the TB-205-shape gap where four env knobs landed without test refs and only surfaced via ideation enumeration weeks later. [→ brief](.cc-autopilot/tasks/test-presence-drift-gate-assert-every-re.md)
+- [ ] **TB-207** **Add `## Operator CLI verbs (reference)` section to `ap2/howto.md`; gate with docs-drift test against the live CLI parser** `#autopilot` `#docs` `#code-quality` `#operator-surface` `#regression-pin` — Mirror TB-203's MCP-tools / env-knobs / event-types pattern: a single `## Operator CLI verbs (reference)` table in howto.md + a `test_docs_drift.py` gate that fails CI when a new `ap2 <verb>` subcommand is added without a docs entry. [→ brief](.cc-autopilot/tasks/add-operator-cli-verbs-reference-section.md)
 
 ## Pipeline Pending
 

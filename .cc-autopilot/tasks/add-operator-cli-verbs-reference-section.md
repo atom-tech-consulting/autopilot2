@@ -176,3 +176,10 @@ content; the test is the anti-drift guard for future additions.
   reference is the current intentional shape).
 - Re-documenting MCP tool / env knob / event type entries (TB-203
   already landed those tables).
+## Attempts
+
+### 2026-05-13 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `[ "$(grep -cE '^\| \`ap2 [a-z][a-z-]*' ap2/howto.md)" -ge 20 ]`— at least 20 verb rows in the new table (the live parse
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T011559Z-TB-207.prompt.md`, `stream: .cc-autopilot/debug/20260513T011559Z-TB-207.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T011559Z-TB-207.messages.jsonl`
