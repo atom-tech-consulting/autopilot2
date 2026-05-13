@@ -8,7 +8,7 @@
 
 ## Backlog
 
-- [ ] **TB-210** **Pin `AP2_TASK_MAX_TURNS`, `AP2_JANITOR_JUDGE_EFFORT`, `AP2_JANITOR_JUDGE_MAX_TURNS`, `AP2_MM_TEAM_ID` with happy + error path unit tests (TB-208 coverage-debt closure)** `#autopilot #tests #code-quality #env-knobs #regression-pin` `@blocked:review` — Four env knobs that TB-208 docstring L301-305 explicitly tags as TB-205-shape coverage debt currently have ZERO real test references — only the comment-block lines in `test_coverage_drift.py` satisfy the substring drift gate. Mirror TB-205's `test_env_knobs.py` pattern with focused parse/default/override + invalid-value tests for each, and remove the four matching rows from the gate-satisfaction shim. [→ brief](.cc-autopilot/tasks/pin-ap2-task-max-turns-ap2-janitor-judge.md)
+- [ ] **TB-210** **Pin `AP2_TASK_MAX_TURNS`, `AP2_JANITOR_JUDGE_EFFORT`, `AP2_JANITOR_JUDGE_MAX_TURNS`, `AP2_MM_TEAM_ID` with happy + error path unit tests (TB-208 coverage-debt closure)** `#autopilot #tests #code-quality #env-knobs #regression-pin` — Four env knobs that TB-208 docstring L301-305 explicitly tags as TB-205-shape coverage debt currently have ZERO real test references — only the comment-block lines in `test_coverage_drift.py` satisfy the substring drift gate. Mirror TB-205's `test_env_knobs.py` pattern with focused parse/default/override + invalid-value tests for each, and remove the four matching rows from the gate-satisfaction shim. [→ brief](.cc-autopilot/tasks/pin-ap2-task-max-turns-ap2-janitor-judge.md)
 
 ## Pipeline Pending
 
