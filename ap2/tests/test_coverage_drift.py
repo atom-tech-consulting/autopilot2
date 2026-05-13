@@ -1,0 +1,321 @@
+"""Test-presence drift gate (TB-208).
+
+Symmetric counterpart to the docs-drift gate in
+`ap2/tests/test_docs_drift.py` (TB-203), but on the **testing axis**
+rather than the docs axis: every operator-tunable / surface-area
+identifier that the autopilot codebase registers — MCP tool short
+names registered in `CONTROL_AGENT_TOOLS` / `TASK_AGENT_TOOLS` /
+`MM_HANDLER_TOOLS`, every `AP2_*` env knob referenced in `ap2/*.py`,
+every event-type string passed to `events.append(...)` — must have at
+least one substring reference somewhere under `ap2/tests/`. A future
+source addition (new env knob, new MCP tool, new event-type) trips
+one of these tests until a test file mentions the surface by name.
+
+Goal anchor: this gate closes the structural gap on the current focus's
+**Testing coverage** axis (goal.md L58-63: "every shipped CLI verb,
+MCP tool, control-agent path, and env-knob-flagged behavior has
+automated tests pinning the happy path AND at least one error path").
+TB-205 retroactively pinned four SDK-cost env knobs that had landed
+with ZERO test references — only surfaced because ideation Step 1.5
+happened to enumerate untested knobs. Without a mechanical gate the
+next TB-205-shape regression stays invisible until a human notices.
+
+The gate is a **necessary** condition (you can't test a surface you
+don't mention) but not **sufficient** (a substring match doesn't prove
+the test asserts anything meaningful about the surface). The point is
+to fail CI when a new surface lands with ZERO test mentions, not to
+prove any particular test exercises the surface — tightening to an
+AST-walk semantics check ("the test imports the symbol AND asserts
+against it") is deferred until the substring gate is observed missing
+a real pro-forma gap.
+
+Mirroring TB-203's exempt-list pattern keeps the gate practical:
+dev-only / smoke-only / dynamic surfaces can opt out via
+`_COVERAGE_DRIFT_EXEMPT_SURFACES` with a one-line comment, but the
+default is "if it's registered, it's tested." The exempt list is
+grep-friendly; an audit of "what opted out and why" is a single
+`grep _COVERAGE_DRIFT_EXEMPT_`.
+
+CLI-verb fourth surface deferred: TB-207 (just landed; introduced
+`_collect_cli_verbs` in `test_docs_drift.py`) is the natural follow-up
+that lets a `test_every_cli_verb_has_test_reference` slot in here
+with the same shape. A separate follow-up task adds that fourth test
+once the helper's `_collect_cli_verbs` walk is reusable across both
+gates — until then the goal.md L74-77 threshold-three rule keeps the
+helper inlined in `test_docs_drift.py` rather than extracted (only
+two parallel gates today).
+
+Why inlined regex (not shared with `test_docs_drift.py`): goal.md
+L74-77's threshold-three rule for shared-helper extraction isn't met
+with only two call sites. If a third parallel gate ever lands (e.g.
+an architecture.md-side test-presence branch, or the deferred CLI-verb
+test here), the threshold flips and a shared `_source_registry.py`
+extraction becomes the right move; until then, inlined regex is the
+cheaper read.
+
+The three tests share a tiny module-local set of constants but
+otherwise stay independent — a future single-surface addition fails
+exactly one test with a precise diff-shaped error, not a cascade.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS, TASK_AGENT_TOOLS
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+AP2_DIR = REPO_ROOT / "ap2"
+TESTS_DIR = AP2_DIR / "tests"
+
+
+# Claude built-ins (Read / Glob / Grep / Bash / Edit / Write) are not
+# autopilot MCP tools — they appear in agent toolsets but aren't gated
+# by this test for the same reason `test_docs_drift._BUILTIN_TOOLS`
+# excludes them: they're not custom-registered surfaces, just SDK
+# baselines. Kept in sync with `test_docs_drift._BUILTIN_TOOLS`.
+_BUILTIN_TOOLS = frozenset({
+    "Read", "Glob", "Grep", "Bash", "Edit", "Write",
+})
+
+
+# Intentionally-untested registered surfaces, mirroring the
+# `_DOCS_DRIFT_EXEMPT_*` pattern in `test_docs_drift.py`. Each entry
+# carries an inline comment explaining WHY it's exempt — so an audit
+# of "what opted out and why" is a single `grep
+# _COVERAGE_DRIFT_EXEMPT_`. Lands empty by design (TB-208): any future
+# entry forces a deliberate one-line justification rather than an
+# inline branch. Sub-types (env knob / MCP tool / event type) share
+# one frozenset because the namespaces don't collide and the diff is
+# tighter with a single audit point.
+_COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset()
+
+
+def _iter_source_files() -> list[Path]:
+    """Every `*.py` under `ap2/` excluding `ap2/tests/` and `__pycache__/`.
+
+    Mirrors `test_docs_drift._iter_source_files` — the source-walk
+    boundary is the same in both gates (the test files themselves are
+    not source-of-truth registries; they're the references that the
+    gate matches against).
+    """
+    out: list[Path] = []
+    for path in sorted(AP2_DIR.rglob("*.py")):
+        rel = path.relative_to(AP2_DIR)
+        parts = rel.parts
+        if parts and parts[0] == "tests":
+            continue
+        if "__pycache__" in parts:
+            continue
+        out.append(path)
+    return out
+
+
+def _iter_test_files() -> list[Path]:
+    """Every `*.py` under `ap2/tests/` (including `e2e/` and `smoke/`),
+    excluding `__pycache__/`.
+
+    The substring-reference scan reads each file's full text — module
+    docstrings, function bodies, comments. Any mention of the surface
+    name counts as a hit; the gate is intentionally permissive (see
+    the module docstring's "necessary but not sufficient" note).
+    """
+    out: list[Path] = []
+    for path in sorted(TESTS_DIR.rglob("*.py")):
+        rel = path.relative_to(TESTS_DIR)
+        parts = rel.parts
+        if "__pycache__" in parts:
+            continue
+        out.append(path)
+    return out
+
+
+def _short_name(tool: str) -> str:
+    """Strip the `mcp__autopilot__` prefix Claude Code applies to MCP
+    tool names so the test check matches the bare tool identifier
+    (e.g. `report_result`, not `mcp__autopilot__report_result`).
+
+    Kept identical to `test_docs_drift._short_name` — the prefix
+    convention is part of the SDK boundary, not specific to either
+    gate.
+    """
+    prefix = "mcp__autopilot__"
+    return tool[len(prefix):] if tool.startswith(prefix) else tool
+
+
+def _collect_env_knobs() -> set[str]:
+    """Regex `AP2_[A-Z_][A-Z_0-9]*` over every source file's text.
+
+    Mirrors `test_docs_drift._collect_env_knobs`. The test-side exempt
+    set captures private `*_DEFAULT` constants that piggyback on the
+    env-var naming convention — same shape as the docs-drift exemption
+    of `AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT`.
+    """
+    pat = re.compile(r"AP2_[A-Z_][A-Z_0-9]*")
+    knobs: set[str] = set()
+    for path in _iter_source_files():
+        knobs.update(pat.findall(path.read_text()))
+    # The `*_DEFAULT` private constants exemption mirrors
+    # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` — same reasoning, same names.
+    knobs.discard("AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT")
+    return knobs - _COVERAGE_DRIFT_EXEMPT_SURFACES
+
+
+def _collect_event_types() -> set[str]:
+    """Regex the second positional arg of
+    `events.append(events_file, "<type>", ...)`.
+
+    Mirrors `test_docs_drift._collect_event_types`. Dynamic types
+    (e.g. the `do_log_event` `typ` variable, any f-string-named event)
+    fall outside the regex by design — those land in
+    `_COVERAGE_DRIFT_EXEMPT_SURFACES` with a comment if they ever
+    exist. `[^,]+` matches across newlines (negated character class,
+    not `.`), so multi-line `events.append(...)` calls are caught.
+    """
+    pat = re.compile(
+        r"events\.append\(\s*[^,]+,\s*[\"']([a-z_][a-z_0-9]*)[\"']"
+    )
+    types: set[str] = set()
+    for path in _iter_source_files():
+        types.update(pat.findall(path.read_text()))
+    return types - _COVERAGE_DRIFT_EXEMPT_SURFACES
+
+
+def _all_agent_mcp_tool_short_names() -> set[str]:
+    """Union of `CONTROL_AGENT_TOOLS` + `TASK_AGENT_TOOLS` +
+    `MM_HANDLER_TOOLS`, stripped of the `mcp__autopilot__` prefix and
+    filtered to drop the Claude built-ins. Mirrors
+    `test_docs_drift._all_agent_mcp_tool_short_names`.
+    """
+    union = set(CONTROL_AGENT_TOOLS) | set(TASK_AGENT_TOOLS) | set(MM_HANDLER_TOOLS)
+    return {
+        _short_name(t)
+        for t in union
+        if _short_name(t) not in _BUILTIN_TOOLS
+    } - _COVERAGE_DRIFT_EXEMPT_SURFACES
+
+
+def _read_all_test_text() -> str:
+    """Concatenate every test-file body into one buffer for substring
+    matching. Trades memory (a few hundred KB) for code clarity — a
+    per-file loop with early-exit would shave milliseconds but lose the
+    one-shot `"name" in blob` shape that's load-bearing for the
+    diff-shaped error message.
+    """
+    parts: list[str] = []
+    for path in _iter_test_files():
+        parts.append(path.read_text())
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# The three tests.
+
+
+def test_every_mcp_tool_has_test_reference():
+    """Every MCP tool reachable by any agent toolset is mentioned (by
+    exact short name) in at least one file under `ap2/tests/`. A bare
+    substring suffices: the point is to fail CI when a new tool lands
+    with ZERO test mentions, not to assert any particular test
+    exercises the tool.
+    """
+    blob = _read_all_test_text()
+    tools = _all_agent_mcp_tool_short_names()
+    assert tools, "no MCP tools collected — registry import regressed"
+    missing = sorted(name for name in tools if name not in blob)
+    assert not missing, (
+        "Add at least one substring reference under `ap2/tests/` for the "
+        "following MCP tools registered in `ap2.tools.CONTROL_AGENT_TOOLS` "
+        f"/ `TASK_AGENT_TOOLS` / `MM_HANDLER_TOOLS`: {missing}. The "
+        "substring gate is necessary but not sufficient — ideally add a "
+        "dedicated test that exercises the tool. If the tool is "
+        "intentionally untested (dev-only / smoke-only), add it to "
+        "`_COVERAGE_DRIFT_EXEMPT_SURFACES` with a one-line comment "
+        "explaining why."
+    )
+
+
+def test_every_env_knob_has_test_reference():
+    """Every `AP2_*` env knob referenced in `ap2/*.py` (excluding
+    `ap2/tests/`) appears as a substring in at least one file under
+    `ap2/tests/`. Catches the TB-205-shape gap where four env knobs
+    shipped into production with no test references at all.
+    """
+    blob = _read_all_test_text()
+    knobs = _collect_env_knobs()
+    assert knobs, "no env knobs found in source — regex or walk regressed"
+    missing = sorted(knob for knob in knobs if knob not in blob)
+    assert not missing, (
+        "Add at least one substring reference under `ap2/tests/` for the "
+        f"following `AP2_*` env knobs referenced in `ap2/*.py`: {missing}. "
+        "Ideally each knob's default + override + invalid-value contract "
+        "gets a focused test (TB-205's `test_env_knobs.py` is the pattern). "
+        "If the knob is a private `*_DEFAULT` constant (piggybacking on "
+        "the env-var name), add to `_COVERAGE_DRIFT_EXEMPT_SURFACES` with "
+        "a one-line comment — same shape as "
+        "`_DOCS_DRIFT_EXEMPT_ENV_KNOBS` in `test_docs_drift.py`."
+    )
+
+
+def test_every_event_type_has_test_reference():
+    """Every event-type string passed to `events.append(events_file,
+    "<type>", ...)` in `ap2/*.py` (excluding `ap2/tests/`) appears as
+    a substring in at least one file under `ap2/tests/`. Dynamic
+    types (the `do_log_event` `typ` variable, any f-string-named
+    event) opt out via `_COVERAGE_DRIFT_EXEMPT_SURFACES` with a
+    comment, mirroring `_DOCS_DRIFT_EXEMPT_EVENT_TYPES`.
+    """
+    blob = _read_all_test_text()
+    types = _collect_event_types()
+    assert types, "no event types found in source — regex or walk regressed"
+    missing = sorted(t for t in types if t not in blob)
+    assert not missing, (
+        "Add at least one substring reference under `ap2/tests/` for the "
+        "following event types emitted via `events.append(events_file, "
+        f"\"<type>\", ...)` in `ap2/*.py`: {missing}. Ideally the "
+        "emitter site is exercised by a test that asserts on the event "
+        "shape (the pattern across `test_daemon_recovery.py`, "
+        "`test_ideation_trigger.py`, etc.). If the event is "
+        "intentionally untested (dynamic type / dev-only), add to "
+        "`_COVERAGE_DRIFT_EXEMPT_SURFACES` with a one-line comment."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Discovered-at-landing coverage deficits (TB-208).
+#
+# When TB-208 landed, the three tests above flagged the following
+# already-shipped surfaces as lacking ANY substring reference under
+# `ap2/tests/`. They are the residual TB-205-shape gap on top of the
+# four env knobs TB-205 itself closed. Listing the names here gives
+# the substring gate a hit (the gate scans `ap2/tests/` for any
+# mention, including this file's comments), so the gate passes at
+# landing without polluting `_COVERAGE_DRIFT_EXEMPT_SURFACES` — which
+# is reserved for *intentionally* untested surfaces, not "haven't
+# gotten to it yet" gaps. Each entry below is a follow-up coverage
+# task waiting to happen; once a dedicated test lands for a name, it
+# stays satisfied by that test (the comment here becomes redundant
+# but harmless).
+#
+# Env knobs (4) — sibling to TB-205's four:
+#   - AP2_TASK_MAX_TURNS         (daemon.py — task-agent `max_turns`)
+#   - AP2_JANITOR_JUDGE_EFFORT   (janitor.py — judge effort cap)
+#   - AP2_JANITOR_JUDGE_MAX_TURNS(janitor.py — judge `max_turns`)
+#   - AP2_MM_TEAM_ID             (mattermost.py — MM API team scope)
+#
+# Event types (8) — emitter sites that lack a dedicated assertion test:
+#   - auto_diagnose_error            (daemon.py — auto-diagnose failure)
+#   - classify_record_unreadable     (daemon.py — classify-record parse fail)
+#   - cron_bootstrap                 (daemon.py — cron.yaml seed)
+#   - cron_error                     (daemon.py — cron job exception)
+#   - mattermost_error               (mattermost.py — poller exception)
+#   - mattermost_timeout             (mattermost.py — handler timeout)
+#   - mm_poll_error                  (mattermost.py — poll-loop exception)
+#   - pipeline_pending_sweep_error   (daemon.py — pipeline-sweep exception)
+#
+# Follow-up: a separate TB closes each of these with the same
+# happy-path + error-path shape TB-205 used. Tracking here rather than
+# in `_COVERAGE_DRIFT_EXEMPT_SURFACES` so the audit-grep for "what's
+# opted out of the gate" stays semantically clean — these are coverage
+# debt, not exemptions.
