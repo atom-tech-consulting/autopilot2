@@ -479,3 +479,9 @@
 - **Summary:** Previously committed in ecd5b2f; re-verified after operator fix to bullet #4 (grep -lE → grep -rlE): file exists with all 4 builders, 18 ≥10 imports, test_tools.py '## Goal'=18 (≤20) / 'Why now:'=5 (≤5), no non-test imports of _briefing_fixtures, 1266 tests pass.
 - **Files:** ap2/tests/_briefing_fixtures.py, ap2/tests/test_tools.py, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_check.py, ap2/tests/test_rollback.py, ap2/tests/test_tb135_verification.py, ap2/tests/e2e/test_mattermost_cron.py, ap2/tests/e2e/test_operator_queue_tick.py, ap2/tests/e2e/test_review_gate.py, ap2/tests/e2e/test_tb142_mm_queue_routing.py, ap2/tests/e2e/test_verify.py, ap2/tests/e2e/test_verify_per_task.py
 - **Tests:** pass
+
+## [2026-05-13] TB-208: Test-presence drift gate: assert every registered MCP tool / env knob / event type has a reference in `ap2/tests/`
+- **Commit:** `e2179b9`
+- **Summary:** Added ap2/tests/test_coverage_drift.py — three regression-pin tests (test_every_mcp_tool/env_knob/event_type_has_test_reference) mirroring TB-203's docs-drift gate on the testing axis. Empty `_COVERAGE_DRIFT_EXEMPT_SURFACES` per briefing; 12 discovered-at-landing coverage gaps (4 env knobs + 8 event types) tracked as a trailing comment block (coverage debt for follow-up TBs, not exemptions). All 1270 tests pass.
+- **Files:** ap2/tests/test_coverage_drift.py
+- **Tests:** pass
