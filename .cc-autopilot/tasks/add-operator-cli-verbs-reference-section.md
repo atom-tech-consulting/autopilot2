@@ -140,9 +140,13 @@ content; the test is the anti-drift guard for future additions.
   (exit 0); no test should change behavior in unrelated modules.
 - `grep -nE "^## Operator CLI verbs \(reference\)" ap2/howto.md`
   — exit 0 (the new section heading exists).
-- `[ "$(grep -cE '^\| \`ap2 [a-z][a-z-]*' ap2/howto.md)" -ge 20 ]`
-  — at least 20 verb rows in the new table (the live parser has
-  24+ non-suppressed subcommands; ≥20 is a safe lower bound).
+- `[ "$(grep -cE '^\| .ap2 [a-z]' ap2/howto.md)" -ge 20 ]`
+  — at least 20 verb rows in the new table. The leading `.` matches
+  whatever char (typically a markdown-fence backtick) precedes `ap2`
+  in the table's verb column; using `.` instead of a literal backtick
+  avoids the verifier's markdown-fence stripping that would otherwise
+  truncate this bullet (the original `\`ap2` pattern broke this way
+  on the first attempt).
 - `grep -nE "def test_every_cli_verb_documented" ap2/tests/test_docs_drift.py`
   — exit 0 (the new test function exists by that exact name, for
   greppability symmetric to the other three TB-203 gate tests).
@@ -176,20 +180,14 @@ content; the test is the anti-drift guard for future additions.
   reference is the current intentional shape).
 - Re-documenting MCP tool / env knob / event type entries (TB-203
   already landed those tables).
+
 ## Attempts
 
 ### 2026-05-13 — verification_failed
 (no summary)
 - **kind:** per_task
-- **failed_criteria:** [fail] `[ "$(grep -cE '^\| \`ap2 [a-z][a-z-]*' ap2/howto.md)" -ge 20 ]`— at least 20 verb rows in the new table (the live parse
+- **failed_criteria:** [fail] `[ "$(grep -cE '^\| \`ap2 [a-z][a-z-]*' ap2/howto.md)" -ge 20 ]` — bash syntax error (unexpected EOF); literal backtick inside the bullet broke verifier extraction
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T011559Z-TB-207.prompt.md`, `stream: .cc-autopilot/debug/20260513T011559Z-TB-207.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T011559Z-TB-207.messages.jsonl`
-### 2026-05-13 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `[ "$(grep -cE '^\| \`ap2 [a-z][a-z-]*' ap2/howto.md)" -ge 20 ]`— at least 20 verb rows in the new table (the live parse
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T013614Z-TB-207.prompt.md`, `stream: .cc-autopilot/debug/20260513T013614Z-TB-207.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T013614Z-TB-207.messages.jsonl`
-### 2026-05-13 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `[ "$(grep -cE '^\| \`ap2 [a-z][a-z-]*' ap2/howto.md)" -ge 20 ]`— at least 20 verb rows in the new table (the live parse
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T014355Z-TB-207.prompt.md`, `stream: .cc-autopilot/debug/20260513T014355Z-TB-207.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T014355Z-TB-207.messages.jsonl`
+
+### 2026-05-13 — operator briefing fix
+Bullet #4's grep pattern contained a literal backtick (`\`ap2 [a-z][a-z-]*`) which the markdown-fence stripping in the verifier truncated the bullet at, leaving bash to receive only `[ "$(grep -cE '^\| ` with unmatched single quotes → exit 2 syntax error. Replaced the literal backtick with `.` (regex any-char), which matches the same verb-row prefix without breaking bullet extraction. Existing commit `5d1d197` should now pass all verification on re-dispatch.
