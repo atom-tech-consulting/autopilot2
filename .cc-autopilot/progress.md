@@ -467,3 +467,9 @@
 - **Summary:** Previously committed in c13a07c: ap2/tests/test_env_knobs.py (17 tests across the four knobs — AP2_EVENT_CONTEXT 4 / AP2_CONTROL_MAX_TURNS 3 / AP2_IDEATION_MAX_TURNS 5 incl. both precedence directions / AP2_AGENT_MODEL 5 incl. source-pin for run_task + _judge_prose_bullet). Re-verified post-retry: `uv run pytest -q ap2/tests/` → 1267 passed, `-k "event_context or control_max_turns or ideation_max_turns or agent_model"` → 17/17 passed, and `grep -rE "AP2_EVENT_CONTEXT|AP2_CONTROL_MAX_TURNS|AP2_IDEATION_MAX_TURNS|AP2_AGENT_MODEL" ap2/tests/` finds 52 hits in test_env_knobs.py (was 0 pre-TB-205). All briefing scope items + verification checks satisfied; the prior verification_failed appears to have been transient.
 - **Files:** ap2/tests/test_env_knobs.py
 - **Tests:** pass
+
+## [2026-05-13] TB-206: Rewrite `ap2/howto.md` worked-example blocks as structural / fictional; decouple from `goal.md` content entirely
+- **Commit:** `72f5933`
+- **Summary:** Previously committed in 72f5933 (full briefing scope: all five worked-example blocks rewritten as fictional Slack-bot-for-trade-alerts, section-header paragraph reframed as illustrative, verbatim-quote test + helpers dropped, current-focus validator test reshaped to parse the howto's heading at runtime with a tmp goal.md). Earlier verification_failed runs were due to briefing bugs on bullets #5/#6 (missing `!` exit-inversion prefix); operator fixed the briefing 2026-05-12T23:24Z. Verified on HEAD: all 10 verification bullets pass — `uv run pytest -q ap2/tests/` 1266 passed; all grep gates clean; no `this repo's own` / `Current focus: code quality` / `Current focus: ideation quality signal collection` strings remain in ap2/howto.md.
+- **Files:** ap2/howto.md, ap2/tests/test_docs.py
+- **Tests:** pass

@@ -9,7 +9,6 @@
 ## Backlog
 
 - [ ] **TB-207** **Add `## Operator CLI verbs (reference)` section to `ap2/howto.md`; gate with docs-drift test against the live CLI parser** `#autopilot` `#docs` `#code-quality` `#operator-surface` `#regression-pin` `@blocked:review` — Mirror TB-203's MCP-tools / env-knobs / event-types pattern: a single `## Operator CLI verbs (reference)` table in howto.md + a `test_docs_drift.py` gate that fails CI when a new `ap2 <verb>` subcommand is added without a docs entry. [→ brief](.cc-autopilot/tasks/add-operator-cli-verbs-reference-section.md)
-- [ ] **TB-206** **Rewrite `ap2/howto.md` worked-example blocks as structural / fictional; decouple from `goal.md` content entirely** `#autopilot` `#docs` `#code-quality` `#operator-surface` `#fix-briefing` `#regression-pin` — Update howto.md's `### Current focus` worked-example block (added by TB-200) so it no longer quotes the pre-pivot `Current focus: ideation quality signal collection` heading verbatim — the 2026-05-12T17:02Z goal.md pivot to "code quality" left it stale and broke `test_docs.py`'s anti-drift gate, cascading TB-203/TB-204/TB-205 into project-wide pytest failures. [→ brief](.cc-autopilot/tasks/resync-ap2-howto-md-current-focus-worked.md)
 
 ## Pipeline Pending
 
@@ -94,6 +93,7 @@
 - [x] **TB-202** **Refuse `ap2 backfill-proposals` and `ap2 cron edit` when a task is Active** [→ brief](.cc-autopilot/tasks/refuse-ap2-backfill-proposals-and-ap2-cr.md)
 - [x] **TB-203** **Documentation drift coverage gate for `ap2/howto.md` + `ap2/architecture.md` — MCP tools, env knobs, event types** `#autopilot` `#docs` `#code-quality` `#operator-surface` `#regression-pin` — Sync the MCP-tools / env-knobs / event-types reference sections in ap2/howto.md and ap2/architecture.md with current source-of-truth registries; add a regression-pin test that fails when a new source surface lacks a docs mention. [→ brief](.cc-autopilot/tasks/documentation-drift-coverage-gate-for-ap.md)
 - [x] **TB-205** **Pin `AP2_EVENT_CONTEXT`, `AP2_CONTROL_MAX_TURNS`, `AP2_IDEATION_MAX_TURNS`, `AP2_AGENT_MODEL` with happy + error path unit tests** `#autopilot` `#tests` `#code-quality` `#env-knobs` `#sdk-cost` — Four env knobs that affect SDK cost/behavior currently have zero test-file references in ap2/tests/. Add focused parse/default/override + invalid-value-fallback tests for each, so a future refactor can't silently break the contract. [→ brief](.cc-autopilot/tasks/pin-ap2-event-context-ap2-control-max-tu.md)
+- [x] **TB-206** **Rewrite `ap2/howto.md` worked-example blocks as structural / fictional; decouple from `goal.md` content entirely** `#autopilot` `#docs` `#code-quality` `#operator-surface` `#fix-briefing` `#regression-pin` — Update howto.md's `### Current focus` worked-example block (added by TB-200) so it no longer quotes the pre-pivot `Current focus: ideation quality signal collection` heading verbatim — the 2026-05-12T17:02Z goal.md pivot to "code quality" left it stale and broke `test_docs.py`'s anti-drift gate, cascading TB-203/TB-204/TB-205 into project-wide pytest failures. [→ brief](.cc-autopilot/tasks/resync-ap2-howto-md-current-focus-worked.md)
 
 ## Frozen
 
