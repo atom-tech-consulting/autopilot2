@@ -473,3 +473,9 @@
 - **Summary:** Previously committed in 72f5933 (full briefing scope: all five worked-example blocks rewritten as fictional Slack-bot-for-trade-alerts, section-header paragraph reframed as illustrative, verbatim-quote test + helpers dropped, current-focus validator test reshaped to parse the howto's heading at runtime with a tmp goal.md). Earlier verification_failed runs were due to briefing bugs on bullets #5/#6 (missing `!` exit-inversion prefix); operator fixed the briefing 2026-05-12T23:24Z. Verified on HEAD: all 10 verification bullets pass — `uv run pytest -q ap2/tests/` 1266 passed; all grep gates clean; no `this repo's own` / `Current focus: code quality` / `Current focus: ideation quality signal collection` strings remain in ap2/howto.md.
 - **Files:** ap2/howto.md, ap2/tests/test_docs.py
 - **Tests:** pass
+
+## [2026-05-13] TB-204: Extract canonical-valid briefing fixture for tests; deduplicate inline duplicates across the test suite
+- **Commit:** `ecd5b2f`
+- **Summary:** Previously committed in ecd5b2f; re-verified after operator fix to bullet #4 (grep -lE → grep -rlE): file exists with all 4 builders, 18 ≥10 imports, test_tools.py '## Goal'=18 (≤20) / 'Why now:'=5 (≤5), no non-test imports of _briefing_fixtures, 1266 tests pass.
+- **Files:** ap2/tests/_briefing_fixtures.py, ap2/tests/test_tools.py, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/test_check.py, ap2/tests/test_rollback.py, ap2/tests/test_tb135_verification.py, ap2/tests/e2e/test_mattermost_cron.py, ap2/tests/e2e/test_operator_queue_tick.py, ap2/tests/e2e/test_review_gate.py, ap2/tests/e2e/test_tb142_mm_queue_routing.py, ap2/tests/e2e/test_verify.py, ap2/tests/e2e/test_verify_per_task.py
+- **Tests:** pass
