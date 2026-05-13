@@ -98,3 +98,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-12T23:26:04Z — applied operator-queued approve → TB-206
 - 2026-05-12T23:49:02Z — applied operator-queued update → TB-206
 - 2026-05-13T00:02:20Z — applied operator-queued unfreeze → TB-206
+- 2026-05-13T00:13:22Z — applied operator-queued unfreeze → TB-204
