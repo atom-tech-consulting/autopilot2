@@ -105,3 +105,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-13T02:03:16Z — applied operator-queued unfreeze → TB-207
 - 2026-05-13T04:24:08Z — applied operator-queued add_backlog → TB-210
 - 2026-05-13T04:30:56Z — applied operator-queued approve → TB-209
+- 2026-05-13T07:11:47Z — applied operator-queued update → TB-209
+- 2026-05-13T07:11:47Z — applied operator-queued unfreeze → TB-209

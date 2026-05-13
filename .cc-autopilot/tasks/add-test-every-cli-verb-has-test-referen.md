@@ -35,8 +35,8 @@ Why now: TB-208 just landed (`e2179b9`, 2026-05-13T01:35:43Z) with an explicit d
 - `grep -q "def test_every_cli_verb_has_test_reference" ap2/tests/test_coverage_drift.py` — exit 0; the new test is present by the canonical name.
 - `grep -q "_collect_cli_verbs" ap2/tests/test_coverage_drift.py` — exit 0; the new test imports the shared helper rather than re-defining it.
 - `[ "$(grep -rc "^def _collect_cli_verbs" ap2/tests/ | grep -v ':0$' | wc -l)" -le 1 ]` — at most one file under `ap2/tests/` defines `_collect_cli_verbs` at module level (the shared-helper module); the original `test_docs_drift.py` definition is gone, replaced by an import.
-- The new test `test_every_cli_verb_has_test_reference` in `ap2/tests/test_coverage_drift.py` uses the same `_COVERAGE_DRIFT_EXEMPT_SURFACES` frozenset as the existing three sibling tests (no new exempt set introduced), and asserts at least one substring reference per CLI verb under `ap2/tests/` (judged by the SDK against the diff).
-- `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" (the lines 41-46 paragraph in the current docstring is rewritten or removed).
+- Prose: the new test `test_every_cli_verb_has_test_reference` in `ap2/tests/test_coverage_drift.py` uses the same `_COVERAGE_DRIFT_EXEMPT_SURFACES` frozenset as the existing three sibling tests (no new exempt set introduced), and asserts at least one substring reference per CLI verb under `ap2/tests/`. Judge confirms via `Read` of the new test.
+- Prose: the module docstring of `ap2/tests/test_coverage_drift.py` no longer describes the CLI-verb test as "deferred" — the lines 41-46 paragraph in the prior docstring is rewritten or removed. Judge confirms via `Read` of the file's top-of-module docstring.
 
 ## Out of scope
 
@@ -44,20 +44,13 @@ Why now: TB-208 just landed (`e2179b9`, 2026-05-13T01:35:43Z) with an explicit d
 - AST-walk semantics tightening for any of the four `test_coverage_drift.py` tests (substring → "imports the symbol AND asserts against it"). Deferred until the substring gate is observed missing a real pro-forma gap, per TB-208's docstring.
 - Adding any new CLI verb to the parser, or modifying any existing verb's behavior. Pure test-infrastructure refactor + new gate.
 - A parallel howto.md docs-side change. The howto's `## Operator CLI verbs (reference)` table already exists (TB-207); this task only closes the testing-axis mirror.
+
 ## Attempts
 
-### 2026-05-13 — verification_failed
-(no summary)
+### 2026-05-13 — verification_failed (×3)
 - **kind:** per_task
-- **failed_criteria:** [fail] `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" (the lines 41-
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T043107Z-TB-209.prompt.md`, `stream: .cc-autopilot/debug/20260513T043107Z-TB-209.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T043107Z-TB-209.messages.jsonl`
-### 2026-05-13 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" (the lines 41-
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T044038Z-TB-209.prompt.md`, `stream: .cc-autopilot/debug/20260513T044038Z-TB-209.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T044038Z-TB-209.messages.jsonl`
-### 2026-05-13 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" (the lines 41-
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260513T044854Z-TB-209.prompt.md`, `stream: .cc-autopilot/debug/20260513T044854Z-TB-209.stream.jsonl`, `messages: .cc-autopilot/debug/20260513T044854Z-TB-209.messages.jsonl`
+- **failed_criteria:** [fail] `` `ap2/tests/test_coverage_drift.py`'s module docstring no longer describes the CLI-verb test as "deferred" ... `` — bullet started with a backtick-fenced filename which the verifier mis-classified as a shell command (`/bin/bash: ap2/tests/test_coverage_drift.py: Permission denied`, exit 126). Pure briefing-shape bug; agent's commit `1a54d14` satisfies the actual scope.
+- **Debug dumps:** runs `20260513T043107Z`, `20260513T044038Z`, `20260513T044854Z` under `.cc-autopilot/debug/`.
+
+### 2026-05-13 — operator briefing fix
+The final Verification bullet was intended as judge-evaluated prose but started with a backtick-fenced filename, which the verifier's bullet classifier read as "shell command starts here" → it tried to execute the .py path as a command and got `Permission denied`. Same bullet split into two `Prose: ...` bullets (judge-routed by the leading "Prose:" prefix that the other prose bullets use). Existing commit `1a54d14` should pass all verification on re-dispatch.
