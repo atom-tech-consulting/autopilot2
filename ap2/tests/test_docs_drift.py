@@ -1,23 +1,26 @@
-"""Docs-drift coverage gate (TB-203).
+"""Docs-drift coverage gate (TB-203, TB-207).
 
 Every operator-facing surface — MCP tool names registered in
 `CONTROL_AGENT_TOOLS` / `TASK_AGENT_TOOLS` / `MM_HANDLER_TOOLS`, every
 `AP2_*` env knob referenced in `ap2/*.py`, every event-type string passed
-to `events.append(...)` — must be referenced (by exact name) in
-`ap2/howto.md` (and/or `ap2/architecture.md` for the MCP-tools
-enumeration). A future source addition (new env knob, new MCP tool, new
-event type) trips one of these tests until docs catch up, so the
+to `events.append(...)`, every non-suppressed `ap2 <verb>` subcommand in
+`build_parser()` — must be referenced (by exact name) in `ap2/howto.md`
+(and/or `ap2/architecture.md` for the MCP-tools enumeration). A future
+source addition (new env knob, new MCP tool, new event type, new CLI
+verb) trips one of these tests until docs catch up, so the
 operator-facing surface can't silently drift past the reference.
 
-The four tests share a tiny module-local set of constants but otherwise
+The five tests share a tiny module-local set of constants but otherwise
 stay independent — a future single-surface addition fails exactly one
 test with a precise diff, not a cascade.
 """
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
+from ap2.cli import build_parser
 from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS, TASK_AGENT_TOOLS
 
 
@@ -119,6 +122,52 @@ def _collect_event_types() -> set[str]:
     return types - _DOCS_DRIFT_EXEMPT_EVENT_TYPES
 
 
+def _collect_cli_verbs() -> set[str]:
+    """Walk `build_parser()`'s subparser tree and return every
+    non-suppressed leaf verb as `"ap2 <verb>"` (top-level) or
+    `"ap2 <group> <sub>"` (nested under `cron` / `sandbox`).
+
+    Argparse marks a subparser as hidden by setting its `help` to
+    `argparse.SUPPRESS` (rendered as the literal `"==SUPPRESS=="`); those
+    entries are NOT operator-facing (e.g. `ap2 _run`, the backgrounded
+    daemon entrypoint forked by `cmd_start`), so they're dropped here.
+    The howto-side wording in `## Operator CLI verbs (reference)` mirrors
+    the same exclusion explicitly so the table and the gate agree on
+    what counts as a verb.
+
+    Group nodes (`ap2 cron`, `ap2 sandbox`) themselves are skipped — the
+    operator-facing leaves are the nested sub-verbs, and the howto table
+    documents one row per leaf rather than a redundant row for the
+    group root.
+    """
+    verbs: set[str] = set()
+
+    def walk(parser: argparse.ArgumentParser, prefix: str) -> None:
+        for action in parser._actions:
+            if not isinstance(action, argparse._SubParsersAction):
+                continue
+            # `_choices_actions` carries the help string per visible subparser;
+            # entries with `help=argparse.SUPPRESS` show `'==SUPPRESS=='` here.
+            help_by_name = {ca.dest: ca.help for ca in action._choices_actions}
+            for name, sub in action.choices.items():
+                help_str = help_by_name.get(name)
+                if help_str == argparse.SUPPRESS:
+                    continue
+                full = f"{prefix} {name}".strip()
+                has_nested = any(
+                    isinstance(a, argparse._SubParsersAction)
+                    for a in sub._actions
+                )
+                if has_nested:
+                    # Group node — recurse to leaves; don't emit the group itself.
+                    walk(sub, full)
+                else:
+                    verbs.add(full)
+
+    walk(build_parser(), "ap2")
+    return verbs
+
+
 def _all_agent_mcp_tool_short_names() -> set[str]:
     """Union of `CONTROL_AGENT_TOOLS` + `TASK_AGENT_TOOLS` + `MM_HANDLER_TOOLS`,
     stripped of the `mcp__autopilot__` prefix and filtered to drop the
@@ -218,6 +267,34 @@ def test_every_event_type_documented():
         f"map the type back to what code wrote it. Dynamic types "
         f"(emitted via `do_log_event`) opt out via "
         f"`_DOCS_DRIFT_EXEMPT_EVENT_TYPES` with a comment."
+    )
+
+
+def test_every_cli_verb_documented():
+    """Every non-suppressed `ap2 <verb>` subcommand in `build_parser()`
+    is mentioned (by exact `ap2 <verb>` substring) in `ap2/howto.md`'s
+    `## Operator CLI verbs (reference)` section. Substring check (not
+    backtick-required) so the verb can appear bare-quoted in a row's
+    `verb` cell or in surrounding prose; the point is the operator's
+    grep finds a hit when they read `ap2 <verb>` in a Mattermost
+    mention or a `--help` string and want a WHY/when-to-use companion.
+
+    Hidden / dev-only subparsers (`help=argparse.SUPPRESS`, e.g.
+    `ap2 _run`) are excluded by `_collect_cli_verbs` so the gate
+    matches the howto section's stated exclusion.
+    """
+    howto = HOWTO_PATH.read_text()
+    verbs = _collect_cli_verbs()
+    assert verbs, "no CLI verbs collected from build_parser() — walk regressed"
+    missing = sorted(v for v in verbs if v not in howto)
+    assert not missing, (
+        f"CLI verb(s) registered in `ap2/cli.py`'s `build_parser()` but "
+        f"missing from howto.md: {missing}. Add a row to `## Operator CLI "
+        f"verbs (reference)` describing why an operator reaches for the "
+        f"verb (purpose) and what failure mode / related verbs it sits "
+        f"alongside (notes). If the new subparser is dev-only and the "
+        f"operator shouldn't see it, mark it `help=argparse.SUPPRESS` "
+        f"so `_collect_cli_verbs` drops it (mirroring `ap2 _run`)."
     )
 
 

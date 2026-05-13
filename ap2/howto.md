@@ -427,6 +427,62 @@ Operator-only (NOT in any agent toolset, TB-146):
   operator review; ideation surfaces unadopted proposals in its
   per-cycle assessment but cannot adopt them itself.
 
+## Operator CLI verbs (reference)
+
+Subcommands of `ap2` invoked by the operator from the host shell — distinct
+from MCP tools (agent-internal, dispatched by the SDK through the
+`autopilot` MCP server; see `## Custom MCP tools (reference)` above) and
+from chat verbs (`@claude-bot <verb>` in Mattermost, which the handler
+agent routes through `operator_queue_append` so the mutation lands at the
+next tick boundary). The full `ap2 <verb> --help` text is the short-form
+reference; this table is the WHY / when-to-use companion. Subcommand
+groups (`ap2 cron`, `ap2 sandbox`) get one row per nested sub-verb.
+
+The `test_every_cli_verb_documented` gate in `ap2/tests/test_docs_drift.py`
+walks `ap2/cli.py`'s `build_parser()` and fails CI if a new non-suppressed
+subcommand ships without a row below. Hidden / dev-only subparsers
+(declared `help=argparse.SUPPRESS`, e.g. `ap2 _run`) are deliberately
+excluded from both the table and the gate — the daemon spawns them,
+never the operator.
+
+| verb | purpose | notes |
+|---|---|---|
+| `ap2 start [--foreground]` | Boot the daemon for a project (backgrounded by default). | Pre-flight refuses if `CLAUDE_CODE_OAUTH_TOKEN` isn't in env (TB-79); `--foreground` is the debugging hook when `daemon.log` doesn't show why the loop died. |
+| `ap2 stop [-f]` | Politely shut the daemon down (SIGTERM; `-f` escalates to SIGKILL). | The clean stop drains the operator queue before exiting, so an `ap2 update` queued just before `ap2 stop` doesn't get lost. |
+| `ap2 status [--json]` | One-screen snapshot — daemon pid, board section counts, cron jobs, decisions-needed nudges. | The "first thing to run" verb at the top of every operator session; pair `--json` with `jq` for tooling. |
+| `ap2 init` | Idempotent scaffold of `.gitignore` + `.cc-autopilot/tasks/` skeleton in a fresh project. | Run once when bringing a repo under ap2; no-op if the structure already exists. |
+| `ap2 doctor [--user U]` | Sanity-check that the project is ready to boot — skeleton present, sandbox user installed, OAuth token reachable. | Run before `ap2 start` on an unfamiliar machine to diagnose the "daemon won't start" silent-fail modes (TB-79's token-missing path is the most common hit). |
+| `ap2 check [--json]` | Validate on-disk state-file integrity — TASKS.md shape, briefing-link resolution, cron.yaml schema, JSON state parseability, insights front matter (TB-108). | Exits 1 on errors; warnings (stale brief links, missing goal.md) don't fail. Run after any manual edit to a fenced file. |
+| `ap2 logs [-n N] [--json]` | Tail `events.jsonl` with column truncation for human reading. | Faster than `tail \| jq` for the common "what just happened?" question; default trims fields to 120 chars and `--json` gives full payloads. |
+| `ap2 backlog TB-N` | Move a task into Backlog from any section (last-ditch reset without retry-counter exhaustion). | Use when a stuck Active task needs to step back without burning retries; for permanent removal use `ap2 delete` instead. |
+| `ap2 add --briefing-file PATH [-s SECTION] [-t TAGS...] [--no-verify] [--blocked CSV] [--skip-goal-alignment]` | Add a new operator-filed task with a real briefing the per-task verifier can read (TB-135). | `--briefing-file` is required because verification needs a `## Verification` section; pass `-` for stdin. `--skip-goal-alignment` (TB-170) bypasses the TB-161 goal-cite and TB-164 Why-now checks for legitimately-meta work (dep bumps, doc fixes). |
+| `ap2 update TB-N [--title T] [--tags CSV] [--blocked CSV] [--description D] [--clear-tags] [--clear-blocked] [--briefing-file PATH] [--force] [--skip-goal-alignment]` | In-place edit a task's board-line fields and/or its briefing file (TB-153). | Routes through the operator queue so the mutation lands at a tick boundary, never mid-task-run; omitted flag = field unchanged. `--force` lets board-line edits land on Active / Pipeline Pending tasks (briefing edits stay hard-refused). |
+| `ap2 delete TB-N [-f]` | Permanently remove a task from the board (row + briefing file) — emits `task_deleted` for audit. | Refuses Active/Ready without `--force`. Use `ap2 reject` instead for ideation proposals still gated by `@blocked:review`, so the rejection reason feeds ideation Step 0's "don't re-propose" learning. |
+| `ap2 reject TB-N [--reason TEXT]` | Reject an ideation-proposed Backlog task (TB-152): drops the row + briefing AND logs the reason. | Writes `rejected ideation proposal → TB-N (<title>): <reason>` to `operator_log.md`; the reason becomes a learnable signal for the next ideation cycle, and `(no reason given)` is itself a (weak) signal. |
+| `ap2 classify TB-N --impact VERDICT [--reason TEXT]` | Record the operator's retrospective impact verdict (`advanced-goal` / `pro-forma` / `unclear`) on a shipped proposal (TB-189). | Captures whether the task substantively moved the goal forward or merely satisfied validators (goal.md L66-76's failure mode); reasons feed TB-188 per-proposal records and `operator_log.md` so future ideation cycles can learn which proposal shapes actually pay off. |
+| `ap2 ack NOTE [-t TB-N]` | Record an out-of-band operator decision in `operator_log.md` so ideation stops re-proposing actions whose effects aren't filesystem-visible (TB-106). | Use for "I already decided X out-of-band" announcements and for clearing decisions-needed nudges the daemon keeps surfacing. |
+| `ap2 approve TB-N` | Approve an ideation-proposed task (TB-121) — strips its `@blocked:review` codespan so the next tick auto-promotes it out of Backlog. | The thumbs-up half of the `approve` / `reject` pair on freshly-ideated proposals; refuses if the task isn't on the board at all. |
+| `ap2 unfreeze TB-N` | Move a Frozen task back to Backlog and clear its retry counter. | Run after fixing the underlying blocker (flaky test, missing dep); refuses if the task isn't currently Frozen so you can't accidentally reset a healthy task. |
+| `ap2 ideate [--force]` | Manually trigger an ideation pass (TB-159), bypassing the natural empty-board / cooldown / `AP2_IDEATION_DISABLED` gates. | Routed through the operator queue; the daemon runs ideation on its next tick (≤30s). Use to refill a thin Ready/Backlog when waiting on cooldown is impractical; the cooldown clock still advances after the forced run. |
+| `ap2 update-goal --file PATH [--reason TEXT]` | Refresh `goal.md` via the operator queue (TB-193) — full-file replacement applied at the next tick under `board_file_lock`. | Symmetric to `ap2 add --briefing-file`; operator-CLI-only by design — the MM handler has no path to mutate `goal.md`. The `--reason` line feeds future ideation cycles as a goal-drift signal. |
+| `ap2 rollback [-n N \| --task TB-N \| --to SHA] [-y] [--force]` | Linear rollback (TB-111): walk back from HEAD by N tasks (or to a specific TB-N / sha) and `git reset --hard`. | Restores TASKS.md + every committed state file coherently in one shot. Refuses a dirty working tree by default; use when a sequence of recent task-completions needs to be undone together rather than one-by-one. |
+| `ap2 backfill-proposals [--dry-run]` | Backfill historical ideation proposal records (TB-195) for every ideation-authored TB-N that lacks one. | Scans `operator_log.md` + briefing files + `events.jsonl` and writes per-proposal records. Idempotent; safe to re-run. Operator-driven one-off, NOT routed through the operator queue or daemon ticks. |
+| `ap2 pause [--reason TEXT]` | Pause the daemon by setting a flag file — in-flight tasks finish but no new ones dispatch. | Use for short maintenance windows; pair with `ap2 resume` to re-enable. The reason is recorded in events for the operator audit trail. |
+| `ap2 resume` | Clear the pause flag set by `ap2 pause`; the daemon picks up on its next tick (≤30s). | Symmetric pair to `ap2 pause`; no-op if the daemon isn't paused. |
+| `ap2 web [--host H] [--port P]` | Start the read-only HTTP UI at `127.0.0.1:7820` with `/events`, `/tasks`, `/task/<TB-N>`, `/pipelines`, `/insights`, `/ideation_state`, `/commits` pages. | Useful when scanning visually beats asking the session for a summary; the daemon also spawns this automatically on `ap2 start` unless `AP2_WEB_DISABLED` is set. |
+| `ap2 cron list` | List the cron jobs registered in `cron.yaml` with their next-fire timestamps. | The diagnostic for "why isn't the X routine firing?" — pair with `tail .cc-autopilot/cron_state.json` to confirm the last-fire timestamp. |
+| `ap2 cron edit ACTION NAME [--interval I] [--prompt P] [--active-when E] [--max-turns N]` | Add / remove / update a cron job in `cron.yaml`. | Operator-CLI-only since TB-146 retired the agent-side `cron_edit` tool; the TB-202 refuse-if-active gate prevents a mid-task invocation from racing the fenced cron.yaml write against the task agent's snapshot window. |
+| `ap2 sandbox user-audit [USER]` | Verify the sandbox user has no creds beyond `CLAUDE_CODE_OAUTH_TOKEN` (and optional Mattermost env). | The pre-flight before letting the daemon run code as that user — the sandbox model only holds if the user can't reach the human's `~/.ssh`, keychain, or other repos. |
+| `ap2 sandbox user-setup [USER] [-y] [--skip-token] [--skip-statusline] [--mm-url/--mm-token]` | Create the sandbox user (prompts before running sudo). | One-time per machine; pairs with `install-token` / `install-howto` / `install-mm` to fill in creds + per-user config. Skip flags exist for partial setups. |
+| `ap2 sandbox install-token [USER] [--token-env VAR]` | Install `CLAUDE_CODE_OAUTH_TOKEN` into `~<user>/.zshenv`. | Run after `claude setup-token`; the daemon refuses to start without the token in its env (TB-79), and the macOS keychain is locked for non-GUI shells so token-via-keychain doesn't work. |
+| `ap2 sandbox install-statusline [USER]` | Copy `hooks/statusline-command.sh` into `~<user>/.claude/` and wire it into the per-user `settings.json`. | Convenience for matching the human's statusline customization on the sandbox user; purely cosmetic for the daemon itself. |
+| `ap2 sandbox install-howto [USER]` | Copy `ap2/howto.md` to `~<user>/.claude/ap2-howto.md` so a Claude session running as the sandbox user can read it as context. | The agent's primary how-do-I-think-about-ap2 reference — keeping it on the sandbox user's home means an interactive session there has the same context the host shell does. |
+| `ap2 sandbox install-mm [USER] [--mm-url/--mm-token]` | Install `MATTERMOST_URL` + `MATTERMOST_TOKEN` into `~<user>/.zshenv`. | Optional — only needed if the project wants the daemon's Mattermost loop active (poll mentions, post status reports, route `@claude-bot` chat verbs). |
+| `ap2 sandbox project-setup SOURCE [--user U] [-y] [--mm-channel N] [--git-name N] [--git-email E]` | Clone `<source>` into `~<user>/repos/` with repo-local git identity set. | The "transfer this project to the sandbox" verb; pair with `--mm-channel` to wire the per-project channel routing in one step, or fall back to `install-channel` after the fact. |
+| `ap2 sandbox install-channel PROJECT CHANNEL [--user U]` | Resolve a Mattermost channel name to an ID and write `AP2_MM_CHANNELS` into `<project>/.cc-autopilot/env`. | Run after `project-setup` if you skipped `--mm-channel` then; idempotent overwrite. |
+| `ap2 sandbox project-audit PATH [--user U]` | Verify an isolated project clone is well-formed — ownership, git identity, env file. | The diagnostic for "did `project-setup` finish correctly?" — catches half-completed setups before they confuse `ap2 doctor` later. |
+| `ap2 sandbox sync-skills [--apply] [--dest DIR]` | Sync `<repo>/skills/*` into `$HOME/.claude/skills/` (TB-140). | Default is a dry-run drift summary; pass `--apply` to actually copy. Run after editing a skill in the repo if you want the change live for the sandbox user's interactive Claude sessions. |
+
 ## Event schema (the canonical timeline)
 
 `.cc-autopilot/events.jsonl` is append-only. Every line has `ts` (UTC
