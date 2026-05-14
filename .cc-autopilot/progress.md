@@ -539,3 +539,9 @@
 - **Summary:** Retry of TB-211 — fixed the synthetic cron_bootstrap test by driving daemon.main_loop end-to-end (via _stub_main_loop_internals helper that no-ops the heavy/blocking internals); both cron_bootstrap happy + negative branches now exercise the production emit at daemon.py L2168-2169. All 1346 ap2 tests pass.
 - **Files:** ap2/tests/test_tb211_event_types.py
 - **Tests:** pass
+
+## [2026-05-14] TB-218: Extract `_short()` to `ap2/_shared.py`; replace 3 duplicate definitions with imports
+- **Commit:** `6ec0081`
+- **Summary:** Extracted `_short()` to `ap2/_shared.py` as `short(v, limit)` (no default), migrated three byte-identical local defs in `ap2/cli.py` (120), `ap2/diagnose.py` (100), and `ap2/events.py` (200) to explicit-limit calls; preserved U+2026 ellipsis marker; full ap2 suite green (1346/1346).
+- **Files:** ap2/_shared.py, ap2/cli.py, ap2/diagnose.py, ap2/events.py, ap2/tests/test_web.py
+- **Tests:** pass
