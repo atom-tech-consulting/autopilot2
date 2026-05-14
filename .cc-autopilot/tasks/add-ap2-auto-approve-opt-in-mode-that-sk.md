@@ -81,3 +81,10 @@ Sequencing risk: the cumulative-regression check (3) reads recent events. The ev
 - Auto-rolling-back tasks that retrospectively classify as `#wasteful` (different mechanism; the existing `ap2 classify` + `ap2 rollback` paths handle that separately).
 - Per-tag granular auto-approve (e.g. "auto-approve `#docs` but not `#tests`") — the current opt-out is opt-out-by-tag; opt-in-by-tag is a different shape and not on this task's path.
 - A daemon-side allowlist of "auto-approvable task shapes" beyond tags (e.g. word-count limits on title, briefing-size caps, scope-section bullet count) — premature; the tag-based opt-out is the first filter; if it proves insufficient, a future task adds finer-grained gates.
+## Attempts
+
+### 2026-05-14 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "^AP2_AUTO_APPROVE" .cc-autopilot/env` — exit may be 0 or 1 depending on whether the operator has enabled the 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T215337Z-TB-223.prompt.md`, `stream: .cc-autopilot/debug/20260514T215337Z-TB-223.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T215337Z-TB-223.messages.jsonl`
