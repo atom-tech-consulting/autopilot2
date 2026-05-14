@@ -503,3 +503,9 @@
 - **Summary:** Added ap2/tests/test_tb210_env_knobs.py with 14 default/override/invalid/precedence tests pinning AP2_TASK_MAX_TURNS (daemon.run_task), AP2_JANITOR_JUDGE_EFFORT + AP2_JANITOR_JUDGE_MAX_TURNS (janitor._judge_finding), and AP2_MM_TEAM_ID (sandbox._install_channel_for_project / resolve_mm_channel); each test references the call-site module symbol. Replaced the four-knob shim block in test_coverage_drift.py L385-389 with a one-line audit comment pointing at the new module — drift gate stays green. Full ap2 suite 1286/1286 passing.
 - **Files:** ap2/tests/test_tb210_env_knobs.py, ap2/tests/test_coverage_drift.py
 - **Tests:** pass
+
+## [2026-05-14] TB-212: Pin 3 mattermost-emitted event types (`mattermost_error`, `mattermost_timeout`, `mm_poll_error`) with happy + error path tests (TB-208 event-type debt closure — mattermost subset)
+- **Commit:** `92703e9`
+- **Summary:** Added 7 source-pinned + real-seam tests for mattermost_timeout, mattermost_error, mm_poll_error in new ap2/tests/test_tb212_mm_event_types.py (mirrors TB-211 shape: stub _run_control_agent + check_new_messages, drive handle_message + _mm_loop), and replaced the 3 mattermost shim rows in test_coverage_drift.py with a TB-212-closed narrative paragraph; full ap2/tests suite passes (1301 passed) and all 5 briefing verification bullets are satisfied.
+- **Files:** ap2/tests/test_tb212_mm_event_types.py, ap2/tests/test_coverage_drift.py
+- **Tests:** pass
