@@ -130,3 +130,7 @@ ideation won't re-propose decisions logged here._
 - 2026-05-14T07:37:10Z — applied operator-queued update → TB-217
 - 2026-05-14T09:11:16Z — applied operator-queued add_backlog → TB-221
 - 2026-05-14T09:11:58Z — applied operator-queued add_backlog → TB-222
+- 2026-05-14T21:09:21Z — applied operator-queued update_goal
+- 2026-05-14T21:09:21Z — operator updated goal.md
+- 2026-05-14T21:09:21Z — applied operator-queued add_backlog → TB-223
+- 2026-05-14T21:09:21Z — applied operator-queued ideate → (forced)

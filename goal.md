@@ -35,76 +35,130 @@ For ap2's own infrastructure, the practical "done enough" thresholds are:
   drifting into ap2-meta polish or scope creep, and stops proposing when
   the target project's `## Done when` criteria are all met.
 
-## Current focus: code quality
+## Current focus: end-to-end automation
 
-The data-collection infrastructure for evaluating ideation quality is
-now in place (operator-decision capture via the reject/classify/update-goal
-verbs, proposal-outcome records, token-cost accounting on every SDK call
-site, rejection-reason injection into the prompt header). Future
-iteration tuning ideation against this data depends on the underlying
-codebase remaining legible and confidently modifiable. The focus shifts
-from accumulating signal to consolidating the foundation that lets us
-act on it: tests, docs, reusable helpers, and code cleanness.
+The code-quality consolidation focus has been substantively addressed:
+the recent task arc (TB-203 → TB-220) closed the major gaps on testing
+coverage (env-knob / MCP-tool / event-type / CLI-verb drift gates and
+the test-presence mirror), operator-facing documentation (the
+`## Authoring goal.md` section restructured, the CLI-verb reference
+table landed, the howto-vs-goal.md content coupling decoupled), code
+reusability (`_locked` / `_short` / `_now` / `_read_pid` /
+`_collect_cli_verbs` extracted), and code cleanness (the verifier's
+prose-vs-shell classifier tightened, the title-asterisk validation
+gate added). The legibility-and-confidence foundation now exists.
 
-Without consolidation, every prompt-shape tweak or behavior change risks
-silent regression (no test net catches it), drift (no docs name the
-invariant), parallel-bug-surface duplication (the same logic copied
-across call sites), or cognitive load that slows future iteration
-(undifferentiated multi-thousand-line modules). The signal-collection
-work is only worthwhile if it feeds into changes we can confidently make.
+The limiting factor on mission progress shifts to a different axis:
+operator-in-the-loop bottlenecks. The mission says "walk away for a
+week without intervention" — but today every ideation-proposed task
+requires `ap2 approve`, every retry-exhausted task requires
+`ap2 unfreeze`, and every focus rotation requires manual `ap2
+update-goal`. A representative operator session in this codebase
+approves 10-20 tasks; that's not walking away, that's approving
+constantly. The Mission's walk-away promise is currently aspirational,
+not deliverable.
+
+This focus closes the gap by relaxing the operator-in-the-loop
+defaults on surfaces where upstream gates already provide safety,
+while keeping the operator-only path for surfaces where judgment
+genuinely can't be automated (goal mutations, git pushes, focus
+direction). The framing: every operator action that the current
+codebase REQUIRES on every cycle is a candidate for opt-in
+automation — automation that the operator can enable when they've
+verified the upstream gates are trustworthy and disable when they
+haven't.
 
 Four axes form this focus. Each has its own failure mode to detect:
 
-(1) **Testing coverage**: every shipped CLI verb, MCP tool, control-agent
-path, and env-knob-flagged behavior has automated tests pinning the happy
-path AND at least one error path. Delete-test for a proposed test: if
-this test were deleted, would a regression risk become invisible? If no,
-the test isn't paying rent — pro-forma test coverage that exercises
-nothing real is its own failure mode.
+(1) **Manual-approval bottleneck**: every ideation-proposed task today
+lands with `@blocked:review` and requires explicit `ap2 approve TB-N`
+to dispatch. The upstream gates that ALREADY make this safe in
+practice — briefing structural validation (TB-161 anchor check, TB-164
+Why-now check, TB-171 manual-bullet reject), goal-alignment validation
+(TB-161 anchor match), per-task verification (every briefing carries
+auto-verifiable acceptance criteria), retry budget (3 attempts before
+Frozen), and rollback (`ap2 rollback` walks back N tasks) — are not
+deployed in concert because the operator-approve gate sits between
+them and dispatch. Deliver: an opt-in auto-approve mode that bypasses
+`@blocked:review` when the operator has verified the upstream gates,
+with tag-based opt-out for high-risk shapes and a cumulative-regression
+pause for safety. Delete-test: if this work didn't ship, the walk-away
+promise stays fiction; with it, the cost-of-walking-away drops from
+"approve constantly" to "set the knob, monitor occasionally." The
+delete-test passes substantively.
 
-(2) **Operator-facing documentation**: every operator surface (CLI
-verb, env knob, MCP tool, fenced-file role, board section semantic) is
-documented where an operator looks first — `ap2/howto.md` for workflow,
-`ap2 <verb> --help` for usage, `ap2/architecture.md` for internals. The
-failure mode is an operator who can't understand a surface from its
-documented description and has to read source. Docs that paraphrase the
-source without explaining the WHY are pro-forma documentation — same
-delete-test applies.
+(2) **Failure-recovery operator dependency**: retry-exhausted tasks
+land in Frozen and require `ap2 unfreeze TB-N` to re-dispatch. In the
+recent task arc, multiple Frozen states were resolved by trivial
+briefing-shape edits the agent self-diagnosed in its blocked status
+summary (TB-204's `grep -lE` → `grep -rlE`, TB-207's literal-backtick
+in shell bullets). The daemon could apply agent-diagnosed briefing
+patches automatically when the agent's `task_complete blocked` summary
+names a concrete syntactic fix, with operator-curated guardrails on
+which fix-shapes are auto-applicable. Delete-test: if this work didn't
+ship, every briefing-shape regression cascades into operator-manual
+unfreeze; with it, the loop self-heals on the recurring class.
 
-(3) **Code reusability**: when a piece of logic appears at three or
-more call sites with structural similarity, extract to a shared helper.
-Threshold is three (not two) — premature abstraction is its own failure
-mode. The failure mode for the OTHER direction is the same bug appearing
-at multiple call sites because logic was copy-pasted instead of shared.
+(3) **Cost and blast-radius guards**: auto-approval shifts the
+bottleneck from operator judgment to system safety. The current cost
+accounting (token usage per SDK call, captured in `control_run_usage`
+/ `task_run_usage` events) is observable but not gated. A bounded
+auto-approve mode needs cost ceilings (cumulative-task budget per
+window, per-task spend cap), regression pauses (N consecutive
+verification-failed-to-Frozen → halt auto-promote until operator
+acks), and unscheduled-failure detection (verifier returns "task_error"
+not "verification_failed" → infrastructure issue, halt and surface).
+Delete-test: if this work didn't ship, an auto-approve mode is
+unbounded-blast-radius; with it, the safety floor catches the patterns
+the operator's per-task review currently catches.
 
-(4) **Code cleanness**: naming clarity, dead-code removal, comment
-hygiene per project conventions (no `# TB-N:` prefix tags rotting in
-source as TB-N references age, no multi-paragraph docstrings duplicating
-what well-named identifiers already communicate, no comments narrating
-what well-named code already shows). Long-running modules (`ap2/tools.py`
-past 3700 lines, `ap2/daemon.py` past 2500, `ap2/cli.py` past 1700) get
-decomposed along natural domain boundaries when the boundary becomes
-clear from reading — not via speculative refactor.
+(4) **Multi-focus sequential execution**: `goal.md` supports a list of
+`## Current focus:` headings in priority order (top = active). ap2
+works the topmost focus until it's exhausted, then advances its
+internal pointer to the next — without operator-mediated rotation.
+The exhaustion gate is mixed: each focus can optionally carry a
+`Done when:` sub-block listing concrete completion criteria, in which
+case ideation gates advancement on those criteria being substantively
+met; foci without an explicit `Done when:` fall back to a heuristic
+(N consecutive 0-proposal cycles against the focus, configurable via
+`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`, default 3). The daemon advances by
+updating an in-memory pointer + emitting `focus_advanced from=<old>
+to=<new>` to the event log — it never mutates `goal.md` itself
+(operator still owns the file; adding, reordering, or retiring foci
+remains `ap2 update-goal`-only). When all foci exhaust, the daemon
+emits a `roadmap_complete` decisions-needed entry and halts
+auto-approval until the operator extends the roadmap. Failure mode
+this closes: today's single-focus model caps walk-away time at the
+focus's natural exhaustion point — when one focus's gaps are
+addressed, ideation has nothing valuable to propose until the
+operator manually rotates, forcing intervention at exactly the moment
+the loop should be most productive. Delete-test: if this work didn't
+ship, walk-away time is bounded by single-focus exhaustion (typically
+days-to-weeks); with it, walk-away time scales with the
+operator-declared roadmap length (weeks-to-months).
 
-These four are mutually reinforcing. Tests give confidence to refactor
-for reusability and cleanness. Docs capture the invariants tests pin.
-Reusable helpers reduce the volume of code that needs testing and
-documenting in the first place. The delete-test for any proposed
-code-quality work: would the codebase get noticeably less confidently
-modifiable if this work didn't ship? If the answer is "no, things would
-be about the same," it's pro-forma consolidation — the same shape of
-goal-shaped pro-forma compliance the prior focus was set up to detect,
-just applied to a different axis.
+These four are mutually reinforcing. The auto-approval mode (#1) is
+the most concrete deliverable and unblocks the others — once an
+operator-trusted auto-approve loop exists, the failure-recovery
+automation (#2) has a clear deployment target (the same opt-in mode),
+the cost guards (#3) gate the same auto-approval surface, and the
+multi-focus advance surface (#4) extends walk-away by removing
+operator-mediated rotation from the per-epoch burden. The delete-test
+for any proposed work in this focus: would the operator's
+walk-away-time materially increase? If the answer is "no, the
+operator still has to approve / unfreeze / update-goal manually,"
+the work isn't paying rent — pro-forma automation that doesn't
+deliver autonomy is its own failure mode.
 
 Side note: continue capturing operator-decision signal as it surfaces
-during this focus. Rejection reasons, classification verdicts, briefing
-edits flow into `operator_log.md` passively via the queue-routed verbs
-without active iteration. Any prompt-shape pattern noticed during
-code-quality work (e.g., "this proposal got rejected because X — that's
-a class of failure mode worth pinning later") belongs in
+during this focus. Rejection reasons, classification verdicts,
+briefing edits flow into `operator_log.md` passively via the
+queue-routed verbs. Any auto-approve-mode pattern noticed (e.g., "the
+auto-approved task hit a class of regression that should have gated
+on tag X — pin tag X as auto-approve-gating") belongs in
 `ideation_state.md`'s "Open questions for operator" or as an operator
-log ack, so the eventual prompt-tuning iteration starts with fresh
-evidence rather than gaps.
+log ack, so future auto-approve guard-tuning starts with fresh
+evidence.
 
 ## Non-goals
 
@@ -114,7 +168,8 @@ evidence rather than gaps.
   tools and dilute the loop.
 - **Replacing operator judgment on goal definition**: the operator owns
   `goal.md`. ap2 doesn't propose new mission statements; it executes
-  against the one it's given.
+  against the one it's given. Focus-rotation proposals (axis 4) surface
+  recommendations for operator review; they do not auto-rewrite goal.md.
 - **Multi-tenancy / shared sandbox**: one operator, one sandbox user,
   one daemon. Multi-tenant isolation is not on the path.
 - **Real-time collaboration**: Mattermost is the human-loop channel, but
@@ -125,6 +180,15 @@ evidence rather than gaps.
 - **Cross-project orchestration**: each project has its own ap2 daemon
   + state. ap2 doesn't aggregate across projects or propose work in one
   project based on activity in another.
+- **Unconditional automation**: auto-approve, auto-unfreeze, and any
+  other operator-in-the-loop relaxation are OPT-IN env knobs with
+  conservative defaults. ap2 does not silently bypass the operator
+  surface; relaxations are operator-curated trust upgrades.
+- **Goal.md auto-rotation**: the operator owns the focus list. ap2
+  advances its internal "topmost active focus" pointer based on
+  exhaustion signals but never mutates `goal.md` itself — adding,
+  reordering, or retiring foci is operator-only via `ap2 update-goal`.
+  Auto-advance is a runtime pointer change, not a docs change.
 
 ## Constraints
 
@@ -143,6 +207,14 @@ evidence rather than gaps.
 - **Verification is gating**: every task lands with auto-verifiable
   acceptance criteria the daemon can evaluate unattended. No manual-step
   gating bullets.
-- **Operator-in-the-loop where work is irreversible**: ideation proposals
-  require operator approval before dispatch; cron schedule changes are
-  operator-CLI-only; git pushes are not automated.
+- **Operator-in-the-loop is configurable per surface, conservative by
+  default**: ideation proposals, retry-exhausted tasks, focus
+  advancement, and other per-cycle operator gates default to requiring
+  operator action. Relaxations are opt-in via env knobs
+  (`AP2_AUTO_APPROVE`, `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`, future
+  siblings) with documented safety gates (tag-based opt-out,
+  cumulative-regression pause, all-foci-exhaust halt). Goal mutations
+  (`goal.md` content — including the focus list itself), git pushes,
+  and cron schedule changes remain operator-CLI-only by design —
+  they're either irreversible or set direction for everything
+  downstream.
