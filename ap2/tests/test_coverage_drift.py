@@ -403,9 +403,15 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 # event-type axis of TB-208's discovered-at-landing debt is now fully
 # closed.
 #
-# CLI verbs (12) — TB-209-landed gap on the CLI-verb axis:
-#   - ap2 pause                      (cli.py — daemon-pause control)
-#   - ap2 resume                     (cli.py — daemon-resume control)
+# CLI verbs — TB-209-landed gap on the CLI-verb axis.
+#
+# TB-213 closed the four daemon-lifecycle verbs (ap2 pause, ap2 resume,
+# ap2 stop, ap2 unfreeze) by landing `ap2/tests/test_tb213_daemon_lifecycle_verbs.py`
+# — the substring drift gate now resolves all four via that real test
+# module rather than this comment block. The four matching shim rows
+# were removed when TB-213 landed. The 8 sandbox-verb rows below remain
+# as discovered-at-landing debt; two follow-up TBs (one per sandbox
+# subset — install-* and audit/setup) close the rest:
 #   - ap2 sandbox install-channel    (cli.py — sandbox MM channel install)
 #   - ap2 sandbox install-howto      (cli.py — sandbox howto install)
 #   - ap2 sandbox install-mm         (cli.py — sandbox MM creds install)
@@ -414,8 +420,6 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 #   - ap2 sandbox project-setup      (cli.py — sandbox per-project setup)
 #   - ap2 sandbox user-audit         (cli.py — sandbox per-user audit)
 #   - ap2 sandbox user-setup         (cli.py — sandbox per-user setup)
-#   - ap2 stop                       (cli.py — daemon-stop control)
-#   - ap2 unfreeze                   (cli.py — frozen-task unfreeze)
 #
 # Follow-up: a separate TB closes each of these with the same
 # happy-path + error-path shape TB-205 used. Tracking here rather than
