@@ -563,3 +563,9 @@
 - **Summary:** Previously committed in 59bd1ba — work fully covers briefing. Audit: ran `uv run pytest -q ap2/tests/` (1357 passed); confirmed ap2/_shared.py exists with both `locked_inplace` (L66) and `locked_sidecar` (L85), zero `^def _locked\(` matches across board.py/cron.py/retry.py, all three files have `from ap2._shared import` lines, none import `fcntl` directly, and the module docstring (L1-29) explicitly names the semantic distinction (inplace holds fd on file itself vs. sidecar locks `.lock` to permit safe rewrite/truncate).
 - **Files:** ap2/_shared.py, ap2/board.py, ap2/cron.py, ap2/retry.py
 - **Tests:** pass
+
+## [2026-05-14] TB-224: Add `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` + `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` + `task_error` halt on top of TB-223's auto-approve gate (axis 3 cost + blast-radius guards)
+- **Commit:** `7e5a400`
+- **Summary:** Layered AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP + AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP + task_error single-event halt onto TB-223's auto-approve gate, with shared `ap2 ack auto_approve_window_resume` resume ack. 14 new tests in test_tb224_token_caps.py cover all 6 behavioral cases from the briefing plus precedence + ideation_state-helper invariants. Full suite: 1404 passed in 89s.
+- **Files:** ap2/daemon.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb224_token_caps.py
+- **Tests:** pass
