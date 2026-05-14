@@ -2364,6 +2364,168 @@ async def _interruptible_sleep(total_s: int) -> None:
         slept += 1
 
 
+# TB-223: cumulative-regression circuit-breaker for the opt-in
+# `AP2_AUTO_APPROVE` mode. When N consecutive `task_complete` events
+# end with a failure status AND ultimately route to `retry_exhausted`,
+# the daemon halts auto-promotion of tasks that were auto-approved by
+# ideation. Operator-approved tasks (those that went through
+# `ap2 approve` after `@blocked:review` was preserved) continue to
+# dispatch normally — the pause is targeted, not blanket.
+#
+# Unfreeze: the operator runs `ap2 ack auto_approve_unfreeze --reason
+# "..."` (the existing `ap2 ack` verb + queue plumbing per TB-106 /
+# TB-201). The drain-side emits an `operator_ack` event with the note
+# carrying the `auto_approve_unfreeze` token; `_auto_approve_paused`
+# below treats that as a state reset — subsequent failure counting
+# starts from the next `task_complete`.
+#
+# Tunable via `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` (default 3). Setting
+# it to 0 (or any non-positive integer) effectively disables the
+# circuit-breaker (the freeze check immediately returns False), which
+# is the escape hatch for operators who explicitly trust the upstream
+# gates beyond this layer.
+_AUTO_APPROVE_FAILURE_STATUSES: frozenset[str] = frozenset(
+    {"verification_failed", "blocked", "error", "failed"},
+)
+_AUTO_APPROVE_UNFREEZE_TOKEN = "auto_approve_unfreeze"
+
+
+def _auto_approve_freeze_threshold() -> int:
+    """Effective threshold for the auto-approve cumulative-regression
+    circuit-breaker, env-overridable via `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`.
+
+    Default 3 (`ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT`).
+    Non-int / empty values silently fall back to the default; a value
+    `<= 0` is treated as "circuit-breaker disabled" (see
+    `_auto_approve_paused` which returns False in that case so an
+    operator who wants the auto-approve dispatch without the safety
+    net can configure that explicitly). Same permissive-parse shape
+    as `ideation._cooldown_s`.
+    """
+    raw = os.environ.get("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "").strip()
+    if not raw:
+        return ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT
+    try:
+        return int(raw)
+    except ValueError:
+        return ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT
+
+
+def _auto_approve_paused(cfg: Config) -> bool:
+    """True iff the auto-approve dispatch path should be halted now.
+
+    Reads the tail of `events.jsonl` and looks at the most recent
+    `task_complete` events. The path is paused when:
+      - The threshold N (= `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`, default
+        3) is positive, AND
+      - The last N `task_complete` events all carry a failure status
+        in `_AUTO_APPROVE_FAILURE_STATUSES`, AND
+      - The most recent of those was followed by a `retry_exhausted`
+        event for the same task (the briefing's "end in
+        `retry_exhausted`" qualifier — the failure chain ultimately
+        froze a task rather than just looping a single TB through
+        retries), AND
+      - The operator has NOT emitted an `operator_ack` whose `note`
+        contains `auto_approve_unfreeze` AFTER the failure window
+        started (the explicit reset signal).
+
+    Threshold `<= 0` short-circuits to False (operator opted out of
+    the circuit-breaker explicitly — see the parser comment).
+
+    Pure / no I/O beyond the events.jsonl tail read; safe to call from
+    `_tick` without taking the board lock.
+    """
+    threshold = _auto_approve_freeze_threshold()
+    if threshold <= 0:
+        return False
+    if not cfg.events_file.exists():
+        return False
+    # Tail-window must be big enough to cover the threshold-N
+    # completions plus interleaved noise (status_report, cron, judge
+    # calls). 500 is a generous default; production events.jsonl tail
+    # is dominated by observability lines, so a bigger window is cheap
+    # (events.tail is bounded by the file).
+    tail = events.tail(cfg.events_file, 500)
+    # Reset state at the most recent unfreeze ack: anything before it
+    # is "old water under the bridge" and doesn't count toward the
+    # current consecutive-failure window.
+    last_unfreeze_idx = -1
+    for i, e in enumerate(tail):
+        if e.get("type") != "operator_ack":
+            continue
+        note = str(e.get("note") or "")
+        if _AUTO_APPROVE_UNFREEZE_TOKEN in note:
+            last_unfreeze_idx = i
+    relevant = tail[last_unfreeze_idx + 1:]
+    # Collect `task_complete` events in order.
+    completes = [e for e in relevant if e.get("type") == "task_complete"]
+    if len(completes) < threshold:
+        return False
+    window = completes[-threshold:]
+    if not all(
+        str(e.get("status", "")).strip() in _AUTO_APPROVE_FAILURE_STATUSES
+        for e in window
+    ):
+        return False
+    # The "end in retry_exhausted" qualifier: the most recent failing
+    # task_complete must have been followed by a retry_exhausted event
+    # for the same task (i.e. the failure chain actually froze a task,
+    # not just looped a single TB through one retry). Scan the
+    # `relevant` slice forward from the last-window-completion onward.
+    final_complete = window[-1]
+    final_task = str(final_complete.get("task") or "")
+    if not final_task:
+        return False
+    # Find the index of `final_complete` in `relevant` and scan after.
+    try:
+        final_idx = next(
+            i for i, e in enumerate(relevant) if e is final_complete
+        )
+    except StopIteration:
+        return False
+    for e in relevant[final_idx:]:
+        if (
+            e.get("type") == "retry_exhausted"
+            and str(e.get("task") or "") == final_task
+        ):
+            return True
+    return False
+
+
+def _was_auto_approved(cfg: Config, task_id: str) -> bool:
+    """True iff `task_id` has an `auto_approved` event in events.jsonl
+    AND no subsequent `ideation_approved` event for the same TB-N
+    (which would indicate the operator subsequently `ap2 approve`'d
+    the task, promoting it to the operator-approved bucket).
+
+    Drives the per-task gate at `_tick`'s auto-promote step: when the
+    circuit-breaker is active (`_auto_approve_paused`), we still want
+    to let operator-approved tasks through. Distinguishing
+    auto-approved (event = `auto_approved`) from operator-approved
+    (event = `ideation_approved`) lets the gate apply at the right
+    granularity.
+
+    A task that was auto-approved AND later operator-approved counts
+    as operator-approved (the operator's explicit decision overrides
+    the auto layer). Pure / events.jsonl tail read only.
+    """
+    if not cfg.events_file.exists():
+        return False
+    tail = events.tail(cfg.events_file, 1000)
+    auto_seen = False
+    for e in tail:
+        if str(e.get("task") or "") != task_id:
+            continue
+        typ = e.get("type")
+        if typ == "auto_approved":
+            auto_seen = True
+        elif typ == "ideation_approved":
+            # Operator explicitly approved → no longer in the
+            # auto-approved bucket regardless of prior auto stamp.
+            auto_seen = False
+    return auto_seen
+
+
 async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # 0. Drain the operator queue (TB-131). Runs BEFORE every other
     # stage so cron / pipeline-pending sweep / task dispatch / ideation
@@ -2436,6 +2598,34 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             # references — backward-compatible: tasks with no declared blockers
             # are always dispatchable.
             backlog = board.next_dispatchable("Backlog")
+            # TB-223: AP2_AUTO_APPROVE cumulative-regression circuit
+            # breaker — when `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`
+            # consecutive task failures land in `retry_exhausted`, halt
+            # auto-promotion of tasks that ideation auto-approved (the
+            # `auto_approved` audit event identifies them).
+            # Operator-approved tasks (those that went through `ap2
+            # approve` with `ideation_approved`) continue to dispatch
+            # normally — the freeze is targeted at the auto layer.
+            # Unfreeze: operator runs `ap2 ack auto_approve_unfreeze
+            # --reason "..."` to reset the failure counter.
+            if (
+                backlog is not None
+                and _was_auto_approved(cfg, backlog.id)
+                and _auto_approve_paused(cfg)
+            ):
+                events.append(
+                    cfg.events_file,
+                    "auto_approve_paused",
+                    task=backlog.id,
+                    threshold=_auto_approve_freeze_threshold(),
+                    reason=(
+                        "consecutive task failures landed in "
+                        "retry_exhausted; auto-promote of auto-approved "
+                        "tasks halted until operator emits "
+                        "`ap2 ack auto_approve_unfreeze`"
+                    ),
+                )
+                backlog = None
             if backlog is not None:
                 do_board_edit(cfg, {"action": "move_to_ready", "task_id": backlog.id})
                 events.append(

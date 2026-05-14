@@ -3,6 +3,28 @@
 Events are the shared awareness mechanism in v2: every `query()` call receives
 the last N events as context, so stateless agents can reconstruct recent history
 without accumulating it in any long-lived session.
+
+Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
+"<type>", ...)` with a fixed string literal. Notable recent additions:
+  - `auto_approved` (TB-223) — ideation-proposed row landed without
+    `@blocked:review` because `AP2_AUTO_APPROVE` is on and the task
+    doesn't carry any `AP2_AUTO_APPROVE_GATE_TAGS` tag. Audit-trail
+    event so `ap2 logs` and the cron status-report surface what
+    auto-approval shipped without operator review. Payload: `task`
+    (TB-N) + `knob` (env value at emit time, for forensic trail).
+  - `auto_approve_paused` (TB-223) — cumulative-regression
+    circuit-breaker tripped; the daemon halted auto-promotion of
+    auto-approved Backlog tasks until the operator emits
+    `ap2 ack auto_approve_unfreeze`. Payload: `task`, `threshold`,
+    `reason` (descriptive sentence). Counterpart `operator_ack` event
+    with a note containing `auto_approve_unfreeze` resets the
+    failure window.
+
+The full canonical list lives in `ap2/howto.md`'s `## Event schema`
+section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)
+and `test_every_event_type_has_test_reference`
+(`ap2/tests/test_coverage_drift.py`) gate that emitted types stay
+documented and tested.
 """
 from __future__ import annotations
 

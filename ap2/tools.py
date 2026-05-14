@@ -1108,8 +1108,45 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 # `(blocked on: ...)`. The codespan lives in `meta` and
                 # round-trips through Task.render() / parse_task_line.
                 meta: dict[str, str] = {}
-                if blocked_on:
-                    meta["blocked"] = blocked_on
+                effective_blocked_on = blocked_on
+                # TB-223: AP2_AUTO_APPROVE opt-in mode strips the
+                # `review` token from `blocked_on` for ideation-authored
+                # `add_backlog` rows so the daemon's next-tick
+                # auto-promote dispatches the task without waiting for
+                # `ap2 approve`. Gate-tag opt-out: a proposed task
+                # carrying any of `AP2_AUTO_APPROVE_GATE_TAGS` (default
+                # `#breaking-change,#high-risk`) retains the review
+                # blocker even in auto-approve mode — operator's
+                # escape hatch for elevated-risk shapes. Decision is
+                # delegated to `ideation.should_auto_approve(tags)` so
+                # the env-knob layer + gate-tag intersection live in
+                # one place. Audit event `auto_approved` fires after a
+                # successful `board.add` so `ap2 logs` and the cron
+                # status-report can surface what auto-approval
+                # shipped without operator review.
+                auto_approved_stripped = False
+                if (
+                    action == "add_backlog"
+                    and effective_blocked_on
+                ):
+                    from . import ideation as _ideation
+                    tokens = [
+                        tok.strip()
+                        for tok in effective_blocked_on.split(",")
+                        if tok.strip()
+                    ]
+                    review_present = any(
+                        tok.lower() == "review" for tok in tokens
+                    )
+                    if review_present and _ideation.should_auto_approve(tags):
+                        kept = [
+                            tok for tok in tokens
+                            if tok.lower() != "review"
+                        ]
+                        effective_blocked_on = ",".join(kept)
+                        auto_approved_stripped = True
+                if effective_blocked_on:
+                    meta["blocked"] = effective_blocked_on
                 board.add(
                     add_map[action],
                     task_id=new_id,
@@ -1119,6 +1156,13 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     description=description,
                     briefing=briefing_rel,
                 )
+                if auto_approved_stripped:
+                    events.append(
+                        cfg.events_file,
+                        "auto_approved",
+                        task=new_id,
+                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                    )
                 # TB-141: persist the new high-water mark to CLAUDE.md
                 # synchronously here. `_allocate_id` no longer writes —
                 # this path (ideation / control agents calling the

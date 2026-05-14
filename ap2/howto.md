@@ -608,7 +608,15 @@ post-task auto-classifier verdict), `backlog_auto_promoted`,
 `@claude-bot ack: …`), `operator_queue_append` /
 `operator_queue_drained`, `ideation_approved` (TB-121 operator
 `ap2 approve TB-N` promoted a proposed task), `ideation_proposal_recorded`
-/ `ideation_proposal_reconciled` (TB-188 per-proposal audit trail).
+/ `ideation_proposal_reconciled` (TB-188 per-proposal audit trail),
+`auto_approved` (TB-223 — ideation omitted the `@blocked:review` codespan
+on a proposed task because `AP2_AUTO_APPROVE` is on and the task carries
+no `AP2_AUTO_APPROVE_GATE_TAGS` tag; `knob=` payload field captures the
+env value at proposal time so the forensic trail survives env changes
+during the daemon's lifetime), `auto_approve_paused` (TB-223 —
+cumulative-regression circuit-breaker tripped; auto-promote of
+auto-approved tasks halted until operator emits `ap2 ack
+auto_approve_unfreeze`).
 
 `diagnose.MEANINGFUL_EVENT_TYPES` is what the watchdog counts as "the
 daemon making progress"; `FAILURE_EVENT_TYPES` is what counts as broken.
@@ -692,6 +700,60 @@ fails CI if a new knob is added and not listed here):
   `1` for the legacy "fire only when the working queue is fully empty"
   behavior; raise it (e.g. `5`) for projects with very fluid scope.
   Invalid (non-int, non-positive) values fall back to the default.
+
+**Operator-in-the-loop relaxations (TB-223).** Three layered safety
+knobs that let an operator who trusts the upstream gates dispatch
+ideation-proposed tasks without running `ap2 approve` on each one.
+Defaults are unset / conservative — current behavior is preserved for
+operators who haven't opted in. Cross-references `goal.md`'s
+**Current focus: end-to-end automation** axis on the manual-approval
+bottleneck: a representative ap2 session approves 10-20 tasks per
+cycle, which contradicts the Mission's "walk away for a week without
+intervention" promise. The trio is layered so an operator can dial
+trust precisely: `AP2_AUTO_APPROVE` is the master switch,
+`AP2_AUTO_APPROVE_GATE_TAGS` is the per-shape opt-out (operator names
+tag categories that retain manual review even in auto-approve mode),
+and `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` is the systemic-regression
+circuit-breaker (auto-promote halts when consecutive task failures
+land in Frozen).
+
+- `AP2_AUTO_APPROVE` — master switch. **Unset by default.** When set
+  to a truthy value (`1` / `true` / `yes`, matching
+  `AP2_IDEATION_DISABLED`'s convention), ideation-authored
+  `add_backlog` rows omit the `@blocked:review` codespan so the
+  daemon's next-tick auto-promote dispatches the task immediately. The
+  operator decision-log entry in `ap2 logs` still surfaces what
+  auto-approval shipped (the `auto_approved` event — see `## Event
+  schema`), so the audit trail is preserved for offline review.
+  Off-by-default keeps the legacy approve-every-task behavior in place
+  for operators who haven't verified the upstream gates (briefing
+  structural validation, goal-alignment validation, per-task
+  verification, retry budget, rollback).
+- `AP2_AUTO_APPROVE_GATE_TAGS` (default `#breaking-change,#high-risk`)
+  — comma-separated list of tag strings. When auto-approve is on, a
+  proposed task carrying ANY of these tags **retains** its
+  `@blocked:review` codespan so it still requires `ap2 approve`. This
+  is the operator's escape hatch for categories of work they don't
+  trust to auto-ship; the defaults align with the tags ideation itself
+  uses to self-mark elevated-risk proposals. Operators may type the
+  tag with or without the leading `#` (both parse identically); empty
+  string falls back to the default set.
+- `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` (default `3`) — integer count.
+  When N consecutive `task_complete` events have status in
+  `{verification_failed, blocked, error, failed}` AND end in
+  `retry_exhausted` (the failure chain actually froze a task rather
+  than looping a single TB through retries), the daemon halts
+  auto-promotion of `auto_approved` tasks. Operator-approved tasks
+  (those promoted via `ap2 approve` → `ideation_approved` event)
+  continue to dispatch normally — the freeze is targeted at the auto
+  layer, not blanket. Operator unfreezes via `ap2 ack
+  auto_approve_unfreeze --reason "<one-line rationale>"` (uses the
+  existing TB-106 ack pattern — the daemon scans `operator_ack`
+  events' `note` field for the `auto_approve_unfreeze` token and
+  resets the failure counter). Setting the threshold to `0` (or any
+  non-positive int) disables the circuit-breaker entirely — the
+  explicit escape hatch for operators who trust the upstream gates
+  beyond this layer.
 
 **Watchdog (auto-diagnose).**
 - `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` (10800 = 3h) — idle duration

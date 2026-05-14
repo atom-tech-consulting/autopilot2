@@ -109,6 +109,20 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
     # creation + terminal-event reconciliation. Listed alphabetically.
     "ideation_proposal_recorded",
     "ideation_proposal_reconciled",
+    # TB-223: opt-in auto-approval audit trail. `auto_approved` fires
+    # at proposal-emission time (in `tools.do_board_edit`'s
+    # `add_backlog` branch) when `AP2_AUTO_APPROVE=1` strips the
+    # `@blocked:review` codespan from a proposed row. Including the
+    # event in the ideation events block lets the next cycle observe
+    # what auto-approval shipped without operator review (otherwise
+    # the auto-approved tasks would be silently invisible to ideation
+    # — anti-pattern for the audit-trail expectation set by goal.md's
+    # end-to-end-automation focus). `auto_approve_paused` fires when
+    # the daemon's cumulative-regression circuit-breaker trips and
+    # halts auto-promote until the operator emits `ap2 ack
+    # auto_approve_unfreeze`.
+    "auto_approved",
+    "auto_approve_paused",
 )
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
@@ -429,6 +443,124 @@ def _trigger_task_count() -> int:
         if parsed > 0:
             return parsed
     return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
+
+
+# TB-223: opt-in `AP2_AUTO_APPROVE` mode lets the daemon dispatch
+# ideation-proposed tasks without the operator running `ap2 approve`
+# first — closes the most-frequently-triggered operator-in-the-loop
+# bottleneck under the **Current focus: end-to-end automation** goal.
+# A representative session approves 10-20 tasks per cycle; that's not
+# the walk-away promise the Mission says, that's approving constantly.
+#
+# Three layered safety knobs (defaults preserve current behavior):
+#   - `AP2_AUTO_APPROVE` (master switch) — unset by default. When set
+#     to a truthy value, ideation-authored `add_backlog` rows omit the
+#     `@blocked:review` codespan so the daemon's next-tick auto-promote
+#     dispatches the task immediately.
+#   - `AP2_AUTO_APPROVE_GATE_TAGS` (per-shape opt-out) — comma-separated
+#     list of tag strings (default: `#breaking-change,#high-risk`). A
+#     proposed task carrying ANY of these tags retains `@blocked:review`
+#     even in auto-approve mode — operator's escape hatch for elevated-risk
+#     categories ideation itself self-tags.
+#   - `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` (systemic-regression circuit
+#     breaker) — integer count, default 3. Consumed by the daemon
+#     (`daemon.py`), not here; included in this module's helper layer
+#     so the three-knob safety model lives in one source file.
+#
+# Truthy-value parse matches the canonical `AP2_IDEATION_DISABLED`
+# pattern in `_maybe_ideate` (L641): `.strip() in ("1", "true", "yes")`.
+# Tag-list parse: comma-separated, whitespace-stripped, normalized to
+# leading `#` (operator may type `#high-risk` or bare `high-risk`).
+AUTO_APPROVE_DEFAULT_GATE_TAGS: tuple[str, ...] = (
+    "#breaking-change",
+    "#high-risk",
+)
+
+
+def _is_auto_approve_enabled() -> bool:
+    """True iff `AP2_AUTO_APPROVE` is set to a truthy value.
+
+    Truthy values: `"1"`, `"true"`, `"yes"` (case-sensitive, leading/trailing
+    whitespace stripped). Default unset → False (current behavior; every
+    ideation-proposed task carries `@blocked:review` and waits for
+    `ap2 approve`).
+
+    Matches the parsing shape of `AP2_IDEATION_DISABLED` in
+    `_maybe_ideate` (L641) so operators tuning the autopilot env file see
+    one consistent boolean convention across knobs.
+    """
+    return os.environ.get("AP2_AUTO_APPROVE", "").strip() in ("1", "true", "yes")
+
+
+def _auto_approve_gate_tags() -> frozenset[str]:
+    """Parsed `AP2_AUTO_APPROVE_GATE_TAGS` as a frozenset of normalized
+    tag strings.
+
+    Comma-separated, whitespace-stripped, normalized to a leading `#`
+    (so operators may type `"#high-risk,#breaking-change"` or bare
+    `"high-risk,breaking-change"` and both parse identically). Default
+    (env unset or empty) is `AUTO_APPROVE_DEFAULT_GATE_TAGS` —
+    `#breaking-change` + `#high-risk`, which are the categories
+    ideation itself uses for proposals it judges as elevated risk
+    (so the defaults align with ideation's existing self-tagging).
+    Empty entries are dropped; deliberate `AP2_AUTO_APPROVE_GATE_TAGS=""`
+    falls back to the default set (the explicit way to opt out of every
+    gate-tag is `AP2_AUTO_APPROVE_GATE_TAGS="#__never__"` or similar
+    sentinel that no real task carries).
+    """
+    raw = os.environ.get("AP2_AUTO_APPROVE_GATE_TAGS", "").strip()
+    if not raw:
+        return frozenset(AUTO_APPROVE_DEFAULT_GATE_TAGS)
+    out: set[str] = set()
+    for token in raw.split(","):
+        t = token.strip()
+        if not t:
+            continue
+        if not t.startswith("#"):
+            t = "#" + t
+        out.add(t)
+    return frozenset(out) if out else frozenset(AUTO_APPROVE_DEFAULT_GATE_TAGS)
+
+
+def should_auto_approve(tags: list[str] | tuple[str, ...] | None) -> bool:
+    """Should this ideation-proposed task have its `@blocked:review`
+    codespan dropped at `add_backlog` time?
+
+    True iff `AP2_AUTO_APPROVE` is enabled AND `tags` does NOT intersect
+    `_auto_approve_gate_tags()`. Tag comparison normalizes leading `#`
+    (so a task tagged `"breaking-change"` matches a gate-tag
+    `"#breaking-change"`).
+
+    Called by `tools.do_board_edit` on the `add_backlog` branch with the
+    proposed task's tag list to decide whether to strip
+    `blocked_on="review"` before the row hits TASKS.md. Pure / no I/O —
+    relies only on the env layer + the in-memory tag list.
+    """
+    if not _is_auto_approve_enabled():
+        return False
+    if not tags:
+        return True
+    gate_tags = _auto_approve_gate_tags()
+    if not gate_tags:
+        return True
+    for t in tags:
+        norm = t.strip()
+        if not norm:
+            continue
+        if not norm.startswith("#"):
+            norm = "#" + norm
+        if norm in gate_tags:
+            return False
+    return True
+
+
+# TB-223: `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` default — also referenced
+# by `daemon._auto_approve_paused` (the consumer site). Listed here so
+# the three-knob safety model documentation lives next to the master
+# switch and gate-tag parsers; `daemon.py` reads the env directly via
+# its own `_auto_approve_freeze_threshold()` helper (no circular import
+# back into ideation).
+AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT = 3
 
 
 async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
