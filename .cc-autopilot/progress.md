@@ -509,3 +509,9 @@
 - **Summary:** Added 7 source-pinned + real-seam tests for mattermost_timeout, mattermost_error, mm_poll_error in new ap2/tests/test_tb212_mm_event_types.py (mirrors TB-211 shape: stub _run_control_agent + check_new_messages, drive handle_message + _mm_loop), and replaced the 3 mattermost shim rows in test_coverage_drift.py with a TB-212-closed narrative paragraph; full ap2/tests suite passes (1301 passed) and all 5 briefing verification bullets are satisfied.
 - **Files:** ap2/tests/test_tb212_mm_event_types.py, ap2/tests/test_coverage_drift.py
 - **Tests:** pass
+
+## [2026-05-14] TB-213: Pin 4 daemon-lifecycle CLI verbs (`ap2 pause`, `ap2 resume`, `ap2 stop`, `ap2 unfreeze`) with happy + error path tests (TB-209 CLI-verb debt closure — daemon-lifecycle subset)
+- **Commit:** `7bdcf584`
+- **Summary:** Landed test_tb213_daemon_lifecycle_verbs.py with 12 tests covering happy + error paths for cmd_pause/cmd_resume/cmd_stop/cmd_unfreeze, removed the four matching shim rows from test_coverage_drift.py; full ap2 suite (1313 tests) passes.
+- **Files:** ap2/tests/test_tb213_daemon_lifecycle_verbs.py, ap2/tests/test_coverage_drift.py
+- **Tests:** pass
