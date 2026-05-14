@@ -393,14 +393,15 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 # cron_error, pipeline_pending_sweep_error) by landing
 # `ap2/tests/test_tb211_event_types.py` — the substring drift gate now
 # resolves those five via that real test module rather than this
-# comment block. The shim entries were removed when TB-211 landed; the
-# three mattermost-emitted entries below are the residual sibling-TB
-# follow-up.
+# comment block. The shim entries were removed when TB-211 landed.
 #
-# Event types (3) — emitter sites that lack a dedicated assertion test:
-#   - mattermost_error               (mattermost.py — poller exception)
-#   - mattermost_timeout             (mattermost.py — handler timeout)
-#   - mm_poll_error                  (mattermost.py — poll-loop exception)
+# Event types: TB-212 closed the three mattermost-emitted entries
+# (mattermost_error, mattermost_timeout, mm_poll_error) by landing
+# `ap2/tests/test_tb212_mm_event_types.py` — the substring drift gate
+# now resolves those three via that real test module rather than this
+# comment block. The shim entries were removed when TB-212 landed; the
+# event-type axis of TB-208's discovered-at-landing debt is now fully
+# closed.
 #
 # CLI verbs (12) — TB-209-landed gap on the CLI-verb axis:
 #   - ap2 pause                      (cli.py — daemon-pause control)
