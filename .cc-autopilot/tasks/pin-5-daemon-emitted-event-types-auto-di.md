@@ -40,3 +40,10 @@ Why now: TB-208's docstring names this gap as a closed-set follow-up at exactly 
 - Tightening the substring drift gate to AST-walk semantics — TB-208's docstring defers this until the substring gate is observed missing a real pro-forma gap.
 - Adding new event types OR changing emitter contracts — pure test additions + shim-row removal; no source-of-truth changes.
 - Refactoring `test_env_knobs.py` / `test_tb210_env_knobs.py` — leave untouched.
+## Attempts
+
+### 2026-05-14 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] Prose: the new tests assert on actual emitter-site behavior — not just synthetic `events.append(...)` calls in test code
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T013558Z-TB-211.prompt.md`, `stream: .cc-autopilot/debug/20260514T013558Z-TB-211.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T013558Z-TB-211.messages.jsonl`
