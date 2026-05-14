@@ -42,7 +42,7 @@ Sequencing with sibling tasks: if another operator-filed task (`_short` extracti
 - `grep -nE "^def locked_inplace\(|^def locked_sidecar\(" ap2/_shared.py` — exits 0 with both lines matched (the two helpers are present by these exact names).
 - `! grep -nE "^def _locked\(" ap2/board.py ap2/cron.py ap2/retry.py` — exits 0 (zero matches; the three local `_locked` definitions are deleted). The `!` inverts the no-match exit so the verifier reads pass-on-zero-matches per the TB-187 idiom.
 - `[ "$(grep -lE 'from ap2\._shared import' ap2/board.py ap2/cron.py ap2/retry.py | wc -l)" -eq 3 ]` — exactly three files import from the shared module (the three migrated callers).
-- `grep -nE "import fcntl" ap2/board.py ap2/cron.py ap2/retry.py` — judge confirms: the three migrated files no longer need to import `fcntl` directly (it's encapsulated in the shared helper). Acceptable if one file keeps the import for a non-locking use case; judge reviews.
+- Prose: the three migrated files (`ap2/board.py`, `ap2/cron.py`, `ap2/retry.py`) no longer import `fcntl` directly — it's encapsulated in `ap2/_shared.py`. Judge confirms via `Read` of each file's imports. Acceptable if one file keeps the import for a non-locking use case (judge reviews and reports which file + why if so).
 - Prose: the module docstring of `ap2/_shared.py` names the semantic distinction between `locked_inplace` and `locked_sidecar` — specifically, that sidecar locking permits the locked file to be safely rewritten/truncated under the lock while inplace locking holds an fd on the file itself. Judge confirms via `Read` of the top-of-module docstring.
 
 ## Out of scope
@@ -51,15 +51,3 @@ Sequencing with sibling tasks: if another operator-filed task (`_short` extracti
 - Adding new locking primitives (advisory vs mandatory, blocking vs non-blocking, timeouts) — current callers don't need them.
 - Re-exporting from `ap2/__init__.py`.
 - Migrating other file-IO helpers (`_atomic_write_json` in tools.py, `_locked`-adjacent patterns in daemon.py) — separate threshold-check; only `_locked` meets n=3 today.
-## Attempts
-
-### 2026-05-14 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `grep -nE "import fcntl" ap2/board.py ap2/cron.py ap2/retry.py` — judge confirms: the three migrated files no longer nee
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T064427Z-TB-217.prompt.md`, `stream: .cc-autopilot/debug/20260514T064427Z-TB-217.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T064427Z-TB-217.messages.jsonl`
-### 2026-05-14 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `grep -nE "import fcntl" ap2/board.py ap2/cron.py ap2/retry.py` — judge confirms: the three migrated files no longer nee
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T071849Z-TB-217.prompt.md`, `stream: .cc-autopilot/debug/20260514T071849Z-TB-217.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T071849Z-TB-217.messages.jsonl`
