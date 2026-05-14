@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/auto-apply-agent-diagnosed-briefing-shap.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-14T21:37:21Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-14T21:14:59Z",
   "tb_id": "TB-225",
   "why_now": "the prior code-quality focus surfaced two real instances of this self-healing-eligible failure shape in a single week (TB-204, TB-207 \u2014 both hit briefing-shape pitfalls already catalogued in CLAUDE.md's \"Shell-bullet pitfalls to AVOID\" section). Goal.md's axis-2 delete-test (L98-100): \"if this work didn't ship, every briefing-shape regression cascades into operator-manual unfreeze; with it, the loop self-heals on the recurring class.\" The class is well-defined, the agent already self-diagnoses, the briefing edit is mechanical. Without this, every recurrence remains an interruption; with it, the walk-away envelope expands by the rate at which briefing-shape regressions arrive (observably non-zero on this codebase)."
