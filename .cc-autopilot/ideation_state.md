@@ -1,14 +1,13 @@
 # Ideation State
 
-_Last updated: 2026-05-14T13:14:23Z by ideation cron_
+_Last updated: 2026-05-14T15:16:00Z by ideation cron_
 
 ## Mission alignment
 
-Mission-aligned. No new Completes since the 11:13Z assessment ~2 hours
-ago — board state is byte-identical (0A/0R/2B/0P/94C/3F), TB-221 and
-TB-222 still pending operator review from 09:11Z (~4h ago), no
-operator activity in the gap. 3 most recent Completes (unchanged from
-prior cycle):
+Mission-aligned. Board state byte-identical to the 13:14Z cycle
+(0A/0R/2B/0P/94C/3F); no new Completes in the 2h gap, no operator
+activity. TB-221 + TB-222 still pending operator review from 09:11Z
+(~6h ago). 3 most recent Completes (unchanged from prior cycle):
 
 - TB-217 (`59bd1ba`, 2026-05-14T07:44Z) — `locked_inplace` +
   `locked_sidecar` exposed from `ap2/_shared.py`; 7 modules now
@@ -77,9 +76,9 @@ axes.
   together 06:43Z; TB-211..216 together 01:35Z) means stacking
   proposals before the prior batch is triaged dilutes operator
   attention and breaks the per-cycle "fresh evidence" loop. This is
-  the third consecutive cycle hitting the same shape (post-overnight
-  pattern → 11:13Z stand-down → now); the principle holds — defer
-  until at least one of TB-221/TB-222 lands or is rejected.
+  now the fourth consecutive cycle hitting the same shape
+  (post-overnight → 11:13Z → 13:14Z → now); the principle holds —
+  defer until at least one of TB-221/TB-222 lands or is rejected.
 - **Decompose `ap2/tools.py` along operator-queue-handler
   boundary** — Carry from prior cycles. goal.md L86-87 says natural
   boundary "becomes clear from reading — not via speculative
@@ -103,25 +102,34 @@ axes.
 
 ## Cycle observations
 
-- Same byte-identical "fresh state file + no new Completes + own
-  proposals still pending review" shape as the 11:13Z cycle, now
-  for the third firing in a row. Re-justified for carry: the
-  decision rule "stand down when the only new state is the
-  passage of time" should compound across cycles instead of being
-  re-derived each tick. Two prior firings (post-overnight,
-  11:13Z) plus this one establish the pattern — if a fourth
-  cycle hits the same shape, that's a signal the cron cadence
-  is over-firing relative to operator throughput, not that
-  ideation has more to say.
+- Fourth consecutive cycle hitting byte-identical state — the
+  prior cycle's observation pre-registered this exact threshold
+  ("if a fourth cycle hits the same shape, that's a signal the
+  cron cadence is over-firing relative to operator throughput,
+  not that ideation has more to say"). Promoting that signal out
+  of agent-internal observation and into Decisions-needed this
+  cycle — the threshold has now been crossed and the actionable
+  shape (cron schedule edit) is an operator-CLI-only mutation
+  (TB-146 says no agent has `cron_edit`), so surfacing is the
+  only available channel. Dropping the carry-rationale bullet
+  from this section to avoid duplicating the promoted item.
 
 ## Decisions needed from operator
 
-_None this cycle._ TB-221 and TB-222 remain pending operator
-review from the 09:11Z queue; both are narrow, traceable
-follow-ups requiring only an approve/reject judgment, not
-narrative ideation input. The pending list is surfaced
-mechanically by `ap2 status` + the cron status-report (TB-151 /
-TB-173) so this section does not duplicate it.
+- Decision needed: Should `ap2 cron edit ideation` move to a
+  longer cadence? Four consecutive ideation cycles
+  (post-overnight, 11:13Z, 13:14Z, 15:15Z) have written
+  byte-identical state files because operator throughput
+  (TB-221/TB-222 pending review since 09:11Z, ~6h) is slower
+  than the cron firing interval (~2h). Operator action: either
+  `ap2 cron edit ideation` to widen the interval (e.g. 6h
+  matches observed approval cadence — TB-211..216 batch at
+  01:35Z, TB-217..220 batch at 06:43Z, ~5h apart), or confirm
+  the current cadence is intentional (e.g. wanted as a heartbeat
+  signal regardless of state change). Unblock-condition: a
+  cadence decision either reduces ideation token spend on
+  no-op cycles or codifies the heartbeat intent so future
+  cycles stop re-deriving the stand-down rationale.
 
 ## Proposals this cycle
 
