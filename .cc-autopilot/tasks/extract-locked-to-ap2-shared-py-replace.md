@@ -58,3 +58,8 @@ Sequencing with sibling tasks: if another operator-filed task (`_short` extracti
 - **kind:** per_task
 - **failed_criteria:** [fail] `grep -nE "import fcntl" ap2/board.py ap2/cron.py ap2/retry.py` — judge confirms: the three migrated files no longer nee
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T064427Z-TB-217.prompt.md`, `stream: .cc-autopilot/debug/20260514T064427Z-TB-217.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T064427Z-TB-217.messages.jsonl`
+### 2026-05-14 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "import fcntl" ap2/board.py ap2/cron.py ap2/retry.py` — judge confirms: the three migrated files no longer nee
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T071849Z-TB-217.prompt.md`, `stream: .cc-autopilot/debug/20260514T071849Z-TB-217.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T071849Z-TB-217.messages.jsonl`
