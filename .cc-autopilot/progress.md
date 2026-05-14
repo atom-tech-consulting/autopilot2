@@ -533,3 +533,9 @@
 - **Summary:** Extended _validate_single_line in ap2/tools.py to reject `*` in title fields (new TITLE_NO_ASTERISK_ERR constant, field-specific guard mirroring TB-134's loud-reject shape). Added 5 entry-point/unit tests in test_tools.py (helper unit test + constant pin + do_board_edit reject + description-passes regression + do_operator_queue_append reject), 1 CLI test in test_cli.py (cmd_add via H1-in-briefing carrying `*`), and 1 parser-side test in test_board.py pinning the malformed-line outcome that motivates the gate. Full suite 1346 passed in 88.7s; briefing's verification one-liner exit 0.
 - **Files:** ap2/tools.py, ap2/tests/test_tools.py, ap2/tests/test_cli.py, ap2/tests/test_board.py
 - **Tests:** pass
+
+## [2026-05-14] TB-211: Pin 5 daemon-emitted event types (`auto_diagnose_error`, `classify_record_unreadable`, `cron_bootstrap`, `cron_error`, `pipeline_pending_sweep_error`) with happy + error path tests (TB-208 event-type debt closure — daemon subset)
+- **Commit:** `efccab5`
+- **Summary:** Retry of TB-211 — fixed the synthetic cron_bootstrap test by driving daemon.main_loop end-to-end (via _stub_main_loop_internals helper that no-ops the heavy/blocking internals); both cron_bootstrap happy + negative branches now exercise the production emit at daemon.py L2168-2169. All 1346 ap2 tests pass.
+- **Files:** ap2/tests/test_tb211_event_types.py
+- **Tests:** pass
