@@ -545,3 +545,9 @@
 - **Summary:** Extracted `_short()` to `ap2/_shared.py` as `short(v, limit)` (no default), migrated three byte-identical local defs in `ap2/cli.py` (120), `ap2/diagnose.py` (100), and `ap2/events.py` (200) to explicit-limit calls; preserved U+2026 ellipsis marker; full ap2 suite green (1346/1346).
 - **Files:** ap2/_shared.py, ap2/cli.py, ap2/diagnose.py, ap2/events.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-14] TB-220: Consolidate `_now()` and `_read_pid()` into `ap2/_shared.py` (operator-filed below-threshold; bundle once shared module exists)
+- **Commit:** `a8a949e`
+- **Summary:** Extracted `now()` and `read_pid()` to `ap2/_shared.py`; migrated 5 call sites across cron.py/events.py/cli.py/web.py; dropped unused `import datetime as dt` in events.py; updated 3 stale docstring/comment references. Full suite green (1346/1346).
+- **Files:** ap2/_shared.py, ap2/cli.py, ap2/cron.py, ap2/events.py, ap2/web.py, ap2/tools.py, ap2/tests/e2e/test_auto_diagnose.py, ap2/tests/test_tb213_daemon_lifecycle_verbs.py
+- **Tests:** pass
