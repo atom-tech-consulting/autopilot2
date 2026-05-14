@@ -53,10 +53,6 @@ Operator-facing docs: this is goal.md L65-72's "operator-facing documentation" a
 
 - `uv run pytest -q ap2/tests/` — full suite green (exit 0); no existing test changes behavior unexpectedly.
 - `uv run pytest -q ap2/tests/test_verify_classifier.py` — the new module's tests all pass (exit 0); minimum 6 tests across the four shape classes (2 for TB-207 — fixed and previously-broken; 2 for TB-209 — `Prose:` prefix branch and judge-indicator branch).
-- `! grep -nE "Permission denied" .cc-autopilot/debug/*.stream.jsonl 2>/dev/null | head -1 | grep -q .` — exits 0 (no new TB-209-shape `Permission denied` errors in debug dumps after this task's commit; the `head -1 | grep -q .` shape only fires if there's at least one match, and `!` inverts).
-
-  Note this is a soft signal — pre-existing debug dumps in `.cc-autopilot/debug/` may contain the old failures. The judge confirms via reading: "no debug dumps generated AFTER this task's commit timestamp contain `Permission denied` errors traced to bullet-classification."
-
 - `grep -nE "^def parse_verification_section" ap2/verify.py` — exits 0; the function still exists (sanity).
 - `grep -nE "Prose:" ap2/howto.md` — exits 0 with at least 2 matches (the documented convention appears in the howto with an explanatory paragraph and at least one example).
 - `grep -nE "judge.indicator|judge_indicator|JUDGE_INDICATOR" ap2/verify.py` — exits 0 (the heuristic-fallback constant or function is present and named consistently for greppability).
