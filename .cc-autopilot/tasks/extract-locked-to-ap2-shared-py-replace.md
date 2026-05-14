@@ -51,3 +51,10 @@ Sequencing with sibling tasks: if another operator-filed task (`_short` extracti
 - Adding new locking primitives (advisory vs mandatory, blocking vs non-blocking, timeouts) — current callers don't need them.
 - Re-exporting from `ap2/__init__.py`.
 - Migrating other file-IO helpers (`_atomic_write_json` in tools.py, `_locked`-adjacent patterns in daemon.py) — separate threshold-check; only `_locked` meets n=3 today.
+## Attempts
+
+### 2026-05-14 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "import fcntl" ap2/board.py ap2/cron.py ap2/retry.py` — judge confirms: the three migrated files no longer nee
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T064427Z-TB-217.prompt.md`, `stream: .cc-autopilot/debug/20260514T064427Z-TB-217.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T064427Z-TB-217.messages.jsonl`
