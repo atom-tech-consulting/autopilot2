@@ -755,6 +755,73 @@ land in Frozen).
   explicit escape hatch for operators who trust the upstream gates
   beyond this layer.
 
+**Cost + blast-radius guards (TB-224).** Two layered token caps and a
+single-event `task_error` halt that ride on top of TB-223's auto-approve
+gate. Without these, `AP2_AUTO_APPROVE=1` trades manual review for
+unbounded token spend — a "successful-but-wasteful" loop can satisfy
+verification while burning tokens indefinitely, and a `task_error`
+cascade (SDK timeout, agent OOM, kernel SIGKILL) needs operator
+attention not a silent retry. **Defaults are unset on both knobs** —
+operators who haven't done the cost-budgeting math for their project
+don't get a hardcoded cap surprising them. The recommended pattern:
+set both caps BEFORE flipping `AP2_AUTO_APPROVE=1`. Cross-references
+`goal.md`'s **Current focus: end-to-end automation** axis 3 ("Cost and
+blast-radius guards").
+
+- `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` — integer cap on combined
+  `input_tokens + output_tokens` per task. **Unset by default → no
+  cap.** When set to a positive integer, the daemon checks each
+  `task_run_usage` event (TB-165, emitted at every terminal path) for
+  auto-approved tasks; an event whose combined tokens exceed the cap
+  trips a `per_task_cap` halt — the daemon emits
+  `auto_approve_halted reason=per_task_cap used=<N> cap=<M>` and
+  pauses auto-promote of `auto_approved` tasks until operator emits
+  `ap2 ack auto_approve_window_resume`. Catches the single-runaway
+  pattern (one task in an infinite tool-call loop). Manual
+  `ap2 approve` continues to dispatch even while halted — the pause
+  is targeted at the auto-approved bucket only.
+- `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` — integer cap on cumulative
+  `input_tokens + output_tokens` across all auto-approved tasks in a
+  rolling **24-hour window**. **Unset by default → no cap.** Computed
+  by summing `task_run_usage` token fields over tasks identified as
+  auto-approved (via TB-223's `auto_approved` audit event) within
+  `now - 24h`. No new state file; tail-scan of events.jsonl, same
+  shape the cron status-report uses. When the sum exceeds the cap,
+  the daemon emits `auto_approve_halted reason=window_cap
+  window_used=<N> cap=<M>` and pauses auto-promote. The rolling-24h
+  shape matches the operator's natural rhythm without calendar-day
+  timezone ambiguity. Catches the drift pattern: 50 small tasks each
+  within the per-task cap but cumulatively unbounded.
+- `task_error` single-event halt — distinct from
+  `verification_failed` (which TB-223's `FREEZE_THRESHOLD` requires
+  N=3 of). A `task_error` event indicates an infrastructure failure
+  (SDK timeout, agent OOM, briefing read failure) per `events.jsonl`
+  conventions; **one occurrence is enough** to halt auto-promote
+  because infrastructure failures aren't statistical noise — they
+  need operator attention immediately. When a `task_error` lands for
+  an `auto_approved` task, the daemon emits
+  `auto_approve_halted reason=task_error task=TB-N
+  error_excerpt=<...>` AND appends a `## Decisions needed from
+  operator` bullet to `.cc-autopilot/ideation_state.md` naming the
+  failing TB-N + error excerpt (so `ap2 status` and the web home
+  page surface it without waiting for the next ideation cron).
+- **Shared resume ack:** `ap2 ack auto_approve_window_resume --reason
+  "<rationale>"` clears any of the three halt reasons above (one ack
+  covers all three since they share the same auto-promote-paused
+  state). Different verb from TB-223's `auto_approve_unfreeze`
+  because the two halts have semantically-distinct entry paths
+  (cumulative-regression vs. cost/blast-radius) and the audit trail
+  benefits from one log line per class of issue. Reuses the existing
+  TB-106 ack pattern (the daemon scans `operator_ack` events' `note`
+  field for the `auto_approve_window_resume` token and resets the
+  halt state).
+
+Audit events: `auto_approve_halted` fires once per triggering
+episode (deduped via tail scan); `auto_approve_skipped` fires once
+per preempted auto-promote tick (with the would-have-promoted TB-N)
+so the cumulative skipped-count is visible in `ap2 logs` for
+operators tuning the cap values.
+
 **Watchdog (auto-diagnose).**
 - `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` (10800 = 3h) — idle duration
   before the watchdog posts a `DiagnoseReport`.

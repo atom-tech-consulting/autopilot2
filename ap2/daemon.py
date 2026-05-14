@@ -2526,6 +2526,360 @@ def _was_auto_approved(cfg: Config, task_id: str) -> bool:
     return auto_seen
 
 
+# ============================================================================
+# TB-224: cost + blast-radius guards layered on TB-223's auto-approve gate.
+#
+# Two env knobs (per-task + 24h-rolling-window token caps) plus a single-
+# event `task_error` halt. All three halt conditions share the same
+# auto-promote-paused state and resume via the same operator ack verb
+# `ap2 ack auto_approve_window_resume`. Defaults are unset on both knobs
+# → no caps applied (current behavior preserved); the operator opts in
+# alongside flipping `AP2_AUTO_APPROVE=1`.
+#
+# Why two knobs, not one:
+#   - `per_task_cap` catches the single-runaway pattern: one task in an
+#     infinite tool-call loop burning $50 of tokens before the verifier
+#     even runs.
+#   - `window_cap` catches the drift pattern: 50 small tasks each within
+#     the per-task cap but cumulatively unbounded.
+# Orthogonal failure modes; both must be operator-tunable. Same shape as
+# TB-223's per-task vs. cumulative-regression layering.
+#
+# Why "post-hoc" detection (vs. predictive estimator): `task_run_usage`
+# events emit only at terminal paths (TB-165), so the cap fires AFTER the
+# offending task finished — not mid-stream. The auto-promote-stream halt
+# is what catches the "one more task in this loop would be unsafe"
+# pattern at the right moment (next tick, before the next auto-approved
+# task would dispatch). The briefing's "halt the in-flight task" framing
+# in Scope (1) is forward-looking — practically the daemon detects after
+# completion and gates the NEXT auto-promote. Same shape, slightly
+# delayed actuation. The briefing explicitly excludes predictive cost
+# estimation from this task's scope.
+#
+# Why one shared ack verb (`auto_approve_window_resume`) instead of one
+# per cap: the operator's mental model collapses to "auto-promote
+# paused" regardless of which cap tripped — three distinct resume verbs
+# would be unnecessary friction. The audit trail's
+# `auto_approve_halted reason=...` event field preserves the forensic
+# distinction so an offline reader can still tell which cap tripped.
+#
+# Why `task_error` is single-event (no N threshold like TB-223): a
+# `task_error` event indicates infrastructure failure (SDK timeout,
+# agent OOM, briefing read failure) per `ap2/events.py` conventions. It
+# is structurally rare in steady-state (the verifier's normal failure
+# path is `verification_failed`, not `task_error`); a single event
+# indicates infrastructure breakage that benefits from operator
+# attention immediately, not after N similar events. Distinct from
+# TB-223's cumulative-regression N=3 default which is calibrated for
+# the noisier `verification_failed` channel.
+# ============================================================================
+
+_AUTO_APPROVE_WINDOW_RESUME_TOKEN = "auto_approve_window_resume"
+_AUTO_APPROVE_WINDOW_S = 24 * 3600  # 24h rolling window
+
+
+def _per_task_token_cap() -> int:
+    """Effective per-task token cap from `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`.
+
+    Returns `0` (cap disabled) when the env var is unset / empty /
+    non-integer / non-positive. Operators who haven't budgeted their
+    project don't get a hardcoded cap surprising them; the explicit
+    way to disable is to leave the knob unset (or set it to `0`).
+    """
+    raw = os.environ.get("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "").strip()
+    if not raw:
+        return 0
+    try:
+        v = int(raw)
+    except ValueError:
+        return 0
+    return v if v > 0 else 0
+
+
+def _window_token_cap() -> int:
+    """Effective 24h rolling-window token cap from
+    `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`.
+
+    Returns `0` (cap disabled) when the env var is unset / empty /
+    non-integer / non-positive. Same parse shape as
+    `_per_task_token_cap` so the two knobs share one mental model.
+    """
+    raw = os.environ.get("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "").strip()
+    if not raw:
+        return 0
+    try:
+        v = int(raw)
+    except ValueError:
+        return 0
+    return v if v > 0 else 0
+
+
+def _event_combined_tokens(event: dict) -> int:
+    """Combined `input_tokens + output_tokens` from a `task_run_usage`
+    event's `usage` blob (TB-165 schema). Robust against missing
+    fields or a non-dict `usage` (returns 0 in those cases — matches
+    the defensive shape of `events.summarize_usage_event`).
+    """
+    usage = event.get("usage")
+    if not isinstance(usage, dict):
+        return 0
+    inp = int(usage.get("input_tokens", 0) or 0)
+    outp = int(usage.get("output_tokens", 0) or 0)
+    return inp + outp
+
+
+def _parse_event_ts(ts: object) -> float | None:
+    """Parse an event `ts` field (ISO8601 with `Z` suffix, per
+    `_shared.now()`) to epoch seconds. Returns `None` on parse
+    failure — events.jsonl shape has been stable but a malformed
+    line shouldn't crash the auto-promote step.
+    """
+    if not isinstance(ts, str):
+        return None
+    try:
+        from datetime import datetime
+        s = ts.replace("Z", "+00:00") if ts.endswith("Z") else ts
+        return datetime.fromisoformat(s).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
+def _auto_approve_window_resume_idx(tail: list[dict]) -> int:
+    """Index of the most recent `operator_ack` whose `note` contains
+    the `auto_approve_window_resume` token. Returns `-1` when absent.
+
+    Same shape as `_auto_approve_paused`'s `last_unfreeze_idx` scan
+    (TB-223), but on a distinct token. Two distinct ack tokens because
+    the auto-promote-paused state has two semantically-distinct entry
+    paths (TB-223 cumulative-regression vs. TB-224 cost+blast-radius)
+    and operators benefit from a forensic record of which class of
+    issue triggered the pause.
+    """
+    last = -1
+    for i, e in enumerate(tail):
+        if e.get("type") != "operator_ack":
+            continue
+        note = str(e.get("note") or "")
+        if _AUTO_APPROVE_WINDOW_RESUME_TOKEN in note:
+            last = i
+    return last
+
+
+def _auto_approved_task_ids(tail: list[dict]) -> set[str]:
+    """Set of TB-Ns that ideation auto-approved within `tail`, with
+    subsequent `ideation_approved` events removing them (a task the
+    operator subsequently `ap2 approve`'d is no longer in the auto
+    bucket — same rule as `_was_auto_approved`).
+
+    Materialized as a set so the per-task / window scans below can
+    filter `task_run_usage` events with O(1) lookups instead of
+    re-scanning the tail per event.
+    """
+    auto: set[str] = set()
+    for e in tail:
+        tid = str(e.get("task") or "").strip()
+        if not tid:
+            continue
+        typ = e.get("type")
+        if typ == "auto_approved":
+            auto.add(tid)
+        elif typ == "ideation_approved":
+            auto.discard(tid)
+    return auto
+
+
+def _auto_approve_check_violations(
+    cfg: Config,
+) -> tuple[str, int, int, str, str] | None:
+    """Inspect recent events for TB-224 cost / blast-radius violations.
+
+    Returns `None` when no halt condition fires, or a 5-tuple:
+        (reason, total_used, cap, trigger_task, detail)
+
+    where:
+      - `reason` is one of `"per_task_cap"`, `"window_cap"`,
+        `"task_error"`.
+      - `total_used` is the token count that tripped the cap (or `0`
+        for `task_error`).
+      - `cap` is the effective env-knob value (`0` for `task_error`).
+      - `trigger_task` is the offending TB-N (`""` if no single task
+        is "the" trigger — today the window-cap path may have this
+        shape when the sum tips over from interleaved tasks).
+      - `detail` is a short excerpt (used for `task_error`).
+
+    Order of precedence: `task_error` first (infrastructure issue —
+    immediate attention), then `per_task_cap` (single runaway), then
+    `window_cap` (drift sum). The first match short-circuits — only
+    one halt event fires per tick regardless of how many conditions
+    overlap.
+
+    Resume semantics: the most recent `operator_ack` carrying the
+    `auto_approve_window_resume` token resets all three checks to a
+    fresh post-ack window. Events before the ack don't count; the
+    operator explicitly cleared the halt and we trust that decision.
+
+    Pure / events.jsonl tail-read only. Safe to call from `_tick`
+    without taking the board lock.
+    """
+    if not cfg.events_file.exists():
+        return None
+    # 2000-event tail comfortably covers 24h of activity for typical
+    # ap2 projects (a tight ideation+task loop emits ~30 events per
+    # hour). Bigger than `_auto_approve_paused`'s 500 because the
+    # window-cap sum legitimately spans 24h of `task_run_usage`
+    # arrivals interleaved with cron / status-report observability
+    # noise.
+    tail = events.tail(cfg.events_file, 2000)
+    if not tail:
+        return None
+    resume_idx = _auto_approve_window_resume_idx(tail)
+    relevant = tail[resume_idx + 1:]
+    if not relevant:
+        return None
+
+    # Auto-approved task ids: scan the FULL tail (a task auto-approved
+    # before the ack still belongs to the auto bucket — the ack
+    # resets the halt state, not the per-task category).
+    auto_ids = _auto_approved_task_ids(tail)
+
+    # 1) `task_error` on an auto-approved task — single-event halt.
+    #    Distinct from `verification_failed` (TB-223 regression-pause
+    #    condition) because infrastructure failures aren't noise.
+    for e in relevant:
+        if e.get("type") != "task_error":
+            continue
+        tid = str(e.get("task") or "").strip()
+        if not tid or tid not in auto_ids:
+            continue
+        detail = str(e.get("error") or "")[:160]
+        return ("task_error", 0, 0, tid, detail)
+
+    per_task_cap = _per_task_token_cap()
+    window_cap = _window_token_cap()
+
+    # 2) `per_task_cap` — any task_run_usage for an auto-approved task
+    #    whose tokens exceed the cap.
+    if per_task_cap > 0:
+        for e in relevant:
+            if e.get("type") != "task_run_usage":
+                continue
+            tid = str(e.get("task") or "").strip()
+            if not tid or tid not in auto_ids:
+                continue
+            used = _event_combined_tokens(e)
+            if used > per_task_cap:
+                return ("per_task_cap", used, per_task_cap, tid, "")
+
+    # 3) `window_cap` — sum of input+output tokens across all
+    #    auto-approved `task_run_usage` events within the last 24h
+    #    (post-ack). Same shape `ap2 status-report`'s recent-events
+    #    surface uses: tail scan, no new state file, no new
+    #    persistence contract.
+    if window_cap > 0:
+        now_s = time.time()
+        total = 0
+        for e in relevant:
+            if e.get("type") != "task_run_usage":
+                continue
+            tid = str(e.get("task") or "").strip()
+            if not tid or tid not in auto_ids:
+                continue
+            ts = _parse_event_ts(e.get("ts"))
+            if ts is None:
+                continue
+            if now_s - ts > _AUTO_APPROVE_WINDOW_S:
+                continue
+            total += _event_combined_tokens(e)
+        if total > window_cap:
+            return ("window_cap", total, window_cap, "", "")
+
+    return None
+
+
+def _auto_approve_already_halted(cfg: Config) -> bool:
+    """True iff an `auto_approve_halted` event has already fired since
+    the most recent `auto_approve_window_resume` operator ack.
+
+    Dedupe gate so each triggering episode emits exactly ONE
+    `auto_approve_halted` event (the "first-time" halt notification)
+    even when the daemon's auto-promote step re-detects the same
+    violation on every tick. Subsequent ticks still emit
+    `auto_approve_skipped` per preempted promotion attempt.
+    """
+    if not cfg.events_file.exists():
+        return False
+    tail = events.tail(cfg.events_file, 2000)
+    resume_idx = _auto_approve_window_resume_idx(tail)
+    relevant = tail[resume_idx + 1:]
+    for e in relevant:
+        if e.get("type") == "auto_approve_halted":
+            return True
+    return False
+
+
+def _append_decisions_needed_bullet(cfg: Config, bullet: str) -> None:
+    """Append a bullet to the `## Decisions needed from operator`
+    section of `.cc-autopilot/ideation_state.md`. Creates the section
+    at end-of-file if absent. Atomic write (tmpfile + rename) mirroring
+    `do_ideation_state_write`'s shape.
+
+    Used by TB-224's `task_error` halt to surface the failing TB-N +
+    error excerpt as an actionable decision on `ap2 status` /
+    `ap2 logs` / the web home page without waiting for the next
+    ideation cron — the same `parse_operator_decisions` reader the
+    three surfaces consume picks up the new bullet automatically.
+
+    Caller responsibility: pass a clean bullet body (no leading `- `).
+    The function adds the bullet marker. Newlines inside `bullet` are
+    preserved as continuation lines (callers should keep entries
+    single-line for the existing parser's bullet-extraction shape).
+    """
+    import re as _re
+    path = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        text = path.read_text()
+    else:
+        text = "# Ideation State\n\n"
+    header_re = _re.compile(
+        r"^##\s+Decisions needed from operator\s*$", _re.M,
+    )
+    next_re = _re.compile(r"^##\s+", _re.M)
+    m = header_re.search(text)
+    bullet_line = f"- {bullet.strip()}\n"
+    if m is None:
+        # No section yet — append fresh `## Decisions needed from operator`
+        # at end-of-file. Two leading newlines to keep section spacing
+        # consistent with the ideation prompt's schema.
+        sep = ""
+        if text and not text.endswith("\n"):
+            sep = "\n\n"
+        elif text.endswith("\n") and not text.endswith("\n\n"):
+            sep = "\n"
+        new_text = (
+            text + sep + "## Decisions needed from operator\n\n" + bullet_line
+        )
+    else:
+        # Insert the new bullet at the end of the existing section
+        # body (just before the next `## ` header or EOF). Preserves
+        # any sibling sections that follow.
+        body_start = m.end()
+        next_m = next_re.search(text, body_start)
+        section_end = next_m.start() if next_m else len(text)
+        body = text[body_start:section_end]
+        body_rstripped = body.rstrip("\n")
+        # One blank line between header and bullets when the body was
+        # empty; otherwise just append after the existing bullets.
+        if not body_rstripped.strip():
+            new_body = "\n\n" + bullet_line + "\n"
+        else:
+            new_body = body_rstripped + "\n" + bullet_line + "\n"
+        new_text = text[:body_start] + new_body + text[section_end:]
+    tmp = path.with_suffix(".md.tmp")
+    tmp.write_text(new_text)
+    tmp.replace(path)
+
+
 async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # 0. Drain the operator queue (TB-131). Runs BEFORE every other
     # stage so cron / pipeline-pending sweep / task dispatch / ideation
@@ -2626,6 +2980,81 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
                     ),
                 )
                 backlog = None
+            # TB-224: cost + blast-radius guards. Three halt conditions
+            # checked against the same auto-promote-paused state,
+            # sharing the ack verb `ap2 ack auto_approve_window_resume`:
+            #   - `per_task_cap`: an auto-approved task's
+            #     `task_run_usage` event reported input+output tokens
+            #     exceeding `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`
+            #     (catches the single-runaway pattern — one task in
+            #     an infinite tool-call loop).
+            #   - `window_cap`: cumulative tokens across all
+            #     auto-approved tasks in the last 24h exceeded
+            #     `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` (catches the
+            #     drift pattern — many small wasteful tasks summing
+            #     to unbounded spend).
+            #   - `task_error`: an `auto_approved` task emitted a
+            #     `task_error` event; one occurrence is enough to
+            #     halt because infrastructure failures aren't noise
+            #     the way `verification_failed` is.
+            # Defaults unset on both knobs → no caps applied (current
+            # behavior preserved for operators who haven't budgeted).
+            # Manual `ap2 approve` continues to dispatch even while
+            # halted — the halt is targeted at the auto-approved
+            # bucket only, mirroring TB-223's freeze-threshold shape.
+            if (
+                backlog is not None
+                and _was_auto_approved(cfg, backlog.id)
+            ):
+                violation = _auto_approve_check_violations(cfg)
+                if violation is not None:
+                    reason, total_used, cap, trigger_task, detail = violation
+                    if not _auto_approve_already_halted(cfg):
+                        payload: dict = {
+                            "task": trigger_task or backlog.id,
+                            "reason": reason,
+                        }
+                        if reason in ("per_task_cap", "window_cap"):
+                            payload["used"] = total_used
+                            payload["cap"] = cap
+                        if reason == "window_cap":
+                            # Briefing-explicit payload shape: name
+                            # the rolling-window total alongside the
+                            # cap so operators don't have to recompute
+                            # from `ap2 logs`.
+                            payload["window_used"] = total_used
+                        if reason == "task_error" and detail:
+                            payload["error_excerpt"] = detail
+                        events.append(
+                            cfg.events_file,
+                            "auto_approve_halted",
+                            **payload,
+                        )
+                        if reason == "task_error" and trigger_task:
+                            # Surface the infrastructure failure as a
+                            # `## Decisions needed from operator`
+                            # bullet so `ap2 status` / `ap2 logs` /
+                            # the web home page render it without
+                            # waiting for the next ideation cron.
+                            _append_decisions_needed_bullet(
+                                cfg,
+                                (
+                                    f"Auto-approved task {trigger_task} hit "
+                                    f"`task_error` (infrastructure failure): "
+                                    f"{detail[:200] if detail else '(no excerpt)'}. "
+                                    f"Inspect via `ap2 logs` and resume "
+                                    f"auto-promote via `ap2 ack "
+                                    f"auto_approve_window_resume` once the "
+                                    f"infrastructure issue is resolved."
+                                ),
+                            )
+                    events.append(
+                        cfg.events_file,
+                        "auto_approve_skipped",
+                        task=backlog.id,
+                        reason=reason,
+                    )
+                    backlog = None
             if backlog is not None:
                 do_board_edit(cfg, {"action": "move_to_ready", "task_id": backlog.id})
                 events.append(

@@ -19,6 +19,23 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `reason` (descriptive sentence). Counterpart `operator_ack` event
     with a note containing `auto_approve_unfreeze` resets the
     failure window.
+  - `auto_approve_halted` (TB-224) — one-shot halt notification when a
+    cost / blast-radius guard tripped:
+    `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` exceeded (single runaway
+    task), `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` exceeded (24h-rolling
+    drift), or a `task_error` event landed for an auto-approved task
+    (infrastructure failure — distinct from `verification_failed`).
+    Payload: `task` (trigger TB-N), `reason` (one of `per_task_cap` /
+    `window_cap` / `task_error`), plus `used` / `cap` / `window_used`
+    / `error_excerpt` per reason. Counterpart `operator_ack` event
+    with a note containing `auto_approve_window_resume` clears the
+    halt for both window-cap and task-error reasons (one ack covers
+    both since they share the same auto-promote-paused state).
+  - `auto_approve_skipped` (TB-224) — per-tick "would have promoted
+    but a cap intervened" event, fired once per preempted promotion
+    attempt while a halt is active. Payload: `task` (the would-have-
+    promoted TB-N), `reason` (matches the active `auto_approve_halted`
+    event's reason).
 
 The full canonical list lives in `ap2/howto.md`'s `## Event schema`
 section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)
