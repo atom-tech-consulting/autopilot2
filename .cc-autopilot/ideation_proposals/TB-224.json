@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/add-ap2-auto-approve-per-task-token-cap.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-14T21:14:00Z",
+  "tb_id": "TB-224",
+  "why_now": "TB-223 lands the auto-approve gate but the operator can't responsibly flip `AP2_AUTO_APPROVE=1` until the cost ceilings exist \u2014 a runaway \"successful-but-wasteful\" loop satisfies verification while burning tokens unbounded, and a `task_error` cascade (SDK timeout, agent OOM, kernel SIGKILL) needs operator attention not a silent retry. Goal.md's delete-test (L146-151): if these guards don't ship, the auto-approve mode is unbounded-blast-radius and the operator's only safe choice is to leave the knob unset. With them, the safety floor catches the exact failure modes the operator's per-task review currently catches (cost runaway, infrastructure halt) and the walk-away envelope expands."
+}
