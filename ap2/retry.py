@@ -5,25 +5,10 @@ it gets shelved to Frozen for human review.
 """
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import json
-import os
 from pathlib import Path
-from typing import Iterator
 
-
-@contextlib.contextmanager
-def _locked(path: Path) -> Iterator[int]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock = path.with_suffix(path.suffix + ".lock")
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield fd
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
+from ap2._shared import locked_sidecar
 
 
 def _load(state_file: Path) -> dict[str, int]:
@@ -49,7 +34,7 @@ def attempt_count(state_file: Path, task_id: str) -> int:
 
 def bump_attempt(state_file: Path, task_id: str) -> int:
     """Increment the attempt counter for `task_id` and return the new value."""
-    with _locked(state_file):
+    with locked_sidecar(state_file):
         state = _load(state_file)
         state[task_id] = state.get(task_id, 0) + 1
         _save(state_file, state)
@@ -57,7 +42,7 @@ def bump_attempt(state_file: Path, task_id: str) -> int:
 
 
 def reset_attempt(state_file: Path, task_id: str) -> None:
-    with _locked(state_file):
+    with locked_sidecar(state_file):
         state = _load(state_file)
         if task_id in state:
             del state[task_id]

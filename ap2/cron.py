@@ -6,18 +6,17 @@ so editing `cron.yaml` doesn't clobber them.
 """
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import json
-import os
 import re
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import yaml
+
+from ap2._shared import locked_sidecar
 
 
 _INTERVAL_RE = re.compile(r"^\s*(\d+)\s*([smhd])?\s*$")
@@ -120,25 +119,12 @@ def save_jobs(cron_file: Path, jobs: list[CronJob]) -> None:
     cron_file.write_text(text)
 
 
-@contextlib.contextmanager
-def _locked(path: Path) -> Iterator[int]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock = path.with_suffix(path.suffix + ".lock")
-    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield fd
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
-
-
 def update_job(cron_file: Path, action: str, **kw: Any) -> tuple[str, list[CronJob]]:
     """Mutate the cron registry.
 
     Supported actions: add, remove, update. Returns `(message, current_jobs)`.
     """
-    with _locked(cron_file):
+    with locked_sidecar(cron_file):
         jobs = load_jobs(cron_file)
         if action == "add":
             name = kw["name"]
@@ -226,7 +212,7 @@ def due_jobs(
 
 def mark_run(state_file: Path, name: str, *, now: float | None = None) -> None:
     """Record that `name` just ran (mutates state_file under a lock)."""
-    with _locked(state_file):
+    with locked_sidecar(state_file):
         state = load_state(state_file)
         state[name] = now if now is not None else time.time()
         save_state(state_file, state)

@@ -16,12 +16,12 @@ pipeline pids are dead, it runs verification and routes to Complete
 from __future__ import annotations
 
 import contextlib
-import fcntl
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
+
+from ap2._shared import locked_inplace
 
 SECTIONS = ["Active", "Ready", "Backlog", "Pipeline Pending", "Complete", "Frozen"]
 SECTION_RE = re.compile(
@@ -103,19 +103,6 @@ class Task:
             f"- [{check}] **{self.id}** **{self.title}**"
             f"{tag_str}{meta_str}{desc}{brief}"
         )
-
-
-@contextlib.contextmanager
-def _locked(path: Path) -> Iterator[int]:
-    """Acquire an exclusive fcntl lock on `path`. Creates the file if missing."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        yield fd
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 @dataclass
@@ -437,7 +424,7 @@ def locked_board(tasks_file: Path) -> Iterator[Board]:
     Callers mutate the yielded Board; on normal exit we write it back. On
     exceptions we skip the write so the on-disk state is unchanged.
     """
-    with _locked(lock_path(tasks_file)):
+    with locked_inplace(lock_path(tasks_file)):
         board = Board.load(tasks_file)
         yield board
         board.save()
@@ -451,5 +438,5 @@ def board_file_lock(tasks_file: Path) -> Iterator[None]:
     TASKS.md *out-of-band* via `git reset --hard` and don't want
     `locked_board`'s save-on-exit to clobber the post-reset on-disk content.
     """
-    with _locked(lock_path(tasks_file)):
+    with locked_inplace(lock_path(tasks_file)):
         yield
