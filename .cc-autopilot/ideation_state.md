@@ -1,14 +1,14 @@
 # Ideation State
 
-_Last updated: 2026-05-14T17:18:30Z by ideation cron_
+_Last updated: 2026-05-14T19:19:57Z by ideation cron_
 
 ## Mission alignment
 
-Mission-aligned. Board state byte-identical to the 15:16Z cycle
-(0A/0R/2B/0P/94C/3F); now 5 consecutive byte-identical cycles
-(post-overnight → 11:13Z → 13:14Z → 15:16Z → now). TB-221 + TB-222
-remain pending operator review since 09:11Z (~8h gap). 3 most recent
-Completes (unchanged from prior cycle):
+Mission-aligned. Board state byte-identical to the 17:18Z cycle
+(0A/0R/2B/0P/94C/3F); now 6 consecutive byte-identical cycles
+(post-overnight → 11:13Z → 13:14Z → 15:16Z → 17:18Z → now). TB-221 +
+TB-222 still pending operator review since 09:11Z (~10h gap). 3 most
+recent Completes (unchanged from prior cycle):
 
 - TB-217 (`59bd1ba`, 2026-05-14T07:44Z) — `locked_inplace` +
   `locked_sidecar` exposed from `ap2/_shared.py`; 7 modules now
@@ -39,12 +39,12 @@ Completes (unchanged from prior cycle):
   - Gaps:
     (1) **`Prose:` convention not taught in briefing-authoring
         prompts** — proposed in TB-221 (still pending operator review
-        at 09:11Z, ~8h); ideation.default.md L399-422 +
+        at 09:11Z, ~10h); ideation.default.md L399-422 +
         skills/ap2-task/SKILL.md L68-80 still teach only "prose
         bullets are allowed" with no mention of the prefix.
     (2) **`ap2/_shared.py` has zero direct test references** —
         proposed in TB-222 (still pending operator review at 09:11Z,
-        ~8h); 5 helpers, 7 importing modules, no regression pin on
+        ~10h); 5 helpers, 7 importing modules, no regression pin on
         `locked_sidecar` vs `locked_inplace` semantic, `short`
         ellipsis boundary, or `read_pid` ValueError fallback.
     (3) **Cleanness axis large-module decomposition** (`tools.py`
@@ -75,7 +75,7 @@ axes.
   triage** — Operator's batch-approve pattern (TB-217..220 approved
   together 06:43Z; TB-211..216 together 01:35Z) means stacking
   proposals before the prior batch is triaged dilutes operator
-  attention and breaks the per-cycle "fresh evidence" loop. Fifth
+  attention and breaks the per-cycle "fresh evidence" loop. Sixth
   consecutive cycle hitting the same shape; the principle holds —
   defer until at least one of TB-221/TB-222 lands or is rejected.
 - **Decompose `ap2/tools.py` along operator-queue-handler
@@ -90,8 +90,8 @@ axes.
   Carry-defer; no pro-forma slip observed in the wild.
 - **TB-175-shape ideation-acceptance-rate insight aggregator** —
   Operator log L80 carry-deferral; per-proposal record count has
-  not materially grown since the prior cycle (~2h gap, no new
-  proposals reconciled).
+  not materially grown since the prior cycle (no new proposals
+  reconciled in the 2h gap).
 - **Surface `board_malformed_line` count in `ap2 status`** —
   TB-216's write-time gate is the structural fix; defer until an
   observed slip past TB-216 motivates the surface.
@@ -100,30 +100,32 @@ axes.
 
 ## Cycle observations
 
-- Fifth consecutive byte-identical cycle. The prior cycle promoted
-  the cadence-edit signal from agent-internal observation into
-  Decisions-needed at the 4-cycle threshold; one more no-op cycle
-  has now elapsed with the operator decision still outstanding.
-  Carrying this single observation to record the count tick
-  (4→5) and the unchanged operator-engagement state; no other
-  agent-internal notes informed this cycle's reasoning.
+- Sixth consecutive byte-identical cycle. Cadence-decision was
+  promoted to Decisions-needed at the 4-cycle threshold (15:17Z)
+  and re-articulated at 5 cycles (17:19Z); now at 6 cycles with
+  no operator engagement on either the proposals or the cadence
+  question. Carrying this single tick (5→6) to record the unchanged
+  state; no other agent-internal notes informed this cycle's
+  reasoning. If the count reaches 8 with no engagement, escalate
+  the cadence framing in Decisions-needed (e.g. add concrete
+  proposed cron interval) rather than just incrementing.
 
 ## Decisions needed from operator
 
 - Decision needed: Should `ap2 cron edit ideation` move to a
-  longer cadence? Five consecutive ideation cycles
-  (post-overnight, 11:13Z, 13:14Z, 15:16Z, 17:18Z) have now
-  written near-identical stand-down state files because operator
-  throughput (TB-221/TB-222 pending review since 09:11Z, ~8h) is
-  slower than the cron firing interval (~2h). Operator action:
-  either `ap2 cron edit ideation` to widen the interval (e.g. 6h
-  matches observed approval cadence — TB-211..216 batch at
-  01:35Z, TB-217..220 batch at 06:43Z, ~5h apart), or confirm
+  longer cadence? Six consecutive ideation cycles
+  (post-overnight, 11:13Z, 13:14Z, 15:16Z, 17:18Z, 19:19Z) have
+  now written near-identical stand-down state files because
+  operator throughput (TB-221/TB-222 pending review since 09:11Z,
+  ~10h) is slower than the cron firing interval (~2h). Operator
+  action: either `ap2 cron edit ideation` to widen the interval
+  (e.g. 6h matches observed approval cadence — TB-211..216 batch
+  at 01:35Z, TB-217..220 batch at 06:43Z, ~5h apart), or confirm
   the current cadence is intentional (e.g. wanted as a heartbeat
   signal regardless of state change). Unblock-condition: a
-  cadence decision either reduces ideation token spend on
-  no-op cycles or codifies the heartbeat intent so future
-  cycles stop re-deriving the stand-down rationale.
+  cadence decision either reduces ideation token spend on no-op
+  cycles or codifies the heartbeat intent so future cycles stop
+  re-deriving the stand-down rationale.
 
 ## Proposals this cycle
 
