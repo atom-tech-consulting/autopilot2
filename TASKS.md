@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-217** **Extract `_locked()` to `ap2/_shared.py`; replace 3 duplicate definitions with imports** `#autopilot` `#code-quality` `#reusability` `#regression-pin` [→ brief](.cc-autopilot/tasks/extract-locked-to-ap2-shared-py-replace.md)
 
 ## Pipeline Pending
 
@@ -108,6 +107,7 @@
 - [x] **TB-218** **Extract `_short()` to `ap2/_shared.py`; replace 3 duplicate definitions with imports** `#autopilot` `#code-quality` `#reusability` `#regression-pin` [→ brief](.cc-autopilot/tasks/extract-short-to-ap2-shared-py-replace-3.md)
 - [x] **TB-220** **Consolidate `_now()` and `_read_pid()` into `ap2/_shared.py` (operator-filed below-threshold; bundle once shared module exists)** `#autopilot` `#code-quality` `#reusability` `#code-cleanness` [→ brief](.cc-autopilot/tasks/consolidate-now-and-read-pid-into-ap2-sh.md)
 - [x] **TB-219** **Tighten `verify.py`'s prose-vs-shell bullet classifier; codify `Prose:` prefix convention** `#autopilot` `#code-quality` `#code-cleanness` `#operator-surface` `#verifier` `#regression-pin` [→ brief](.cc-autopilot/tasks/tighten-verify-py-s-prose-vs-shell-bulle.md)
+- [x] **TB-217** **Extract `_locked()` to `ap2/_shared.py`; replace 3 duplicate definitions with imports** `#autopilot` `#code-quality` `#reusability` `#regression-pin` [→ brief](.cc-autopilot/tasks/extract-locked-to-ap2-shared-py-replace.md)
 
 ## Frozen
 

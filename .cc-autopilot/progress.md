@@ -557,3 +557,9 @@
 - **Summary:** Tightened verify.py's prose-vs-shell classifier with three layered signals on top of the leading-codespan rule (Prose: hard override, TB-207 malformed-backtick detection emitting kind=malformed, judge-indicator heuristic fallback); added 11 regression-pin tests across TB-204/TB-206/TB-207/TB-209 shapes plus backward-compat cases; updated ap2/howto.md with an Authoring `## Verification` bullets section naming all four pitfalls — full suite 1357 passed.
 - **Files:** ap2/verify.py, ap2/tests/test_verify_classifier.py, ap2/howto.md
 - **Tests:** pass
+
+## [2026-05-14] TB-217: Extract `_locked()` to `ap2/_shared.py`; replace 3 duplicate definitions with imports
+- **Commit:** `59bd1ba`
+- **Summary:** Previously committed in 59bd1ba — work fully covers briefing. Audit: ran `uv run pytest -q ap2/tests/` (1357 passed); confirmed ap2/_shared.py exists with both `locked_inplace` (L66) and `locked_sidecar` (L85), zero `^def _locked\(` matches across board.py/cron.py/retry.py, all three files have `from ap2._shared import` lines, none import `fcntl` directly, and the module docstring (L1-29) explicitly names the semantic distinction (inplace holds fd on file itself vs. sidecar locks `.lock` to permit safe rewrite/truncate).
+- **Files:** ap2/_shared.py, ap2/board.py, ap2/cron.py, ap2/retry.py
+- **Tests:** pass
