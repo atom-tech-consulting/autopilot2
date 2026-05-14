@@ -569,3 +569,9 @@
 - **Summary:** Layered AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP + AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP + task_error single-event halt onto TB-223's auto-approve gate, with shared `ap2 ack auto_approve_window_resume` resume ack. 14 new tests in test_tb224_token_caps.py cover all 6 behavioral cases from the briefing plus precedence + ideation_state-helper invariants. Full suite: 1404 passed in 89s.
 - **Files:** ap2/daemon.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb224_token_caps.py
 - **Tests:** pass
+
+## [2026-05-14] TB-225: Auto-apply agent-diagnosed briefing-shape fixes from `task_complete blocked` summaries; operator-curated allowlist via `AP2_AUTO_UNFREEZE_FIX_SHAPES` (axis 2 failure-recovery)
+- **Commit:** `b8af9b5`
+- **Summary:** Implemented TB-225 auto-unfreeze: parse_blocked_summary_fix_shape helper in _shared.py, three new AP2_AUTO_UNFREEZE_* env knobs in daemon.py with _maybe_auto_unfreeze sweep wired into _tick step 0.5, auto_unfreeze_applied / auto_unfreeze_skipped events registered in events.py + howto.md, four bootstrap shapes documented with BriefingFix: prefix contract, and 17 new tests pinning parser + knobs + seven (a-g) behavioral cases end-to-end. Full suite 1421 passed.
+- **Files:** ap2/_shared.py, ap2/daemon.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb225_auto_unfreeze.py
+- **Tests:** pass
