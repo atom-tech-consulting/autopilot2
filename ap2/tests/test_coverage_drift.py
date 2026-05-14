@@ -388,15 +388,19 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 # gate now resolves all four via that real test module rather than this
 # comment block. The shim entries were removed when TB-210 landed.
 #
-# Event types (8) — emitter sites that lack a dedicated assertion test:
-#   - auto_diagnose_error            (daemon.py — auto-diagnose failure)
-#   - classify_record_unreadable     (daemon.py — classify-record parse fail)
-#   - cron_bootstrap                 (daemon.py — cron.yaml seed)
-#   - cron_error                     (daemon.py — cron job exception)
+# Event types: TB-211 closed the five daemon-emitted entries
+# (auto_diagnose_error, classify_record_unreadable, cron_bootstrap,
+# cron_error, pipeline_pending_sweep_error) by landing
+# `ap2/tests/test_tb211_event_types.py` — the substring drift gate now
+# resolves those five via that real test module rather than this
+# comment block. The shim entries were removed when TB-211 landed; the
+# three mattermost-emitted entries below are the residual sibling-TB
+# follow-up.
+#
+# Event types (3) — emitter sites that lack a dedicated assertion test:
 #   - mattermost_error               (mattermost.py — poller exception)
 #   - mattermost_timeout             (mattermost.py — handler timeout)
 #   - mm_poll_error                  (mattermost.py — poll-loop exception)
-#   - pipeline_pending_sweep_error   (daemon.py — pipeline-sweep exception)
 #
 # CLI verbs (12) — TB-209-landed gap on the CLI-verb axis:
 #   - ap2 pause                      (cli.py — daemon-pause control)
