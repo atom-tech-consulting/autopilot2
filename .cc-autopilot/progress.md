@@ -521,3 +521,9 @@
 - **Summary:** Added 13 tests across the 4 sandbox install-* CLI handlers (cmd_install_channel/howto/mm/statusline) in ap2/tests/test_tb214_sandbox_install_verbs.py — happy + error paths via in-process handler invocation with stubbed subprocess/MM-API seams; removed the 4 matching shim rows from test_coverage_drift.py. Full suite 1326 passed.
 - **Files:** ap2/tests/test_tb214_sandbox_install_verbs.py, ap2/tests/test_coverage_drift.py
 - **Tests:** pass
+
+## [2026-05-14] TB-215: Pin 4 sandbox audit/setup CLI verbs (`ap2 sandbox project-audit`, `project-setup`, `user-audit`, `user-setup`) with happy + error path tests (TB-209 CLI-verb debt closure — sandbox audit/setup subset)
+- **Commit:** `c84e8da`
+- **Summary:** Added ap2/tests/test_tb215_sandbox_audit_setup_verbs.py (13 tests covering happy + error paths for cmd_user_audit, cmd_user_setup, cmd_project_setup, cmd_project_audit via in-process handler invocation + stubbed _user_exists/_user_home/_path_owner/subprocess.run seams + a cli.main argv→handler dispatch sanity test) and removed the 4 matching audit/setup shim rows from test_coverage_drift.py's comment block, completing the 12-verb TB-209 CLI-verb debt closure (TB-213 + TB-214 + TB-215). Full ap2/tests/ suite passes (1339 tests).
+- **Files:** ap2/tests/test_tb215_sandbox_audit_setup_verbs.py, ap2/tests/test_coverage_drift.py
+- **Tests:** pass
