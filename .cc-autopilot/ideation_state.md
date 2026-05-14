@@ -1,13 +1,14 @@
 # Ideation State
 
-_Last updated: 2026-05-14T15:16:00Z by ideation cron_
+_Last updated: 2026-05-14T17:18:30Z by ideation cron_
 
 ## Mission alignment
 
-Mission-aligned. Board state byte-identical to the 13:14Z cycle
-(0A/0R/2B/0P/94C/3F); no new Completes in the 2h gap, no operator
-activity. TB-221 + TB-222 still pending operator review from 09:11Z
-(~6h ago). 3 most recent Completes (unchanged from prior cycle):
+Mission-aligned. Board state byte-identical to the 15:16Z cycle
+(0A/0R/2B/0P/94C/3F); now 5 consecutive byte-identical cycles
+(post-overnight → 11:13Z → 13:14Z → 15:16Z → now). TB-221 + TB-222
+remain pending operator review since 09:11Z (~8h gap). 3 most recent
+Completes (unchanged from prior cycle):
 
 - TB-217 (`59bd1ba`, 2026-05-14T07:44Z) — `locked_inplace` +
   `locked_sidecar` exposed from `ap2/_shared.py`; 7 modules now
@@ -38,12 +39,12 @@ activity. TB-221 + TB-222 still pending operator review from 09:11Z
   - Gaps:
     (1) **`Prose:` convention not taught in briefing-authoring
         prompts** — proposed in TB-221 (still pending operator review
-        at 09:11Z); ideation.default.md L399-422 + skills/ap2-task/
-        SKILL.md L68-80 still teach only "prose bullets are allowed"
-        with no mention of the prefix.
+        at 09:11Z, ~8h); ideation.default.md L399-422 +
+        skills/ap2-task/SKILL.md L68-80 still teach only "prose
+        bullets are allowed" with no mention of the prefix.
     (2) **`ap2/_shared.py` has zero direct test references** —
-        proposed in TB-222 (still pending operator review at 09:11Z);
-        5 helpers, 7 importing modules, no regression pin on
+        proposed in TB-222 (still pending operator review at 09:11Z,
+        ~8h); 5 helpers, 7 importing modules, no regression pin on
         `locked_sidecar` vs `locked_inplace` semantic, `short`
         ellipsis boundary, or `read_pid` ValueError fallback.
     (3) **Cleanness axis large-module decomposition** (`tools.py`
@@ -59,8 +60,7 @@ activity. TB-221 + TB-222 still pending operator review from 09:11Z
   - Status: `in-progress`
   - Reasoning: Gaps (1)+(2) remain queued behind operator review;
     gaps (3)+(4) remain principled carry-defers. No new Complete
-    has shipped to re-shape the gap landscape since the prior
-    cycle.
+    has shipped to re-shape the gap landscape since the prior cycle.
 
 ## Non-goal risk check
 
@@ -75,9 +75,8 @@ axes.
   triage** — Operator's batch-approve pattern (TB-217..220 approved
   together 06:43Z; TB-211..216 together 01:35Z) means stacking
   proposals before the prior batch is triaged dilutes operator
-  attention and breaks the per-cycle "fresh evidence" loop. This is
-  now the fourth consecutive cycle hitting the same shape
-  (post-overnight → 11:13Z → 13:14Z → now); the principle holds —
+  attention and breaks the per-cycle "fresh evidence" loop. Fifth
+  consecutive cycle hitting the same shape; the principle holds —
   defer until at least one of TB-221/TB-222 lands or is rejected.
 - **Decompose `ap2/tools.py` along operator-queue-handler
   boundary** — Carry from prior cycles. goal.md L86-87 says natural
@@ -97,32 +96,27 @@ axes.
   TB-216's write-time gate is the structural fix; defer until an
   observed slip past TB-216 motivates the surface.
 - **n=4 authoritative rejects** (TB-172/175/184/185) — Continued
-  vigilance. Today's stand-down avoids all four shapes by virtue
-  of holding.
+  vigilance. Today's stand-down avoids all four shapes by holding.
 
 ## Cycle observations
 
-- Fourth consecutive cycle hitting byte-identical state — the
-  prior cycle's observation pre-registered this exact threshold
-  ("if a fourth cycle hits the same shape, that's a signal the
-  cron cadence is over-firing relative to operator throughput,
-  not that ideation has more to say"). Promoting that signal out
-  of agent-internal observation and into Decisions-needed this
-  cycle — the threshold has now been crossed and the actionable
-  shape (cron schedule edit) is an operator-CLI-only mutation
-  (TB-146 says no agent has `cron_edit`), so surfacing is the
-  only available channel. Dropping the carry-rationale bullet
-  from this section to avoid duplicating the promoted item.
+- Fifth consecutive byte-identical cycle. The prior cycle promoted
+  the cadence-edit signal from agent-internal observation into
+  Decisions-needed at the 4-cycle threshold; one more no-op cycle
+  has now elapsed with the operator decision still outstanding.
+  Carrying this single observation to record the count tick
+  (4→5) and the unchanged operator-engagement state; no other
+  agent-internal notes informed this cycle's reasoning.
 
 ## Decisions needed from operator
 
 - Decision needed: Should `ap2 cron edit ideation` move to a
-  longer cadence? Four consecutive ideation cycles
-  (post-overnight, 11:13Z, 13:14Z, 15:15Z) have written
-  byte-identical state files because operator throughput
-  (TB-221/TB-222 pending review since 09:11Z, ~6h) is slower
-  than the cron firing interval (~2h). Operator action: either
-  `ap2 cron edit ideation` to widen the interval (e.g. 6h
+  longer cadence? Five consecutive ideation cycles
+  (post-overnight, 11:13Z, 13:14Z, 15:16Z, 17:18Z) have now
+  written near-identical stand-down state files because operator
+  throughput (TB-221/TB-222 pending review since 09:11Z, ~8h) is
+  slower than the cron firing interval (~2h). Operator action:
+  either `ap2 cron edit ideation` to widen the interval (e.g. 6h
   matches observed approval cadence — TB-211..216 batch at
   01:35Z, TB-217..220 batch at 06:43Z, ~5h apart), or confirm
   the current cadence is intentional (e.g. wanted as a heartbeat
