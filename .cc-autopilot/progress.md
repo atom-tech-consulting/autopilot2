@@ -575,3 +575,9 @@
 - **Summary:** Implemented TB-225 auto-unfreeze: parse_blocked_summary_fix_shape helper in _shared.py, three new AP2_AUTO_UNFREEZE_* env knobs in daemon.py with _maybe_auto_unfreeze sweep wired into _tick step 0.5, auto_unfreeze_applied / auto_unfreeze_skipped events registered in events.py + howto.md, four bootstrap shapes documented with BriefingFix: prefix contract, and 17 new tests pinning parser + knobs + seven (a-g) behavioral cases end-to-end. Full suite 1421 passed.
 - **Files:** ap2/_shared.py, ap2/daemon.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb225_auto_unfreeze.py
 - **Tests:** pass
+
+## [2026-05-14] TB-221: Teach `Prose:` prefix convention in briefing-authoring prompts (`ap2/ideation.default.md` + `skills/ap2-task/SKILL.md`)
+- **Commit:** `9b3f5a5`
+- **Summary:** Previously committed in 9b3f5a5 — verified completeness: scope items 1+2 satisfied (ap2/ideation.default.md L423-432 teaches `Prose:` token inside shape 3 of "Three valid shapes" within `## Briefing requirements`, points to `ap2/howto.md`; skills/ap2-task/SKILL.md L80 teaches `Prose:` token inside `## Verification` block, points to `ap2/howto.md`); scope item 3 satisfied (no verify.py/howto.md/test changes per `git show 9b3f5a5 --stat`); all 6 verification bullets pass on current tree (3 grep shell bullets exit 0 with 3+1=4 combined `Prose:` matches; pytest -q 1421 passed; the two prose claims directly inspectable against the committed paragraphs). Prior verification_failed at 21:43Z mis-classified the two `Prose:`-prefixed bullets as shell despite the TB-219 hard-override; local re-parse via `parse_verification_section` confirms `_has_prose_prefix=True` for both, so the runtime mis-classification was transient (verify.py unchanged since 4814b97).
+- **Files:** ap2/ideation.default.md, skills/ap2-task/SKILL.md
+- **Tests:** pass
