@@ -143,3 +143,95 @@ def read_pid(cfg: "Config") -> int | None:
         return int(cfg.pid_file.read_text().strip())
     except (ValueError, OSError):
         return None
+
+
+def parse_blocked_summary_fix_shape(summary: str) -> dict | None:
+    """Parse the canonical `BriefingFix:` agent prefix from a
+    `task_complete status=blocked` summary (TB-225). Returns a dict on a
+    clean parse, else None.
+
+    Canonical agent contract (documented in `ap2/howto.md`'s
+    `## Operator-in-the-loop relaxations` section):
+
+        BriefingFix: <shape> at <briefing_path>:<line>: <from> -> <to>
+
+    Where:
+      - `<shape>` is a snake_case fix-shape token the operator-curated
+        `AP2_AUTO_UNFREEZE_FIX_SHAPES` allowlist consults. Recommended
+        bootstrap shapes (each names a known pitfall in the briefing-
+        authoring prompt's `## Shell-bullet pitfalls to AVOID` section):
+        `grep_missing_r_on_dir`, `bare_python_to_uv_run`,
+        `literal_backtick_in_shell_bullet`, `bare_path_to_test_f`.
+      - `<briefing_path>` is a project-relative path to the offending
+        briefing file (typically `.cc-autopilot/tasks/<slug>.md`).
+      - `<line>` is the 1-indexed line number where the daemon must
+        verify the `from` pattern literally appears before patching.
+      - `<from>` and `<to>` are the literal substrings the daemon will
+        line-replace. The first `" -> "` (space-arrow-space) is the
+        separator; subsequent occurrences are part of `<to>`.
+
+    Returns ``{"shape", "from", "to", "file", "line"}`` on success.
+    Returns None on any structural mismatch — malformed prefix, missing
+    fields, non-integer line, empty shape/path/from. Callers fall back
+    to today's manual-unfreeze behavior.
+
+    Whitespace-tolerant on the canonical separators (` at `, `: `,
+    ` -> `). The first `BriefingFix:` substring in `summary` wins;
+    subsequent lines (e.g. agent re-statements) are ignored. The parser
+    only consumes what the agent structurally emits — no regex-on-prose
+    guessing, no inferring `from`/`to` from free text. TB-119 / TB-121
+    history of `board_malformed_line` from prose-regex collisions is the
+    reason this stays strictly structured.
+    """
+    if not isinstance(summary, str) or not summary:
+        return None
+    needle = "BriefingFix:"
+    idx = summary.find(needle)
+    if idx == -1:
+        return None
+    # Take from after the needle to the next newline (or end of string).
+    after = summary[idx + len(needle):]
+    nl = after.find("\n")
+    if nl != -1:
+        after = after[:nl]
+    body = after.strip()
+    # body == "<shape> at <path>:<line>: <from> -> <to>"
+    at_idx = body.find(" at ")
+    if at_idx == -1:
+        return None
+    shape = body[:at_idx].strip()
+    rest = body[at_idx + 4:].strip()
+    # rest == "<path>:<line>: <from> -> <to>" — split on the FIRST ": "
+    # (colon-space) so a path/line containing no spaces is unambiguous.
+    colon_space = rest.find(": ")
+    if colon_space == -1:
+        return None
+    path_and_line = rest[:colon_space].strip()
+    diff_part = rest[colon_space + 2:]
+    # path_and_line == "<path>:<line>" — split on last `:` so a path
+    # containing colons (unusual on .cc-autopilot/tasks/ but possible)
+    # still parses correctly.
+    last_colon = path_and_line.rfind(":")
+    if last_colon == -1:
+        return None
+    file_part = path_and_line[:last_colon].strip()
+    line_str = path_and_line[last_colon + 1:].strip()
+    try:
+        line_no = int(line_str)
+    except ValueError:
+        return None
+    # diff_part == "<from> -> <to>" — split on the first " -> ".
+    arrow = diff_part.find(" -> ")
+    if arrow == -1:
+        return None
+    from_pat = diff_part[:arrow]
+    to_pat = diff_part[arrow + 4:]
+    if not shape or not file_part or not from_pat:
+        return None
+    return {
+        "shape": shape,
+        "from": from_pat,
+        "to": to_pat,
+        "file": file_part,
+        "line": line_no,
+    }

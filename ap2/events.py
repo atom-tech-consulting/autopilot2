@@ -36,6 +36,25 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     attempt while a halt is active. Payload: `task` (the would-have-
     promoted TB-N), `reason` (matches the active `auto_approve_halted`
     event's reason).
+  - `auto_unfreeze_applied` (TB-225) — agent-diagnosed briefing-shape
+    fix was auto-applied to a Frozen task. The daemon parsed a
+    `BriefingFix: <shape> at <path>:<line>: <from> -> <to>` line from
+    the agent's most recent `task_complete status=blocked` summary,
+    verified the named line literally matches `from`, queued an
+    `update` op (briefing patch) + an `unfreeze` op (Frozen →
+    Backlog) on the operator queue, and emitted this event for the
+    audit trail. Payload: `task` (TB-N), `shape` (allowlist token),
+    `from`, `to`. Counterpart `task_updated` (TB-153) + `task_unfrozen`
+    events land on next-tick drain.
+  - `auto_unfreeze_skipped` (TB-225) — auto-unfreeze attempt was
+    refused at one of the layered guards. Payload: `task` (TB-N
+    when scoped to a task; absent for the `sweep_error` reason
+    which is daemon-wide), `reason` (one of
+    `shape_not_in_allowlist`, `briefing_mismatch`,
+    `briefing_path_missing`, `per_task_cap`, `per_day_cap`,
+    `queue_error`, `sweep_error`). The `knob_unset` case does NOT
+    emit per-tick — the feature is opt-in and operators who haven't
+    set `AP2_AUTO_UNFREEZE_FIX_SHAPES` shouldn't see noise.
 
 The full canonical list lives in `ap2/howto.md`'s `## Event schema`
 section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)

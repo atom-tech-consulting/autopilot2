@@ -616,7 +616,14 @@ env value at proposal time so the forensic trail survives env changes
 during the daemon's lifetime), `auto_approve_paused` (TB-223 —
 cumulative-regression circuit-breaker tripped; auto-promote of
 auto-approved tasks halted until operator emits `ap2 ack
-auto_approve_unfreeze`).
+auto_approve_unfreeze`), `auto_unfreeze_applied` (TB-225 —
+agent-diagnosed briefing-shape fix from a `BriefingFix:` prefix was
+auto-applied to a Frozen task; payload `task`, `shape`, `from`, `to`),
+`auto_unfreeze_skipped` (TB-225 — auto-unfreeze attempt refused at
+one of the layered guards; payload `task` + `reason` token, where
+reason is one of `shape_not_in_allowlist`, `briefing_mismatch`,
+`briefing_path_missing`, `per_task_cap`, `per_day_cap`, `queue_error`,
+`sweep_error`).
 
 `diagnose.MEANINGFUL_EVENT_TYPES` is what the watchdog counts as "the
 daemon making progress"; `FAILURE_EVENT_TYPES` is what counts as broken.
@@ -821,6 +828,95 @@ episode (deduped via tail scan); `auto_approve_skipped` fires once
 per preempted auto-promote tick (with the would-have-promoted TB-N)
 so the cumulative skipped-count is visible in `ap2 logs` for
 operators tuning the cap values.
+
+**Auto-unfreeze on agent-diagnosed briefing-shape fixes (TB-225).**
+Self-heals the recurring class of retry-exhausted Frozen tasks whose
+root cause is a briefing-shape regression the agent already diagnosed
+in its `task_complete status=blocked` summary. Two known prod examples
+the brief calls out: TB-204 (`grep -lE` → `grep -rlE` on a directory
+target — missing the `-r` flag returns nothing), TB-207 (literal-
+backtick in shell bullets truncates the shell command at the first
+backtick). Both shapes are catalogued in
+`ap2/ideation.default.md`'s `## Shell-bullet pitfalls to AVOID`
+section. With this gate on, the daemon parses the agent's structured
+`BriefingFix:` prefix, verifies the briefing-line literal match,
+patches the briefing via the operator-queue `update` op, and unfreezes
+the task — all without operator-manual `ap2 unfreeze`. **Defaults are
+unset / conservative — feature is opt-in only.** Cross-references
+`goal.md`'s **Current focus: end-to-end automation** axis 2
+("Failure-recovery operator dependency").
+
+The canonical agent-prefix contract (task agents emit this line as
+part of their `report_result(status="blocked", summary=...)` payload
+when they diagnose a briefing-shape regression as the root cause):
+
+    BriefingFix: <shape> at <briefing_path>:<line>: <from> -> <to>
+
+Worked example:
+
+    BriefingFix: grep_missing_r_on_dir at .cc-autopilot/tasks/foo.md:23: grep -lE 'pattern' ap2/tests/ -> grep -rlE 'pattern' ap2/tests/
+
+The parser (`ap2._shared.parse_blocked_summary_fix_shape`) is
+strictly structured — no regex-on-prose guessing — so an agent that
+authors free-text diagnoses (no `BriefingFix:` line) falls through
+to today's manual-unfreeze path identically.
+
+- `AP2_AUTO_UNFREEZE_FIX_SHAPES` — comma-separated allowlist of
+  fix-shape tokens. **Unset by default → feature disabled.** The
+  daemon refuses to auto-apply any shape that isn't in this
+  allowlist; unknown shapes still require manual `ap2 unfreeze`.
+  The env-knob string IS the trust contract: operators audit each
+  shape and opt in by listing tokens. Recommended bootstrap list
+  (each names a known pitfall in
+  `ap2/ideation.default.md`'s `## Shell-bullet pitfalls to AVOID`
+  section):
+  - `grep_missing_r_on_dir` — `grep -lE 'pattern' <dir>/` returns
+    nothing without `-r`. Fix: `grep -rlE 'pattern' <dir>/`.
+  - `bare_python_to_uv_run` — `python -c '...'` exits 127 in the
+    daemon environment. Fix: `uv run python -c '...'`.
+  - `literal_backtick_in_shell_bullet` — a bullet with literal
+    backticks like `` `grep ... | wc -l` `` truncates at the first
+    backtick. Fix: drop the wrapping backticks; the bullet body IS
+    the command.
+  - `bare_path_to_test_f` — a bullet whose body is a bare path
+    (e.g. `reports/foo.md`) tries to execute the file (exit 126).
+    Fix: `test -f reports/foo.md`.
+- `AP2_AUTO_UNFREEZE_MAX_PER_TASK` (default `1`) — integer cap on
+  auto-unfreeze attempts per task before fallback to manual
+  `ap2 unfreeze`. Bounds oscillation when the patched briefing
+  ALSO fails. `0` disables the per-task cap (unbounded retries —
+  intentionally not the default; disabling should be an explicit
+  operator decision).
+- `AP2_AUTO_UNFREEZE_MAX_PER_DAY` (default `3`) — rolling 24h cap
+  on total auto-unfreeze applications across all tasks. When
+  exceeded, the daemon halts further auto-unfreeze attempts on the
+  tick AND appends a `## Decisions needed from operator` bullet to
+  `.cc-autopilot/ideation_state.md` so `ap2 status` surfaces the
+  systemic-regression signal. `0` disables the per-day cap.
+
+Audit events: `auto_unfreeze_applied` (success — payload `task`,
+`shape`, `from`, `to`); `auto_unfreeze_skipped` (any guarded skip —
+payload `task` + `reason` token; one of
+`shape_not_in_allowlist`, `briefing_mismatch`,
+`briefing_path_missing`, `per_task_cap`, `per_day_cap`,
+`queue_error`, `sweep_error`). The `knob_unset` baseline does NOT
+emit per-tick — the feature is opt-in and operators who haven't
+set `AP2_AUTO_UNFREEZE_FIX_SHAPES` shouldn't see noise.
+
+Why operator-curated allowlist (not heuristic detection): arbitrary
+briefing edits by the daemon are blast-radius-unsafe. The allowlist
+lets the operator audit each fix-shape and opt in specifically;
+shapes can be removed instantly if one misfires by editing the env
+string. New shapes never auto-promote — the operator opens new
+shapes by editing the env value, the daemon never invents them.
+
+Why the briefing-line literal match check: the agent's diagnosis may
+be stale if the briefing was operator-edited between failure and
+freeze handling (e.g. the operator hand-edited it trying to fix it
+themselves). Verifying the `from` pattern is literally present on
+the named line before patching closes the data-race window. A
+mismatch emits `auto_unfreeze_skipped reason=briefing_mismatch` and
+leaves the task Frozen — fail-safe.
 
 **Watchdog (auto-diagnose).**
 - `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` (10800 = 3h) — idle duration
