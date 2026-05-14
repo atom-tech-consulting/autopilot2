@@ -1,130 +1,165 @@
 # Ideation State
 
-_Last updated: 2026-05-14T21:09:40Z by ideation cron_
+_Last updated: 2026-05-14T23:22:18Z by ideation cron_
 
 ## Mission alignment
 
-Operator pivoted goal.md at 21:09:21Z (operator_log L133-134) from
-"code quality consolidation" to **Current focus: end-to-end
-automation** — four axes (manual-approval bottleneck, failure-
-recovery operator dependency, cost+blast-radius guards, multi-focus
-sequential execution) framed by Done-when bullet 1's walk-away
-promise (goal.md L28-29). Operator simultaneously filed TB-223 as the
-axis-1 starting point (operator_log L135) and force-ideated
-(operator_log L136). The code-quality arc that drove TB-203 → TB-220
-is acknowledged in goal.md L40-49 as "substantively addressed" — the
-limiting factor has shifted axes. 3 most recent Completes:
+Prior cycle (21:09:40Z) rebuilt the assessment around the 21:09Z pivot
+to "Current focus: end-to-end automation" (goal.md L38-151, four
+axes). Since then, all three highest-priority axes shipped: TB-223
+(axis 1: `AP2_AUTO_APPROVE` gate, `a46c461`), TB-224 (axis 3: per-task
++ window token caps + `task_error` halt, `7e5a400`), TB-225 (axis 2:
+auto-unfreeze on agent-diagnosed `BriefingFix:` shapes, `b8af9b5`) —
+plus pre-pivot residuals TB-221 / TB-222 (`9b3f5a5` / `7b64617`). 3
+most recent Completes considered:
 
-- TB-217 (`59bd1ba`, 2026-05-14T07:44Z) — `locked_inplace` +
-  `locked_sidecar` exposed from `ap2/_shared.py`.
-- TB-219 (`4814b97`, 2026-05-14T07:38Z) — verify.py 3-layer
-  classifier with `Prose:` hard override.
-- TB-220 (`a8a949e`, 2026-05-14T07:17Z) — `now()` + `read_pid()`
-  consolidated to `_shared.py`.
+- TB-225 (`b8af9b5`, 2026-05-14T22:47Z) — `_maybe_auto_unfreeze`
+  sweep + 3 env knobs + parser in `_shared.py`.
+- TB-224 (`7e5a400`, 2026-05-14T22:30Z) — token-cap + halt knobs
+  with shared `auto_approve_window_resume` ack.
+- TB-223 (`a46c461`, 2026-05-14T22:11Z) — `AP2_AUTO_APPROVE` knob,
+  `auto_approved` + `auto_approve_paused` events.
+
+The limiting factor on mission progress now shifts from "axes 1-3
+deliverables don't exist" to "axes 1-3 have zero operator-facing
+observability and axis 4 is unstarted." The walk-away promise stays
+fictional until the operator can SEE whether the loop is healthy
+without `ap2 logs` archeology.
 
 ## Current focus assessment
 
 - **Current focus: end-to-end automation (goal.md L38-151, four axes)**
   - Progress so far:
-    - Axis 1 (Manual-approval bottleneck): TB-223 in Backlog
-      (operator-filed 21:09Z) — `AP2_AUTO_APPROVE` knob +
-      `AP2_AUTO_APPROVE_GATE_TAGS` + `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`
-      regression-pause + `auto_approved` event.
-    - Axes 2-4: nothing shipped or proposed yet — focus is new
-      (21:09Z, this cycle).
+    - Axis 1 (Manual-approval bottleneck): TB-223 shipped 3 env
+      knobs + `auto_approved` / `auto_approve_paused` events + 13
+      behavioral tests (commit `a46c461`).
+    - Axis 2 (Failure-recovery operator dependency): TB-225 shipped
+      `parse_blocked_summary_fix_shape` helper, 3 `AP2_AUTO_UNFREEZE_*`
+      env knobs, `_maybe_auto_unfreeze` sweep, 17 tests (commit
+      `b8af9b5`).
+    - Axis 3 (Cost + blast-radius guards): TB-224 shipped per-task +
+      window token caps, `task_error` single-event halt, shared
+      `auto_approve_window_resume` ack verb (commit `7e5a400`).
+    - Axis 4 (Multi-focus sequential execution): NOTHING shipped.
+      Only `parse_focus_statuses` from TB-174 exists (reads
+      `ideation_state.md`, not goal.md focus list).
   - Gaps:
-    (1) **Axis 3: Cost + blast-radius guards** — TB-223 covers the
-        regression-pause but explicitly excludes "Token-cost ceilings
-        / per-window budgets" (TB-223 brief L77) and does NOT halt on
-        `task_error` (infrastructure failure, distinct from
-        `verification_failed`). Without per-task and per-window token
-        caps, auto-approve is unbounded-blast-radius (goal.md
-        L103-113); operator cannot responsibly enable
-        `AP2_AUTO_APPROVE=1` until cost ceilings ship alongside.
-        Addressed by proposal 1 this cycle.
-    (2) **Axis 2: Failure-recovery operator dependency** — Frozen
-        tasks today require operator `ap2 unfreeze`. Goal.md L92-100
-        names two concrete in-codebase examples (TB-204 `grep -lE` →
-        `grep -rlE`, TB-207 literal-backtick) where the agent
-        self-diagnosed the briefing-shape fix in its `task_complete
-        blocked` summary; daemon could auto-apply allowlisted shapes.
+    (1) **Axis 4: goal.md focus-list parser + pointer + advance
+        heuristic** — goal.md L115-138 design names a concrete
+        deliverable surface (multi-`## Current focus:` heading parser
+        + per-focus `Done when:` sub-block + pointer state file +
+        `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` heuristic + `focus_advanced`
+        event + `roadmap_complete` halt + `ap2 ack roadmap_complete`
+        resume) but none of it exists yet. Today goal.md carries a
+        single `## Current focus:` heading; the parser ingests one
+        focus only. Addressed by proposal 1 this cycle.
+    (2) **Auto-approve/auto-unfreeze loop has zero operator-facing
+        status surface** — `grep -n auto_approve ap2/cli.py
+        ap2/web.py` returns empty. `ap2 status` exposes board counts
+        + pending-review IDs + queue depth + janitor + decisions
+        needed but NOT whether `AP2_AUTO_APPROVE=1`, whether the
+        loop is paused (waiting on `ap2 ack
+        auto_approve_window_resume`), the `consecutive_freezes`
+        counter vs `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`, or
+        cumulative window-token spend vs cap. Operator returning
+        Monday morning has to `ap2 logs | grep auto_approve` to
+        learn loop health — walk-away promise blocked (goal.md
+        L28-29 "walk away for a week without intervention").
         Addressed by proposal 2 this cycle.
-    (3) **Axis 4: Multi-focus sequential execution** — goal.md
-        L115-138 design is concrete (pointer + `Done when:`
-        per-focus + `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` heuristic +
-        `roadmap_complete` halt) but larger design surface
-        (focus-parsing + pointer state + per-focus exhaustion gate
-        + goal.md schema changes). Defer this cycle in favor of the
-        axes 2/3 proposals that compound directly on TB-223.
-    (4) **Pre-pivot residuals (TB-221, TB-222)** — filed 09:11Z
-        against the old code-quality focus; operator kept them on
-        the board through the 21:09Z pivot. Surfaced in
-        Decisions-needed below for triage; ideation does not
-        re-propose or alter.
+    (3) **Status-report cron doesn't include axis 1/2/3 digest** —
+        Operator's walk-away surface IS the scheduled status-report
+        Mattermost post (per TB-144 shared routine + TB-128 fresh
+        snapshot). Today it summarizes board counts + recent
+        completes but never mentions the auto-approve/auto-unfreeze
+        loop activity. A weekly walk-away digest needs: N tasks
+        auto-approved (M succeeded, K froze), L tasks auto-unfrozen
+        (P succeeded, Q re-froze), paused/healthy state. Addressed
+        by proposal 3 this cycle.
+    (4) **`BriefingFix:` emitter is unprompted; auto-unfreeze stays
+        cold** — TB-225 wired the parser, sweep, and four bootstrap
+        shapes into `AP2_AUTO_UNFREEZE_FIX_SHAPES`, but the
+        per-task agent that emits `task_complete blocked` summaries
+        doesn't know about the `BriefingFix:` prefix convention.
+        `skills/ap2-task/SKILL.md` doesn't teach it. Same shape as
+        TB-219 → TB-221 (verifier learned `Prose:`, but until the
+        prompt taught it the convention stayed cold). Without
+        upstream emission, `_maybe_auto_unfreeze` has nothing to
+        parse → axis-2 delete-test stays fictional. Addressed by
+        proposal 4 this cycle.
   - Status: `in-progress`
-  - Reasoning: Focus is brand-new (this cycle); 4 substantive gaps
-    identified, 2 ranked-and-proposed, 1 deferred (axis 4 size),
-    1 routed to operator decision (pre-pivot residuals).
+  - Reasoning: 3/4 axes shipped within the last hour; 4 substantive
+    follow-up gaps identified, all 4 within ranking budget.
 
 ## Non-goal risk check
 
-None. Axes 1-4 are all explicitly inside goal.md's Mission and
-Done-when. The opt-in env-knob shape on all proposals respects
-goal.md L183-186 "Unconditional automation" Non-goal (auto-approve,
-auto-unfreeze are OPT-IN with conservative defaults). No drift
-toward generic-task-scheduler / replace-operator-judgment /
-multi-tenancy / real-time / cross-project axes.
+None. All four proposals stay inside axes 1-4. Observability
+(proposals 2, 3) doesn't expand opt-in defaults — purely surfaces
+existing state. The `BriefingFix:` teaching (proposal 4) compounds
+TB-225 without enlarging its scope. Axis 4 (proposal 1) explicitly
+respects goal.md L187-191 "Goal.md auto-rotation" Non-goal: pointer
+is runtime-only, never mutates goal.md.
 
 ## Considered & deferred this cycle
 
-- **Axis 4: Multi-focus pointer + per-focus `Done when:` gate** —
-  Concrete design in goal.md L115-138 but larger surface than
-  axes 2/3; defer to next cycle once TB-223 + the two proposed
-  follow-ups have been operator-triaged so the auto-approve
-  cluster's shape is settled before adding focus-advance on top.
-- **CLI verb `ap2 auto-approve --enable|--disable`** — TB-223 brief
-  L40-41 explicitly rejected for runtime-toggle drain-semantic
-  reasons; both this cycle's proposals match the env-only pattern.
-- **`ap2 frozen TB-N` triage view** — n=4 authoritative reject
-  (TB-185, 2026-05-06): "Frozen tasks are very rare"; auto-unfreeze
-  proposal addresses the recurring class without introducing a new
-  triage surface.
+- **Default values for `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` /
+  `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`** — Both ship unset (cap
+  inactive until operator sets a value). Changing defaults to a
+  hard non-zero would alter semantics (silent-cap-enable contradicts
+  goal.md L183-186 "OPT-IN env knobs"). Soft answer: howto
+  guidance on recommended starter values; deferred until operator
+  signal accumulates from at least one real walk-away cycle.
+- **Historical-rate halt on cumulative verification_failed%** — Too
+  early to define a threshold; TB-223's per-event consecutive-N
+  halt covers the same failure shape with cheaper signal. Defer
+  until at least 20 auto-approved completes exist (currently 0).
+- **`ap2 audit auto-approve --window N` simulator CLI** — Useful
+  for operator trust-upgrade before flipping `AP2_AUTO_APPROVE=1`,
+  but overlaps with the existing TB-188/TB-189/TB-195 proposals
+  pipeline; let proposal 2's status surface accumulate signal first.
 - **Wack-a-mole shell-bullet linting (TB-172-shape)** — n=4
-  authoritative reject; auto-unfreeze proposal generalizes the
-  recurring class (operator-curated allowlist of fix-shapes) rather
-  than enumerating bullet pitfalls.
-- **TB-175-shape ideation-quality insight aggregator** — operator
-  log L80 carry-deferral; signal still accumulating. Stays carried.
+  authoritative reject (operator_log L80). Auto-unfreeze + the
+  TB-219 classifier together generalize the recurring class.
+- **TB-175-shape ideation-quality aggregator** — n=4 authoritative
+  reject; signal still accumulating via TB-188 / TB-189 records.
+- **`ap2 frozen TB-N` triage view** — n=4 authoritative reject
+  (TB-185, 2026-05-06): "Frozen tasks are very rare."
 
 ## Cycle observations
 
-- Prior cycle's "6-consecutive byte-identical" observation
-  RESOLVED by the operator's 21:09Z update_goal + force_ideate —
-  cadence question is moot, the operator engaged via the goal.md
-  channel they explicitly endorsed (operator_log L68 "edit goal.md
-  — that's the cheap, principled path"). Dropping the carried
-  observation; no replacement needed.
+- Prior-cycle pre-pivot residuals carry-bullet RESOLVED: operator
+  approved TB-221 + TB-222 at 21:37:12Z (operator_log L137-138)
+  and both shipped on 2026-05-14. Decisions-needed item drops; no
+  replacement.
+- Axis-rollout cadence on 2026-05-14 was unusually fast (TB-223
+  → TB-225 in <90 min wall-clock), driven by the operator's
+  force-ideate at 21:09Z + batch-approve at 21:37Z. The 4
+  proposals this cycle deliberately add observability + axis-4
+  foundation rather than racing more deliverables — without
+  observability, the operator can't safely flip
+  `AP2_AUTO_APPROVE=1` even with axes 1-3 shipped.
 
 ## Decisions needed from operator
 
-- Decision needed: triage pre-pivot Backlog residuals TB-221
-  (`Prose:` prefix in briefing-authoring prompts) and TB-222
-  (`_shared.py` happy+error tests). Both were filed 2026-05-14T09:11Z
-  against the now-superseded "code quality" focus; operator kept
-  them on the board through the 21:09Z pivot to "end-to-end
-  automation." Operator action: either `ap2 approve TB-221 TB-222`
-  to drain them as residual code-quality cleanup before the new
-  focus arc, or `ap2 reject` them as stale-focus so ideation doesn't
-  treat them as carry-defer context next cycle. Unblock-condition:
-  triage resolves whether the new-focus proposals (TB-224, TB-225
-  and successors) compete with these for batch-approve attention.
+(none this cycle — the pre-pivot residual triage RESOLVED via the
+21:37:12Z approve batch; no carried bullets meet the actionable-
+decision shape, and TB-N-awaiting-review surfacing is covered by
+`ap2 status` / status-report mechanically per TB-151 / TB-173.)
 
 ## Proposals this cycle
 
-- TB-224 — Axis 3 cost guards: `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`
-  + `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` + `task_error` halt — covers
-  goal.md L103-113 unbounded-blast-radius gap left by TB-223.
-- TB-225 — Axis 2 auto-unfreeze: parse agent-diagnosed briefing-shape
-  fix from `task_complete blocked` summary; operator-allowlisted
-  shapes auto-applied with per-task + per-day caps — covers
-  goal.md L90-100 axis-2 delete-test.
+- TB-226 — Axis 4 foundation: parse multiple `## Current focus:`
+  headings from goal.md, per-focus `Done when:` sub-block, pointer
+  state file, `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` heuristic,
+  `focus_advanced` / `roadmap_complete` events, `ap2 ack
+  roadmap_complete` resume verb — covers goal.md L115-138 axis-4
+  gap (1).
+- TB-227 — Auto-approve/auto-unfreeze visibility in `ap2 status`
+  (text + JSON) + web home — covers gap (2), unblocks operator's
+  walk-away check.
+- TB-228 — Status-report cron digest block summarizing
+  auto-approve/auto-unfreeze loop activity since last report — covers
+  gap (3), serves Done-when-1's walk-away promise.
+- TB-229 — Teach `BriefingFix:` prefix convention in
+  `skills/ap2-task/SKILL.md` + per-task agent prompt; mirror TB-221's
+  `Prose:` teaching pattern — covers gap (4), unblocks axis-2
+  auto-unfreeze path.
