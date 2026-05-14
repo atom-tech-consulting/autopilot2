@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-219** **Tighten `verify.py`'s prose-vs-shell bullet classifier; codify `Prose:` prefix convention** `#autopilot` `#code-quality` `#code-cleanness` `#operator-surface` `#verifier` `#regression-pin` [→ brief](.cc-autopilot/tasks/tighten-verify-py-s-prose-vs-shell-bulle.md)
 - [ ] **TB-217** **Extract `_locked()` to `ap2/_shared.py`; replace 3 duplicate definitions with imports** `#autopilot` `#code-quality` `#reusability` `#regression-pin` [→ brief](.cc-autopilot/tasks/extract-locked-to-ap2-shared-py-replace.md)
 
 ## Pipeline Pending
@@ -108,6 +107,7 @@
 - [x] **TB-211** **Pin 5 daemon-emitted event types (`auto_diagnose_error`, `classify_record_unreadable`, `cron_bootstrap`, `cron_error`, `pipeline_pending_sweep_error`) with happy + error path tests (TB-208 event-type debt closure — daemon subset)** `#autopilot #tests #code-quality #event-types #regression-pin` — Five daemon-emitted event types that TB-208's docstring (`ap2/tests/test_coverage_drift.py` L391-399) tags as TB-205-shape coverage debt have ZERO real test refs — only the comment-block shim satisfies the substring drift gate. Mirror TB-205/TB-210's `test_env_knobs.py` pattern with focused emitter-site tests and remove the matching shim rows. [→ brief](.cc-autopilot/tasks/pin-5-daemon-emitted-event-types-auto-di.md)
 - [x] **TB-218** **Extract `_short()` to `ap2/_shared.py`; replace 3 duplicate definitions with imports** `#autopilot` `#code-quality` `#reusability` `#regression-pin` [→ brief](.cc-autopilot/tasks/extract-short-to-ap2-shared-py-replace-3.md)
 - [x] **TB-220** **Consolidate `_now()` and `_read_pid()` into `ap2/_shared.py` (operator-filed below-threshold; bundle once shared module exists)** `#autopilot` `#code-quality` `#reusability` `#code-cleanness` [→ brief](.cc-autopilot/tasks/consolidate-now-and-read-pid-into-ap2-sh.md)
+- [x] **TB-219** **Tighten `verify.py`'s prose-vs-shell bullet classifier; codify `Prose:` prefix convention** `#autopilot` `#code-quality` `#code-cleanness` `#operator-surface` `#verifier` `#regression-pin` [→ brief](.cc-autopilot/tasks/tighten-verify-py-s-prose-vs-shell-bulle.md)
 
 ## Frozen
 

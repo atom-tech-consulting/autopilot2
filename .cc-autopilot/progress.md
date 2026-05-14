@@ -551,3 +551,9 @@
 - **Summary:** Extracted `now()` and `read_pid()` to `ap2/_shared.py`; migrated 5 call sites across cron.py/events.py/cli.py/web.py; dropped unused `import datetime as dt` in events.py; updated 3 stale docstring/comment references. Full suite green (1346/1346).
 - **Files:** ap2/_shared.py, ap2/cli.py, ap2/cron.py, ap2/events.py, ap2/web.py, ap2/tools.py, ap2/tests/e2e/test_auto_diagnose.py, ap2/tests/test_tb213_daemon_lifecycle_verbs.py
 - **Tests:** pass
+
+## [2026-05-14] TB-219: Tighten `verify.py`'s prose-vs-shell bullet classifier; codify `Prose:` prefix convention
+- **Commit:** `4814b97`
+- **Summary:** Tightened verify.py's prose-vs-shell classifier with three layered signals on top of the leading-codespan rule (Prose: hard override, TB-207 malformed-backtick detection emitting kind=malformed, judge-indicator heuristic fallback); added 11 regression-pin tests across TB-204/TB-206/TB-207/TB-209 shapes plus backward-compat cases; updated ap2/howto.md with an Authoring `## Verification` bullets section naming all four pitfalls — full suite 1357 passed.
+- **Files:** ap2/verify.py, ap2/tests/test_verify_classifier.py, ap2/howto.md
+- **Tests:** pass

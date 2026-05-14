@@ -67,3 +67,11 @@ Operator-facing docs: this is goal.md L65-72's "operator-facing documentation" a
 - Auto-rewriting existing briefings to add `Prose:` prefixes or strip literal backticks (briefings are ideation-authored or operator-authored; retroactive rewrites are a separate cleanup if needed).
 - Migrating from `mistune` to a different markdown parser.
 - Adding a "shell vs prose" `kind:` field to the briefing markdown itself (e.g. `shell:` / `prose:` as YAML-front-matter or per-bullet attributes) — operator-facing markdown should stay markdown.
+## Attempts
+
+### 2026-05-14 — error
+(no summary)
+- **error:** Exception: Command failed with exit code 1 (exit code: 1)
+Error output: Check stderr output for details
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T070214Z-TB-219.prompt.md`, `stream: .cc-autopilot/debug/20260514T070214Z-TB-219.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T070214Z-TB-219.messages.jsonl`
