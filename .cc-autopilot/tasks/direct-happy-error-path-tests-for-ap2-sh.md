@@ -50,3 +50,10 @@ No changes to `ap2/_shared.py` itself, no changes to existing callers, no change
 - Documenting `_shared.py` in `ap2/architecture.md` — folded into this task's design notes; standalone delete-test on the doc paragraph is weak.
 - Refactoring callers — TB-217/TB-218/TB-220 already migrated 7 modules; no further call-site work here.
 - Speculative additional helpers in `_shared.py` (e.g. promoting other 2-call-site helpers prematurely) — goal.md L74-77 threshold-three rule defers those until a third reader appears.
+## Attempts
+
+### 2026-05-14 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `ap2/tests/test_shared.py` Prose: at least one test in the file pins the `locked_sidecar` vs `locked_inplace` semantic d; [fail] `ap2/tests/test_shared.py` Prose: at least one test pins `short()`'s truncation boundary as `s[: limit - 1] + "…"` (U+20; [fail] `ap2/tests/test_shared.py` Prose: the `read_pid` tests cover at least three error branches (FileNotFoundError via missin
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T214334Z-TB-222.prompt.md`, `stream: .cc-autopilot/debug/20260514T214334Z-TB-222.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T214334Z-TB-222.messages.jsonl`
