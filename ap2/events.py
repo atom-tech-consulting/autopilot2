@@ -6,24 +6,19 @@ without accumulating it in any long-lived session.
 """
 from __future__ import annotations
 
-import datetime as dt
 import fcntl
 import json
 import os
 from pathlib import Path
 from typing import Any, Iterable
 
-from ap2._shared import short
-
-
-def _now() -> str:
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+from ap2._shared import now, short
 
 
 def append(events_file: Path, type: str, **fields: Any) -> dict:
     """Append an event; returns the event dict actually written."""
     events_file.parent.mkdir(parents=True, exist_ok=True)
-    evt = {"ts": _now(), "type": type, **fields}
+    evt = {"ts": now(), "type": type, **fields}
     line = json.dumps(evt, default=str)
     fd = os.open(events_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     try:

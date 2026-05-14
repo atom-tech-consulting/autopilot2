@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from ap2._shared import locked_sidecar
+from ap2._shared import locked_sidecar, now
 
 
 _INTERVAL_RE = re.compile(r"^\s*(\d+)\s*([smhd])?\s*$")
@@ -138,7 +138,7 @@ def update_job(cron_file: Path, action: str, **kw: Any) -> tuple[str, list[CronJ
                 active_when=kw.get("active_when"),
                 max_turns=int(mt) if mt else 15,
                 created_by=kw.get("created_by"),
-                created_at=kw.get("created_at") or _now(),
+                created_at=kw.get("created_at") or now(),
                 allowed_tools=list(kw.get("allowed_tools") or []),
             ))
             msg = f"added cron job {name!r}"
@@ -249,9 +249,3 @@ def evaluate_condition(expr: str, project_root: Path) -> bool:
         return not full.exists()
     # Default: unknown condition → skip the job, don't run.
     return False
-
-
-def _now() -> str:
-    import datetime as dt
-
-    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

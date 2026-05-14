@@ -268,7 +268,7 @@ def test_cmd_resume_when_not_paused_is_noop(tmp_path: Path):
 # (3) `ap2 stop` — `cli.cmd_stop`
 #
 # Handler at `ap2/cli.py:101-111`:
-#     pid = _read_pid(cfg)
+#     pid = read_pid(cfg)
 #     if not pid or not _is_running(pid):
 #         print("not running")
 #         if cfg.pid_file.exists():
@@ -342,7 +342,7 @@ def test_cmd_stop_force_sends_sigkill(tmp_path: Path, capsys):
 
 
 def test_cmd_stop_daemon_not_running_no_pid_file(tmp_path: Path, capsys):
-    """Error path: `ap2 stop` with no pid file (`_read_pid` returns None)
+    """Error path: `ap2 stop` with no pid file (`read_pid` returns None)
     prints "not running" and exits 0. No `os.kill` should fire (avoiding
     the accidental-kill-by-stale-pid hazard). Pin this branch so a
     refactor that swaps to "raise if no pid file" surfaces — operators

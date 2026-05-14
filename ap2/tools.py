@@ -2242,7 +2242,7 @@ def classifications_last_30d_by_verdict(cfg: Config) -> dict[str, int]:
     """Count `task_classified` events (TB-189) in the last 30 days, by
     verdict. Always returns a dict with a key per `IMPACT_VERDICTS` value
     (zeros when empty). Counts are based on the event's `ts` field; the
-    window endpoints use UTC (matches `events.append`'s _now()).
+    window endpoints use UTC (matches `events.append`'s `now()`).
 
     Reads up to 1000 recent events — comfortably more than any plausible
     30-day classification volume even at one classification per shipped

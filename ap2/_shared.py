@@ -33,14 +33,33 @@ across `ap2/cli.py`, `ap2/diagnose.py`, and `ap2/events.py` for rendering
 event extras at one-line widths. No default `limit` argument: each caller
 picks explicitly (the prior convention of three different module-local
 defaults — 120 / 100 / 200 — was a smell, not a feature).
+
+TB-220 added two more helpers that previously lived as private duplicates:
+
+- `now()` — UTC ISO-8601 timestamp (`YYYY-MM-DDTHH:MM:SSZ`). Was `_now()`
+  in `ap2/cron.py` and `ap2/events.py`; the two bodies were functionally
+  identical (cron's inlined `import datetime as dt` inside the function,
+  events used the module-level import — same external behavior).
+- `read_pid(cfg)` — read daemon PID from `cfg.pid_file`, returning the int
+  or None on missing / unparseable file. Was `_read_pid(cfg)` in
+  `ap2/cli.py` and `ap2/web.py`; the two bodies were byte-identical.
+
+These were below goal.md's threshold-three rule (n=2 each), but bundled
+with the n=3 extractions while the shared module was fresh — incremental
+cost is minimal and a future third call site lands on the shared helper
+naturally.
 """
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import fcntl
 import os
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
+
+if TYPE_CHECKING:
+    from ap2.config import Config
 
 
 @contextlib.contextmanager
@@ -95,3 +114,32 @@ def short(v: Any, limit: int) -> str:
     """
     s = str(v)
     return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
+def now() -> str:
+    """Return the current UTC time as an ISO-8601 string with `Z` suffix.
+
+    Format: `YYYY-MM-DDTHH:MM:SSZ` — the format every event-log and
+    cron-state writer in the codebase already produces. TB-220 consolidated
+    this from two private `_now()` definitions in `ap2/cron.py` and
+    `ap2/events.py` (the two bodies were functionally identical; cron's
+    inlined `import datetime as dt` inside the function, events used the
+    module-level import — same external behavior).
+    """
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def read_pid(cfg: "Config") -> int | None:
+    """Return the daemon PID stored in `cfg.pid_file`, or None if absent / unparseable.
+
+    Returns None on FileNotFoundError, ValueError (file present but body
+    isn't an int), or OSError (read failure). TB-220 consolidated this
+    from two byte-identical private `_read_pid(cfg)` definitions in
+    `ap2/cli.py` and `ap2/web.py`.
+    """
+    if not cfg.pid_file.exists():
+        return None
+    try:
+        return int(cfg.pid_file.read_text().strip())
+    except (ValueError, OSError):
+        return None

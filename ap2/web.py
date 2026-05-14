@@ -41,6 +41,7 @@ from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from . import diagnose, events as ev_mod, insights as ins_mod
+from ap2._shared import read_pid
 from .board import Board
 from .config import Config
 
@@ -268,15 +269,6 @@ def _is_alive(pid: int | None) -> bool:
         return True
     except (ProcessLookupError, PermissionError):
         return False
-
-
-def _read_pid(cfg: Config) -> int | None:
-    if not cfg.pid_file.exists():
-        return None
-    try:
-        return int(cfg.pid_file.read_text().strip())
-    except (ValueError, OSError):
-        return None
 
 
 # ------------- HTML helpers -------------
@@ -2271,7 +2263,7 @@ def _render_usage(
 
 
 def _render_home(cfg: Config) -> str:
-    pid = _read_pid(cfg)
+    pid = read_pid(cfg)
     running = _is_alive(pid)
     paused = cfg.pause_flag.exists()
     board = Board.load(cfg.tasks_file)

@@ -15,7 +15,7 @@ from ap2 import daemon, events, tools
 def _seed_meaningful_event(cfg, *, ts_offset_s: float, now: float) -> None:
     """Append a fake `task_complete` event whose ts is `ts_offset_s` ago.
 
-    `events.append` always uses real-time `_now()`, so we patch the file
+    `events.append` always uses real-time `now()`, so we patch the file
     directly to inject the desired timestamp.
     """
     import datetime as dt

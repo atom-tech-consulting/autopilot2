@@ -15,21 +15,12 @@ import time
 from pathlib import Path
 
 from . import doctor, events, rollback, sandbox
-from ap2._shared import short
+from ap2._shared import read_pid, short
 from .board import Board, _norm_tag, board_file_lock
 from .config import Config
 from .cron import load_jobs, load_state
 from .init import init_project
 from . import tools
-
-
-def _read_pid(cfg: Config) -> int | None:
-    if not cfg.pid_file.exists():
-        return None
-    try:
-        return int(cfg.pid_file.read_text().strip())
-    except (ValueError, OSError):
-        return None
 
 
 def _is_running(pid: int | None) -> bool:
@@ -70,7 +61,7 @@ def _require_oauth_token() -> int:
 
 
 def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
-    pid = _read_pid(cfg)
+    pid = read_pid(cfg)
     if _is_running(pid):
         print(f"already running (pid {pid})")
         return 0
@@ -100,7 +91,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
-    pid = _read_pid(cfg)
+    pid = read_pid(cfg)
     if not pid or not _is_running(pid):
         print("not running")
         if cfg.pid_file.exists():
@@ -113,7 +104,7 @@ def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
-    pid = _read_pid(cfg)
+    pid = read_pid(cfg)
     running = _is_running(pid)
     board = Board.load(cfg.tasks_file)
     counts = {s: len(board.sections.get(s, [])) for s in
