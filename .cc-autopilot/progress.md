@@ -587,3 +587,9 @@
 - **Summary:** Previously committed in 7b64617 — ap2/tests/test_shared.py exists with 20 happy + error path tests covering all 5 _shared.py helpers; uv run pytest -q ap2/tests/test_shared.py passes 20/20 and full ap2/tests/ suite passes 1421/1421 (above 1357 baseline); prior verification_failed was a classifier-routing bug (the 3 `Prose:`-prefixed bullets were exec'd as shell paths → Permission denied), not a content issue — re-parsing the briefing against current verify.py classifies all 3 as kind=prose (confirmed: `parse_verification_section` returns shell=6/prose=3), so the judge will be invoked this run; the test file already pins each prose contract: test_locked_sidecar_permits_safe_rewrite_under_lock + test_locked_inplace_vs_sidecar_target_different_files pin the sidecar-vs-inplace semantic distinction, test_short_truncates_with_ellipsis_at_limit_minus_one pins the exact s[:limit-1]+"…" U+2026 boundary, and four read_pid error tests (missing/non-integer/empty/IsADirectoryError) cover 3+ error branches.
 - **Files:** ap2/tests/test_shared.py
 - **Tests:** pass
+
+## [2026-05-14] TB-223: Add `AP2_AUTO_APPROVE` opt-in mode that skips `@blocked:review` on ideation-proposed tasks; guard with tag opt-out + cumulative-regression pause
+- **Commit:** `a46c461`
+- **Summary:** Previously committed in a46c461 — full TB-223 work (3 env knobs + auto_approved/auto_approve_paused events + howto section + 13 behavioral pinning tests) already on HEAD's ancestor chain; prior verification failure was a now-removed informational `.cc-autopilot/env` bullet in the briefing. Re-verified: pytest 1421 passed, all 6 grep bullets exit 0, 2 test files reference the knob, all 5 behavioral cases present, howto section names all three knobs with defaults + layered-safety framing. TB-224 already builds on this commit.
+- **Files:** ap2/ideation.py, ap2/daemon.py, ap2/tools.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb223_auto_approve.py
+- **Tests:** pass
