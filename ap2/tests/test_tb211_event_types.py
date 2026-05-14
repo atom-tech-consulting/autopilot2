@@ -65,7 +65,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ap2 import daemon, events, ideation, tools
+from ap2 import daemon, events, ideation, tools, web
 from ap2.board import Board
 from ap2.config import Config
 from ap2.cron import CronJob
@@ -113,6 +113,47 @@ class _NoopSDK:
                 yield None
 
         return _gen()
+
+
+def _stub_main_loop_internals(monkeypatch) -> None:
+    """Stub every `daemon.main_loop` heavy/blocking dependency to a no-op
+    so the real `main_loop` coroutine runs to completion in-process.
+
+    The only `main_loop` behavior we leave un-stubbed is the line under
+    test: the `if bootstrap_cron(cfg.cron_file): events.append("cron_bootstrap", ...)`
+    pair near the top (L2167-2169). Everything downstream (SDK import,
+    MCP server build, daemon_start emit, the two infinite tick loops, the
+    web task spawn, the `daemon_stop` finally block) is no-op or harmless
+    so `await daemon.main_loop(cfg)` returns within the test's runtime.
+
+    Stubbed:
+      - `daemon._recover_orphans` → sync no-op (skips reading orphan
+        sentinels under `tmp_path` that the test doesn't seed).
+      - `daemon._import_sdk_or_die` → sync no-op (we don't need the real
+        SDK for the bootstrap-emit path; the import line at L2172 still
+        runs and reads the installed module).
+      - `daemon.build_mcp_server` → returns None (the MCP server is never
+        actually consumed because the two tick loops are also stubbed).
+      - `daemon._main_tick_loop` / `daemon._mm_loop` → async no-op so the
+        `asyncio.gather(...)` at L2201 completes immediately instead of
+        looping until SIGTERM.
+      - `AP2_WEB_DISABLED=1` env so the `web.is_web_disabled()` check at
+        L2197 short-circuits the web task spawn.
+    """
+    async def _noop_async(*a, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(daemon, "_recover_orphans", lambda cfg: None)
+    monkeypatch.setattr(daemon, "_import_sdk_or_die", lambda: None)
+    monkeypatch.setattr(daemon, "build_mcp_server", lambda cfg: None)
+    monkeypatch.setattr(daemon, "_main_tick_loop", _noop_async)
+    monkeypatch.setattr(daemon, "_mm_loop", _noop_async)
+    monkeypatch.setenv("AP2_WEB_DISABLED", "1")
+    # Sanity: the env-knob parser must read this back as True, otherwise
+    # `main_loop` spawns the web task and the test would hang. Pinning the
+    # parser contract here prevents a silent env-name rename from breaking
+    # this test in non-obvious ways.
+    assert web.is_web_disabled() is True
 
 
 def _stub_tick_quiet(monkeypatch) -> None:
@@ -166,15 +207,18 @@ _CRON_BOOTSTRAP_EMIT = (
 )
 
 
-def test_cron_bootstrap_fires_on_first_run(tmp_path):
-    """Happy path: missing cron.yaml → `daemon.bootstrap_cron` returns
-    True, the seed is written, and the `cron_bootstrap` event fires
-    with `path=<cron.yaml path>` payload.
+def test_cron_bootstrap_fires_on_first_run(tmp_path, monkeypatch):
+    """Happy path: missing cron.yaml → `daemon.main_loop` calls
+    `bootstrap_cron(cfg.cron_file)`, which returns True (the seed is
+    written), and `main_loop`'s next line emits `cron_bootstrap` with
+    `path=<cron.yaml path>` payload.
 
     Source-pin the `if bootstrap_cron(...): events.append(...)` pattern
-    in `daemon.main_loop` so a refactor that drops the emit (or renames
-    the event type / payload field) trips this test. Then exercise the
-    real seam: `daemon.bootstrap_cron` on a missing-file project.
+    so a refactor that drops the emit (or renames the event type /
+    payload field) trips this test. Then drive the REAL `main_loop`
+    coroutine end-to-end with heavy/blocking internals stubbed to no-op
+    so the bootstrap-emit pair (lines 2168-2169) actually fires from
+    production code — not from a synthetic mirror in test code.
     """
     cfg = _cfg(tmp_path)
     src = inspect.getsource(daemon.main_loop)
@@ -190,33 +234,36 @@ def test_cron_bootstrap_fires_on_first_run(tmp_path):
     # Sanity: pre-bootstrap, the cron.yaml does NOT exist.
     assert not cfg.cron_file.exists()
 
-    # Real seam — invoke bootstrap_cron directly. Returns True when the
-    # file was newly written.
-    assert daemon.bootstrap_cron(cfg.cron_file) is True
-    assert cfg.cron_file.exists()
+    _stub_main_loop_internals(monkeypatch)
 
-    # Mirror the source-pinned emit pattern. The source-pin above proves
-    # this is the exact call `main_loop` makes; running it here verifies
-    # the (bool return → emit) coupling produces the documented payload
-    # shape.
-    if daemon.bootstrap_cron(cfg.cron_file):  # second call returns False
-        pytest.fail("bootstrap_cron must return False when file exists")
-    # Now emit — only on the first-run True branch above.
-    events.append(
-        cfg.events_file, "cron_bootstrap", path=str(cfg.cron_file),
-    )
+    # Real seam — `daemon.main_loop` itself. The two tick loops are
+    # stubbed to async no-ops so `await asyncio.gather(...)` completes
+    # immediately; everything before the gather (`ensure_dirs`,
+    # `bootstrap_cron(...)` + the conditional emit, SDK import,
+    # `_emit_daemon_start`, pid-file write) runs unmodified, so the
+    # `cron_bootstrap` event we assert on below comes from production
+    # code's `events.append(...)` call at L2169.
+    asyncio.run(daemon.main_loop(cfg))
+
+    # Production code's bootstrap_cron wrote the seed.
+    assert cfg.cron_file.exists()
 
     evts = events.tail(cfg.events_file, 50)
     bootstraps = [e for e in evts if e["type"] == "cron_bootstrap"]
-    assert len(bootstraps) == 1
+    assert len(bootstraps) == 1, evts
     assert bootstraps[0]["path"] == str(cfg.cron_file)
 
 
-def test_cron_bootstrap_no_emit_when_cron_yaml_exists(tmp_path):
+def test_cron_bootstrap_no_emit_when_cron_yaml_exists(tmp_path, monkeypatch):
     """Branch coverage: when cron.yaml already exists, `bootstrap_cron`
     returns False and the `if` gate in `main_loop` short-circuits — no
     `cron_bootstrap` event fires. Pins the negative branch so a refactor
     that always-emits (regardless of bootstrap return) trips here.
+
+    Drives the real `daemon.main_loop` end-to-end (with heavy internals
+    stubbed) on a pre-seeded cron.yaml; the absence of the event is the
+    contract, verified against production code's actual run — not a
+    side-channel inference.
     """
     cfg = _cfg(tmp_path)
     cfg.cron_file.parent.mkdir(parents=True, exist_ok=True)
@@ -229,11 +276,18 @@ def test_cron_bootstrap_no_emit_when_cron_yaml_exists(tmp_path):
         "daemon start instead of only first run"
     )
 
-    # Real seam: bootstrap_cron returns False when the file already exists.
-    assert daemon.bootstrap_cron(cfg.cron_file) is False
-    # The `if` gate short-circuits → no events emitted.
+    _stub_main_loop_internals(monkeypatch)
+
+    asyncio.run(daemon.main_loop(cfg))
+
+    # cron.yaml is unchanged — `bootstrap_cron` returned False because
+    # the file existed, so the seed wasn't overwritten.
+    assert cfg.cron_file.read_text() == "jobs: []\n"
+
+    # The `if` gate short-circuits → no `cron_bootstrap` event in the
+    # production-side emit log.
     evts = events.tail(cfg.events_file, 50)
-    assert [e for e in evts if e["type"] == "cron_bootstrap"] == []
+    assert [e for e in evts if e["type"] == "cron_bootstrap"] == [], evts
 
 
 # ===========================================================================
