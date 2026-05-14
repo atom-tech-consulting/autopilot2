@@ -409,13 +409,15 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 # ap2 stop, ap2 unfreeze) by landing `ap2/tests/test_tb213_daemon_lifecycle_verbs.py`
 # — the substring drift gate now resolves all four via that real test
 # module rather than this comment block. The four matching shim rows
-# were removed when TB-213 landed. The 8 sandbox-verb rows below remain
-# as discovered-at-landing debt; two follow-up TBs (one per sandbox
-# subset — install-* and audit/setup) close the rest:
-#   - ap2 sandbox install-channel    (cli.py — sandbox MM channel install)
-#   - ap2 sandbox install-howto      (cli.py — sandbox howto install)
-#   - ap2 sandbox install-mm         (cli.py — sandbox MM creds install)
-#   - ap2 sandbox install-statusline (cli.py — sandbox statusline install)
+# were removed when TB-213 landed.
+#
+# TB-214 closed the four sandbox install-* verbs (ap2 sandbox install-channel,
+# install-howto, install-mm, install-statusline) by landing
+# `ap2/tests/test_tb214_sandbox_install_verbs.py` — the substring drift gate
+# now resolves all four via that real test module rather than this comment
+# block. The four matching shim rows were removed when TB-214 landed. The 4
+# sandbox audit/setup rows below remain as discovered-at-landing debt; a
+# follow-up TB closes the rest:
 #   - ap2 sandbox project-audit      (cli.py — sandbox per-project audit)
 #   - ap2 sandbox project-setup      (cli.py — sandbox per-project setup)
 #   - ap2 sandbox user-audit         (cli.py — sandbox per-user audit)
