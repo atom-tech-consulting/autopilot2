@@ -352,6 +352,47 @@ def test_clean_board_has_no_malformed_lines(tmp_path):
     assert b.malformed_lines == []
 
 
+def test_task_line_re_malformed_on_asterisk_title(tmp_path):
+    """TB-216: TASK_LINE_RE's title group `\\*\\*(?P<title>[^*]+)\\*\\*`
+    is asterisk-bounded, so an embedded `*` collapses the bold-fence
+    match — the rendered task line ends up in `malformed_lines` and
+    `Board.find(task_id)` returns None. Operator-queue verbs
+    (`approve` / `update` / `delete`) then all KeyError because none
+    of them can locate the task. This is the parser limitation that
+    motivates the write-time gate in `tools._validate_single_line` —
+    if the future parser refactor (TB-119) ever tolerates `*`, this
+    test goes red and the gate can be loosened in lockstep.
+    """
+    text = textwrap.dedent(
+        """\
+        # Tasks
+
+        ## Active
+
+        ## Ready
+
+        ## Backlog
+
+        - [ ] **TB-999** **foo *bar** `#x` — collapsed title
+
+        ## Complete
+
+        ## Frozen
+        """
+    )
+    path = _write_board(tmp_path, text)
+    b = Board.load(path)
+    # The asterisk-bearing line landed in malformed_lines.
+    backlog_malformed = [
+        (s, line) for (s, line) in b.malformed_lines if s == "Backlog"
+    ]
+    assert backlog_malformed, b.malformed_lines
+    _, line = backlog_malformed[0]
+    assert "TB-999" in line and "*bar" in line
+    # And the consequence: operator-queue verbs can't reach TB-999.
+    assert b.find("TB-999") is None
+
+
 # ---------------------------------------------------------------------------
 # TB-81: blocked_on now returns ALL comma-separated tokens — TB-N and external
 # `<scheme>:<value>` schemes (currently `pid:<N>@<TS>`).

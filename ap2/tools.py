@@ -89,6 +89,24 @@ SINGLE_LINE_ERR = (
 )
 
 
+# TB-216: TASK_LINE_RE's title group `\*\*(?P<title>[^*]+)\*\*` is bounded
+# by `[^*]+`, so an embedded asterisk collapses the bold-fence match and
+# strands the rendered task in `Board.malformed_lines` — `Board.find(id)`
+# returns None and operator-queue verbs (`approve` / `update` / `delete`)
+# all KeyError. Hit live on TB-214 (`Pin 4 sandbox install-* CLI verbs`),
+# which silently disappeared from `ap2 status` / `pending_review_ids`
+# until an operator hand-edit. Loud-reject mirrors TB-134's shape: the
+# write-time gate refuses the value with an actionable hint rather than
+# letting it ship and forcing a downstream recovery. Field-specific so
+# existing description / tag / blocked values with `*` continue to
+# round-trip (the parser only chokes on the title group).
+TITLE_NO_ASTERISK_ERR = (
+    "title must not contain '*' — TASKS.md's bold-fence parser "
+    "(board.py TASK_LINE_RE) collapses on embedded asterisks; rename "
+    "or describe the wildcard in the briefing prose instead"
+)
+
+
 def _validate_update_args(args: dict) -> str | None:
     """Single-line gate for TB-153 `update` op inputs.
 
@@ -131,11 +149,20 @@ def _validate_single_line(field: str, value: str | None) -> str | None:
     Used by `cmd_add` (CLI), `do_board_edit` (MCP), and
     `do_operator_queue_append` (MCP + CLI bridge) so every entry point
     that can land a task on TASKS.md hits the same gate.
+
+    TB-216: when `field == "title"`, also reject any value containing
+    a literal `*` — TASK_LINE_RE's `\\*\\*(?P<title>[^*]+)\\*\\*` group
+    collapses on embedded asterisks and the rendered line lands in
+    `Board.malformed_lines` (un-addressable by operator-queue verbs).
+    Field-specific so description / tag / blocked values with `*` keep
+    round-tripping; only the title group is asterisk-bounded.
     """
     if not value:
         return None
     if "\n" in value or "\r" in value:
         return SINGLE_LINE_ERR.format(field=field)
+    if field == "title" and "*" in value:
+        return TITLE_NO_ASTERISK_ERR
     return None
 
 

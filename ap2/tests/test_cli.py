@@ -1301,6 +1301,39 @@ def test_add_rejects_newline_in_tag_flag(tmp_path: Path, capsys):
     assert "single line" in capsys.readouterr().err
 
 
+def test_add_rejects_asterisk_in_title(tmp_path: Path, capsys):
+    """TB-216: a briefing H1 containing `*` would collapse TASK_LINE_RE's
+    bold-fence title group on drain (parsed via TASK_LINE_RE), so the
+    rendered task lands in `Board.malformed_lines` and operator-queue
+    verbs (`approve` / `update` / `delete`) can no longer address it.
+    Reproduced live on TB-214 (`Pin 4 sandbox install-* CLI verbs`).
+    The CLI path (`ap2 add`) forwards the H1 verbatim into
+    `do_operator_queue_append({title: ...})`, which calls
+    `_validate_single_line("title", ...)` and now refuses `*`. The
+    CLI surfaces the error to stderr and exits non-zero; nothing
+    lands on TASKS.md or in operator_queue.jsonl."""
+    cfg = _project(tmp_path)
+    brief = tmp_path / "briefing.md"
+    # H1 carries `*` — `_parse_briefing_metadata` forwards it verbatim.
+    brief.write_text(
+        _GOOD_BRIEFING.replace("# Add foo helper", "# install-* helpers"),
+    )
+    before_tasks = cfg.tasks_file.read_text()
+    queue_path = cfg.project_root / ".cc-autopilot" / "operator_queue.jsonl"
+    before_queue = queue_path.read_text() if queue_path.exists() else ""
+
+    rc = cmd_add(cfg, _add_args(briefing_file=str(brief)))
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "*" in err
+    assert "TASK_LINE_RE" in err or "bold-fence" in err
+    # Nothing landed on the board, nothing queued.
+    assert cfg.tasks_file.read_text() == before_tasks
+    after_queue = queue_path.read_text() if queue_path.exists() else ""
+    assert after_queue == before_queue
+
+
 # ---------------------------------------------------------------------------
 # TB-135: editor-driven authoring fallback. When `--briefing-file` isn't
 # supplied AND `$EDITOR` is set, `ap2 add` opens the editor against the

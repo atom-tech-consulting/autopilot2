@@ -1082,6 +1082,108 @@ def test_operator_queue_append_rejects_newline_in_description(cfg, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# TB-216: `_validate_single_line` rejects titles containing `*`.
+#
+# TASK_LINE_RE's bold-fence title group `\*\*(?P<title>[^*]+)\*\*` collapses
+# on any embedded asterisk → the rendered task line lands in
+# `Board.malformed_lines` and `Board.find(task_id)` returns None. Operator-
+# queue verbs (`approve` / `update` / `delete`) then all KeyError. Hit live
+# on TB-214 (`Pin 4 sandbox install-* CLI verbs`). Gate is field-specific
+# so description / tag / blocked values keep round-tripping with `*`.
+
+
+def test_validate_single_line_rejects_asterisk_in_title():
+    """Helper-level unit test: title with `*` returns a non-None error
+    that mentions `*`; clean title returns None; description with `*`
+    returns None (field-specific gate)."""
+    err = tools._validate_single_line("title", "foo*bar")
+    assert err is not None
+    assert "*" in err
+    assert tools._validate_single_line("title", "foo bar") is None
+    # Field-specific: description / tag / blocked may contain `*`.
+    assert tools._validate_single_line("description", "foo*bar") is None
+    assert tools._validate_single_line("tag", "#foo*bar") is None
+    assert tools._validate_single_line("blocked", "TB-5*review") is None
+
+
+def test_validate_single_line_title_asterisk_uses_named_constant():
+    """The new error returns `TITLE_NO_ASTERISK_ERR` verbatim so the
+    constant is the single source of truth for the message text."""
+    assert (
+        tools._validate_single_line("title", "install-*")
+        == tools.TITLE_NO_ASTERISK_ERR
+    )
+
+
+def test_board_edit_rejects_asterisk_in_title(cfg, tmp_path):
+    """do_board_edit({title: 'has * asterisk'}) → isError; nothing
+    lands on the board, no briefing file written."""
+    tasks_dir = tmp_path / ".cc-autopilot" / "tasks"
+    before_briefings = (
+        sorted(p.name for p in tasks_dir.iterdir()) if tasks_dir.exists() else []
+    )
+    before_tasks = (tmp_path / "TASKS.md").read_text()
+
+    res = tools.do_board_edit(
+        cfg,
+        {
+            "action": "add_backlog",
+            "title": "has * asterisk",
+            "briefing": _DEFAULT_BRIEFING,
+        },
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "*" in msg
+    assert "TASK_LINE_RE" in msg or "bold-fence" in msg
+    # Board untouched, no briefing file written.
+    assert (tmp_path / "TASKS.md").read_text() == before_tasks
+    after_briefings = (
+        sorted(p.name for p in tasks_dir.iterdir()) if tasks_dir.exists() else []
+    )
+    assert after_briefings == before_briefings
+
+
+def test_board_edit_accepts_asterisk_in_description(cfg):
+    """Field-specific gate: description with `*` is still allowed.
+    The parser only chokes on the title group; descriptions are
+    free-form prose past the `—` and don't collapse the regex."""
+    res = tools.do_board_edit(
+        cfg,
+        {
+            "action": "add_backlog", "title": "clean title",
+            "description": "wildcard char * is fine here",
+            "briefing": _DEFAULT_BRIEFING,
+        },
+    )
+    assert not res.get("isError"), res
+
+
+def test_operator_queue_append_rejects_asterisk_in_title(cfg, tmp_path):
+    """The MCP+CLI bridge path also rejects `*` in titles up-front so the
+    operator queue doesn't accept a payload that would later collapse on
+    drain. Reproduces the TB-214 dead-letter shape at queue-append time."""
+    before = (tmp_path / "TASKS.md").read_text()
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    before_queue = queue_path.read_text() if queue_path.exists() else ""
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "has * asterisk"},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "*" in msg
+    assert "TASK_LINE_RE" in msg or "bold-fence" in msg
+    # Board untouched, nothing queued.
+    assert (tmp_path / "TASKS.md").read_text() == before
+    after_queue = queue_path.read_text() if queue_path.exists() else ""
+    assert after_queue == before_queue
+
+
+# ---------------------------------------------------------------------------
 # TB-135: do_board_edit / do_operator_queue_append require an explicit
 # briefing payload for every add_* op. The skeleton-template auto-fill that
 # used to land for add_backlog is gone — a briefing whose `## Verification`
