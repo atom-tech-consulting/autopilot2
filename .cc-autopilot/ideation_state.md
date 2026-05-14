@@ -1,119 +1,137 @@
 # Ideation State
 
-_Last updated: 2026-05-13T12:38:00Z by ideation cron_
+_Last updated: 2026-05-14T02:52:28Z by ideation cron_
 
 ## Mission alignment
 
-Code-quality consolidation still mission-aligned: 11 Completes against
-the four axes (TB-203/204/205/206/207/208/209/210 shipped;
-TB-211/212/213/215 in flight). Board: `0A / 0R / 5B / 0P / 84C / 3F`,
-1 slot this cycle. The 3 most recent Completes still ground the testing
-axis:
+Code-quality consolidation continues to be the mission-aligned focus.
+TB-208's full enumerated debt (4 env knobs + 8 event types + 12 CLI
+verbs = 24 surfaces) is now closed; the shim comment block in
+`test_coverage_drift.py` resolves every surface via a real
+`test_tbXXX_*.py` module rather than a placeholder. TB-216 closes the
+TB-214-shape dead-letter (titles containing `*`) at queue-append time.
+Board: `0A / 0R / 0B / 0P / 105C / 3F`. 3 most recent Completes:
 
-- TB-210 (`843b379`, 2026-05-13T07:33Z) — 4 env knobs (TB-208 debt closure).
-- TB-209 (`1a54d14`, 2026-05-13T07:17Z) — CLI-verb 4th drift-gate surface
-  + `_collect_cli_verbs` reusability extraction.
-- TB-208 (`e2179b9`, 2026-05-13T01:35Z) — 3-surface coverage drift gate.
+- TB-216 (`fd4e77a`, 2026-05-14T02:42Z) — `_validate_single_line`
+  field-specific `*`-in-title reject (TB-134 loud-reject shape).
+- TB-211 retry (`efccab5`, 2026-05-14T02:52Z) — `_stub_main_loop_internals`
+  fixture drives daemon.main_loop end-to-end for the 5 daemon event types.
+- TB-215 (`c84e8da`, 2026-05-14T02:33Z) — 4 sandbox audit/setup CLI
+  verbs pinned; TB-209 CLI-verb debt fully closed (12/12).
 
 ## Current focus assessment
 
 - **Current focus: code quality (goal.md L38-97, four axes)**
   - Progress so far:
-    - Docs axis: TB-203, TB-206, TB-207 — all four operator-facing
-      registry surfaces have docs entries + drift gates.
-    - Testing axis: TB-205, TB-208, TB-209, TB-210 shipped;
-      TB-211/212/213/215 in flight close event-type + 8/12 CLI-verb
-      coverage debt enumerated in `test_coverage_drift.py` L391-413.
-      TB-214 IS DEAD-LETTER ON DISK (see Gap 1).
-    - Reusability axis: TB-204 (`_briefing_fixtures.py`) + TB-209
-      (`_source_registry.py`).
-    - Cleanness axis: untouched (goal.md L86-87 anti-speculative-refactor
-      guardrail).
+    - Docs axis: TB-203 (MCP/env/event drift), TB-206 (howto worked-
+      examples decoupled from goal.md), TB-207 (CLI-verb reference
+      section + drift). All four operator-facing registry surfaces
+      have docs entries + drift gates.
+    - Testing axis: TB-205 + TB-210 closed all 8 env-knob shim rows;
+      TB-211 + TB-212 closed all 8 event-type shim rows; TB-213 +
+      TB-214 + TB-215 closed all 12 CLI-verb shim rows. TB-208 +
+      TB-209 drift gates remain green with zero shim entries; future
+      surface additions trip the substring gate at landing time.
+    - Reusability axis: TB-204 (`_briefing_fixtures.py`, ~30+ inline
+      fixtures deduplicated) + TB-209 (`_source_registry.py` for
+      `_collect_cli_verbs`, 3rd-call-site threshold-three trigger).
+    - Cleanness axis: untouched per goal.md L86-87 anti-speculative-
+      refactor guardrail. No module-boundary clarity has surfaced
+      from reading.
   - Gaps:
-    (1) **TB-214 dead-letter — operator hand-edit required.** Its title
-        `Pin 4 sandbox install-* CLI verbs (...)` contains literal `*`
-        (the `install-*` glob), which collides with `ap2/board.py`
-        TASK_LINE_RE's `\*\*(?P<title>[^*]+)\*\*` group. Verified by
-        parsing live `TASKS.md`: TB-214 lands in `Board.malformed_lines`,
-        `Board.find('TB-214')` returns None, so operator-queue verbs
-        `approve` / `update` / `delete` all KeyError. `ap2 status --json`
-        shows `"pending_review": 4` and `"pending_review_ids": ["TB-211",
-        "TB-212", "TB-213", "TB-215"]` against 5 Backlog tasks. Last
-        events.jsonl ref: `board_malformed_line` at 2026-05-13T10:37:20Z.
-        Decision needed below — only hand-edit fixes this specific row.
-    (2) **No queue-append validator for `*` in `title`.** `_validate_single_line`
-        (`ap2/tools.py` L126-139) rejects `\n`/`\r` per TB-134 but no
-        other char that breaks TASK_LINE_RE. Any future ideation /
-        operator add that names a glob/wildcard/footnote-marker literally
-        in the title repeats TB-214's dead-letter trap. This cycle's
-        single proposal (TB-216) closes the gate.
-    (3) **Cleanness axis (untouched)** — goal.md L86-87 anti-speculative-
-        refactor guardrail. Unchanged.
+    (1) **Drift-gate sufficiency tightening still deferred.**
+        `test_coverage_drift.py` docstring L26-32 explicitly defers
+        the substring → AST-walk semantics check ("the test imports
+        the symbol AND asserts against it") until "the substring gate
+        is observed missing a real pro-forma gap." TB-211 retry
+        verification_failed at 01:51:05Z was a TEST-shape issue
+        (synthetic emit didn't drive the production code path), not a
+        drift-gate miss — the test module existed and the gate passed
+        at landing. So no pro-forma gap has been observed; the
+        deferral stands.
+    (2) **Cleanness axis (untouched)** — goal.md L86-87. Unchanged
+        from prior cycle. `ap2/tools.py` past 3700 lines,
+        `ap2/daemon.py` past 2500, `ap2/cli.py` past 1700 — but no
+        module-boundary has surfaced from reading.
+    (3) **2-call-site helpers awaiting threshold-three trigger.**
+        `_collect_env_knobs`, `_collect_event_types`,
+        `_all_agent_mcp_tool_short_names` are inlined in both
+        `test_docs_drift.py` and `test_coverage_drift.py`
+        (`_source_registry.py` L23-31). No 3rd reader has appeared.
+        Premature extraction would re-trip goal.md L74-77's
+        "premature abstraction is its own failure mode" guardrail.
   - Status: `in-progress`
-  - Reasoning: TB-214 is a generalizable parser-shape bug, not a one-off
-    briefing typo — the cheapest fix is a TB-134-shape loud-reject at
-    queue-append, with happy + error path tests pinning all three entry
-    points (cmd_add, do_board_edit, do_operator_queue_append).
-    Field-specific (title only) so existing description/tag/blocked
-    values with `*` aren't retroactively rejected.
+  - Reasoning: The TB-208/TB-209 closure batch (24 surfaces / 6 task
+    landings) substantively advanced testing coverage. The remaining
+    axis gaps are either explicitly deferred (sufficiency tightening,
+    threshold-three triggers) or guardrailed (cleanness/speculative-
+    refactor). No high-leverage concrete gap surfaced this cycle.
 
 ## Non-goal risk check
 
-None. Validator extension stays inside ap2's validation + test
-infrastructure; no drift into generic-task-scheduler / replace-
-operator-judgment / multi-tenancy / real-time / cross-project axes.
+None. All recent work stayed inside the four axes; no drift into
+generic-task-scheduler / replace-operator-judgment / multi-tenancy /
+real-time / cross-project axes.
 
 ## Considered & deferred this cycle
 
-- **Cleanness module decomposition** — goal.md L86-87 guardrailed
-  ("when the boundary becomes clear from reading — not via
-  speculative refactor"). Unchanged.
-- **Auto-sanitize `*` → `_` at write time** — silently rewrites operator
-  intent; TB-134's docstring explicitly rejected this shape ("400-char
-  run-on lines that nobody actually wanted"). Loud reject + actionable
-  hint forces the right semantic split (move wildcard mention into
-  briefing prose).
-- **Parser refactor to tolerate `*` in titles** — bigger lift; TB-119
-  (Frozen) is the tracker for the mistune-AST migration that subsumes
-  this whole class. Defer until a second char class needs similar
-  tolerance.
-- **Surface malformed_line counts in `ap2 status`** — secondary
-  hardening worth doing later, but not the gate fix; the validator
-  prevents the entry rather than papering over the symptom.
-- **n=4 authoritative rejects** (TB-172/175/184/185) — unchanged. The
-  TB-216 proposal matches TB-134's loud-reject pattern (concrete
-  observed failure in production), not the wack-a-mole / forecasting
-  / parallel-surface / operator-intent-erosion shapes the rejects
-  flagged.
+- **Surface `board_malformed_line` count in `ap2 status` (text + JSON)** —
+  Prior cycle's secondary-layer candidate ("what slipped past the
+  gate?"). Now that TB-216's write-time gate has shipped, the
+  secondary layer becomes more relevant. BUT this is feature/
+  observability work, not consolidation — adds a NEW operator-facing
+  surface rather than tightening tests/docs on existing ones. Goal.md
+  L38-46 explicitly pivots FROM accumulating signal TO consolidating
+  foundations; this leans toward the wrong side. Defer until focus
+  rotates or a real malformed-line incident slips past TB-216 and
+  causes operator-visible damage.
+- **TB-175-shape ideation-acceptance-rate insight aggregator** —
+  Operator log L80 carry-deferral (2026-05-07): wait ~3+ ideation
+  cycles after TB-188 lands so per-proposal records + TB-189 classify
+  verdicts accumulate. TB-188 landed 2026-05-07; we're 7 days later;
+  the records exist for TB-209/TB-211/.../TB-216. BUT zero `ap2
+  classify` entries in operator_log.md — only accept/reject signal
+  available, which is already in the prompt header. Re-deferring
+  until classify verdicts surface or the operator explicitly engages.
+- **Tighten `test_coverage_drift` substring gate to assert happy +
+  error path parity** — goal.md L60-61's explicit testing-axis
+  criterion. BUT the gate docstring L26-32 explicitly defers
+  tightening until the substring gate is observed missing a real
+  pro-forma gap. No such gap observed; deferral holds. Premature
+  tightening would re-trip TB-172's wack-a-mole rejection shape
+  (enumerate failure modes without a generalizable mechanism).
+- **MM chat-verb / cron-job drift-gate (5th surface)** — Investigated:
+  MM chat verbs aren't a uniformly-registered surface (the handler
+  agent interprets natural-language dispatch), so no enumeration to
+  gate against. Cron jobs in `cron.default.yaml` are only 1 entry
+  (`status-report`); a drift gate of size 1 is overkill.
+- **n=4 authoritative rejects** (TB-172/175/184/185) — Continued
+  vigilance. This cycle's deferrals (malformed_line surface,
+  acceptance-rate aggregator, drift-gate tightening) each match
+  rejected shapes (feature-not-consolidation, defer-until-data,
+  wack-a-mole). Better to ship zero this cycle than recapitulate.
 
 ## Cycle observations
 
-- TB-214 finding: `board_malformed_line` events are operator-invisible
-  unless they read `events.jsonl` directly. `ap2 status` shows board
-  counts but the pending_review drop from 5 → 4 doesn't flag the
-  parse failure. Carrying this observation: it informs both this
-  cycle's gate choice (prevent at write rather than detect at read)
-  AND a possible future hardening proposal — but only as a secondary
-  layer once the gate ships and the question becomes "what slipped
-  past the gate?"
+- TB-208/TB-209 closure batch lands cleanly with the
+  `test_tb<NNN>_<scope>.py` convention (one module per closure task,
+  named after both the TB-N and the scope). The convention is
+  emerging organically; not yet pinned as a meta-test. If 3+ future
+  closure-batches follow the same shape, the meta-test (e.g. "every
+  `test_tb<NNN>_*.py` references the matching TB-N in its docstring")
+  becomes a threshold-three reusability candidate. Informs ranking of
+  future proposals that touch the closure-batch shape.
 
 ## Decisions needed from operator
 
-- Decision needed: TB-214 is dead-letter on disk (title contains `*`
-  → parsed as malformed; `Board.find` returns None; queue verbs can't
-  address it). Manual unblock: edit `TASKS.md` line 14, replace both
-  `install-*` occurrences with an asterisk-free form (e.g.
-  `install verbs` or `install_*` with the `_*` escaped). After the
-  edit, `ap2 status --json` should re-show 5 IDs in
-  `pending_review_ids` and `ap2 approve TB-214` will dispatch
-  normally. Unblock-condition: the asterisk-bearing line stops
-  blocking the sandbox install-* CLI-verb coverage closure that
-  TB-214 was supposed to ship.
+(none this cycle — prior cycle's TB-214 dead-letter ask was resolved
+by the operator's manual title-rename + TB-216's gate landing.)
 
 ## Proposals this cycle
 
-1 proposal (slots=1):
-
-- TB-216: Extend `_validate_single_line` to reject titles containing
-  `*` at queue-append time (TB-214-shape dead-letter prevention) —
-  closes Gap (2).
+Backlog is currently at 0 workable items but no high-leverage gap
+surfaced that fits the consolidation focus without recapitulating a
+rejected shape (feature-not-consolidation, defer-until-data, wack-a-
+mole). Proposing zero this cycle rather than manufacturing work.
+Operator can `ap2 ideate --force` if intent shifts or run `ap2 add`
+for specific direction.
