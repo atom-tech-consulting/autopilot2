@@ -40,3 +40,10 @@ Update three lines of teaching, no behavior changes:
 - Re-running verifier on past briefings — TB-219 already covers the heuristic-fallback path for legacy authors.
 - Mechanical drift gate that asserts the prefix is mentioned in author-facing prompts — single-paragraph teaching changes don't warrant a regression-pin test; this is documentation, not behavior.
 - Any verifier changes — TB-219 is complete; this task only updates teaching prompts.
+## Attempts
+
+### 2026-05-14 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `ap2/ideation.default.md` Prose: the new teaching paragraph names the `Prose:` token explicitly, points authors to `ap2/; [fail] `skills/ap2-task/SKILL.md` Prose: the new teaching paragraph mirrors the ideation file's intent, lives inside the existi
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260514T213721Z-TB-221.prompt.md`, `stream: .cc-autopilot/debug/20260514T213721Z-TB-221.stream.jsonl`, `messages: .cc-autopilot/debug/20260514T213721Z-TB-221.messages.jsonl`
