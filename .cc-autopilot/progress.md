@@ -527,3 +527,9 @@
 - **Summary:** Added ap2/tests/test_tb215_sandbox_audit_setup_verbs.py (13 tests covering happy + error paths for cmd_user_audit, cmd_user_setup, cmd_project_setup, cmd_project_audit via in-process handler invocation + stubbed _user_exists/_user_home/_path_owner/subprocess.run seams + a cli.main argv→handler dispatch sanity test) and removed the 4 matching audit/setup shim rows from test_coverage_drift.py's comment block, completing the 12-verb TB-209 CLI-verb debt closure (TB-213 + TB-214 + TB-215). Full ap2/tests/ suite passes (1339 tests).
 - **Files:** ap2/tests/test_tb215_sandbox_audit_setup_verbs.py, ap2/tests/test_coverage_drift.py
 - **Tests:** pass
+
+## [2026-05-14] TB-216: Reject titles containing literal asterisk at queue-append time (TB-214-shape dead-letter prevention)
+- **Commit:** `fd4e77a`
+- **Summary:** Extended _validate_single_line in ap2/tools.py to reject `*` in title fields (new TITLE_NO_ASTERISK_ERR constant, field-specific guard mirroring TB-134's loud-reject shape). Added 5 entry-point/unit tests in test_tools.py (helper unit test + constant pin + do_board_edit reject + description-passes regression + do_operator_queue_append reject), 1 CLI test in test_cli.py (cmd_add via H1-in-briefing carrying `*`), and 1 parser-side test in test_board.py pinning the malformed-line outcome that motivates the gate. Full suite 1346 passed in 88.7s; briefing's verification one-liner exit 0.
+- **Files:** ap2/tools.py, ap2/tests/test_tools.py, ap2/tests/test_cli.py, ap2/tests/test_board.py
+- **Tests:** pass
