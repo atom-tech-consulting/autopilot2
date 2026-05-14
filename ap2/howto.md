@@ -345,6 +345,86 @@ post-pipeline as `_sweep_pipeline_pending` re-runs it.)
 per-task gate. Typical: `uv run pytest -q`. `--no-verify` tag opts
 specific tasks out (e.g. docs-only changes).
 
+## Authoring `## Verification` bullets (briefing convention)
+
+Bullets in a briefing's `## Verification` section are the per-task gate's
+input — the daemon parses them into one of three kinds and dispatches
+each: **shell** (run via subprocess; exit 0 = pass), **prose** (judged by
+SDK against the cumulative task diff + working tree), or **malformed**
+(classifier-detected unrecoverable shape; recorded as fail). The
+classifier in `ap2/verify.py::parse_verification_section` (TB-219) decides
+the kind from the bullet's markdown shape. Four pitfalls have caused
+n=4 retry cascades in the 2026-05-12 → 2026-05-13 window alone
+(TB-204/TB-206/TB-207/TB-209). The conventions below close every one.
+
+### Prose bullets — use the `Prose:` prefix for explicit classification
+
+Prose bullets that DON'T lead with a backtick-fenced token (e.g.
+`- the new feature is documented in CLAUDE.md`) classify as prose
+automatically. Prose bullets that DO lead with a backtick-fenced subject
+(e.g. `- ``ap2/tests/test_x.py`` exists with the expected fixture`)
+would otherwise classify as shell — and the verifier would try to exec
+the bare path. To force prose classification, prefix the post-codespan
+text with the literal token `Prose:` (case-sensitive, single colon):
+
+> `` `ap2/tests/test_x.py` Prose: the file includes the expected
+> `_COVERAGE_DRIFT_EXEMPT_SURFACES` fixture; judge confirms via Read.``
+
+The `Prose:` prefix is a hard override — it wins over every other
+classifier signal. Operators have been writing the convention organically
+since the TB-206/207/209 fix briefings; TB-219 codified it.
+
+A heuristic fallback also routes codespan-leading bullets to prose if the
+bullet text contains any of the phrases in
+`ap2/verify.py::JUDGE_INDICATOR_PHRASES` (e.g. `Judge confirms`,
+`judged via`). It's a safety net for briefings that don't use the
+`Prose:` prefix; the prefix is the canonical signal — reach for it first.
+
+### Shell bullets — four authoring pitfalls
+
+1. **No literal backticks in the command body.** Markdown's
+   single-backtick codespan cannot represent a literal backtick — mistune
+   truncates the codespan at the inner backtick and the rest of the
+   command leaks into the bullet's prose body. Workarounds:
+   - If the literal backtick is part of a regex pattern, replace it with
+     the regex any-char `.` (e.g. `'^\| .pat'` instead of
+     `'^\| `pat'`). This is the simplest fix and what TB-207's operator
+     post-mortem ships.
+   - If the literal backtick is genuinely required, wrap the codespan
+     with **double backticks**: `` `` `cmd-with-`backtick`-in-it` `` ``.
+     Mistune preserves the inner backtick under double-backtick wrapping.
+   - The TB-219 classifier detects the broken single-backtick shape and
+     emits `kind="malformed"` rather than silently exec'ing a truncated
+     half-command, so a slip-up here surfaces as a verification fail
+     with a rewrite suggestion in the event payload.
+2. **Absence-check shell bullets must use the `!` exit-inversion prefix.**
+   `grep "absent string" file` exits 1 when the string is absent, which
+   the verifier reads as a FAIL. The intent is the inverse: pass iff
+   absent. Use bash's exit-status negation: `! grep "absent string" file`
+   passes when `grep` exits non-zero (string not found) and fails when
+   `grep` exits 0 (string found — the absence claim is violated).
+3. **Directory-walking grep must use `-r`.** `grep -lE 'pat' dir/` exits
+   2 with "Is a directory" because plain `grep` is a file-only matcher.
+   The bullet looks correct but always fails at runtime. Use `grep -rlE
+   'pat' dir/` (or pre-list files via `find dir/ -type f`).
+4. **`Prose:` prefix for judge bullets.** Covered above — the
+   complement to the three shell pitfalls. If a bullet's grammatical
+   subject is a backtick-fenced filename / symbol and the rest is a
+   claim to judge against the diff, lead the suffix with `Prose:`.
+
+A worked example combining all four:
+
+```
+## Verification
+
+- `uv run pytest -q ap2/tests/` — full suite green (the canonical happy-path bullet).
+- `! grep "deprecated_symbol" ap2/` — the symbol is gone (absence check; `!` is required).
+- `grep -rlE 'pat' ap2/` — directory walk needs `-r` (file-only without it).
+- `[ "$(grep -rcE '^| .pat' ap2/cli.py)" -ge 1 ]` — regex pattern; `.` substitutes for a literal backtick the codespan couldn't represent.
+- `ap2/tests/test_new.py` Prose: the new test asserts on the documented fixture set; judge confirms via Read.
+- `ap2/howto.md` Prose: the new convention section names all four pitfalls. Judge confirms via Read.
+```
+
 ## Failure modes the daemon recovers from
 
 - **SDK subprocess crash with empty stderr.** All SDK calls capture

@@ -76,9 +76,49 @@ def _get_md():
 
 @dataclass
 class VerifyBullet:
-    kind: str  # "shell" | "prose"
+    kind: str  # "shell" | "prose" | "malformed"
     text: str  # full bullet text (for prose)
     command: str | None = None  # extracted shell command, if shell
+    # TB-219: when the classifier detects an unrecoverable bullet shape (e.g.
+    # the TB-207 "literal backtick inside a single-backtick codespan that
+    # markdown can't represent" trap), `kind="malformed"` and
+    # `command_error` carries the human-readable explanation. The dispatcher
+    # in `verify_task` emits a failed `CriterionResult` with these notes
+    # rather than silently truncating to a half-command and exec'ing it.
+    command_error: str | None = None
+
+
+# TB-219: Judge-indicator phrases that flip a codespan-leading bullet from
+# "shell" to "prose". Conservative, observed-in-the-wild list — these are
+# the phrases operators and ideation routinely write to mean "this bullet
+# is judge-routed, even if it leads with a backtick-fenced file path or
+# symbol name." Without this fallback the TB-209-shape trap fires: an
+# ideation-authored prose bullet whose grammatical subject is a backtick-
+# fenced filename gets mis-classified as shell, the verifier executes the
+# bare file path → `Permission denied`, exit 126 → retry-exhausts → Frozen
+# (the n=4 incident across TB-204/TB-206/TB-207/TB-209). Adding to this
+# tuple is cheap and forward-compatible; removing a phrase that's already
+# in operator-authored briefings risks reopening the trap, so prefer
+# extension over rewording.
+JUDGE_INDICATOR_PHRASES: tuple[str, ...] = (
+    "Judge confirms",
+    "(judged by",
+    "judge confirms",
+    "the SDK against the diff",
+    "judged via",
+)
+
+
+#: TB-219: hard-override prefix that forces a bullet to `prose` classification
+#: regardless of whether the first inline child is a codespan. The convention
+#: has organically appeared in operator-authored briefings (TB-206/207/209
+#: operator-fix briefings all use it); codifying it here closes the upstream
+#: design hole — operators get an unambiguous "do not exec this bullet"
+#: signal, and ideation will pick it up via `ap2/howto.md`'s authoring
+#: guidance. Case-sensitive (matches the operator-authored shape exactly);
+#: the single colon and optional trailing whitespace are part of the literal
+#: token.
+PROSE_PREFIX: str = "Prose:"
 
 
 @dataclass
@@ -150,16 +190,26 @@ def _list_item_text(item: dict) -> str:
     return "".join(parts).strip()
 
 
+def _bullet_inlines(item: dict) -> list[dict]:
+    """Return the bullet's inline children (the contents of its
+    `block_text` / `paragraph` wrapper), or `[]` if there are none.
+
+    Factored out of `_list_item_leading_codespan` so the new TB-219
+    classifier helpers (`_has_prose_prefix`, `_has_unbalanced_backtick`)
+    can walk the same inlines without duplicating the wrapper unwrap.
+    """
+    for ch in item.get("children", []) or []:
+        if ch.get("type") in ("block_text", "paragraph"):
+            return ch.get("children", []) or []
+    return []
+
+
 def _list_item_leading_codespan(item: dict) -> str | None:
     """If the list_item's first inline child is a codespan, return its raw
     content with surrounding backticks stripped (handles both
     `` `cmd` `` → "cmd" and `` ` `cmd` ` `` → "`cmd`" → "cmd"). Else None.
     """
-    inlines: list[dict] = []
-    for ch in item.get("children", []) or []:
-        if ch.get("type") in ("block_text", "paragraph"):
-            inlines = ch.get("children", []) or []
-            break
+    inlines = _bullet_inlines(item)
     if not inlines:
         return None
     first = inlines[0]
@@ -173,6 +223,72 @@ def _list_item_leading_codespan(item: dict) -> str | None:
     if raw.startswith("`") and raw.endswith("`") and len(raw) >= 2:
         raw = raw[1:-1].strip()
     return raw or None
+
+
+def _has_prose_prefix(item: dict) -> bool:
+    """TB-219: True iff the bullet has the `Prose:` hard-override prefix.
+
+    The check is "after the first inline child" so a bullet of the shape
+    `` `path/to/file.py` Prose: this is judge-routed`` qualifies (the
+    leading codespan is the bullet's grammatical subject; the operator
+    wants the rest evaluated as prose). Leading whitespace between the
+    codespan and the `Prose:` token is tolerated (mistune inserts a
+    space-prefixed text node between adjacent inline children); leading
+    punctuation (em-dashes, colons, hyphens) is NOT — operators write
+    `` `foo` Prose: ...`` or just `Prose: ...` at bullet start.
+
+    For bullets whose first inline child is already a text node starting
+    with `Prose:` (no leading codespan), this returns False — the
+    codespan-leading classifier already routes them to prose via the
+    "no leading codespan → prose" branch, so an extra match here would be
+    redundant.
+    """
+    inlines = _bullet_inlines(item)
+    if len(inlines) < 2:
+        return False
+    parts: list[str] = []
+    for ch in inlines[1:]:
+        if ch.get("type") == "codespan":
+            parts.append(f"`{ch.get('raw', '')}`")
+        else:
+            parts.append(ch.get("raw", ""))
+    rest = "".join(parts).lstrip()
+    return rest.startswith(PROSE_PREFIX)
+
+
+def _has_judge_indicator(item: dict) -> bool:
+    """TB-219: True iff the bullet's reconstructed text contains any of the
+    judge-indicator phrases. Heuristic fallback for codespan-leading
+    bullets that lack the explicit `Prose:` prefix — catches the
+    TB-209-shape "ideation-authored prose bullet with a backtick-fenced
+    filename lead" trap without forcing every existing operator briefing
+    to be rewritten.
+    """
+    text = _list_item_text(item)
+    return any(phrase in text for phrase in JUDGE_INDICATOR_PHRASES)
+
+
+def _has_unbalanced_backtick(item: dict) -> bool:
+    """TB-219: True iff a non-codespan inline child contains a literal
+    backtick character. Strong signal that the bullet author wrote a shell
+    command with a literal-backtick inside a single-backtick codespan,
+    which markdown cannot represent — mistune truncates the codespan at
+    the inner backtick and the remaining command leaks into the bullet's
+    prose body as a sequence of text nodes (one of which is just `` ` ``).
+    Detecting it lets the classifier emit a `kind="malformed"` bullet
+    rather than silently exec'ing the truncated half-command (the TB-207
+    trap).
+
+    Mistune only emits a backtick-containing text node when the source
+    had an unbalanced backtick — paired codespans always go into
+    `codespan` nodes. So this detection is precise: it doesn't false-
+    positive on bullets with multiple paired codespans (`` `cmd one`
+    plus `cmd two```).
+    """
+    for ch in _bullet_inlines(item):
+        if ch.get("type") == "text" and "`" in ch.get("raw", ""):
+            return True
+    return False
 
 
 def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
@@ -195,6 +311,40 @@ def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
     handle parenthetical headings, double-backtick code spans, indented
     bullets, and any other markdown rendering quirk natively — eliminating
     the regex-brittleness class that produced TB-91 and TB-146.
+
+    TB-219 (classifier-tightening): the earlier "first inline child is a
+    codespan → shell, else prose" rule was too aggressive. It mis-classified
+    ideation-authored prose bullets that opened with a backtick-fenced
+    filename (the TB-209-shape) → the verifier exec'd the bare path →
+    `Permission denied` → retry-exhaust → Frozen (n=4 incident across
+    TB-204/TB-206/TB-207/TB-209 in the 2026-05-12 → 2026-05-13 window).
+    The current rule layers three signals on top of the leading-codespan
+    check:
+
+      1. **`Prose:` hard override** — if the bullet's text after the first
+         inline child begins with the literal `Prose:` prefix, classify as
+         `prose` unconditionally. This codifies the operator-authored
+         convention that emerged in TB-206/207/209 fix briefings.
+      2. **TB-207 malformed detection** — for codespan-leading bullets
+         WITHOUT a `Prose:` prefix, look for a stray backtick character
+         in any non-codespan inline child. Markdown's single-backtick
+         codespan cannot represent a literal backtick, so a stray one
+         means the codespan got truncated mid-command; emit
+         `kind="malformed"` with an explanatory `command_error` rather
+         than exec'ing the truncated half-command.
+      3. **Judge-indicator heuristic fallback** — for codespan-leading
+         bullets WITHOUT a `Prose:` prefix AND no malformed-backtick
+         signal, scan the bullet text for any of the
+         `JUDGE_INDICATOR_PHRASES` (`"Judge confirms"`, `"(judged by"`,
+         etc.). If any match, classify as `prose`. Catches the TB-209
+         shape without forcing a `Prose:` prefix on every legacy
+         briefing.
+
+    Well-formed bullets — those that lead with a real shell command in a
+    single codespan and contain neither `Prose:` nor a judge-indicator
+    phrase nor a stray backtick — continue to be classified as `shell`
+    with their codespan extracted as `command`. Behavior is unchanged for
+    the common case.
     """
     nodes = _get_md()(briefing_text) or []
     # Find the LAST verification heading; capture all sibling list nodes
@@ -217,8 +367,39 @@ def parse_verification_section(briefing_text: str) -> list[VerifyBullet] | None:
             text = _list_item_text(item)
             if not text:
                 continue
+            # TB-219 step 1: `Prose:` hard override beats every other
+            # signal. Operators reach for it precisely when the bullet
+            # would otherwise be mis-classified.
+            if _has_prose_prefix(item):
+                bullets.append(VerifyBullet(kind="prose", text=text))
+                continue
             cmd = _list_item_leading_codespan(item)
             if cmd:
+                # TB-219 step 2: TB-207-shape malformed-backtick trap.
+                # Emit a typed-fail bullet rather than exec'ing the
+                # truncated codespan.
+                if _has_unbalanced_backtick(item):
+                    bullets.append(VerifyBullet(
+                        kind="malformed",
+                        text=text,
+                        command_error=(
+                            "TB-207-shape malformed bullet: a literal "
+                            "backtick inside a single-backtick codespan "
+                            "truncated the shell command. Rewrite the "
+                            "bullet to either (a) use a double-backtick "
+                            "wrapping (`` `..\\`..` ``) so markdown "
+                            "preserves the inner backtick, or (b) "
+                            "replace the literal backtick with the "
+                            "regex any-char `.` if a regex pattern is "
+                            "what you intended."
+                        ),
+                    ))
+                    continue
+                # TB-219 step 3: judge-indicator heuristic fallback for
+                # codespan-leading prose bullets (TB-209 shape).
+                if _has_judge_indicator(item):
+                    bullets.append(VerifyBullet(kind="prose", text=text))
+                    continue
                 bullets.append(VerifyBullet(kind="shell", text=text, command=cmd))
             else:
                 bullets.append(VerifyBullet(kind="prose", text=text))
@@ -650,6 +831,20 @@ async def verify_task(
         if b.kind == "shell":
             results.append(_run_shell_bullet(
                 b, project_root=project_root, timeout_s=timeout_s,
+            ))
+        elif b.kind == "malformed":
+            # TB-219: typed-fail produced by the classifier when the
+            # bullet shape can't be safely exec'd or judged (the TB-207
+            # literal-backtick trap is the only producer today). Surface
+            # the classifier's explanation as the criterion's `notes`
+            # so the operator sees a precise rewrite suggestion in the
+            # `verification_failed` event rather than a downstream
+            # exec-failure shell exit code. The execution paths
+            # themselves (`_run_shell_bullet`, `_judge_prose_bullet`)
+            # stay unchanged — this is a dispatcher-only branch.
+            results.append(CriterionResult(
+                bullet=b.text, kind=b.kind, status="fail",
+                notes=b.command_error or "malformed bullet",
             ))
         else:
             if sdk is None:
