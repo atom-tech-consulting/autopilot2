@@ -415,16 +415,17 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 # install-howto, install-mm, install-statusline) by landing
 # `ap2/tests/test_tb214_sandbox_install_verbs.py` — the substring drift gate
 # now resolves all four via that real test module rather than this comment
-# block. The four matching shim rows were removed when TB-214 landed. The 4
-# sandbox audit/setup rows below remain as discovered-at-landing debt; a
-# follow-up TB closes the rest:
-#   - ap2 sandbox project-audit      (cli.py — sandbox per-project audit)
-#   - ap2 sandbox project-setup      (cli.py — sandbox per-project setup)
-#   - ap2 sandbox user-audit         (cli.py — sandbox per-user audit)
-#   - ap2 sandbox user-setup         (cli.py — sandbox per-user setup)
+# block. The four matching shim rows were removed when TB-214 landed.
 #
-# Follow-up: a separate TB closes each of these with the same
-# happy-path + error-path shape TB-205 used. Tracking here rather than
-# in `_COVERAGE_DRIFT_EXEMPT_SURFACES` so the audit-grep for "what's
-# opted out of the gate" stays semantically clean — these are coverage
-# debt, not exemptions.
+# TB-215 closed the four sandbox audit/setup verbs (ap2 sandbox project-audit,
+# project-setup, user-audit, user-setup) by landing
+# `ap2/tests/test_tb215_sandbox_audit_setup_verbs.py` — the substring drift gate
+# now resolves all four via that real test module rather than this comment
+# block. The four matching shim rows were removed when TB-215 landed; the
+# CLI-verb axis of TB-209's discovered-at-landing debt is now fully closed
+# (12 / 12 verb rows resolved by real test modules rather than shims).
+#
+# Tracking the closure history here rather than in
+# `_COVERAGE_DRIFT_EXEMPT_SURFACES` so the audit-grep for "what's opted
+# out of the gate" stays semantically clean — these were coverage debt,
+# not exemptions.
