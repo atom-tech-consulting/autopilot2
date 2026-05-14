@@ -420,7 +420,16 @@ shapes:
      tree** — must name a concrete file/symbol the SDK judge can
      `Read` or `Grep` (e.g. "`Daemon.main_loop` in `ap2/daemon.py`
      splits into `_main_tick_loop` + `_mm_loop` with
-     `asyncio.gather`").
+     `asyncio.gather`"). When the bullet's grammatical subject is a
+     backtick-fenced filename or symbol (which the classifier would
+     otherwise route to shell), lead the post-codespan text with the
+     literal token `Prose:` (case-sensitive, single colon) — it is the
+     canonical hard-override signal that forces prose classification
+     (TB-219). Example: `` `ap2/tests/test_x.py` Prose: the file
+     includes the expected fixture; judge confirms via Read.`` Reach
+     for the prefix first whenever a prose bullet starts with a
+     codespan; see `ap2/howto.md` "Prose bullets — use the `Prose:`
+     prefix" for the full convention.
 
 **No `Manual:` bullets. No "operator runs X live and observes Y"
 steps.** TB-122 hit this on 2026-05-01: 5/6 bullets passed, but a
