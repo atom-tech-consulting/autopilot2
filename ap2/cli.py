@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from . import doctor, events, rollback, sandbox
+from ap2._shared import short
 from .board import Board, _norm_tag, board_file_lock
 from .config import Config
 from .cron import load_jobs, load_state
@@ -846,7 +847,7 @@ def cmd_logs(cfg: Config, args: argparse.Namespace) -> int:
                 print(f"{ts} {typ:16s} {compact}")
                 continue
         extras = {k: v for k, v in e.items() if k not in ("ts", "type")}
-        extra = " ".join(f"{k}={_short(v)}" for k, v in extras.items())
+        extra = " ".join(f"{k}={short(v, 120)}" for k, v in extras.items())
         print(f"{ts} {typ:16s} {extra}")
     return 0
 
@@ -1505,11 +1506,6 @@ def cmd_web(cfg: Config, args: argparse.Namespace) -> int:
 
     web.serve(cfg, host=args.host, port=args.port)
     return 0
-
-
-def _short(v, limit=120) -> str:
-    s = str(v)
-    return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 def _add_mm_url_token_args(p: argparse.ArgumentParser) -> None:

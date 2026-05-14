@@ -27,6 +27,12 @@ Two named functions (not one helper with a `sidecar=` flag) because the
 two locking modes are semantically distinct and every current caller picks
 one variant and sticks with it; forcing the choice at the import site
 makes the distinction visible at the call site.
+
+Also exposes `short(v, limit)` — a string-or-value truncation helper used
+across `ap2/cli.py`, `ap2/diagnose.py`, and `ap2/events.py` for rendering
+event extras at one-line widths. No default `limit` argument: each caller
+picks explicitly (the prior convention of three different module-local
+defaults — 120 / 100 / 200 — was a smell, not a feature).
 """
 from __future__ import annotations
 
@@ -34,7 +40,7 @@ import contextlib
 import fcntl
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 
 @contextlib.contextmanager
@@ -74,3 +80,18 @@ def locked_sidecar(path: Path) -> Iterator[int]:
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def short(v: Any, limit: int) -> str:
+    """Return `str(v)`, truncated to `limit` chars with a `…` suffix if needed.
+
+    Returns `str(v)` unchanged when `len(str(v)) <= limit`; otherwise
+    returns `str(v)[: limit - 1] + "…"` — the U+2026 horizontal-ellipsis
+    character is the visual signal that truncation occurred. No default
+    `limit` argument: every caller picks explicitly (TB-218 collapsed
+    three module-local defaults of 120 / 100 / 200, each of which made
+    sense at its own site; one shared default would have imposed one
+    site's choice on the others without merit).
+    """
+    s = str(v)
+    return s if len(s) <= limit else s[: limit - 1] + "…"

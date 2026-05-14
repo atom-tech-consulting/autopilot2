@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
+from ap2._shared import short
+
 
 def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -74,18 +76,13 @@ def format_for_prompt(events: Iterable[dict], *, max_chars: int = 6000) -> str:
         ts = e.get("ts", "")
         typ = e.get("type", "?")
         extras = {k: v for k, v in e.items() if k not in ("ts", "type")}
-        extra_str = " ".join(f"{k}={_short(v)}" for k, v in extras.items())
+        extra_str = " ".join(f"{k}={short(v, 200)}" for k, v in extras.items())
         line = f"{ts} {typ} {extra_str}".rstrip()
         total += len(line) + 1
         if total > max_chars:
             break
         rendered.append(line)
     return "\n".join(rendered)
-
-
-def _short(v: Any, limit: int = 200) -> str:
-    s = str(v)
-    return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 # TB-158: shared formatter for `verification_failed` events. Both
@@ -201,7 +198,7 @@ def _truncate(s: str, limit: int) -> str:
 # event types — `judge_call`, `task_run_usage`, `control_run_usage`.
 # Their verbose `usage` (and `model_usage`, `server_tool_use`,
 # `cache_creation`, `service_tier`, etc.) blob, when dumped inline via
-# the generic `_event_extra` / `_short` field-dump path, wraps the row
+# the generic `_event_extra` / `short` field-dump path, wraps the row
 # across several lines and drowns the at-a-glance signal both on the
 # events page and in `ap2 logs`.
 #

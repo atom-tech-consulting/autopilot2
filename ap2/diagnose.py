@@ -19,6 +19,7 @@ from typing import Any
 
 from . import cron as cron_mod
 from . import events
+from ap2._shared import short
 from .board import Board
 from .config import Config
 
@@ -216,7 +217,7 @@ def render_markdown(report: DiagnoseReport) -> str:
             ts = f.get("ts", "")
             typ = f.get("type", "?")
             extras = " ".join(
-                f"{k}={_short(v)}"
+                f"{k}={short(v, 100)}"
                 for k, v in f.items()
                 if k not in ("ts", "type")
             )
@@ -373,8 +374,3 @@ def _pretty_duration(seconds: int) -> str:
         return f"{seconds // 60}m"
     h, m = divmod(seconds, 3600)
     return f"{h}h{(m // 60):02d}m" if m // 60 else f"{h}h"
-
-
-def _short(v: Any, limit: int = 100) -> str:
-    s = str(v)
-    return s if len(s) <= limit else s[: limit - 1] + "…"

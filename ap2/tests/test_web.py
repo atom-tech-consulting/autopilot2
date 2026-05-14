@@ -385,7 +385,7 @@ def test_events_renders_full_text(project: Config):
     """Truncation-free rendering — long values land verbatim in the page.
 
     This is the whole point of the web UI vs `ap2 logs`: the latter caps each
-    field at 120 chars (`_short`), the former shows the entire value.
+    field at 120 chars (`short`), the former shows the entire value.
     """
     long_summary = "x" * 1000
     ev_mod.append(project.events_file, "cron_complete", job="status-report",
