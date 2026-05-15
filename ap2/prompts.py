@@ -167,9 +167,19 @@ _STATUS_REPORT_CONTRACT = """\
   since the last `status_report` event in the tail (i.e. no new
   task_start / task_complete / verification_failed / pipeline_* /
   retry_exhausted / daemon_pause / daemon_resume / operator_ack /
-  cron_proposed / ideation_complete events). When you skip, still call
+  cron_proposed / ideation_complete / auto_approved /
+  auto_approve_paused / auto_approve_halted / auto_unfreeze_applied
+  events). When you skip, still call
   `log_event(type="status_report", summary="skipped: no activity since
   <ts>")` so the daemon sees a marker.
+- TB-228: if the `## Current state` block carries a
+  `## Automation loop activity` section (auto-approve / auto-unfreeze
+  digest the daemon assembled for the inter-report window), copy that
+  entire section VERBATIM into your Mattermost post — heading, headline
+  line, and bullets. The daemon owns the rendering so the post is
+  deterministic across runs; recomputing or paraphrasing risks the
+  TB-128 stale-text regression class. When the section is absent the
+  loop has been quiet (or the operator hasn't opted in) — omit.
 - Always call `log_event(type="status_report", summary=...)` before
   finishing — posted or skipped.
 """

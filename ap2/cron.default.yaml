@@ -9,6 +9,11 @@ jobs:
       constant if you want to change the report's shape; editing this
       stub has no effect at runtime. Kept here for legibility — `ap2
       cron list` still shows that a status-report job exists, with the
-      operator-tunable `interval` / `max_turns` fields above.)
+      operator-tunable `interval` / `max_turns` fields above.
+      TB-228: the routine also injects an `## Automation loop activity`
+      section into the snapshot block when the auto-approve /
+      auto-unfreeze loop has been active since the last report; the
+      canonical prompt teaches the agent to forward that section
+      verbatim into the Mattermost post.)
     max_turns: 10
     created_by: bootstrap

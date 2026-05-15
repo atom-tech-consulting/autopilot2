@@ -61,6 +61,17 @@ _HALT_REASON_RENAME: dict[str, str] = {
 }
 
 
+# TB-228: ack-verb mapping used by the status-report digest. Same
+# vocabulary as TB-227's CLI/web rendering — operators see one verb
+# regardless of which surface flagged the halt.
+_PAUSE_REASON_ACK_VERB: dict[str, str] = {
+    "consecutive_freezes": "auto_approve_unfreeze",
+    "per_task_token_cap_exceeded": "auto_approve_window_resume",
+    "window_token_cap_exceeded": "auto_approve_window_resume",
+    "task_error": "auto_approve_window_resume",
+}
+
+
 def _is_truthy(raw: str | None) -> bool:
     """Same truthy-set as `ideation._is_auto_approve_enabled` (TB-223).
 
@@ -384,3 +395,249 @@ def collect_auto_approve_state(
         "auto_unfreeze_skipped_count_24h": unfreeze_skipped_24h,
         "pause_reason": pause_reason,
     }
+
+
+# ---------------------------------------------------------------------------
+# TB-228: inter-status-report-window aggregation for the cron digest block.
+#
+# TB-227's `collect_auto_approve_state` already exposes a 24h rolling
+# view used by `ap2 status` / web home. The status-report cron needs a
+# *different* window — "since the previous `cron_complete name=status-
+# report` event" — so an operator returning to the Mattermost post sees
+# exactly what happened between report N-1 and report N. The function
+# below shares the tail-walking primitives but parameterizes the start
+# index instead of `now - 24h`.
+#
+# Decision: keep `collect_auto_approve_state`'s contract (knob + 24h)
+# untouched and add a sibling helper here. The two surfaces want
+# different windows; coupling them through a single `since_event_idx`
+# kwarg would force one or the other to refetch the tail to get its
+# preferred window, which is wasteful.
+
+# `auto_unfreeze_skipped` events carry a `reason` discriminator from
+# `daemon._maybe_auto_unfreeze` — the operator-facing digest renders
+# the breakdown so a noisy reason ("per_task_cap=12") is legible
+# without alt-tabbing to `ap2 logs`.
+_AUTO_UNFREEZE_SKIPPED_REASONS: frozenset[str] = frozenset({
+    "shape_not_in_allowlist",
+    "briefing_mismatch",
+    "briefing_path_missing",
+    "per_task_cap",
+    "per_day_cap",
+    "queue_error",
+    "sweep_error",
+})
+
+
+def _ack_verb_for_pause_reason(reason: str | None) -> str | None:
+    """Map a pause_reason token to the operator ack verb that clears it.
+
+    Mirrors the CLI / web rendering in TB-227 so the cron digest names
+    the same verb the operator sees on the other surfaces. `None` when
+    not paused.
+    """
+    if reason is None:
+        return None
+    return _PAUSE_REASON_ACK_VERB.get(reason)
+
+
+def collect_window_loop_activity(
+    cfg: "Config",
+    *,
+    since_event_idx: int,
+    tail: list[dict] | None = None,
+) -> dict:
+    """Aggregate auto-approve / auto-unfreeze loop activity in the
+    inter-status-report window for TB-228's digest block.
+
+    `since_event_idx` is the *positional* index of the previous
+    `cron_complete job=status-report` event in the events tail; events
+    at indices `> since_event_idx` count toward the digest. Use `-1` to
+    count from the start of the tail (first-ever status report, or
+    last report rolled out of the tail window).
+
+    `tail` is passed in when the caller already has it (the routine
+    walks the tail once to find `since_event_idx`); when omitted, the
+    helper loads the same 2000-event tail `collect_auto_approve_state`
+    uses.
+
+    Returned dict (always present, machine-stable shape):
+
+      - `auto_approved` (int) — count of `auto_approved` events.
+      - `auto_approved_completed` (int) — of those tasks, the count
+        with a subsequent `task_complete status=complete` in the
+        window. Operator-facing as "M completed".
+      - `auto_approved_froze` (int) — of those tasks, the count whose
+        most-recent subsequent `task_complete` was a failure status.
+        Operator-facing as "K froze".
+      - `auto_unfreeze_applied` (int) — count of
+        `auto_unfreeze_applied` events (one per shape application;
+        same task may carry multiple if multiple shapes auto-fix).
+      - `auto_unfreeze_tasks` (int) — distinct task_ids that had at
+        least one `auto_unfreeze_applied` event. Operator-facing as
+        "L tasks auto-unfrozen".
+      - `auto_unfreeze_succeeded` (int) — of those L tasks, the count
+        with a subsequent `task_complete status=complete`.
+      - `auto_unfreeze_refroze` (int) — of those L tasks, the count
+        whose most-recent subsequent `task_complete` was a failure
+        status.
+      - `auto_unfreeze_skipped` (int) — count of `auto_unfreeze_skipped`
+        events.
+      - `auto_unfreeze_skipped_by_reason` (dict[str, int]) — breakdown
+        by the event's `reason` field; only non-zero buckets are
+        included so the digest doesn't carry empty `per_day_cap=0`
+        noise.
+      - `auto_approve_paused` (int) — count of `auto_approve_paused`
+        events (TB-223 cumulative-freeze trips).
+      - `auto_approve_halted` (int) — count of `auto_approve_halted`
+        events (TB-224 cost/blast-radius trips).
+      - `latest_halt` (dict | None) — the most recent halt-class event
+        in the window: `{ts, event_type, reason, ack_verb}` for digest
+        rendering. `None` when no halt-class event fired.
+
+    Pure / no I/O beyond reading `cfg.events_file` when `tail` is
+    omitted; safe to call from request handlers.
+    """
+    if tail is None:
+        if cfg.events_file.exists():
+            tail = events.tail(cfg.events_file, 2000)
+        else:
+            tail = []
+
+    slice_ = tail[since_event_idx + 1:] if since_event_idx >= -1 else tail
+
+    # Indices of `auto_approved` events keyed by task_id — used below
+    # to find the next `task_complete` for each auto-approved TB-N.
+    auto_approve_idx: dict[str, int] = {}
+    unfreeze_idx_by_task: dict[str, int] = {}
+
+    auto_approved = 0
+    auto_unfreeze_applied = 0
+    auto_unfreeze_skipped = 0
+    skipped_by_reason: dict[str, int] = {}
+    auto_approve_paused_count = 0
+    auto_approve_halted_count = 0
+    latest_halt: dict | None = None
+    latest_halt_idx = -1
+
+    for i, e in enumerate(slice_):
+        typ = e.get("type")
+        if typ == "auto_approved":
+            auto_approved += 1
+            tid = str(e.get("task") or "").strip()
+            if tid:
+                auto_approve_idx[tid] = i
+        elif typ == "auto_unfreeze_applied":
+            auto_unfreeze_applied += 1
+            tid = str(e.get("task") or "").strip()
+            if tid:
+                unfreeze_idx_by_task[tid] = i
+        elif typ == "auto_unfreeze_skipped":
+            auto_unfreeze_skipped += 1
+            reason = str(e.get("reason") or "").strip() or "unknown"
+            skipped_by_reason[reason] = skipped_by_reason.get(reason, 0) + 1
+        elif typ == "auto_approve_paused":
+            auto_approve_paused_count += 1
+            if i > latest_halt_idx:
+                latest_halt_idx = i
+                latest_halt = {
+                    "ts": str(e.get("ts") or ""),
+                    "event_type": "auto_approve_paused",
+                    "reason": "consecutive_freezes",
+                    "ack_verb": _PAUSE_REASON_ACK_VERB[
+                        "consecutive_freezes"
+                    ],
+                }
+        elif typ == "auto_approve_halted":
+            auto_approve_halted_count += 1
+            if i > latest_halt_idx:
+                latest_halt_idx = i
+                raw = str(e.get("reason") or "").strip()
+                renamed = _HALT_REASON_RENAME.get(raw, raw or "unknown")
+                latest_halt = {
+                    "ts": str(e.get("ts") or ""),
+                    "event_type": "auto_approve_halted",
+                    "reason": renamed,
+                    "ack_verb": _PAUSE_REASON_ACK_VERB.get(
+                        renamed, "auto_approve_window_resume",
+                    ),
+                }
+
+    # Outcome breakdown: for each auto-approved task, find the next
+    # `task_complete` event in the slice and bucket on status.
+    auto_approved_completed, auto_approved_froze = _outcome_breakdown(
+        slice_, auto_approve_idx,
+    )
+    auto_unfreeze_succeeded, auto_unfreeze_refroze = _outcome_breakdown(
+        slice_, unfreeze_idx_by_task,
+    )
+
+    return {
+        "auto_approved": auto_approved,
+        "auto_approved_completed": auto_approved_completed,
+        "auto_approved_froze": auto_approved_froze,
+        "auto_unfreeze_applied": auto_unfreeze_applied,
+        "auto_unfreeze_tasks": len(unfreeze_idx_by_task),
+        "auto_unfreeze_succeeded": auto_unfreeze_succeeded,
+        "auto_unfreeze_refroze": auto_unfreeze_refroze,
+        "auto_unfreeze_skipped": auto_unfreeze_skipped,
+        "auto_unfreeze_skipped_by_reason": skipped_by_reason,
+        "auto_approve_paused": auto_approve_paused_count,
+        "auto_approve_halted": auto_approve_halted_count,
+        "latest_halt": latest_halt,
+    }
+
+
+def _outcome_breakdown(
+    slice_: list[dict],
+    seed_idx_by_task: dict[str, int],
+) -> tuple[int, int]:
+    """Score the (completed, froze) outcome buckets for tasks in
+    `seed_idx_by_task` (each value is the seed event's positional
+    index inside `slice_`).
+
+    For each TB-N, walk forward looking for the FIRST subsequent
+    `task_complete task=TB-N` event. A complete-status hit increments
+    the completed bucket; a failure-status hit increments the froze
+    bucket. Tasks with no subsequent `task_complete` in the slice are
+    excluded from both buckets (the task is still pending — won't be
+    surfaced as either outcome).
+
+    Naming pinned by the briefing's "M succeeded, K froze" phrasing.
+    """
+    completed = 0
+    froze = 0
+    for tid, seed_idx in seed_idx_by_task.items():
+        for e in slice_[seed_idx + 1:]:
+            if e.get("type") != "task_complete":
+                continue
+            if str(e.get("task") or "").strip() != tid:
+                continue
+            status = str(e.get("status") or "").strip()
+            if status == "complete":
+                completed += 1
+            elif status in _FAILURE_STATUSES:
+                froze += 1
+            break
+    return completed, froze
+
+
+def find_previous_status_report_idx(tail: list[dict]) -> int:
+    """Return the positional index of the most recent
+    `cron_complete job=status-report` event in `tail`, or `-1` if none
+    exists (first-ever status report, or the previous one rolled out
+    of the tail window).
+
+    Used by the cron status-report routine to scope the digest's
+    counts to the inter-report window. Lives here (alongside the
+    helper that consumes the index) so callers don't sprinkle
+    tail-scanning idioms across modules.
+    """
+    for i in range(len(tail) - 1, -1, -1):
+        e = tail[i]
+        if (
+            e.get("type") == "cron_complete"
+            and e.get("job") == "status-report"
+        ):
+            return i
+    return -1
