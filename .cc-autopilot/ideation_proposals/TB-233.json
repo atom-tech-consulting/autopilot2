@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/monitor-only-auto-unfreeze-mode-ap2-auto.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-15T21:43:32Z",
+  "tb_id": "TB-233",
+  "why_now": "TB-225 shipped the auto-unfreeze loop and TB-229 taught the `BriefingFix:` emitter prefix, so the loop is technically ready to deploy \u2014 but `_auto_unfreeze_allowlist` (daemon.py:2914) is opt-in only, and an operator's first flip from \"unset\" to \"shapes-listed\" runs against the LIVE Frozen set with no monitor-only history. TB-232 closes the symmetric gap for axis 1 by adding `AP2_AUTO_APPROVE_DRY_RUN=1`; without this sibling for axis 2, an operator confident enough to enable BOTH automations has uneven on-ramp surfaces \u2014 axis 1 has trust-building, axis 2 is cold-start. The walk-away promise (goal.md L9-16) names automatic failure recovery as a core requirement; an axis-2 path that can only be enabled cold-start is exactly the \"every relaxation is operator-curated\" pattern goal.md L60-69 calls out as load-bearing. Closes the binary-cliff on-ramp gap for axis 2."
+}
