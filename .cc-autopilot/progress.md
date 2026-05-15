@@ -605,3 +605,9 @@
 - **Summary:** Added ap2/automation_status.collect_auto_approve_state aggregator (pure events.jsonl tail-scan, 11-key dict covering enabled/paused/freezes/threshold/caps/window-tokens/24h-counters/pause_reason); wired it into `ap2 status` text branch (omit-on-empty `auto-approve:` line, healthy vs PAUSED rendering with the ack verb) and `--json` branch (`auto_approve` key always present); added an Automation card to the web home page with green/red tinting per TB-148 palette, drill-down `/events?type=...` links, and a hand-rolled SVG sparkline. 27 new tests cover helper contract, CLI rendering, JSON shape, and web rendering. Full suite green (1484 passed).
 - **Files:** ap2/automation_status.py, ap2/tests/test_tb227_automation_status.py, ap2/cli.py, ap2/web.py
 - **Tests:** pass
+
+## [2026-05-15] TB-228: Status-report cron digest block summarizing auto-approve/auto-unfreeze loop activity since last report
+- **Commit:** `4383e52`
+- **Summary:** Added `## Automation loop activity` digest section to the status-report cron post: new `collect_window_loop_activity` + `find_previous_status_report_idx` helpers in `automation_status.py`, `render_automation_loop_activity_section` renderer in `status_report.py` wired into `run_status_report`'s `state_extras`, updated `_STATUS_REPORT_CONTRACT` + `STATUS_REPORT_PROMPT` + cron.default.yaml stub to teach the agent verbatim forwarding, new `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` constant naming the four event types the should-skip gate treats as interesting, and 22 new tests covering omit-on-empty, healthy/paused/non-zero rendering, ack-verb literals, since-last-report window scoping, and skip-gate behavior; full suite 1506 passed (up from 1484 baseline, +22).
+- **Files:** ap2/automation_status.py, ap2/cron.default.yaml, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_tb228_status_report_automation_digest.py
+- **Tests:** pass
