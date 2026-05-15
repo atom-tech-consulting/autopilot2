@@ -276,6 +276,7 @@ will reject `Edit`/`Write` on them — they're listed in `disallowed_tools`.
 - `.cc-autopilot/ideation_proposals` — per-proposal records (TB-188), one JSON per ideation-authored proposal, written at `add_backlog` time and reconciled with an `outcome` block by the daemon on terminal events. Daemon-owned audit trail; an agent rewriting its own proposal's `focus_anchor` / `why_now` mid-run could otherwise mask scope drift.
 - `.cc-autopilot/tasks/` — per-task briefing markdown files (TB-198), authored by the operator (`ap2 add`) or by ideation (`do_board_edit`'s add-* branch). The per-task verifier reads `## Verification` from these files at verification time; a task agent rewriting its own or another task's briefing could weaken verification mid-run.
 - `.cc-autopilot/insights/_index.md` — daemon-regenerated insights index (TB-198), rebuilt by `insights.maybe_regenerate_index(cfg)` pre-fire from `_maybe_ideate`. Only `_index.md` is fenced — individual `<topic>.md` insights remain writable so `#evaluation`-tagged task agents can author them per the ideation prompt's Step 0.5 contract.
+- `.cc-autopilot/focus_pointer.json` — daemon-owned focus-list pointer (TB-226). The `_maybe_advance_focus` pass advances the in-memory pointer past exhausted `## Current focus:` headings in goal.md; an agent rewriting this file could short-circuit the roadmap-exhaustion halt or skip a focus's Done-when criteria.
 
 (TB-143: `events.jsonl` and `operator_queue.jsonl` are listed
 above for defense in depth — the SDK still rejects `Edit`/`Write`

@@ -1553,6 +1553,25 @@ def _apply_operator_ack(cfg: Config, args: dict) -> dict:
     if task_id:
         payload["task"] = task_id
     events.append(cfg.events_file, "operator_ack", **payload)
+
+    # TB-226: if the ack carries the `roadmap_complete` token, also
+    # bump the focus-pointer's forensic `roadmap_complete_ack_idx` to
+    # the current focus-list length so `ap2 status` / web UI render
+    # the cleared state without an events-scan side-effect. Best-
+    # effort: `goal.roadmap_exhausted` (the dispatch-path gate) also
+    # consults the events.jsonl token directly, so a pointer-write
+    # failure here doesn't change the cleared verdict — defense in
+    # depth, not the canonical authority.
+    from ap2 import goal as _goal
+    if _goal.ROADMAP_COMPLETE_ACK_TOKEN in note:
+        try:
+            pointer = _goal.load_pointer(cfg)
+            foci = _goal.read_focus_list(cfg)
+            pointer["roadmap_complete_ack_idx"] = len(foci)
+            _goal.save_pointer(cfg, pointer)
+        except OSError:
+            pass
+
     return _ok(f"appended to {log_path.name}", line=line.strip())
 
 
@@ -3864,4 +3883,14 @@ TASK_AGENT_FENCED_PATHS = (
     # owned, so the fence is a single-file path (not a directory like
     # `tasks/` / `ideation_proposals/`).
     ".cc-autopilot/insights/_index.md",
+    # TB-226: focus-list pointer state (which `## Current focus:`
+    # heading in goal.md the daemon's runtime pointer points at, plus
+    # the heuristic-fallback empty-cycles counter and the
+    # `roadmap_complete` ack bookkeeping). Daemon-owned: a task agent
+    # rewriting its own focus pointer mid-run could short-circuit the
+    # roadmap-exhaustion halt or fast-forward through an unfinished
+    # focus to skip its Done-when criteria. The runtime pointer is
+    # in-memory state only — goal.md itself stays operator-owned
+    # (goal.md L187-191 "Goal.md auto-rotation" Non-goal).
+    ".cc-autopilot/focus_pointer.json",
 )

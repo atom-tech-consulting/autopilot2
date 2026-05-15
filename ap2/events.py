@@ -55,6 +55,29 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `queue_error`, `sweep_error`). The `knob_unset` case does NOT
     emit per-tick — the feature is opt-in and operators who haven't
     set `AP2_AUTO_UNFREEZE_FIX_SHAPES` shouldn't see noise.
+  - `focus_advanced` (TB-226) — daemon advanced its in-memory focus
+    pointer past an exhausted `## Current focus:` heading in
+    goal.md. Triggered by either an LLM-judge verdict on the
+    focus's explicit `Done when:` bullets being substantively met
+    OR by the empty-cycles heuristic fallback
+    (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive 0-proposal
+    cycles against the active focus). Payload: `from` (old focus
+    title), `to` (new focus title, empty string when the advance
+    crossed the last focus into roadmap-exhausted state),
+    `trigger` (one of `done_when_judge` / `empty_cycles_heuristic`),
+    `new_index` (the pointer's new `active_index`), `total_foci`
+    (current foci-list length).
+  - `roadmap_complete` (TB-226) — focus pointer has advanced past
+    the last `## Current focus:` heading in goal.md. Auto-promote
+    of Backlog tasks halts on subsequent ticks until the operator
+    extends the roadmap (adding new `## Current focus:` headings
+    via `ap2 update-goal`) AND emits `ap2 ack roadmap_complete`
+    to clear the halt. Payload: `exhausted_count` (the foci-list
+    length at exhaustion), `trigger` (`pointer_past_last`). Fired
+    once per exhaustion episode; the `_maybe_advance_focus` pass
+    suppresses re-emission via the pointer's
+    `roadmap_complete_emitted` flag, which resets on the next
+    advance after the operator extends the roadmap.
 
 The full canonical list lives in `ap2/howto.md`'s `## Event schema`
 section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)

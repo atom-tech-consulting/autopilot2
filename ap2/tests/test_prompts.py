@@ -157,12 +157,12 @@ def test_task_prompt_do_not_touch_bullet_count(tmp_path):
     the SDK enforces, and dropping one silently weakens defense in
     depth.
 
-    Current expected list (count = 13):
+    Current expected list (count = 14):
       TASKS.md, CLAUDE.md, goal.md, progress.md, events.jsonl,
       ideation_state.md, cron.yaml, operator_log.md,
       operator_queue.jsonl, operator_queue_state.json,
       ideation_proposals (TB-188), tasks/ (TB-198),
-      insights/_index.md (TB-198).
+      insights/_index.md (TB-198), focus_pointer.json (TB-226).
     """
     cfg = _cfg(tmp_path)
     t = Task(id="TB-99", title="x", section="Active")
@@ -176,8 +176,8 @@ def test_task_prompt_do_not_touch_bullet_count(tmp_path):
     # parenthetical — the next paragraph is the TB-143 callout.
     body, _, _ = section.partition("\n\n(TB-143")
     bullets = [ln for ln in body.splitlines() if ln.startswith("- `")]
-    assert len(bullets) == 13, (
-        f"expected 13 'do NOT touch' bullets after TB-198, got "
+    assert len(bullets) == 14, (
+        f"expected 14 'do NOT touch' bullets after TB-226, got "
         f"{len(bullets)}:\n" + "\n".join(bullets)
     )
 

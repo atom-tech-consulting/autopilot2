@@ -256,6 +256,14 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
         # ARE committed; the queue itself shouldn't ride along.
         "operator_queue.jsonl",
         "operator_queue_state.json",
+        # TB-226: focus-list runtime pointer (which `## Current focus:`
+        # heading in goal.md is active, the heuristic empty-cycles
+        # counter, exhausted titles, roadmap-complete ack idx). In-memory
+        # runtime state — goal.md itself stays operator-owned and IS
+        # committed; the pointer flowing forward across rollbacks would
+        # also re-fire `focus_advanced` events redundantly, so the
+        # pointer (like `cron_state.json`) should restart fresh.
+        "focus_pointer.json",
     ]),
     ("Per-run prompt + stream dumps for failure diagnosis (kept only on failure)", [
         "debug/",

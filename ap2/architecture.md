@@ -124,6 +124,7 @@ Failure paths (`task_timeout`, `task_error`) try `_infer_result_from_head` first
 | `.cc-autopilot/pipelines/<name>-<pid>.log` | detached pipeline subprocess | none | gitignored |
 | `.cc-autopilot/debug/<ts>-<label>.{prompt,stream,messages}` | daemon (`_prep_debug_dumps`) | none | gitignored |
 | `CLAUDE.md` | operator (Next task ID auto-bumped by daemon at drain time — TB-141 deferred from per-add to once per drain pass) | none | yes |
+| `.cc-autopilot/focus_pointer.json` | daemon (`_maybe_advance_focus`; TB-226) | `fcntl.flock` (`locked_inplace`) | no (gitignored) |
 
 State-file commits land with subject `state: TB-N → Complete` (per task) or `state: cron <name>` / `state: ideation` (per cron/ideation run). They ride alongside the task agent's source commit so `git log` tracks board evolution next to code evolution.
 
@@ -248,6 +249,8 @@ Pre-TB-115's two-task split (launch + auto-created Backlog validation with `(blo
 **Daemon goes silent for >3h** — the watchdog (`_maybe_auto_diagnose`) builds a `DiagnoseReport` (board summary + recent failures + cron staleness + board health), renders it as Mattermost-friendly markdown, and posts to `AP2_MM_CHANNELS[0]`. Cooldown 6h. Skips when no MM destination is configured (sticky one-shot warning so it doesn't spam).
 
 **Stuck-blocker** — `Board._is_blocker_satisfied` checks each `(blocked on: ...)` token. `TB-N` blockers are satisfied when the named task is in Complete; unknown schemes fail-safe (including the retired `pid:N@TS` scheme — any straggler from a pre-TB-115 / pre-TB-117 board sits in Backlog until the operator removes the clause). `diagnose.board_health["unsatisfiable_blocks"]` surfaces the corner case where a Backlog task is blocked on a Frozen task (will never auto-promote).
+
+**Roadmap exhaustion** — `_maybe_advance_focus` (TB-226) advances the in-memory focus-list pointer (`.cc-autopilot/focus_pointer.json`) as each `## Current focus:` heading in goal.md exhausts; when the pointer crosses past the last heading, the daemon emits `roadmap_complete` (once) and halts auto-promote of Backlog tasks. Operator extends the roadmap via `ap2 update-goal` (adding new `## Current focus:` headings) and resumes via `ap2 ack roadmap_complete`. The two event types — `focus_advanced` and `roadmap_complete` — provide the audit trail.
 
 **Malformed task line** — `Board._parse` flags any line that doesn't match `TASK_LINE_RE`; the daemon emits a deduped `board_malformed_line` event in step 3 of `_tick`. Without this, an out-of-band edit (e.g. a `(<sha>)` annotation between `**TB-N**` and `**Title**`) silently strands every task that depends on the affected one.
 

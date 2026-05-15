@@ -625,6 +625,26 @@ reason is one of `shape_not_in_allowlist`, `briefing_mismatch`,
 `briefing_path_missing`, `per_task_cap`, `per_day_cap`, `queue_error`,
 `sweep_error`).
 
+**Focus rotation (TB-226 axis 4).** `focus_advanced` and
+`roadmap_complete` track the daemon's in-memory focus-list pointer
+against goal.md's `## Current focus:` headings. See
+`### Focus rotation (axis 4)` below for the full design.
+
+- `focus_advanced` (TB-226) — daemon advanced its in-memory pointer
+  past an exhausted `## Current focus:` heading. Trigger field is
+  one of `done_when_judge` (LLM-judge ruled the focus's `Done when:`
+  bullets substantively met) or `empty_cycles_heuristic` (focus had
+  no explicit `Done when:` block; `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+  consecutive 0-proposal cycles tripped the fallback). Payload also
+  carries `from` (old title), `to` (new title — empty string when
+  the advance crossed the last focus), `new_index`, `total_foci`.
+- `roadmap_complete` (TB-226) — pointer crossed past the last
+  `## Current focus:` heading; auto-promote of Backlog tasks halts
+  until operator extends roadmap + emits `ap2 ack
+  roadmap_complete`. Payload: `exhausted_count`, `trigger`. Fired
+  once per exhaustion episode (suppression via pointer's
+  `roadmap_complete_emitted` flag).
+
 `diagnose.MEANINGFUL_EVENT_TYPES` is what the watchdog counts as "the
 daemon making progress"; `FAILURE_EVENT_TYPES` is what counts as broken.
 
@@ -918,6 +938,32 @@ the named line before patching closes the data-race window. A
 mismatch emits `auto_unfreeze_skipped reason=briefing_mismatch` and
 leaves the task Frozen — fail-safe.
 
+**Focus rotation (TB-226 axis 4).** Three knobs gate the in-memory
+focus-list pointer's advance. See `### Focus rotation (axis 4)` below
+for the architecture + the `ap2 ack roadmap_complete` resume verb.
+
+- `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default `3`, min `1`, max `20`) —
+  heuristic-fallback threshold: when the active focus has NO
+  explicit `Done when:` sub-block, the daemon advances after this
+  many consecutive ideation cycles produced 0 proposals against
+  the focus. Invalid (non-int / empty) values fall back to the
+  default; values outside the clamp range are pinned to the
+  nearest bound (so a typo `0` doesn't disable advance and `999`
+  doesn't wedge it permanently).
+- `AP2_FOCUS_AUTO_ADVANCE_DISABLED` — kill-switch. Set to `1` /
+  `true` / `yes` / `on` (same convention as `AP2_IDEATION_DISABLED`)
+  to prevent the daemon from auto-advancing even when criteria are
+  met; the daemon surfaces a `## Decisions needed from operator`
+  bullet instead so the operator can advance manually via
+  `ap2 update-goal`. Default unset → auto-advance enabled.
+- `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` (default `medium`) — effort
+  level for the LLM-judge call that evaluates whether a focus's
+  `Done when:` bullets are substantively met. Mirrors
+  `AP2_JANITOR_JUDGE_EFFORT`'s shape: explicit value > fallback to
+  `AP2_AGENT_EFFORT` > the `medium` default. Default `medium`
+  (cheaper than the verifier's `high`) because the question is
+  one-shot per advance attempt, not per-bullet-per-task.
+
 **Watchdog (auto-diagnose).**
 - `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` (10800 = 3h) — idle duration
   before the watchdog posts a `DiagnoseReport`.
@@ -949,6 +995,81 @@ leaves the task Frozen — fail-safe.
 
 Plus required: `CLAUDE_CODE_OAUTH_TOKEN`. Daemon refuses to start
 without it.
+
+### Focus rotation (axis 4)
+
+Closes goal.md L115-138's axis 4 design. The operator authors a
+multi-`## Current focus:` heading list in `goal.md` (priority order,
+top = active); the daemon's runtime pointer advances as each focus
+exhausts, without operator-mediated rotation. The daemon never
+mutates goal.md itself (goal.md L187-191 "Goal.md auto-rotation"
+Non-goal); pointer state is in-memory only.
+
+**Pointer file.**
+`.cc-autopilot/focus_pointer.json` carries the runtime pointer
+(`active_index`, `active_title`, `empty_cycles`, `exhausted_titles`,
+`roadmap_complete_ack_idx`, `roadmap_complete_emitted`,
+`updated_ts`, `schema`). Fenced from task agents
+(`TASK_AGENT_FENCED_PATHS`) and gitignored so rollbacks (TB-111)
+don't re-fire stale `focus_advanced` events. Schema-versioned via
+the `schema: 1` field so a future migration can branch cleanly.
+
+**Advance heuristic.**
+Each tick, `_maybe_advance_focus(cfg, sdk)` runs as step 0.6 of
+`_tick` (after the auto-unfreeze sweep, before cron / pipeline /
+dispatch / ideation). The active focus's structural shape decides
+the advance path:
+
+1. *Explicit `Done when:` sub-block* — the daemon invokes a short
+   SDK judge call (`_judge_done_when`) with the focus title, its
+   Done-when bullets, the last ~10 task-complete titles + summaries,
+   and the head of `ideation_state.md`. The judge replies on the
+   first line with one of `yes` / `no` / `insufficient_evidence`;
+   only `yes` triggers advance. Cost bounded by
+   `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` (default `medium`).
+2. *No `Done when:` sub-block* — heuristic fallback. The daemon
+   counts consecutive recent ideation cycles that produced 0
+   proposals against the active focus
+   (`ideation_empty_board` + `ideation_complete` events,
+   reset by `ideation_proposal_recorded`). When the count reaches
+   `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3, clamped to
+   [1, 20]), advance.
+
+On advance, the daemon emits `focus_advanced from=<old_title>
+to=<new_title> trigger=<done_when_judge|empty_cycles_heuristic>
+new_index=<i> total_foci=<n>` and writes the updated pointer.
+
+**Kill-switch.**
+`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits the advance even
+when criteria are met. The daemon surfaces a `## Decisions needed
+from operator` bullet so the operator advances manually via
+`ap2 update-goal`. The pointer doesn't move; the next tick re-emits
+the bullet if criteria still trip — acceptable noise floor.
+
+**Roadmap-complete halt.**
+When the pointer advances past the LAST `## Current focus:`
+heading, the daemon emits `roadmap_complete exhausted_count=<n>
+trigger=pointer_past_last` (once, suppressed via the pointer's
+`roadmap_complete_emitted` flag) AND appends a `## Decisions
+needed from operator` bullet to `ideation_state.md`. The dispatch
+path's `goal.roadmap_exhausted(cfg)` check then blocks Backlog
+auto-promotion (Ready-section tasks still dispatch — the halt is
+targeted at the auto-promote-from-Backlog gate). Operator clears
+via `ap2 ack roadmap_complete --reason "extended roadmap with
+axis 5"`; the daemon's events-jsonl scan detects an `operator_ack`
+event whose `note` carries the `roadmap_complete` token AFTER the
+most recent `roadmap_complete` event and clears the halt. Same
+shape TB-223's `auto_approve_unfreeze` / TB-224's
+`auto_approve_window_resume` use.
+
+**Why never auto-mutate goal.md.**
+Goal.md L187-191 names goal.md auto-rotation as a Non-goal. The
+operator owns the focus list; the daemon advances its pointer
+based on exhaustion signals but never writes the file. Adding /
+reordering / retiring foci stays `ap2 update-goal`-only. This
+keeps the surface symmetric with the other operator-only paths
+(cron mutation via `ap2 cron edit`, classify-verdict via
+`ap2 classify`, ack via `ap2 ack`).
 
 ## Sandbox model
 
