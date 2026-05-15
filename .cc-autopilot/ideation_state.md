@@ -1,18 +1,19 @@
 # Ideation State
 
-_Last updated: 2026-05-15T03:31:00Z by ideation cron_
+_Last updated: 2026-05-15T05:32:34Z by ideation cron_
 
 ## Mission alignment
 
-No state change since the 01:28Z cycle: board snapshot is still
-0A/0R/4B/0P with TB-226 / TB-227 / TB-228 / TB-229 in `@blocked:review`
-(verified via `ap2 status` at run start; review list matches). The
-operator approve queue last moved at 2026-05-14T22:25Z (operator_log
-last entry: TB-223 update); the four proposals queued at 23:26–28Z
-remain pending across the ~5h gap, and no `verification_failed` /
-`retry_exhausted` / `verification_partial` / `cron_proposed` events
-appear in the recent-events block. 3 most recent Completes considered
-(unchanged from prior cycle):
+No state change since the 03:31Z cycle: board snapshot still
+0A/0R/4B/0P with TB-226 / TB-227 / TB-228 / TB-229 in
+`@blocked:review` (verified via `ap2 status` at run start; review
+list matches). Operator approve queue last moved at
+2026-05-14T22:25Z (operator_log last entry: TB-223 update); the
+four proposals queued at 23:26–28Z remain pending across a ~7h gap,
+and no `verification_failed` / `retry_exhausted` /
+`verification_partial` / `cron_proposed` events appear in the
+recent-events block. 3 most recent Completes considered (unchanged
+from prior cycle):
 
 - TB-225 (`b8af9b5`, 2026-05-14T22:47Z) — axis-2 `_maybe_auto_unfreeze`
   sweep + `parse_blocked_summary_fix_shape` + 3 env knobs.
@@ -21,11 +22,12 @@ appear in the recent-events block. 3 most recent Completes considered
 - TB-223 (`a46c461`, 2026-05-14T22:11Z) — axis-1 `AP2_AUTO_APPROVE`
   knob + `auto_approved` / `auto_approve_paused` events.
 
-The limiting factor stays exactly where the 01:28Z cycle left it:
-axes 1–3 lack operator-facing observability, axis 4 is unstarted,
-axis-2 emitter teaching hasn't landed. All four are in flight as
-pending-review proposals; this cycle's job is to give the operator
-ranking room to engage them rather than stack a 5th proposal on top.
+Limiting factor unchanged from the 01:28Z and 03:31Z cycles:
+axes 1–3 lack operator-facing observability (TB-227 / TB-228),
+axis 4 is unstarted (TB-226), axis-2 emitter teaching unlanded
+(TB-229). All four are in flight as pending-review proposals; this
+cycle's job is to give the operator ranking room rather than stack
+a 5th proposal on top.
 
 ## Current focus assessment
 
@@ -75,7 +77,7 @@ ranked candidate this cycle.
   Slot=1 leaves room for ONE high-signal addition but no new gap
   outranks the four already queued; piling on without operator signal
   risks reject-pattern accumulation. Defer until at least one approve
-  or reject lands. (Carried unchanged from 01:28Z cycle — no operator
+  or reject lands. (Carried unchanged from 03:31Z — no operator
   action in the interim.)
 - **Wack-a-mole shell-bullet linting (TB-172-shape)** — n=4
   authoritative reject (operator_log L80, 2026-05-05). Auto-unfreeze
@@ -91,12 +93,14 @@ ranked candidate this cycle.
 
 ## Cycle observations
 
-- Operator approve queue gap is now ~5h (last action 22:25Z TB-223
-  update; 4 proposals queued 23:26–28Z). Still inside the expected
-  overnight cadence window; informs the no-new-proposal call this
-  cycle exactly as in 01:28Z. If the gap stretches past a normal
-  business-day window without engagement, the right next move is a
-  status-surface check, not a 5th proposal.
+- Operator approve queue gap is now ~7h (last action 22:25Z TB-223
+  update; 4 proposals queued 23:26–28Z). Still inside an expected
+  overnight cadence window for this operator (prior overnight gaps
+  in operator_log range 6-10h before activity resumes); informs the
+  no-new-proposal call this cycle exactly as in 03:31Z. If the gap
+  stretches past a normal business-day window without engagement,
+  the right next move is a status-surface check via
+  `operator_log_append`, not a 5th proposal.
 - Failure-review scan turned up nothing actionable: no
   `verification_failed` / `retry_exhausted` / `verification_partial`
   events in the prompt's events block; Frozen set is TB-119 /
