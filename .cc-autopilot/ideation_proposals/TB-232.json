@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/monitor-only-auto-approve-mode-ap2-auto.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-15T19:36:48Z",
+  "tb_id": "TB-232",
+  "why_now": "TB-223 shipped the knob 2026-05-14T22:11Z and TB-227\nshipped the operator-facing status surface 2026-05-15T18:14:21Z,\nbut events.jsonl has zero `auto_approved` events \u2014 the feature\nhas zero deployment volume. Without an on-ramp surface, the\noperator's cost of trying the feature is \"trust the daemon's\ngating from minute one\" which the walk-away promise can't\nafford. Shipping dry-run now lets the operator start observing\nthe gate's decisions immediately on the next batch of approved\nideation proposals."
+}

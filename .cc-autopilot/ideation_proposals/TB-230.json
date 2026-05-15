@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/end-to-end-walk-away-integration-test-pi.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-15T19:35:25Z",
+  "tb_id": "TB-230",
+  "why_now": "TB-223/224/225/226/229 closed the per-axis foundations\nand the burst of 4 task completes at 2026-05-15T17:30-18:45Z just\ndrained the board. Without in-concert e2e coverage, the operator\ncan't risk flipping `AP2_AUTO_APPROVE=1` (events.jsonl shows zero\n`auto_approved` events in the recent tail, confirming the feature\nis in HEAD but never deployed). The walk-away promise stays\naspirational until the loop is pinned working in concert."
+}

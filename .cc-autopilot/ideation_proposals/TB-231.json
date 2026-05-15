@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/prose-judge-retry-once-with-stricter-sys.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-15T19:36:03Z",
+  "tb_id": "TB-231",
+  "why_now": "TB-228's `verification_partial` event in events.jsonl\n(2026-05-15T18:30:53Z, bullet_idx=7, malformed JSON path) is the\nfirst observed prose-judge format failure since TB-219 tightened\nthe classifier on 2026-05-14, and it landed in HEAD a week before\nany operator will plausibly flip `AP2_AUTO_APPROVE=1`. Closing the\nresilience hole now means the first real auto-approve deployment\ndoesn't silently accumulate partial verifications it can't\ndistinguish from genuine completes."
+}
