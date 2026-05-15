@@ -611,3 +611,9 @@
 - **Summary:** Added `## Automation loop activity` digest section to the status-report cron post: new `collect_window_loop_activity` + `find_previous_status_report_idx` helpers in `automation_status.py`, `render_automation_loop_activity_section` renderer in `status_report.py` wired into `run_status_report`'s `state_extras`, updated `_STATUS_REPORT_CONTRACT` + `STATUS_REPORT_PROMPT` + cron.default.yaml stub to teach the agent verbatim forwarding, new `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` constant naming the four event types the should-skip gate treats as interesting, and 22 new tests covering omit-on-empty, healthy/paused/non-zero rendering, ack-verb literals, since-last-report window scoping, and skip-gate behavior; full suite 1506 passed (up from 1484 baseline, +22).
 - **Files:** ap2/automation_status.py, ap2/cron.default.yaml, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_tb228_status_report_automation_digest.py
 - **Tests:** pass
+
+## [2026-05-15] TB-229: Teach `BriefingFix:` prefix convention in `skills/ap2-task/SKILL.md` + per-task agent prompt (axis-2 emitter)
+- **Commit:** `62301ec`
+- **Summary:** Taught the `BriefingFix:` prefix convention on three surfaces (SKILL.md new `## Reporting failures` section with 4 worked examples + originating TB-Ns, prompts.py `_TASK_FOOTER` extends the `blocked` status bullet with the canonical line shape, howto.md cross-reference back to SKILL.md); added 12 new tests in ap2/tests/test_tb229_briefing_fix_teaching.py (incl. parser round-trip) — full suite 1518 passed, no regressions. Note: the briefing's design used `=>` while the live parser (`parse_blocked_summary_fix_shape`) expects ` -> `; I taught the parser-canonical ` -> ` form so the auto-unfreeze sweep can actually fire — recommend operator update the briefing's design block to match.
+- **Files:** skills/ap2-task/SKILL.md, ap2/prompts.py, ap2/howto.md, ap2/tests/test_tb229_briefing_fix_teaching.py
+- **Tests:** pass
