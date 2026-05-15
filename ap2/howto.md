@@ -881,6 +881,11 @@ strictly structured — no regex-on-prose guessing — so an agent that
 authors free-text diagnoses (no `BriefingFix:` line) falls through
 to today's manual-unfreeze path identically.
 
+See also `skills/ap2-task/SKILL.md` § "Reporting failures
+(`task_complete blocked` summaries)" — the upstream emitter contract
+the per-task agent reads at run time, with one fenced worked example
+per bootstrap fix-shape (TB-229).
+
 - `AP2_AUTO_UNFREEZE_FIX_SHAPES` — comma-separated allowlist of
   fix-shape tokens. **Unset by default → feature disabled.** The
   daemon refuses to auto-apply any shape that isn't in this

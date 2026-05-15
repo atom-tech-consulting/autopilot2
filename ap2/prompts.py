@@ -321,6 +321,26 @@ Valid statuses:
 - `complete`   — task done, tests pass, committed.
 - `incomplete` — partial progress; document what remains in `summary`.
 - `blocked`    — hit a blocker you can't resolve; explain in `summary`.
+  If the blocker is a briefing-shape regression in `## Verification`
+  that one of the published `AP2_AUTO_UNFREEZE_FIX_SHAPES` covers
+  (e.g. missing `-r` on a directory `grep`, literal backticks
+  wrapping a shell bullet, bare `python` instead of `uv run python`,
+  bare-path bullet that should be `test -f <path>`), include a
+  structured `BriefingFix:` line in `summary` so the daemon's
+  auto-unfreeze sweep (TB-225) can apply the patch and re-dispatch
+  the task without operator-manual `ap2 unfreeze`. Canonical line
+  shape (parser is strict — `ap2._shared.parse_blocked_summary_fix_shape`):
+
+      BriefingFix: <shape> at <briefing_path>:<line>: <from> -> <to>
+
+  `<shape>` must name one of the published fix-shapes the operator
+  has trusted on the allowlist; the daemon verifies `<from>`
+  appears literally on `<briefing_path>:<line>` before patching, and
+  unknown shapes / line mismatches fall through to today's manual-
+  unfreeze path. See `skills/ap2-task/SKILL.md` § "Reporting failures
+  (`task_complete blocked` summaries)" for the four bootstrap shapes
+  with worked examples, and `ap2/howto.md`'s auto-unfreeze section
+  for the operator-side knobs / audit-event surface.
 - `failed`     — tried and could not make progress.
 
 ### Proposing recurring work (optional) — `cron_propose`

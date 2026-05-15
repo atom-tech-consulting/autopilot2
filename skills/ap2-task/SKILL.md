@@ -132,6 +132,100 @@ Briefly state:
 
 Do **not** edit `TASKS.md` or `CLAUDE.md` in the human's local clone — the sandbox is the source of truth for the board now.
 
+## Reporting failures (`task_complete blocked` summaries)
+
+When a task agent's verification fails on a briefing-shape regression
+the agent can identify in the briefing itself (misused shell flags,
+literal backticks, missing `-r`, a bare path with no `test -f`, a
+bare `python` invocation that should be `uv run python`, etc.), the
+agent should emit a structured `BriefingFix:` line as part of its
+`report_result(status="blocked", summary=...)` payload. The daemon's
+auto-unfreeze sweep (TB-225) parses the line, verifies the briefing-
+line literal match, patches the briefing via the operator-queue
+`update` op, and re-dispatches the task — all without operator-manual
+`ap2 unfreeze`, provided the named fix-shape is on the operator's
+`AP2_AUTO_UNFREEZE_FIX_SHAPES` allowlist (defaults unset → feature is
+opt-in; the env-knob string IS the trust contract).
+
+Canonical line shape (`ap2._shared.parse_blocked_summary_fix_shape`
+is strict — no regex-on-prose guessing, no inferring `from`/`to`
+from free text):
+
+```
+BriefingFix: <shape> at <briefing_path>:<line>: <from> -> <to>
+```
+
+- `<shape>` is a snake_case fix-shape token; the operator's
+  `AP2_AUTO_UNFREEZE_FIX_SHAPES` allowlist consults this name. Stick
+  to a published shape — the daemon refuses anything not on the
+  allowlist with `auto_unfreeze_skipped reason=shape_not_in_allowlist`.
+- `<briefing_path>` is project-relative (typically
+  `.cc-autopilot/tasks/<slug>.md`).
+- `<line>` is the 1-indexed line number where `<from>` literally
+  appears in the briefing; the daemon verifies the literal match
+  before patching (closes the operator-edit-during-failure data-race
+  window — a mismatch emits `auto_unfreeze_skipped
+  reason=briefing_mismatch` and leaves the task Frozen, fail-safe).
+- `<from>` and `<to>` are the literal substrings the daemon line-
+  replaces. The first ` -> ` (space-arrow-space) is the separator;
+  subsequent occurrences are part of `<to>`.
+
+Use this prefix only when the failure root cause is genuinely a
+briefing-shape regression that one of the published shapes covers.
+Free-text diagnoses without the prefix fall through to today's
+manual-unfreeze path identically; emitting a malformed `BriefingFix:`
+line is harmless (the parser returns None and the task stays Frozen
+until an operator intervenes), but it wastes the audit-trail slot.
+
+### Four bootstrap fix-shapes (worked examples)
+
+These four shapes are the canonical bootstrap set the auto-unfreeze
+sweep ships against (each names a pitfall catalogued in
+`ap2/ideation.default.md`'s `## Shell-bullet pitfalls to AVOID`
+section). The originating TB-N is the in-tree task where the shape
+first surfaced — if a future shape gets added, follow the same
+"one fenced example per shape, labelled with origin" pattern below.
+
+- **`grep_missing_r_on_dir`** (origin: TB-204). `grep -lE 'pattern'
+  <dir>/` returns nothing without `-r`; the verifier sees zero matches
+  and the bullet fails. Fix: add the `-r` recursive flag.
+
+  ```
+  BriefingFix: grep_missing_r_on_dir at .cc-autopilot/tasks/foo.md:23: grep -lE 'pattern' ap2/tests/ -> grep -rlE 'pattern' ap2/tests/
+  ```
+
+- **`literal_backtick_in_shell_bullet`** (origin: TB-207). A bullet
+  with literal backticks like `` `grep ... | wc -l` `` truncates at
+  the first backtick when the verifier slices the codespan out; the
+  remaining argv is malformed. Fix: drop the wrapping backticks —
+  the bullet body IS the command.
+
+  ```
+  BriefingFix: literal_backtick_in_shell_bullet at .cc-autopilot/tasks/foo.md:42: `grep -c 'foo' bar.py` -> grep -c 'foo' bar.py
+  ```
+
+- **`bare_python_to_uv_run`** (origin: TB-76). `python -c '...'`
+  exits 127 in the daemon environment (no `python` on `$PATH` outside
+  the project's `uv` venv). Fix: prefix the invocation with `uv run`.
+
+  ```
+  BriefingFix: bare_python_to_uv_run at .cc-autopilot/tasks/foo.md:55: python -c 'import ap2; print(ap2.__version__)' -> uv run python -c 'import ap2; print(ap2.__version__)'
+  ```
+
+- **`bare_path_to_test_f`** (origin: TB-76). A bullet whose body is
+  a bare path (e.g. `reports/foo.md`) tries to execute the file
+  (exit 126); the verifier reads this as "command failed" rather
+  than "file should exist." Fix: wrap in `test -f`.
+
+  ```
+  BriefingFix: bare_path_to_test_f at .cc-autopilot/tasks/foo.md:67: reports/foo.md -> test -f reports/foo.md
+  ```
+
+For the full operator-side knob set (per-task / per-day caps, audit
+event names, the trust-contract rationale for the allowlist) see
+`ap2/howto.md`'s `## Operator-in-the-loop relaxations` →
+auto-unfreeze (TB-225) section.
+
 ## Default section
 
 Backlog. Don't dump tasks straight into Ready — Ready means "briefing prepared", and your briefing is a *seed* (the daemon's prep step may still flesh out `## Design`, etc.). The ideation/reflector flow handles promotion.
