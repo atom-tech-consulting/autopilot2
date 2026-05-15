@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/axis-4-foundation-parse-goal-md-focus-li.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-15T17:30:39Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-14T23:26:19Z",
   "tb_id": "TB-226",
   "why_now": "without focus rotation, walk-away time is bounded by the\ntopmost focus's natural exhaustion point \u2014 when one focus's gaps are\naddressed, ideation has nothing valuable to propose until the operator\nmanually rotates `goal.md`, forcing intervention at exactly the moment\nthe loop should be most productive. Axes 1-3 just shipped (TB-223 /\nTB-224 / TB-225); the focus arc is currently sized for hours of\nwalk-away, not weeks. Axis 4 is the gating delivery on Done-when-1's\n\"walk away for a week without intervention\" promise scaling from\ndays-to-weeks to weeks-to-months."

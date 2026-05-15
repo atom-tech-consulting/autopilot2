@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/teach-briefingfix-prefix-convention-in-s.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-15T17:30:39Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-14T23:28:19Z",
   "tb_id": "TB-229",
   "why_now": "this is the same shape as TB-219 \u2192 TB-221 (verifier\nlearned to classify `Prose:` correctly, but until TB-221 taught\nthe prompt the convention the override stayed cold). Without\nupstream teaching, TB-225's parser + sweep + allowlist machinery\ncannot fire \u2014 axis-2's delete-test (\"if this work didn't ship,\nevery briefing-shape regression cascades into operator-manual\nunfreeze; with it, the loop self-heals on the recurring class\")\nfails because no `BriefingFix:` line ever lands in a blocked\nsummary for the sweep to pick up."

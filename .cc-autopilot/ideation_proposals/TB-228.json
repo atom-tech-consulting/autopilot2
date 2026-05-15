@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/status-report-cron-digest-block-summariz.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-15T17:30:39Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-14T23:27:40Z",
   "tb_id": "TB-228",
   "why_now": "walk away for a week without intervention (goal.md L28-29\nDone-when bullet 1) is the mission's headline promise, and the\nstatus-report cron is the surface that proves whether the promise\nheld while the operator was gone. Without an auto-approve digest in\nthat post, returning operators have to alt-tab to `ap2 status` or\n`ap2 logs` to learn whether the loop ran cleanly \u2014 the\nstatus-report is the WALK-AWAY summary, so it must summarize\nexactly the surfaces the operator gave up touch on."

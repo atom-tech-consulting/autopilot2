@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/surface-auto-approve-auto-unfreeze-loop.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-15T17:30:39Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-14T23:27:01Z",
   "tb_id": "TB-227",
   "why_now": "without this surface the walk-away promise (goal.md L28-29\n\"walk away for a week without intervention\") stays fictional even\nwith axes 1-3 shipped \u2014 an operator who returns to a halted loop\nwill see \"0A / 0R / 0B\" and conclude the daemon idled correctly,\nwhen in reality auto-approve is paused waiting for an ack that\nnever came because they never saw the pause. This closes the\nobservability gap between TB-223/TB-224/TB-225's state machinery\nand the operator's first-touch surface."
