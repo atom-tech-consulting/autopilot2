@@ -599,3 +599,9 @@
 - **Summary:** Shipped TB-226 axis-4 focus rotation: new ap2/goal.py parser for multi-`## Current focus:` headings + Done-when sub-blocks; runtime pointer state at .cc-autopilot/focus_pointer.json (fenced + gitignored); three env knobs (AP2_FOCUS_ADVANCE_EMPTY_CYCLES with [1,20] clamp, AP2_FOCUS_AUTO_ADVANCE_DISABLED kill-switch, AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT defaulting to medium); daemon._maybe_advance_focus as _tick step 0.6 emitting focus_advanced + roadmap_complete; dispatch-path halt via goal.roadmap_exhausted that operator clears via `ap2 ack roadmap_complete` (token scan in events.jsonl + drain-side pointer bump); howto.md `### Focus rotation (axis 4)` section + events.py registry entries + architecture.md state-files row. Test count 1421 → 1457, all green.
 - **Files:** ap2/goal.py, ap2/tests/test_tb226_focus_rotation.py, ap2/daemon.py, ap2/events.py, ap2/tools.py, ap2/init.py, ap2/prompts.py, ap2/howto.md, ap2/architecture.md, ap2/tests/test_prompts.py
 - **Tests:** pass
+
+## [2026-05-15] TB-227: Surface auto-approve/auto-unfreeze loop state in `ap2 status` (text + JSON) and web home
+- **Commit:** `296f93ab`
+- **Summary:** Added ap2/automation_status.collect_auto_approve_state aggregator (pure events.jsonl tail-scan, 11-key dict covering enabled/paused/freezes/threshold/caps/window-tokens/24h-counters/pause_reason); wired it into `ap2 status` text branch (omit-on-empty `auto-approve:` line, healthy vs PAUSED rendering with the ack verb) and `--json` branch (`auto_approve` key always present); added an Automation card to the web home page with green/red tinting per TB-148 palette, drill-down `/events?type=...` links, and a hand-rolled SVG sparkline. 27 new tests cover helper contract, CLI rendering, JSON shape, and web rendering. Full suite green (1484 passed).
+- **Files:** ap2/automation_status.py, ap2/tests/test_tb227_automation_status.py, ap2/cli.py, ap2/web.py
+- **Tests:** pass
