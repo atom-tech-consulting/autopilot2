@@ -1,19 +1,18 @@
 # Ideation State
 
-_Last updated: 2026-05-15T01:28:56Z by ideation cron_
+_Last updated: 2026-05-15T03:31:00Z by ideation cron_
 
 ## Mission alignment
 
-The 22:30Z–23:13Z arc closed axes 1–3 of the "end-to-end automation"
-focus (TB-223 → TB-224 → TB-225, plus pre-pivot residuals TB-221 /
-TB-222). The 23:26Z–23:28Z ideation cycle then proposed TB-226 →
-TB-229 against the four gaps the prior assessment identified (axis-4
-foundation, auto-approve/auto-unfreeze visibility, status-report
-digest, `BriefingFix:` prompt teaching). All 4 are still in Backlog
-with `@blocked:review` (per board snapshot 0A/0R/4B/0P at
-2026-05-15T01:28:56Z); no operator approve has landed in the ~2-hour
-gap since they were queued (operator_log L142 last entry is the
-22:25Z TB-223 update). 3 most recent Completes considered:
+No state change since the 01:28Z cycle: board snapshot is still
+0A/0R/4B/0P with TB-226 / TB-227 / TB-228 / TB-229 in `@blocked:review`
+(verified via `ap2 status` at run start; review list matches). The
+operator approve queue last moved at 2026-05-14T22:25Z (operator_log
+last entry: TB-223 update); the four proposals queued at 23:26–28Z
+remain pending across the ~5h gap, and no `verification_failed` /
+`retry_exhausted` / `verification_partial` / `cron_proposed` events
+appear in the recent-events block. 3 most recent Completes considered
+(unchanged from prior cycle):
 
 - TB-225 (`b8af9b5`, 2026-05-14T22:47Z) — axis-2 `_maybe_auto_unfreeze`
   sweep + `parse_blocked_summary_fix_shape` + 3 env knobs.
@@ -22,11 +21,11 @@ gap since they were queued (operator_log L142 last entry is the
 - TB-223 (`a46c461`, 2026-05-14T22:11Z) — axis-1 `AP2_AUTO_APPROVE`
   knob + `auto_approved` / `auto_approve_paused` events.
 
-The limiting factor stays exactly where the prior cycle left it:
+The limiting factor stays exactly where the 01:28Z cycle left it:
 axes 1–3 lack operator-facing observability, axis 4 is unstarted,
-and axis-2 emitter teaching hasn't landed. All four are in flight as
+axis-2 emitter teaching hasn't landed. All four are in flight as
 pending-review proposals; this cycle's job is to give the operator
-ranking room to review them rather than stack a 5th proposal on top.
+ranking room to engage them rather than stack a 5th proposal on top.
 
 ## Current focus assessment
 
@@ -43,20 +42,19 @@ ranking room to review them rather than stack a 5th proposal on top.
     - Axis 4 (Multi-focus sequential execution): NOTHING shipped;
       TB-226 foundation pending review.
   - Gaps:
-    (1) **Axis 4 foundation not yet implemented** — TB-226 queued at
-        2026-05-14T23:26Z covers goal.md L115-138 (parser + pointer
-        + advance heuristic + `focus_advanced` / `roadmap_complete`
-        events + `ap2 ack roadmap_complete`); pending operator
-        approve.
+    (1) **Axis 4 foundation not yet implemented** — TB-226 queued
+        2026-05-14T23:26Z covers goal.md L115-138 (parser + pointer +
+        advance heuristic + `focus_advanced` / `roadmap_complete`
+        events + `ap2 ack roadmap_complete`); pending operator approve.
     (2) **Auto-approve/auto-unfreeze loop has zero operator-facing
-        status surface** — TB-227 queued at 2026-05-14T23:27Z covers
-        the `ap2 status` (text+JSON) + web home gap; pending operator
+        status surface** — TB-227 queued 2026-05-14T23:27Z covers
+        `ap2 status` (text+JSON) + web home gap; pending operator
         approve.
-    (3) **Status-report cron lacks axis 1/2/3 digest** — TB-228
-        queued at 2026-05-14T23:27Z covers the walk-away
-        Mattermost-return surface; pending operator approve.
+    (3) **Status-report cron lacks axis 1/2/3 digest** — TB-228 queued
+        2026-05-14T23:27Z covers the walk-away Mattermost-return
+        surface; pending operator approve.
     (4) **`BriefingFix:` emitter unprompted; auto-unfreeze stays
-        cold** — TB-229 queued at 2026-05-14T23:28Z covers
+        cold** — TB-229 queued 2026-05-14T23:28Z covers
         `skills/ap2-task/SKILL.md` + per-task agent prompt teaching;
         pending operator approve.
   - Status: `in-progress`
@@ -71,13 +69,14 @@ ranked candidate this cycle.
 
 ## Considered & deferred this cycle
 
-- **Any 5th proposal stacked on top of TB-226–229** — Backlog is at
-  4 with all items in `@blocked:review`. AP2_IDEATION_TRIGGER_TASK_COUNT
-  default 3 (TB-160); current depth (4) is at-or-above threshold.
+- **Any 5th proposal stacked on top of TB-226–229** — Backlog at 4
+  with all items in `@blocked:review`; AP2_IDEATION_TRIGGER_TASK_COUNT
+  default 3 (TB-160), current depth (4) is at-or-above threshold.
   Slot=1 leaves room for ONE high-signal addition but no new gap
-  outranks the four already queued; piling on without operator
-  signal risks reject-pattern accumulation. Defer until at least one
-  approve or reject lands.
+  outranks the four already queued; piling on without operator signal
+  risks reject-pattern accumulation. Defer until at least one approve
+  or reject lands. (Carried unchanged from 01:28Z cycle — no operator
+  action in the interim.)
 - **Wack-a-mole shell-bullet linting (TB-172-shape)** — n=4
   authoritative reject (operator_log L80, 2026-05-05). Auto-unfreeze
   + TB-219 classifier generalize the recurring class structurally;
@@ -92,11 +91,12 @@ ranked candidate this cycle.
 
 ## Cycle observations
 
-- Operator approve queue has a ~2-hour outstanding gap (last action
-  22:25Z TB-223 update; 4 proposals queued 23:26Z–23:28Z). Not a
-  problem signal — overnight cadence is expected — but informs the
-  no-new-proposal call this cycle: a 5th stacked proposal compounds
-  approve-queue depth without compounding focus coverage.
+- Operator approve queue gap is now ~5h (last action 22:25Z TB-223
+  update; 4 proposals queued 23:26–28Z). Still inside the expected
+  overnight cadence window; informs the no-new-proposal call this
+  cycle exactly as in 01:28Z. If the gap stretches past a normal
+  business-day window without engagement, the right next move is a
+  status-surface check, not a 5th proposal.
 - Failure-review scan turned up nothing actionable: no
   `verification_failed` / `retry_exhausted` / `verification_partial`
   events in the prompt's events block; Frozen set is TB-119 /
