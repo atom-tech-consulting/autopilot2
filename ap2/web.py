@@ -530,6 +530,36 @@ _CSS = """<style>
   svg.cost-chart, svg.cache-chart, svg.model-split {
     display: block; max-width: 100%; height: auto;
   }
+  /* TB-227: auto-approve / auto-unfreeze loop state card on `/`.
+     Mirrors the `.ideation-status` palette (TB-197) so the home page's
+     two automation-cards (ideation gate-state + auto-approve state)
+     read as one visual cluster. Two tint variants:
+       healthy — green:  knob on, no halt, 24h counters non-zero
+       paused  — red:    one of the four halt conditions tripped;
+                         border highlights the urgency
+     Omitted entirely (server-side, not CSS-hidden) when the knob is
+     off AND all 24h counters are zero — pre-opt-in projects don't
+     see a perpetual `auto-approve: off` card. */
+  .automation-status { padding: 0.5rem 0.8rem; border-radius: 4px;
+                       margin: 0.5rem 0; font-size: 13px; line-height: 1.5;
+                       background: #f7f7f7; border-left: 4px solid #888 }
+  .automation-status.is-healthy { background: #f0fff0;
+                                  border-left-color: #2a8 }
+  .automation-status.is-paused  { background: #fff7f7;
+                                  border-left-color: #c33 }
+  .automation-status .as-header { font-weight: 600; margin-right: 0.4rem }
+  .automation-status.is-healthy .as-header { color: #1a6f2a }
+  .automation-status.is-paused  .as-header { color: #8a1818 }
+  .automation-status .as-body { color: #333 }
+  .automation-status .as-meta { color: #888; font-size: 12px;
+                                font-family: ui-monospace, monospace;
+                                margin-left: 0.4rem; display: block;
+                                margin-top: 0.2rem }
+  .automation-status .as-sparkline { display: inline-block;
+                                     margin-left: 0.4rem;
+                                     vertical-align: middle }
+  .automation-status a { color: inherit; text-decoration: underline;
+                         text-decoration-color: rgba(0,0,0,0.2) }
 </style>"""
 
 
@@ -1403,6 +1433,175 @@ def _render_ideation_status_block(cfg: Config) -> str:
         '<span class="is-body">'
         'eligible — will fire on next tick (≤30s)'
         '</span>'
+        '</div>'
+    )
+
+
+# ------------- TB-227: auto-approve / auto-unfreeze state card on / -------------
+
+
+def _hourly_sparkline_buckets(
+    cfg: Config, event_type: str, *, now: _dt.datetime | None = None,
+) -> list[int]:
+    """24 hourly counts for `event_type` ending at `now` (default UTC
+    now). Bucket index 0 = oldest hour (23h ago), 23 = newest hour
+    (most recent).
+
+    Pure events.jsonl tail-scan; no I/O beyond the 2000-event tail
+    (matches the aggregator's read window). Events outside the 24h
+    window or with malformed `ts` are dropped silently.
+    """
+    if now is None:
+        now = _dt.datetime.now(_dt.timezone.utc)
+    now_s = now.timestamp()
+    buckets = [0] * 24
+    if not cfg.events_file.exists():
+        return buckets
+    tail = ev_mod.tail(cfg.events_file, 2000)
+    for e in tail:
+        if e.get("type") != event_type:
+            continue
+        ts = e.get("ts")
+        if not isinstance(ts, str):
+            continue
+        try:
+            s = ts.replace("Z", "+00:00") if ts.endswith("Z") else ts
+            ts_s = _dt.datetime.fromisoformat(s).timestamp()
+        except (ValueError, TypeError):
+            continue
+        delta_h = (now_s - ts_s) / 3600.0
+        if delta_h < 0 or delta_h >= 24:
+            continue
+        # Oldest hour (23h ago) → bucket 0; newest hour (0h ago) → bucket 23.
+        idx = 23 - int(delta_h)
+        if 0 <= idx < 24:
+            buckets[idx] += 1
+    return buckets
+
+
+def _render_sparkline_svg(
+    buckets: list[int], *, color: str, width: int = 80, height: int = 16,
+) -> str:
+    """Hand-rolled D3-free `<polyline>` sparkline. Returns the empty
+    string when every bucket is zero so the home page doesn't get a
+    flat line of noise — matches the omit-on-empty rendering shape of
+    `_render_operator_decisions` and friends.
+
+    The SVG coordinate system has y=0 at the top, so `peak - v` flips
+    the visual so larger counts sit higher. `peak or 1` guards the
+    divide when every bucket is zero (already short-circuited above
+    but defensively kept for the assertion-style read).
+    """
+    if not any(buckets):
+        return ""
+    peak = max(buckets) or 1
+    n = len(buckets)
+    if n < 2:
+        return ""
+    step = width / (n - 1)
+    pts = " ".join(
+        f"{i * step:.1f},{(peak - v) / peak * height:.1f}"
+        for i, v in enumerate(buckets)
+    )
+    return (
+        f'<svg class="as-sparkline" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" preserveAspectRatio="none">'
+        f'<polyline fill="none" stroke="{color}" stroke-width="1.5" '
+        f'points="{pts}"/>'
+        '</svg>'
+    )
+
+
+def _render_automation_card(cfg: Config) -> str:
+    """Render the auto-approve / auto-unfreeze state card for the home
+    page (TB-227).
+
+    Always rendered when `AP2_AUTO_APPROVE` is truthy OR any 24h counter
+    is non-zero; omitted entirely on fresh / pre-opt-in projects so the
+    UI never grows a perpetual "auto-approve: off, 0 / 0 / 0" line.
+
+    Two tint variants:
+      - `is-paused`  — red border, urgent — at least one halt
+                       condition (TB-223 freeze / TB-224 cap / task_error)
+                       is in effect since its respective ack.
+      - `is-healthy` — green border — knob on, no halt; counters
+                       summarized + sparkline.
+
+    Counter rows link to `/events?type=auto_approved` etc. so an
+    operator can drill into individual events without leaving the home
+    page.
+    """
+    from . import automation_status
+
+    state = automation_status.collect_auto_approve_state(cfg)
+
+    enabled = state["auto_approve_enabled"]
+    counters_total = (
+        state["auto_approved_count_24h"]
+        + state["auto_unfreeze_applied_count_24h"]
+        + state["auto_unfreeze_skipped_count_24h"]
+    )
+    if not enabled and counters_total == 0:
+        return ""
+
+    if state["auto_approve_paused"]:
+        klass = "automation-status is-paused"
+        header = "Auto-approve — PAUSED"
+        reason = state["pause_reason"] or "unknown"
+        body = (
+            f'reason={html.escape(str(reason))}; '
+            f'{state["consecutive_freezes"]} consecutive freezes / '
+            f'threshold {state["freeze_threshold"]} — '
+            '<code>ap2 ack auto_approve_window_resume</code>'
+        )
+    else:
+        klass = "automation-status is-healthy"
+        header = "Auto-approve"
+        body = "enabled — circuit healthy"
+
+    approved_buckets = _hourly_sparkline_buckets(cfg, "auto_approved")
+    unfrozen_buckets = _hourly_sparkline_buckets(cfg, "auto_unfreeze_applied")
+    approved_spark = _render_sparkline_svg(approved_buckets, color="#1a6f2a")
+    unfrozen_spark = _render_sparkline_svg(unfrozen_buckets, color="#3a6db5")
+
+    window_cap = state["window_token_cap"]
+    window_used = state["window_tokens_used"]
+    if window_cap is not None:
+        cap_line = (
+            f'window tokens: {window_used:,} / {window_cap:,}'
+        )
+    elif window_used:
+        cap_line = f'window tokens: {window_used:,} (cap unset)'
+    else:
+        cap_line = ""
+
+    rows: list[str] = [
+        f'<a href="/events?type=auto_approved">'
+        f'{state["auto_approved_count_24h"]} auto-approved (24h)</a>'
+        f'{approved_spark}',
+        f'<a href="/events?type=auto_unfreeze_applied">'
+        f'{state["auto_unfreeze_applied_count_24h"]} auto-unfrozen (24h)</a>'
+        f'{unfrozen_spark}',
+    ]
+    if state["auto_unfreeze_skipped_count_24h"]:
+        rows.append(
+            f'<a href="/events?type=auto_unfreeze_skipped">'
+            f'{state["auto_unfreeze_skipped_count_24h"]} unfreeze skipped (24h)</a>'
+        )
+    if cap_line:
+        rows.append(html.escape(cap_line))
+
+    meta = (
+        '<span class="as-meta">'
+        + ' · '.join(rows)
+        + '</span>'
+    )
+
+    return (
+        f'<div class="{klass}">'
+        f'<span class="as-header">{html.escape(header)}</span>'
+        f'<span class="as-body">{body}</span>'
+        f'{meta}'
         '</div>'
     )
 
@@ -2304,6 +2503,12 @@ def _render_home(cfg: Config) -> str:
     # table (which is the historical record, lower priority than the
     # forward-looking gate-state read).
     ideation_status_html = _render_ideation_status_block(cfg)
+    # TB-227: auto-approve / auto-unfreeze loop state card. Sits
+    # alongside the ideation gate-state card (visual sibling — both
+    # are "what's the daemon's automation doing right now?" surfaces).
+    # Omitted entirely on pre-opt-in projects (knob off + no 24h
+    # activity); see `_render_automation_card` for the contract.
+    automation_html = _render_automation_card(cfg)
 
     body = (
         f"<h1>ap2 — {html.escape(cfg.project_root.name)}</h1>"
@@ -2321,6 +2526,7 @@ def _render_home(cfg: Config) -> str:
         f"{operator_decisions_html}"
         f"{pending_html}"
         f"{ideation_status_html}"
+        f"{automation_html}"
         f'<h2>events <span class="meta">— last 30, newest first '
         f'(<a href="/events">all</a>)</span></h2>'
         f"{_events_table(evts, cfg=cfg)}"

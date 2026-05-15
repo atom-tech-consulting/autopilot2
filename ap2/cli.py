@@ -182,6 +182,16 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # grow zero-noise.
     classifications_30d = tools.classifications_last_30d_by_verdict(cfg)
     classifications_30d_total = sum(classifications_30d.values())
+    # TB-227: auto-approve / auto-unfreeze loop state (axes 1-3 of the
+    # end-to-end automation focus). Always computed (the helper handles
+    # missing events file / unset knobs cleanly); the text rendering
+    # below omits the line entirely when the knob is off AND no 24h
+    # activity has accumulated, so fresh projects don't grow a zero-line.
+    # JSON consumers always see the full `auto_approve` key for parser
+    # stability.
+    from . import automation_status
+
+    auto_approve_state = automation_status.collect_auto_approve_state(cfg)
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -237,6 +247,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # full shape regardless of activity. The text branch below
             # omits the line entirely when total is 0.
             "classifications_last_30d_by_verdict": classifications_30d,
+            # TB-227: auto-approve / auto-unfreeze loop state. Keys are
+            # always present regardless of knob-state (machine consumers
+            # get a stable shape); see `automation_status.collect_auto_approve_state`
+            # for the contract.
+            "auto_approve": auto_approve_state,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -341,6 +356,33 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             f"decisions needed ({len(operator_decisions)}): "
             + "; ".join(rendered)
         )
+    # TB-227: surface the auto-approve / auto-unfreeze loop state. Two
+    # rendering shapes — healthy (knob on, no halt) vs. paused (halt
+    # active, ack verb shown so the action is one readable nudge away,
+    # mirroring TB-151's pending-review line shape). Omitted entirely
+    # when the knob is off AND all 24h counters are zero so fresh /
+    # pre-opt-in projects don't grow a perpetual zero-line (same shape
+    # as TB-189's classifications line).
+    a = auto_approve_state
+    _has_24h_activity = (
+        a["auto_approved_count_24h"]
+        + a["auto_unfreeze_applied_count_24h"]
+        + a["auto_unfreeze_skipped_count_24h"]
+    ) > 0
+    if a["auto_approve_enabled"] or _has_24h_activity:
+        if a["auto_approve_paused"]:
+            print(
+                f"auto-approve: PAUSED (reason={a['pause_reason']}; "
+                f"{a['consecutive_freezes']} consecutive freezes / "
+                f"threshold {a['freeze_threshold']}) — "
+                f"`ap2 ack auto_approve_window_resume`"
+            )
+        else:
+            print(
+                f"auto-approve: enabled (24h: "
+                f"{a['auto_approved_count_24h']} approved, "
+                f"{a['auto_unfreeze_applied_count_24h']} auto-unfrozen)"
+            )
     nxt = board.next_ready()
     if nxt:
         print(f"next:     {nxt.id} {nxt.title}")
