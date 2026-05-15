@@ -593,3 +593,9 @@
 - **Summary:** Previously committed in a46c461 — full TB-223 work (3 env knobs + auto_approved/auto_approve_paused events + howto section + 13 behavioral pinning tests) already on HEAD's ancestor chain; prior verification failure was a now-removed informational `.cc-autopilot/env` bullet in the briefing. Re-verified: pytest 1421 passed, all 6 grep bullets exit 0, 2 test files reference the knob, all 5 behavioral cases present, howto section names all three knobs with defaults + layered-safety framing. TB-224 already builds on this commit.
 - **Files:** ap2/ideation.py, ap2/daemon.py, ap2/tools.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb223_auto_approve.py
 - **Tests:** pass
+
+## [2026-05-15] TB-226: Axis 4 foundation: parse goal.md focus list, pointer state, advance heuristic, roadmap_complete halt
+- **Commit:** `bc4885a`
+- **Summary:** Shipped TB-226 axis-4 focus rotation: new ap2/goal.py parser for multi-`## Current focus:` headings + Done-when sub-blocks; runtime pointer state at .cc-autopilot/focus_pointer.json (fenced + gitignored); three env knobs (AP2_FOCUS_ADVANCE_EMPTY_CYCLES with [1,20] clamp, AP2_FOCUS_AUTO_ADVANCE_DISABLED kill-switch, AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT defaulting to medium); daemon._maybe_advance_focus as _tick step 0.6 emitting focus_advanced + roadmap_complete; dispatch-path halt via goal.roadmap_exhausted that operator clears via `ap2 ack roadmap_complete` (token scan in events.jsonl + drain-side pointer bump); howto.md `### Focus rotation (axis 4)` section + events.py registry entries + architecture.md state-files row. Test count 1421 → 1457, all green.
+- **Files:** ap2/goal.py, ap2/tests/test_tb226_focus_rotation.py, ap2/daemon.py, ap2/events.py, ap2/tools.py, ap2/init.py, ap2/prompts.py, ap2/howto.md, ap2/architecture.md, ap2/tests/test_prompts.py
+- **Tests:** pass
