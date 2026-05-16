@@ -1,22 +1,20 @@
 # Ideation State
 
-_Last updated: 2026-05-16T12:15:30Z by ideation cron_
+_Last updated: 2026-05-16T14:17:30Z by ideation cron_
 
 ## Mission alignment
 
 Cycle entry: board 0A/0R/3B/0P/112C/3F (per prompt header
-2026-05-16T12:15:17Z; events block shows no terminal events between
-prior cycle 10:14Z and now). No completes have shipped since the
-prior ideation cycle — the last terminal event remains TB-239's
-recovery to `complete` at 07:01:39Z. The 3 prior-cycle proposals
-(TB-240/241/242) are still in Backlog with `@blocked:review`,
-operator_log.md L159 (last entry 2026-05-16T05:48:30Z) shows no
-operator action since. This is the **2nd consecutive zero-completes
-ideation cycle** — the empirical confirmation of last cycle's
-exhaustion-watch prediction (prior `## Cycle observations` L105-110).
+2026-05-16T14:17:00Z). No terminal events in the events block since
+prior cycle 12:15Z; the last complete remains TB-239's recovery at
+07:01:39Z. Operator_log.md L159 (last entry 2026-05-16T05:48:30Z)
+shows no operator action since. This is the **3rd consecutive
+zero-completes ideation cycle** (10:14Z → 12:15Z → 14:17Z). The 3
+prior-cycle proposals (TB-240/241/242) remain in Backlog with
+`@blocked:review`, untouched since they landed at 08:12Z.
 
-Recent Completes considered (unchanged from prior cycle — re-cited
-because no new completes shipped):
+Recent Completes considered (unchanged from prior two cycles —
+re-cited because no new completes shipped):
 
 - TB-239 (`ccfcff1`, 07:01:39Z) — axis-2 doctor floor.
 - TB-238 (`d861d83`, 06:39:03Z) — automation_status collector +
@@ -38,26 +36,27 @@ because no new completes shipped):
       (dry-run readiness in collector + cron digest).
     - Adjacent gates: TB-235 (briefing dependency-coherence) +
       TB-236 (prose-judge tighten).
-  - Gaps (unchanged from prior cycle — no fresh gaps because no
+  - Gaps (unchanged from prior two cycles — no fresh gaps because no
     completes shipped between cycles; all three remain addressed by
     pending-review Backlog items):
     (1) **Briefing file-path-coherence** — TB-239's
         wrong-but-plausible-path bullet cost ~$2 + cross-task rename.
-        Addressed by **TB-240** (pending review).
+        Addressed by **TB-240** (pending review, 6h+ stale).
     (2) **Dry-run readiness surface parity** — TB-238 extended the
         collector + cron digest but not `ap2 status` / web home.
-        Addressed by **TB-241** (pending review).
+        Addressed by **TB-241** (pending review, 6h+ stale).
     (3) **Axis-4 focus-pointer current-state surface** — TB-226/237
         shipped machinery, no `ap2 status` / web home rendering.
-        Addressed by **TB-242** (pending review).
+        Addressed by **TB-242** (pending review, 6h+ stale).
   - Status: `in-progress`
   - Reasoning: All four axes have foundation + on-ramp + safety-floor
     + observability shipped. The three surface-asymmetry follow-ups
-    are queued and awaiting operator approval. Two consecutive 0-new-
-    gap cycles strengthens the exhaustion signal but cannot confirm
+    are queued. 3 consecutive 0-new-gap cycles strengthens the
+    exhaustion signal but per the criterion proposed last cycle
+    (still unanswered by operator), exhaustion cannot be confirmed
     until the pending-review queue clears AND a subsequent gap-search
-    against fresh completes also surfaces nothing — until then
-    status stays `in-progress`, not `exhausted-needs-operator`.
+    against fresh completes also surfaces nothing. Until then status
+    stays `in-progress`, not `exhausted-needs-operator`.
 
 ## Non-goal risk check
 
@@ -67,17 +66,19 @@ end-to-end automation per prior-cycle non-goal scan.
 ## Considered & deferred this cycle
 
 - **Add proposals anyway to fill the 2 advertised slots** —
-  rejected (same as prior cycle). The 3 pending-review items already
-  address every gap this cycle's analysis surfaces; manufacturing
-  to fill slots would either duplicate scope or scope-creep into
-  non-gap polish (the failure mode goal.md L61-70's delete-test
-  explicitly rejects). Slot count is a ceiling, not a target.
+  rejected (same as prior two cycles). The 3 pending-review items
+  already address every gap this cycle's analysis surfaces;
+  manufacturing to fill slots would either duplicate scope or
+  scope-creep into non-gap polish (the failure mode goal.md L61-70's
+  delete-test explicitly rejects). Slot count is a ceiling, not a
+  target.
 - **Verify-time "diff exceeds briefing scope" judge** — same defer
-  as prior cycle: TB-240's upstream prevention is cheaper; revisit
-  only if rename-shape recurs post-TB-240.
+  as prior two cycles: TB-240's upstream prevention is cheaper;
+  revisit only if rename-shape recurs post-TB-240.
 - **Cross-axis 4-way e2e walk-away test** (axes 1+2+3+4 in concert) —
-  defer until TB-240/241/242 land; without axis-4 visibility (TB-242)
-  the in-concert test's signal is hard for an operator to interpret.
+  defer until TB-240/241/242 land; without axis-4 visibility
+  (TB-242) the in-concert test's signal is hard for an operator to
+  interpret.
 - **`ap2 doctor` "walk-away readiness" composite section** — defer
   until TB-241 + TB-242 land; the doctor would just re-render what
   those tasks expose in `ap2 status`. Premature aggregation.
@@ -97,36 +98,32 @@ end-to-end automation per prior-cycle non-goal scan.
 
 ## Cycle observations
 
-- Two consecutive zero-completes ideation cycles (10:14Z + 12:15Z)
-  with zero new gaps surfaced confirms last cycle's exhaustion-watch
-  prediction. Carried because it informs THIS cycle's "propose 0"
-  decision AND grounds the new Decisions-needed entry below: if a
-  3rd consecutive 0-gap cycle ticks AFTER the pending-review queue
-  clears, that's the formal signal to advance status to
-  `exhausted-needs-operator` (today it stays `in-progress` because
-  exhaustion can't be verified while the queue is gated).
-
-(Prior cycle's 2nd bullet — "operator-review-loop is the binding
-constraint, ~37min gap from queue to next ideation tick" — dropped
-this cycle. Tracking cadence between consecutive zero-completes
-cycles is exactly the recurring "no operator activity" status-
-reporting pattern the discipline prohibits; no operator action is
-unblocked by the observation, and it adds nothing to this cycle's
-proposal/no-proposal verdict.)
+- Three consecutive zero-completes ideation cycles (10:14Z + 12:15Z
+  + 14:17Z) with zero new gaps surfaced AND zero operator
+  approve/reject on the pending-review queue between cycles.
+  Carried-with-re-justification because (a) it informs THIS cycle's
+  "propose 0" decision and (b) it sharpens the unblock-condition on
+  the Decisions-needed entry below — the criterion question is now
+  more pressing as the cron continues to tick against a static
+  queue, not less.
 
 ## Decisions needed from operator
 
-- Decision needed: After 2 consecutive ideation cycles with 0 new
-  gaps surfaced against end-to-end automation, what criterion
-  should ideation use to flip the focus status to
-  `exhausted-needs-operator`? Preference: (a) once the pending-review
-  queue clears AND one more 0-gap cycle ticks against fresh completes,
+- Decision needed: After 3 consecutive ideation cycles with 0 new
+  gaps surfaced against end-to-end automation AND zero operator
+  movement on the pending-review queue (TB-240/241/242 all 6h+
+  stale), what criterion should ideation use to flip the focus
+  status to `exhausted-needs-operator`? Re-articulated from prior
+  cycle (preference (a) unchanged): once the pending-review queue
+  clears AND one more 0-gap cycle ticks against fresh completes,
   treat that as exhaustion signal so ideation flags it next cycle
-  and the operator can extend goal.md's `## Current focus` block via
-  `ap2 update-goal`, or (b) different threshold — name it. Engaging
-  fixes the exhaustion-detection criterion ideation applies in
-  future cycles (today the threshold is implicit; explicit is
-  cheaper than re-litigating it each cycle as the pattern develops).
+  and the operator can extend goal.md's `## Current focus` block
+  via `ap2 update-goal`. Engaging fixes the exhaustion-detection
+  criterion ideation applies in future cycles AND unblocks the queue
+  in one motion (approve OR reject TB-240/241/242 → next-cycle gap
+  search runs against fresh completes; today the threshold is
+  implicit, queue is static, and the cron will keep ticking 0-gap
+  indefinitely).
 
 ## Proposals this cycle
 
