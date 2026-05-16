@@ -1512,6 +1512,75 @@ def _render_sparkline_svg(
     )
 
 
+def _render_focus_card(cfg: Config) -> str:
+    """Render the axis-4 focus-rotation state card for the home page
+    (TB-242).
+
+    Renders the active focus title + `N of M` position above the
+    automation card so an operator returning after walk-away can
+    answer "what focus am I on, and how many remain?" without
+    leaving the home page. Three shapes (mirrors the
+    `cmd_status` text branch):
+
+      - halt state (pointer past last focus, no operator ack since
+        the most recent `roadmap_complete` event) → red-tinted
+        `is-paused` card with the `ap2 ack roadmap_complete` resume
+        verb rendered as `<code>`.
+      - multi-focus → green-tinted `is-healthy` card with
+        `<title> (<idx+1> of <total>)`.
+      - single-focus → green-tinted `is-healthy` card with `<title>`
+        (no `(1 of 1)` suffix — single-focus projects don't need a
+        position counter).
+
+    Omitted entirely (empty string) when goal.md is missing or has
+    zero `## Current focus:` headings (fresh / pre-pivot projects),
+    so the default-off home stays byte-identical to pre-TB-242.
+
+    Reuses the `automation-status` CSS classes so the visual styling
+    is consistent with the sibling automation card directly below
+    it — the operator reads them as one cluster of "what is the
+    daemon's automation doing right now?" state.
+
+    Reads `goal.read_focus_list(cfg)`, `goal.active_focus(cfg)`, and
+    `focus_pointer.json` (via `goal.load_pointer`) — no new state
+    files, no daemon-side mutation. The halt branch reads
+    `goal.roadmap_exhausted` which itself walks the events tail for
+    the most recent `roadmap_complete` / `operator_ack` pair.
+    """
+    from . import goal as _goal
+
+    foci = _goal.read_focus_list(cfg)
+    if not foci:
+        return ""
+    focus_pointer = _goal.load_pointer(cfg)
+    if _goal.roadmap_exhausted(cfg, foci):
+        klass = "automation-status is-paused"
+        header = "Focus — ROADMAP_COMPLETE"
+        body = (
+            "all foci exhausted — "
+            "<code>ap2 ack roadmap_complete</code> to resume"
+        )
+    else:
+        klass = "automation-status is-healthy"
+        header = "Focus"
+        item = _goal.active_focus(cfg, foci)
+        title = item.title if item else ""
+        if len(foci) > 1:
+            idx_display = focus_pointer["active_index"] + 1
+            body = (
+                f"{html.escape(title)} "
+                f"({idx_display} of {len(foci)})"
+            )
+        else:
+            body = html.escape(title)
+    return (
+        f'<div class="{klass}">'
+        f'<span class="as-header">{html.escape(header)}</span>'
+        f'<span class="as-body">{body}</span>'
+        '</div>'
+    )
+
+
 def _render_automation_card(cfg: Config) -> str:
     """Render the auto-approve / auto-unfreeze state card for the home
     page (TB-227).
@@ -2546,6 +2615,14 @@ def _render_home(cfg: Config) -> str:
     # table (which is the historical record, lower priority than the
     # forward-looking gate-state read).
     ideation_status_html = _render_ideation_status_block(cfg)
+    # TB-242: axis-4 focus-rotation card. Sits directly above the
+    # automation card — the operator reads them as one visual cluster
+    # of "what is the daemon's automation doing right now?" state
+    # (focus pointer + auto-approve loop). Omitted entirely when
+    # goal.md is missing or has zero `## Current focus:` headings
+    # (fresh / pre-pivot projects); see `_render_focus_card` for the
+    # contract.
+    focus_html = _render_focus_card(cfg)
     # TB-227: auto-approve / auto-unfreeze loop state card. Sits
     # alongside the ideation gate-state card (visual sibling — both
     # are "what's the daemon's automation doing right now?" surfaces).
@@ -2569,6 +2646,7 @@ def _render_home(cfg: Config) -> str:
         f"{operator_decisions_html}"
         f"{pending_html}"
         f"{ideation_status_html}"
+        f"{focus_html}"
         f"{automation_html}"
         f'<h2>events <span class="meta">— last 30, newest first '
         f'(<a href="/events">all</a>)</span></h2>'

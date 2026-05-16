@@ -192,6 +192,26 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     from . import automation_status
 
     auto_approve_state = automation_status.collect_auto_approve_state(cfg)
+    # TB-242: axis-4 focus-rotation surface — read the focus list +
+    # active focus + halt state once so both the text and JSON branches
+    # can render them. Pure read-layer composition over TB-226's
+    # `goal.read_focus_list` + `goal.active_focus` + `goal.load_pointer`
+    # + `goal.roadmap_exhausted`; no new state files, no daemon-side
+    # mutation. The render-symmetry mirrors TB-227's auto-approve
+    # surface — fresh / pre-pivot projects (goal.md absent OR no
+    # `## Current focus:` headings) get `active_focus: null` in JSON
+    # and zero text-render lines.
+    from . import goal as _goal
+
+    _foci = _goal.read_focus_list(cfg)
+    if _foci:
+        _focus_pointer = _goal.load_pointer(cfg)
+        _focus_item = _goal.active_focus(cfg, _foci)
+        _focus_roadmap_complete = _goal.roadmap_exhausted(cfg, _foci)
+    else:
+        _focus_pointer = None
+        _focus_item = None
+        _focus_roadmap_complete = False
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -252,6 +272,28 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # get a stable shape); see `automation_status.collect_auto_approve_state`
             # for the contract.
             "auto_approve": auto_approve_state,
+            # TB-242: axis-4 focus-rotation state. Renders as `null`
+            # when goal.md is missing or has zero `## Current focus:`
+            # headings (fresh / pre-pivot projects) so machine
+            # consumers can distinguish "no roadmap" from "roadmap
+            # exhausted" — the `roadmap_complete` boolean field
+            # disambiguates the latter on populated roadmaps. `index`
+            # is 0-based (matches `focus_pointer.json`'s
+            # `active_index`); the text branch displays it as `idx+1`
+            # for human readability. `title` is the active focus title
+            # when one is in flight; it falls back to "" when the
+            # pointer is past the last focus (halt state) — the
+            # `roadmap_complete: true` flag carries the meaning there.
+            "active_focus": (
+                None
+                if not _foci
+                else {
+                    "title": _focus_item.title if _focus_item else "",
+                    "index": _focus_pointer["active_index"],
+                    "total": len(_foci),
+                    "roadmap_complete": _focus_roadmap_complete,
+                }
+            ),
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -259,6 +301,36 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     print(f"daemon:   {'running' if running else 'stopped'} (pid {pid or '-'}){' [paused]' if paused else ''}")
     print(f"version:  ap2 {version}")
     print(f"tick:     {cfg.tick_interval_s}s")
+    # TB-242: surface axis-4 focus-rotation state near the top of the
+    # report so an operator returning after walk-away can answer
+    # "what focus am I on, and how many remain?" without grepping
+    # events.jsonl or reading `focus_pointer.json` by hand. Three
+    # render shapes (mirrors the JSON branch):
+    #   - halt state (pointer past last focus, no operator ack since
+    #     the most recent `roadmap_complete` event) → the halt-state
+    #     line with the `ap2 ack roadmap_complete` resume nudge, same
+    #     shape as TB-227's auto-approve PAUSED line.
+    #   - multi-focus → `focus: <title> (<idx+1> of <total>)`.
+    #   - single-focus → `focus: <title>` (no `(1 of 1)` suffix —
+    #     single-focus projects don't need a position counter).
+    # Omitted entirely when goal.md is missing or has zero
+    # `## Current focus:` headings (fresh / pre-pivot projects) so
+    # the default-off output stays byte-identical to pre-TB-242.
+    if _foci:
+        if _focus_roadmap_complete:
+            print(
+                "focus:    ROADMAP_COMPLETE — "
+                "`ap2 ack roadmap_complete` to resume"
+            )
+        elif len(_foci) == 1:
+            _title = _focus_item.title if _focus_item else ""
+            print(f"focus:    {_title}")
+        elif _focus_item is not None:
+            _idx_display = _focus_pointer["active_index"] + 1
+            print(
+                f"focus:    {_focus_item.title} "
+                f"({_idx_display} of {len(_foci)})"
+            )
     print(
         f"board:    {counts['Active']}A / {counts['Ready']}R / "
         f"{counts['Backlog']}B / {counts['Pipeline Pending']}P / "
