@@ -683,3 +683,9 @@
 - **Summary:** Surfaced axis-4 focus-rotation state in `ap2 status` text/JSON and web home: added a `focus:` text line near the top of cmd_status output (single-focus: `<title>`; multi-focus: `<title> (N of M)`; halt: `ROADMAP_COMPLETE — \`ap2 ack roadmap_complete\` to resume`), an `active_focus` JSON block (title/index/total/roadmap_complete, null on fresh projects), and a parallel `_render_focus_card` above the automation card on the web home. Pure read-layer composition over TB-226 helpers; no daemon-side changes. 14 new behavioral pins all pass; cli/web/TB-226/TB-237 suites stay green (1519 unit + 3 e2e tests).
 - **Files:** ap2/cli.py, ap2/web.py, ap2/tests/test_tb242_status_active_focus_surface.py
 - **Tests:** pass
+
+## [2026-05-16] TB-243: Surface `validator_judge_fail` + `validator_judge_timeout` 24h counts in `automation_status` collector + `ap2 status` text/JSON + web home automation card (close TB-235 fail-open quiet-degradation hazard)
+- **Commit:** `647b771`
+- **Summary:** Surfaced TB-235 validator-judge fail-open audit counts on ap2 status (text sub-line + nested auto_approve.validator_judge JSON object) and the web home Automation card (new "Validator judge (24h)" row with warn-tint), gated by new AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD env knob (default 5); added 21-test pin module and updated TB-227 shape pin; full suite 1651 passes.
+- **Files:** ap2/automation_status.py, ap2/cli.py, ap2/web.py, ap2/howto.md, ap2/tests/test_tb243_validator_judge_surface.py, ap2/tests/test_tb227_automation_status.py
+- **Tests:** pass
