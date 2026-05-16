@@ -140,3 +140,10 @@ task — out of scope below.
 - Documentation drift gate for the new env knob — TB-203's
   docs-drift coverage should pick up the knob automatically;
   if it doesn't, file a follow-up rather than expanding scope.
+## Attempts
+
+### 2026-05-16 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] Prose: `ap2/daemon.py` Prose: the dry-run branch sits AFTER the existing tags / freeze-threshold / per-task-token-cap / 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260516T011356Z-TB-232.prompt.md`, `stream: .cc-autopilot/debug/20260516T011356Z-TB-232.stream.jsonl`, `messages: .cc-autopilot/debug/20260516T011356Z-TB-232.messages.jsonl`
