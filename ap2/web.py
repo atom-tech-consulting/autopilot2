@@ -560,6 +560,14 @@ _CSS = """<style>
                                      vertical-align: middle }
   .automation-status a { color: inherit; text-decoration: underline;
                          text-decoration-color: rgba(0,0,0,0.2) }
+  /* TB-243: warn-tint for the "Validator judge (24h)" row when
+     (fail + timeout) >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD (default 5).
+     Uses the same amber palette as the cost-dashboard's warning-tier
+     row class so the operator's color-memory ("orange = soft
+     warning") carries over. Below-threshold rows keep the default
+     `.as-meta` palette so a single transient blip doesn't tint the
+     card. */
+  .automation-status .as-vj-noisy { color: #b87000; font-weight: 600 }
 </style>"""
 
 
@@ -1619,6 +1627,14 @@ def _render_automation_card(cfg: Config) -> str:
         + state["auto_unfreeze_skipped_count_24h"]
         + state["would_auto_approve_count_24h"]
         + state["would_auto_unfreeze_count_24h"]
+        # TB-243: validator-judge fail-open counts also keep the card
+        # visible — the silent-degradation hazard is the WHOLE reason
+        # for surfacing these counts, so omitting the card when only
+        # the judge is noisy (with auto-approve still off / no other
+        # 24h activity) would defeat the purpose. Mirrors the TB-243
+        # text-block visibility rule in `cmd_status`.
+        + state["validator_judge_fail_count_24h"]
+        + state["validator_judge_timeout_count_24h"]
     )
     if not enabled and counters_total == 0:
         return ""
@@ -1699,6 +1715,36 @@ def _render_automation_card(cfg: Config) -> str:
             f'<a href="/events?type=would_auto_unfreeze">'
             f'{state["would_auto_unfreeze_count_24h"]} '
             f'would-unfrozen (24h)</a>'
+        )
+    # TB-243: "Validator judge (24h)" row surfaces TB-235's
+    # dependency-coherence judge fail-open audit counts. Omit-on-empty
+    # (both counts zero → row absent) so the default-healthy card
+    # stays compact; warn-tint class when
+    # `(fail + timeout) >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`
+    # (default 5) so the operator's eye catches the sustained-issue
+    # case. Both counts render in one row (not two separate rows)
+    # because the operator-facing signal is "is the gate noisy?" —
+    # the fail / timeout split helps triage but doesn't justify two
+    # rows of card noise. Anchor links cover both event types.
+    vj_fail = state["validator_judge_fail_count_24h"]
+    vj_timeout = state["validator_judge_timeout_count_24h"]
+    if vj_fail or vj_timeout:
+        vj_threshold = automation_status.validator_judge_noisy_threshold()
+        vj_noisy = (vj_fail + vj_timeout) >= vj_threshold
+        # Inline `class=` so the warn-tint CSS rule (.as-vj-noisy)
+        # styles only this row. Default (non-noisy) row stays in the
+        # default `.as-meta` palette so a single transient blip
+        # doesn't tint the card.
+        klass_attr = ' class="as-vj-noisy"' if vj_noisy else ""
+        rows.append(
+            f'<span{klass_attr}>'
+            f'Validator judge (24h): '
+            f'<a href="/events?type=validator_judge_fail">'
+            f'{vj_fail} fail</a> | '
+            f'<a href="/events?type=validator_judge_timeout">'
+            f'{vj_timeout} timeout</a>'
+            + (" [noisy]" if vj_noisy else "")
+            + '</span>'
         )
     if cap_line:
         rows.append(html.escape(cap_line))

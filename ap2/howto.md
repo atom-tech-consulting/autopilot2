@@ -729,6 +729,20 @@ exception repr or `"non-dict judge response"`). When
 `AP2_VALIDATOR_JUDGE_DISABLED=1` is set, the check is skipped
 entirely and neither event fires (clean bypass, not a fail-open).
 
+TB-243 surfaces the rolling 24h counts of both event types on
+`ap2 status` (text: a `validator-judge: N fail | M timeout (24h)`
+sub-line under the `auto-approve:` block, omitted when both counts
+are zero; JSON: a nested `auto_approve.validator_judge.{fail_count_24h,
+timeout_count_24h}` object, always present) and on the web home
+Automation card (a "Validator judge (24h)" row, omitted when both
+counts are zero, warn-tinted amber when
+`(fail + timeout) >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`, default
+5). Closes the silent-degradation hazard the fail-open design
+otherwise left for an operator with `AP2_AUTO_APPROVE=1`: 10
+silently-timed-out judge calls used to take ≥2h (the next
+status-report cron tick) to surface — now they appear on the
+on-demand pull surfaces immediately.
+
 **Focus rotation (TB-226 axis 4).** `focus_advanced` and
 `roadmap_complete` track the daemon's in-memory focus-list pointer
 against goal.md's `## Current focus:` headings. See
@@ -856,6 +870,19 @@ symmetry.
   for the judge's reasoning. Decision is structured JSON; verbose
   explanations don't help and inflate cost. Per-invocation cost
   target is ≤$0.005 at Haiku rates.
+- `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5) — TB-243 surface
+  threshold. When the rolling 24h sum
+  `validator_judge_fail_count_24h + validator_judge_timeout_count_24h`
+  is ≥ this number, `ap2 status` appends ` [noisy]` to its
+  `validator-judge:` sub-line and the web home Automation card's
+  "Validator judge (24h)" row gets the warn-tint (amber). Below the
+  threshold both surfaces stay in the neutral palette so a single
+  transient SDK blip doesn't tint the card. Closes the silent-
+  degradation hazard left by the fail-open design above: an
+  operator with `AP2_AUTO_APPROVE=1` whose judge has been quietly
+  timing out for the last N briefings sees the warn-tint before the
+  next audit. Unset / empty / non-int / non-positive → default
+  (matches the TB-224 / TB-234 token-cap parse semantics).
 
 **Ideation.**
 - `AP2_IDEATION_DISABLED` — set to `1`/`true` to opt out of empty-board

@@ -104,6 +104,10 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
     # TB-238 added the parallel `auto_unfreeze_dry_run_enabled` +
     # `would_auto_unfreeze_count_24h` pair on the axis-2 side so the
     # status-report digest can render both dry-runs as one block.
+    # TB-243 added `validator_judge_fail_count_24h` +
+    # `validator_judge_timeout_count_24h` to surface the TB-235
+    # dependency-coherence judge's fail-open audit counts on
+    # `ap2 status` + the web home Automation card.
     expected_keys = {
         "auto_approve_enabled", "auto_approve_paused",
         "consecutive_freezes", "freeze_threshold",
@@ -117,6 +121,8 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
         "would_auto_approve_count_24h",
         "auto_unfreeze_dry_run_enabled",
         "would_auto_unfreeze_count_24h",
+        "validator_judge_fail_count_24h",
+        "validator_judge_timeout_count_24h",
     }
     assert set(state.keys()) == expected_keys
 
@@ -136,6 +142,8 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
     assert state["would_auto_approve_count_24h"] == 0
     assert state["auto_unfreeze_dry_run_enabled"] is False
     assert state["would_auto_unfreeze_count_24h"] == 0
+    assert state["validator_judge_fail_count_24h"] == 0
+    assert state["validator_judge_timeout_count_24h"] == 0
 
 
 # ===========================================================================

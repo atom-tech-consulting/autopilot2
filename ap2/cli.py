@@ -271,7 +271,27 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # always present regardless of knob-state (machine consumers
             # get a stable shape); see `automation_status.collect_auto_approve_state`
             # for the contract.
-            "auto_approve": auto_approve_state,
+            #
+            # TB-243: surface the validator-judge fail-open counts as a
+            # nested object alongside the flat collector keys so
+            # machine consumers can `.auto_approve.validator_judge.fail_count_24h`
+            # without grepping the flat key name (mirrors the
+            # `validator_judge:` text sub-line). Always present (zeros
+            # when no events) so consumers see a stable shape regardless
+            # of TB-235 knob state. Flat collector keys remain for
+            # back-compat with anything that parsed them between TB-227
+            # and TB-243.
+            "auto_approve": {
+                **auto_approve_state,
+                "validator_judge": {
+                    "fail_count_24h":
+                        auto_approve_state["validator_judge_fail_count_24h"],
+                    "timeout_count_24h":
+                        auto_approve_state[
+                            "validator_judge_timeout_count_24h"
+                        ],
+                },
+            },
             # TB-242: axis-4 focus-rotation state. Renders as `null`
             # when goal.md is missing or has zero `## Current focus:`
             # headings (fresh / pre-pivot projects) so machine
@@ -450,6 +470,14 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         + a["auto_unfreeze_skipped_count_24h"]
         + a["would_auto_approve_count_24h"]
         + a["would_auto_unfreeze_count_24h"]
+        # TB-243: validator-judge fail-open counts also surface the
+        # block so a noisy gate (with auto-approve still off / no
+        # other 24h activity) doesn't fall through. The whole point
+        # of surfacing the counts is to let an operator catch the
+        # silent-degradation hazard BEFORE flipping `AP2_AUTO_APPROVE=1`;
+        # gating on auto-approve here would defeat that.
+        + a["validator_judge_fail_count_24h"]
+        + a["validator_judge_timeout_count_24h"]
     ) > 0
     if a["auto_approve_enabled"] or _has_24h_activity:
         if a["auto_approve_paused"]:
@@ -479,6 +507,31 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
                 f"{a['would_auto_approve_count_24h']} (24h) | "
                 f"would-unfreeze "
                 f"{a['would_auto_unfreeze_count_24h']} (24h)"
+            )
+        # TB-243: validator-judge fail-open visibility. TB-235's check #7
+        # (LLM-driven dep-coherence judge in
+        # `tools._validate_briefing_structure`) logs
+        # `validator_judge_fail` / `validator_judge_timeout` on SDK /
+        # parse errors and admits the briefing anyway — fail-open is
+        # the load-bearing trade-off, but it leaves the auto-approve
+        # safety claim (goal.md L82-85) silently-degradable. Render
+        # the two counts as a single sub-line when EITHER is non-zero
+        # so an operator with `AP2_AUTO_APPROVE=1` sees the gate's
+        # health at a glance; omit when both are zero so the
+        # default-healthy block stays compact (mirrors TB-241's
+        # dry-run line omit-on-empty rule). Append ` [noisy]` when
+        # `(fail + timeout) >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`
+        # (default 5) so the operator's eye catches the sustained-
+        # issue case without staring at raw counts.
+        _vj_fail = a["validator_judge_fail_count_24h"]
+        _vj_timeout = a["validator_judge_timeout_count_24h"]
+        if _vj_fail or _vj_timeout:
+            _vj_threshold = automation_status.validator_judge_noisy_threshold()
+            _vj_noisy = (_vj_fail + _vj_timeout) >= _vj_threshold
+            print(
+                f"validator-judge: {_vj_fail} fail | "
+                f"{_vj_timeout} timeout (24h)"
+                + (" [noisy]" if _vj_noisy else "")
             )
     nxt = board.next_ready()
     if nxt:

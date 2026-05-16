@@ -131,6 +131,31 @@ def _is_auto_unfreeze_dry_run() -> bool:
     return _is_truthy(os.environ.get("AP2_AUTO_UNFREEZE_DRY_RUN"))
 
 
+def validator_judge_noisy_threshold() -> int:
+    """TB-243: effective `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`.
+
+    When `(validator_judge_fail_count_24h + validator_judge_timeout_count_24h)
+    >= threshold`, the `ap2 status` text sub-line gets a ` [noisy]`
+    suffix and the web home automation card's "Validator judge (24h)"
+    row gets a warn-tint class. Default 5 chosen so a single transient
+    SDK blip doesn't flip the surface to warn-tint, but a sustained
+    issue (>5 fails in 24h) does — same parse semantics as TB-224 /
+    TB-234 token caps: unset / empty / non-int / non-positive → treat
+    as default (5).
+
+    Public (no leading `_`) so both `ap2/cli.py` and `ap2/web.py` can
+    consult one source-of-truth; tests pin the parser independently.
+    """
+    raw = os.environ.get("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "").strip()
+    if not raw:
+        return 5
+    try:
+        v = int(raw)
+    except ValueError:
+        return 5
+    return v if v > 0 else 5
+
+
 def _freeze_threshold() -> int:
     """Effective `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`, mirroring
     `daemon._auto_approve_freeze_threshold`.
@@ -390,6 +415,20 @@ def collect_auto_approve_state(
         during the dry-run window to confirm the auto-unfreeze gate
         is exercising decisions on the live Frozen set before
         flipping the dry-run knob off.
+      - `validator_judge_fail_count_24h` (int) — TB-243 rolling 24h
+        count of `validator_judge_fail` events emitted by the TB-235
+        dependency-coherence judge (check #7 in
+        `tools._validate_briefing_structure`). The judge fails open
+        on SDK / parse errors so the briefing is admitted regardless;
+        this counter surfaces the silent-degradation hazard so an
+        operator with `AP2_AUTO_APPROVE=1` can notice when the gate's
+        coverage is thinning. Zero on fresh / no-events projects.
+      - `validator_judge_timeout_count_24h` (int) — TB-243 sibling of
+        `validator_judge_fail_count_24h` for the timeout branch (judge
+        SDK call exceeded `AP2_VALIDATOR_JUDGE_TIMEOUT_S`). Split from
+        `_fail` so the operator can tell a flaky API (mostly
+        timeouts) from a model / parse regression (mostly fails)
+        without alt-tabbing to `ap2 logs`.
 
     `now` (default `datetime.now(UTC)`) and `window_s` are kwargs to
     keep the helper testable without `freezegun` — tests can pass a
@@ -457,6 +496,20 @@ def collect_auto_approve_state(
         tail, event_type="would_auto_unfreeze",
         now_s=now_s, window_s=window_s,
     )
+    # TB-243: validator-judge fail-open audit events (TB-235 dependency-
+    # coherence judge in `tools._validate_briefing_structure` check #7).
+    # Same 24h-window arithmetic as the auto-approve counters above; two
+    # keys (not one combined `judge_skipped`) so the operator can tell
+    # a flaky API (mostly timeouts) from a model / parse regression
+    # (mostly fails) without alt-tabbing to `ap2 logs`.
+    validator_judge_fail_24h = _count_events_24h(
+        tail, event_type="validator_judge_fail",
+        now_s=now_s, window_s=window_s,
+    )
+    validator_judge_timeout_24h = _count_events_24h(
+        tail, event_type="validator_judge_timeout",
+        now_s=now_s, window_s=window_s,
+    )
 
     pause_reason = _pause_reason(
         tail, unfreeze_idx=unfreeze_idx, resume_idx=resume_idx,
@@ -490,6 +543,15 @@ def collect_auto_approve_state(
         # one "dry-run window" sub-block when either knob is on.
         "auto_unfreeze_dry_run_enabled": _is_auto_unfreeze_dry_run(),
         "would_auto_unfreeze_count_24h": would_auto_unfreeze_24h,
+        # TB-243: validator-judge fail-open audit counts. Surfacing
+        # closes the silent-degradation hazard left by TB-235's
+        # fail-open design — the auto-approve safety claim (goal.md
+        # L82-85) depends on the dep-coherence gate being healthy, so
+        # an operator with `AP2_AUTO_APPROVE=1` needs to see whether
+        # the gate is rendering verdicts or quietly skipping. Two
+        # always-present keys regardless of TB-235 knob state.
+        "validator_judge_fail_count_24h": validator_judge_fail_24h,
+        "validator_judge_timeout_count_24h": validator_judge_timeout_24h,
     }
 
 
