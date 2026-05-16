@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-243** **Surface `validator_judge_fail` + `validator_judge_timeout` 24h counts in `automation_status` collector + `ap2 status` text/JSON + web home automation card (close TB-235 fail-open quiet-degradation hazard)** `#autopilot` `#observability` `#validator-judge` `#axis-1` `#auto-approve` `@blocked:review` — Extend `collect_auto_approve_state` (automation_status.py:331) with `validator_judge_fail_count_24h` + `validator_judge_timeout_count_24h` keys; render a `validator-judge:` sub-line in `ap2 status` text/JSON automation block (cli.py:106) and as a new row in `_render_automation_card` (web.py:1584) when 24h count > 0. Closes the silent-degradation hazard left by TB-235's fail-open design. [→ brief](.cc-autopilot/tasks/surface-validator-judge-fail-validator-j.md)
+- [ ] **TB-244** **Extend status-report cron digest with axis-4 focus-rotation activity (`focus_advanced` + `roadmap_complete`) and add `roadmap_complete` to `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` (TB-228/TB-238 surface-parity closure for axis 4 push channel)** `#autopilot` `#observability` `#status-report` `#axis-4` `#focus-rotation` `@blocked:review` — Add `roadmap_complete` + `focus_advanced` to `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` (status_report.py:426) and extend `render_automation_loop_activity_section` (status_report.py:137) with a focus-rotation sub-section so the cron status-report Mattermost post surfaces axis-4 activity. Closes the push-surface gap left by TB-242 (which covered the pull surface only). [→ brief](.cc-autopilot/tasks/extend-status-report-cron-digest-with-ax.md)
 
 ## Pipeline Pending
 

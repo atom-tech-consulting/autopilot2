@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/extend-status-report-cron-digest-with-ax.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-16T22:25:34Z",
+  "tb_id": "TB-244",
+  "why_now": "TB-242 just shipped the pull surface; the digest-renderer\ntest+code patterns from TB-228 + TB-238 are still fresh. This is the\ncheapest moment to close the surface-parity gap before context\ndecays, AND axis 4's whole value proposition collapses if the\noperator can walk away for a week but loses 6+ hours of progress\nevery time the daemon halts because they didn't get a push notice."
+}
