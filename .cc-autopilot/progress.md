@@ -671,3 +671,9 @@
 - **Summary:** Prior commit bd1dd62 already implemented the full TB-239 briefing (auto_unfreeze_audit + diagnose wiring + 19-test module + howto.md note); two prior verifier runs failed only because briefing's verification line names test_tb234_doctor_auto_approve_audit.py but the TB-234 file shipped as test_tb234_doctor_auto_approve.py. This commit (ccfcff1) git-mv's the TB-234 test file to the briefing-expected name (no content change). All 31 TB-234+TB-239 audit tests pass; full ap2/tests/ suite 1605 passed.
 - **Files:** ap2/tests/test_tb234_doctor_auto_approve_audit.py
 - **Tests:** pass
+
+## [2026-05-16] TB-241: Surface dry-run readiness signal (`would_auto_approve` / `would_auto_unfreeze` 24h counts + dry-run badge) in `ap2 status` text/JSON + web home automation card (TB-238 surface-parity closure)
+- **Commit:** `fc14fe3`
+- **Summary:** Surfaced dry-run readiness in `ap2 status` text (new `dry-run: would-approve N | would-unfreeze M` line + heuristic) and web home Automation card (per-axis `would-approved`/`would-unfrozen` rows + `[dry-run]` badge); 1500 unit tests pass including new TB-241 + TB-238 regression-pin modules.
+- **Files:** ap2/cli.py, ap2/web.py, ap2/tests/test_tb241_status_dry_run_surface.py, ap2/tests/test_tb238_automation_status_dry_run.py
+- **Tests:** pass
