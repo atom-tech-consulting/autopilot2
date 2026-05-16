@@ -623,3 +623,9 @@
 - **Summary:** Added ap2/tests/e2e/test_walk_away_loop.py with two in-concert e2e tests: test_auto_approve_dispatches_ideation_proposal_without_operator drives 2 _tick cycles through ideation→auto-approve→backlog-promote→task-complete with AP2_AUTO_APPROVE=1 and asserts the causal chain ideation_empty_board→auto_approved→task_start→task_complete with no operator_queue_append op=approve event; test_auto_unfreeze_briefingfix_repairs_frozen_task drives the BriefingFix sweep+drain over 2 ticks (also with AP2_AUTO_APPROVE=1 set so the in-concert combo is pinned) asserting briefing patched, auto_unfreeze_applied event fired, task off Frozen. Full ap2/tests/ suite green (1520 passed).
 - **Files:** ap2/tests/e2e/test_walk_away_loop.py
 - **Tests:** pass
+
+## [2026-05-16] TB-233: Monitor-only auto-unfreeze mode: `AP2_AUTO_UNFREEZE_DRY_RUN=1` emits `would_auto_unfreeze` events without mutating briefings or queueing unfreeze ops
+- **Commit:** `74bd793`
+- **Summary:** Added AP2_AUTO_UNFREEZE_DRY_RUN monitor-only on-ramp: new _auto_unfreeze_dry_run() helper + branch in _maybe_auto_unfreeze that emits would_auto_unfreeze (payload mirrors auto_unfreeze_applied + file/line) instead of patching when dry-run is on; skip events still fire, per-day-cap halt preserved but bullet append skipped, per-task/per-day counters don't increment; event type registered in events.py, ideation.py allowlist, and howto.md schema + knobs sections; new test_tb233 module pins 3 behavioral cases (would-event + per-task-cap skip-wins + per-day-cap halt-without-bullet) plus helper unit + default-off byte-identical pin; full 1532-test regression green.
+- **Files:** ap2/daemon.py, ap2/events.py, ap2/howto.md, ap2/ideation.py, ap2/tests/test_tb233_auto_unfreeze_dry_run.py
+- **Tests:** pass
