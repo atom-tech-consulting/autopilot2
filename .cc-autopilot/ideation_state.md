@@ -1,22 +1,21 @@
 # Ideation State
 
-_Last updated: 2026-05-16T16:18:30Z by ideation cron_
+_Last updated: 2026-05-16T18:19:47Z by ideation cron_
 
 ## Mission alignment
 
 Cycle entry: board 0A/0R/3B/0P/112C/3F (per prompt header
-2026-05-16T16:18:30Z). No terminal events in the events tail since
-prior cycle 14:17Z — only this cycle's own `ideation_empty_board`
-(16:18:30Z) and the 15:37/15:38Z status-report cron skip-cycle.
-Last complete remains TB-239's recovery at 07:01:39Z.
-Operator_log.md L159 (last entry 2026-05-16T05:48:30Z) shows no
-operator action since. This is the **4th consecutive zero-completes
-ideation cycle** (10:14Z → 12:15Z → 14:17Z → 16:18Z). The 3
-prior-cycle proposals (TB-240/241/242) remain in Backlog with
-`@blocked:review`, untouched since they landed at 08:12Z (now ~8h
-stale).
+2026-05-16T18:19:47Z), proposal slots 2. No terminal events since prior
+cycle 16:18:30Z — only this cycle's own ideation_empty_board (18:19Z)
+and the 17:37/17:38Z status-report cron skip-cycle. Last complete
+remains TB-239's recovery at 07:01:39Z. operator_log.md L159 (last
+entry 2026-05-16T05:48:30Z) shows no operator action since. This is
+the **5th consecutive zero-completes ideation cycle** (10:14Z → 12:15Z
+→ 14:17Z → 16:18Z → 18:19Z). The 3 prior-cycle proposals
+(TB-240/241/242) remain in Backlog with `@blocked:review`, untouched
+since they landed at 08:12Z (now ~10h stale).
 
-Recent Completes considered (unchanged from prior three cycles —
+Recent Completes considered (unchanged from prior four cycles —
 re-cited because no new completes shipped):
 
 - TB-239 (`ccfcff1`, 07:01:39Z) — axis-2 doctor floor.
@@ -39,23 +38,23 @@ re-cited because no new completes shipped):
       (dry-run readiness in collector + cron digest).
     - Adjacent gates: TB-235 (briefing dependency-coherence) +
       TB-236 (prose-judge tighten).
-  - Gaps (unchanged from prior three cycles — no fresh gaps because
+  - Gaps (unchanged from prior four cycles — no fresh gaps because
     no completes shipped between cycles; all three remain addressed
     by pending-review Backlog items):
     (1) **Briefing file-path-coherence** — TB-239's
         wrong-but-plausible-path bullet cost ~$2 + cross-task rename.
-        Addressed by **TB-240** (pending review, ~8h stale).
+        Addressed by **TB-240** (pending review, ~10h stale).
     (2) **Dry-run readiness surface parity** — TB-238 extended the
         collector + cron digest but not `ap2 status` / web home.
-        Addressed by **TB-241** (pending review, ~8h stale).
+        Addressed by **TB-241** (pending review, ~10h stale).
     (3) **Axis-4 focus-pointer current-state surface** — TB-226/237
         shipped machinery, no `ap2 status` / web home rendering.
-        Addressed by **TB-242** (pending review, ~8h stale).
+        Addressed by **TB-242** (pending review, ~10h stale).
   - Status: `in-progress`
   - Reasoning: All four axes have foundation + on-ramp + safety-floor
     + observability shipped. The three surface-asymmetry follow-ups
-    are queued. 4 consecutive 0-new-gap cycles continues to strengthen
-    the exhaustion signal but per the criterion proposed two cycles
+    are queued. 5 consecutive 0-new-gap cycles continues to strengthen
+    the exhaustion signal but per the criterion proposed three cycles
     ago (still unanswered by operator), exhaustion cannot be confirmed
     until the pending-review queue clears AND a subsequent gap-search
     against fresh completes also surfaces nothing. Until then status
@@ -69,14 +68,14 @@ end-to-end automation per prior-cycle non-goal scan.
 ## Considered & deferred this cycle
 
 - **Add proposals anyway to fill the 2 advertised slots** —
-  rejected (same as prior three cycles). The 3 pending-review items
+  rejected (same as prior four cycles). The 3 pending-review items
   already address every gap this cycle's analysis surfaces;
   manufacturing to fill slots would either duplicate scope or
   scope-creep into non-gap polish (the failure mode goal.md L61-70's
   delete-test explicitly rejects). Slot count is a ceiling, not a
   target.
 - **Verify-time "diff exceeds briefing scope" judge** — same defer
-  as prior three cycles: TB-240's upstream prevention is cheaper;
+  as prior four cycles: TB-240's upstream prevention is cheaper;
   revisit only if rename-shape recurs post-TB-240.
 - **Cross-axis 4-way e2e walk-away test** (axes 1+2+3+4 in concert) —
   defer until TB-240/241/242 land; without axis-4 visibility
@@ -101,9 +100,9 @@ end-to-end automation per prior-cycle non-goal scan.
 
 ## Cycle observations
 
-- Four consecutive zero-completes ideation cycles (10:14Z + 12:15Z
-  + 14:17Z + 16:18Z) with zero new gaps surfaced AND zero operator
-  approve/reject on the pending-review queue between cycles.
+- Five consecutive zero-completes ideation cycles (10:14Z + 12:15Z
+  + 14:17Z + 16:18Z + 18:19Z) with zero new gaps surfaced AND zero
+  operator approve/reject on the pending-review queue between cycles.
   Carried-with-re-justification because (a) it still informs THIS
   cycle's "propose 0" decision and (b) it continues to sharpen the
   unblock-condition on the Decisions-needed entry below — each cycle
@@ -112,9 +111,9 @@ end-to-end automation per prior-cycle non-goal scan.
 
 ## Decisions needed from operator
 
-- Decision needed: After 4 consecutive ideation cycles with 0 new
+- Decision needed: After 5 consecutive ideation cycles with 0 new
   gaps surfaced against end-to-end automation AND zero operator
-  movement on the pending-review queue (TB-240/241/242 all ~8h
+  movement on the pending-review queue (TB-240/241/242 all ~10h
   stale), what criterion should ideation use to flip the focus
   status to `exhausted-needs-operator`? Re-articulated from prior
   cycle (preference (a) unchanged): once the pending-review queue
