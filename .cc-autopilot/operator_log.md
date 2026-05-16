@@ -157,3 +157,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-16T05:48:30Z — applied operator-queued approve → TB-237
 - 2026-05-16T05:48:30Z — applied operator-queued approve → TB-238
 - 2026-05-16T05:48:30Z — applied operator-queued approve → TB-239
+- 2026-05-16T21:41:18Z — applied operator-queued reject → TB-240
+- 2026-05-16T21:41:18Z — rejected ideation proposal → TB-240 (Add LLM-driven file-path-coherence check to briefing validator: reject when `## Verification` shell bullet references a file path that doesn't exist in HEAD AND isn't named in `## Scope`): Agent self-corrected TB-239 via file rename at zero functional cost; no evidence ideation fabricates irrelevant paths. Higher principle: maintain a high bar for letting agents 'fix' verification — easy to slide into cheating the passing criteria. Reconsider only if recurrence shows agent inventing code/tests that don't match the briefing's design intent.
