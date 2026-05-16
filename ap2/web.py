@@ -1536,13 +1536,36 @@ def _render_automation_card(cfg: Config) -> str:
     state = automation_status.collect_auto_approve_state(cfg)
 
     enabled = state["auto_approve_enabled"]
+    # TB-241: dry-run 24h activity is part of the render-block decision
+    # — an operator who flipped `AP2_AUTO_APPROVE_DRY_RUN` /
+    # `AP2_AUTO_UNFREEZE_DRY_RUN` against an otherwise quiet board
+    # should see the readiness signal here (the dry-run on-ramp's
+    # whole purpose is to observe the loop's decisions on-demand
+    # without flipping live dispatch). Pre-TB-241 the bucket counted
+    # only real-mode activity, so dry-run-only state fell through and
+    # the card stayed omitted after the knob flip.
     counters_total = (
         state["auto_approved_count_24h"]
         + state["auto_unfreeze_applied_count_24h"]
         + state["auto_unfreeze_skipped_count_24h"]
+        + state["would_auto_approve_count_24h"]
+        + state["would_auto_unfreeze_count_24h"]
     )
     if not enabled and counters_total == 0:
         return ""
+
+    # TB-241: `[dry-run]` badge next to the header when either dry-run
+    # knob is on. One badge regardless of which knob (or both) is on
+    # — the on-axis rows below differentiate which side is in
+    # monitor mode. Omitted entirely when both knobs are off so the
+    # default-on header stays byte-identical to TB-227.
+    aa_dry_run = state["dry_run_enabled"]
+    au_dry_run = state["auto_unfreeze_dry_run_enabled"]
+    dry_run_badge = (
+        ' <span class="as-dry-run-badge">[dry-run]</span>'
+        if (aa_dry_run or au_dry_run)
+        else ''
+    )
 
     if state["auto_approve_paused"]:
         klass = "automation-status is-paused"
@@ -1588,6 +1611,26 @@ def _render_automation_card(cfg: Config) -> str:
             f'<a href="/events?type=auto_unfreeze_skipped">'
             f'{state["auto_unfreeze_skipped_count_24h"]} unfreeze skipped (24h)</a>'
         )
+    # TB-241: per-axis would-* rows surface the dry-run readiness
+    # counters, linking to the events drilldown so the operator can
+    # inspect individual `would_auto_approve` / `would_auto_unfreeze`
+    # events without leaving the home page. Each row is gated on the
+    # corresponding dry-run knob (not the count) so an operator who
+    # just flipped the knob with no events yet still sees the "0
+    # (24h)" baseline confirming the surface is wired — same shape
+    # as TB-227's auto-approved / auto-unfrozen rows.
+    if aa_dry_run:
+        rows.append(
+            f'<a href="/events?type=would_auto_approve">'
+            f'{state["would_auto_approve_count_24h"]} '
+            f'would-approved (24h)</a>'
+        )
+    if au_dry_run:
+        rows.append(
+            f'<a href="/events?type=would_auto_unfreeze">'
+            f'{state["would_auto_unfreeze_count_24h"]} '
+            f'would-unfrozen (24h)</a>'
+        )
     if cap_line:
         rows.append(html.escape(cap_line))
 
@@ -1599,7 +1642,7 @@ def _render_automation_card(cfg: Config) -> str:
 
     return (
         f'<div class="{klass}">'
-        f'<span class="as-header">{html.escape(header)}</span>'
+        f'<span class="as-header">{html.escape(header)}{dry_run_badge}</span>'
         f'<span class="as-body">{body}</span>'
         f'{meta}'
         '</div>'

@@ -364,10 +364,20 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # pre-opt-in projects don't grow a perpetual zero-line (same shape
     # as TB-189's classifications line).
     a = auto_approve_state
+    # TB-241: dry-run 24h activity also counts toward the render-block
+    # decision so an operator who flipped `AP2_AUTO_APPROVE_DRY_RUN=1` /
+    # `AP2_AUTO_UNFREEZE_DRY_RUN=1` against an otherwise quiet board
+    # still sees the readiness signal here (the dry-run on-ramp's
+    # whole purpose is to observe the loop's decisions on-demand
+    # without flipping live dispatch). Pre-TB-241 the bucket counted
+    # only real-mode activity, so dry-run-only state fell through and
+    # the operator saw nothing changed after the knob flip.
     _has_24h_activity = (
         a["auto_approved_count_24h"]
         + a["auto_unfreeze_applied_count_24h"]
         + a["auto_unfreeze_skipped_count_24h"]
+        + a["would_auto_approve_count_24h"]
+        + a["would_auto_unfreeze_count_24h"]
     ) > 0
     if a["auto_approve_enabled"] or _has_24h_activity:
         if a["auto_approve_paused"]:
@@ -382,6 +392,21 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
                 f"auto-approve: enabled (24h: "
                 f"{a['auto_approved_count_24h']} approved, "
                 f"{a['auto_unfreeze_applied_count_24h']} auto-unfrozen)"
+            )
+        # TB-241: surface the dry-run readiness signal (sibling of the
+        # TB-238 status-report digest `*Dry-run window:*` sub-block) on
+        # the on-demand `ap2 status` surface. Rendered immediately
+        # below the existing `auto-approve:` line so an operator
+        # reading the two side-by-side sees the real-mode summary
+        # first and the dry-run readiness count on the next row.
+        # Omitted entirely when both dry-run knobs are off so the
+        # default-off output stays byte-identical to TB-227.
+        if a["dry_run_enabled"] or a["auto_unfreeze_dry_run_enabled"]:
+            print(
+                f"dry-run: would-approve "
+                f"{a['would_auto_approve_count_24h']} (24h) | "
+                f"would-unfreeze "
+                f"{a['would_auto_unfreeze_count_24h']} (24h)"
             )
     nxt = board.next_ready()
     if nxt:
