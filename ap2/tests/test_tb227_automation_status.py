@@ -90,12 +90,16 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
     refactor that drops a key or returns `None` where an int is
     documented."""
     monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
 
     state = automation_status.collect_auto_approve_state(cfg)
-    # Every key in the contract must be present.
+    # Every key in the contract must be present. TB-232 added the
+    # `dry_run_enabled` + `would_auto_approve_count_24h` pair as the
+    # monitor-only on-ramp surface; the two land in the same dict so
+    # CLI / web / JSON renderings consume one source of truth.
     expected_keys = {
         "auto_approve_enabled", "auto_approve_paused",
         "consecutive_freezes", "freeze_threshold",
@@ -105,6 +109,8 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
         "auto_unfreeze_applied_count_24h",
         "auto_unfreeze_skipped_count_24h",
         "pause_reason",
+        "dry_run_enabled",
+        "would_auto_approve_count_24h",
     }
     assert set(state.keys()) == expected_keys
 
@@ -120,6 +126,8 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
     assert state["auto_unfreeze_applied_count_24h"] == 0
     assert state["auto_unfreeze_skipped_count_24h"] == 0
     assert state["pause_reason"] is None
+    assert state["dry_run_enabled"] is False
+    assert state["would_auto_approve_count_24h"] == 0
 
 
 def test_collect_state_knob_on_no_halt(cfg: Config, monkeypatch):

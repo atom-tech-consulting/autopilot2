@@ -1125,11 +1125,22 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 # status-report can surface what auto-approval
                 # shipped without operator review.
                 auto_approved_stripped = False
+                # TB-232: dry-run on-ramp. When the tags gate would
+                # otherwise pass AND `AP2_AUTO_APPROVE_DRY_RUN=1` is
+                # set, do NOT strip the review token; emit a
+                # `would_auto_approve` audit event instead so the
+                # operator can observe what auto-approve WOULD have
+                # shipped without committing to the binary cliff.
+                # `would_auto_approved_simulated` is the local flag
+                # for the post-add emit branch (parallel to
+                # `auto_approved_stripped`).
+                would_auto_approved_simulated = False
                 if (
                     action == "add_backlog"
                     and effective_blocked_on
                 ):
                     from . import ideation as _ideation
+                    from . import automation_status as _astatus
                     tokens = [
                         tok.strip()
                         for tok in effective_blocked_on.split(",")
@@ -1139,12 +1150,23 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                         tok.lower() == "review" for tok in tokens
                     )
                     if review_present and _ideation.should_auto_approve(tags):
-                        kept = [
-                            tok for tok in tokens
-                            if tok.lower() != "review"
-                        ]
-                        effective_blocked_on = ",".join(kept)
-                        auto_approved_stripped = True
+                        if _astatus._is_auto_approve_dry_run():
+                            # Dry-run: gate passed but the WRITE step
+                            # is a no-op on the row. The
+                            # `@blocked:review` codespan survives so
+                            # the task still requires operator
+                            # `ap2 approve` to dispatch.
+                            would_auto_approved_simulated = True
+                        else:
+                            # Real auto-approve: strip the review
+                            # token so the row's @blocked: codespan
+                            # drops cleanly.
+                            kept = [
+                                tok for tok in tokens
+                                if tok.lower() != "review"
+                            ]
+                            effective_blocked_on = ",".join(kept)
+                            auto_approved_stripped = True
                 if effective_blocked_on:
                     meta["blocked"] = effective_blocked_on
                 board.add(
@@ -1162,6 +1184,20 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                         "auto_approved",
                         task=new_id,
                         knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                    )
+                elif would_auto_approved_simulated:
+                    # TB-232: payload mirrors `auto_approved` shape so
+                    # the 24h-counter aggregator + any forensic
+                    # tooling can parse both event streams uniformly.
+                    # `dry_run=True` discriminator field lets
+                    # downstream consumers distinguish the simulated
+                    # decision from the real one.
+                    events.append(
+                        cfg.events_file,
+                        "would_auto_approve",
+                        task=new_id,
+                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                        dry_run=True,
                     )
                 # TB-141: persist the new high-water mark to CLAUDE.md
                 # synchronously here. `_allocate_id` no longer writes —

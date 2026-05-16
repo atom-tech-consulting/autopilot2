@@ -613,7 +613,12 @@ post-task auto-classifier verdict), `backlog_auto_promoted`,
 on a proposed task because `AP2_AUTO_APPROVE` is on and the task carries
 no `AP2_AUTO_APPROVE_GATE_TAGS` tag; `knob=` payload field captures the
 env value at proposal time so the forensic trail survives env changes
-during the daemon's lifetime), `auto_approve_paused` (TB-223 —
+during the daemon's lifetime), `would_auto_approve` (TB-232 monitor-only
+dry-run sibling — fires at proposal time when both `AP2_AUTO_APPROVE=1`
+AND `AP2_AUTO_APPROVE_DRY_RUN=1` and the tags gate would have stripped
+`@blocked:review`; payload `task`, `knob`, `dry_run=true`; the codespan
+is preserved so operator-manual `ap2 approve` is still required),
+`auto_approve_paused` (TB-223 —
 cumulative-regression circuit-breaker tripped; auto-promote of
 auto-approved tasks halted until operator emits `ap2 ack
 auto_approve_unfreeze`), `auto_unfreeze_applied` (TB-225 —
@@ -756,6 +761,25 @@ land in Frozen).
   for operators who haven't verified the upstream gates (briefing
   structural validation, goal-alignment validation, per-task
   verification, retry budget, rollback).
+- `AP2_AUTO_APPROVE_DRY_RUN` — TB-232 monitor-only on-ramp. **Unset
+  by default.** When set to a truthy value alongside
+  `AP2_AUTO_APPROVE=1`, the auto-approve gate chain (tags +
+  freeze-threshold + token caps) still runs but the WRITE step is a
+  no-op on the board row: instead of stripping `@blocked:review` and
+  emitting `auto_approved`, the daemon emits a `would_auto_approve`
+  audit event (same `task` + `knob` payload, plus `dry_run=true`) and
+  leaves the codespan intact for operator-manual `ap2 approve`. Use
+  this to observe the loop's decisions without committing to the
+  binary cliff. **Enablement on-ramp:** set both
+  `AP2_AUTO_APPROVE=1` AND `AP2_AUTO_APPROVE_DRY_RUN=1`, leave the
+  daemon running for ≥24h, read `ap2 status --json` and grep
+  `events.jsonl` for `would_auto_approve` events to confirm the
+  gate's decisions match your judgment, then unset
+  `AP2_AUTO_APPROVE_DRY_RUN` (keep `AP2_AUTO_APPROVE=1`) to engage
+  real dispatch. The `would_auto_approve_count_24h` field on
+  `collect_auto_approve_state` (surfaced via `ap2 status` + web home)
+  rises as decisions accumulate so you can confirm at a glance the
+  gate is exercising decisions before flipping the switch.
 - `AP2_AUTO_APPROVE_GATE_TAGS` (default `#breaking-change,#high-risk`)
   — comma-separated list of tag strings. When auto-approve is on, a
   proposed task carrying ANY of these tags **retains** its

@@ -3766,6 +3766,24 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             # auto-promote-from-Backlog path only.
             if backlog is not None and goal.roadmap_exhausted(cfg):
                 backlog = None
+            # TB-232: dry-run on-ramp. When `AP2_AUTO_APPROVE_DRY_RUN=1`
+            # is set alongside `AP2_AUTO_APPROVE=1`, the auto-approve
+            # gate chain still runs but lives at the proposal-time
+            # site (`tools.do_board_edit`'s `add_backlog` branch):
+            # instead of stripping `@blocked:review` and emitting
+            # `auto_approved`, it emits a `would_auto_approve` audit
+            # event and preserves the codespan. That means in dry-run
+            # mode the daemon's freeze-threshold / token-cap branches
+            # below NEVER fire for the simulated decisions —
+            # `_was_auto_approved(cfg, ...)` returns False (no
+            # `auto_approved` event in the tail), so the
+            # would-have-promoted task simply sits in Backlog awaiting
+            # operator-manual `ap2 approve`. Operator observes the
+            # `would_auto_approve` event stream + the
+            # `would_auto_approve_count_24h` counter
+            # (`collect_auto_approve_state`) for ≥24h, then unsets the
+            # dry-run knob to engage real dispatch.
+            #
             # TB-223: AP2_AUTO_APPROVE cumulative-regression circuit
             # breaker — when `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`
             # consecutive task failures land in `retry_exhausted`, halt

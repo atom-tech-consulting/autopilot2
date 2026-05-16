@@ -36,6 +36,19 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     attempt while a halt is active. Payload: `task` (the would-have-
     promoted TB-N), `reason` (matches the active `auto_approve_halted`
     event's reason).
+  - `would_auto_approve` (TB-232) — monitor-only dry-run sibling of
+    `auto_approved`. Fires at proposal-emission time when both
+    `AP2_AUTO_APPROVE=1` AND `AP2_AUTO_APPROVE_DRY_RUN=1` are set and
+    the tags gate would have stripped `@blocked:review`. The codespan
+    is preserved (operator-manual `ap2 approve` still required).
+    Payload: `task` (TB-N), `knob` (env value at emit time, mirrors
+    `auto_approved`), `dry_run=True` (discriminator field so the 24h
+    counter aggregator + offline tooling can parse both event streams
+    together without ambiguity). The operator runs in dry-run for
+    ≥24h, reads the `would_auto_approve` event stream + the
+    `would_auto_approve_count_24h` counter on `ap2 status` to confirm
+    the gate's decisions match their judgment, then unsets the
+    dry-run knob to engage real dispatch.
   - `auto_unfreeze_applied` (TB-225) — agent-diagnosed briefing-shape
     fix was auto-applied to a Frozen task. The daemon parsed a
     `BriefingFix: <shape> at <path>:<line>: <from> -> <to>` line from

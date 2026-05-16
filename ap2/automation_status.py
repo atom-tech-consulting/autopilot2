@@ -83,6 +83,31 @@ def _is_truthy(raw: str | None) -> bool:
     return (raw or "").strip() in ("1", "true", "yes")
 
 
+def _is_auto_approve_dry_run() -> bool:
+    """TB-232: True iff `AP2_AUTO_APPROVE_DRY_RUN` is set to a truthy
+    value.
+
+    Monitor-only on-ramp for the `AP2_AUTO_APPROVE` master switch
+    (TB-223). When both `AP2_AUTO_APPROVE=1` AND
+    `AP2_AUTO_APPROVE_DRY_RUN=1` are set, the auto-approve gate chain
+    (tags + freeze-threshold + token caps) still runs, but the WRITE
+    step changes: instead of stripping `@blocked:review` and emitting
+    `auto_approved`, the daemon emits a `would_auto_approve` audit
+    event and leaves the row's `@blocked:review` codespan intact for
+    operator-manual approval. The operator runs with both knobs on
+    for ≥24h, reads the events to confirm the gate's decisions match
+    their judgment, then unsets the dry-run knob to engage real
+    dispatch.
+
+    Mirrors `_is_truthy`'s permissive-parse shape so operators tuning
+    the autopilot env file see one consistent boolean convention
+    across knobs. Default unset → False (current TB-223 behavior; the
+    knob has no effect when `AP2_AUTO_APPROVE` itself is unset because
+    the gate chain doesn't fire at all in that case).
+    """
+    return _is_truthy(os.environ.get("AP2_AUTO_APPROVE_DRY_RUN"))
+
+
 def _freeze_threshold() -> int:
     """Effective `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`, mirroring
     `daemon._auto_approve_freeze_threshold`.
@@ -317,6 +342,17 @@ def collect_auto_approve_state(
         `"per_task_token_cap_exceeded"`,
         `"window_token_cap_exceeded"`, `"task_error"`, or `None` when
         not currently paused.
+      - `dry_run_enabled` (bool) — TB-232 `AP2_AUTO_APPROVE_DRY_RUN`
+        truthy. Operator on-ramp: when on, the gate chain still runs
+        but the WRITE step emits `would_auto_approve` instead of
+        stripping `@blocked:review`. The CLI / web home / JSON
+        surfaces render this as a "dry-run" badge so operators can
+        confirm the loop is in monitor mode at a glance.
+      - `would_auto_approve_count_24h` (int) — TB-232 rolling 24h
+        count of `would_auto_approve` events (parallel to
+        `auto_approved_count_24h`). Operator watches this rise during
+        the dry-run window to confirm the gate is making decisions
+        before flipping the dry-run knob off.
 
     `now` (default `datetime.now(UTC)`) and `window_s` are kwargs to
     keep the helper testable without `freezegun` — tests can pass a
@@ -376,6 +412,10 @@ def collect_auto_approve_state(
         tail, event_type="auto_unfreeze_skipped",
         now_s=now_s, window_s=window_s,
     )
+    would_auto_approve_24h = _count_events_24h(
+        tail, event_type="would_auto_approve",
+        now_s=now_s, window_s=window_s,
+    )
 
     pause_reason = _pause_reason(
         tail, unfreeze_idx=unfreeze_idx, resume_idx=resume_idx,
@@ -394,6 +434,14 @@ def collect_auto_approve_state(
         "auto_unfreeze_applied_count_24h": unfreeze_applied_24h,
         "auto_unfreeze_skipped_count_24h": unfreeze_skipped_24h,
         "pause_reason": pause_reason,
+        # TB-232: monitor-only on-ramp surface. `dry_run_enabled` flips
+        # the operator-facing CLI / web / JSON surfaces to render a
+        # "dry-run" badge; `would_auto_approve_count_24h` is the
+        # rolling counter of `would_auto_approve` events so the
+        # operator can confirm the gate is exercising decisions before
+        # flipping the dry-run knob off.
+        "dry_run_enabled": _is_auto_approve_dry_run(),
+        "would_auto_approve_count_24h": would_auto_approve_24h,
     }
 
 

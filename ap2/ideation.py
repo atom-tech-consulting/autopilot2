@@ -123,6 +123,11 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
     # auto_approve_unfreeze`.
     "auto_approved",
     "auto_approve_paused",
+    # TB-232: dry-run sibling of `auto_approved`. Surfacing it in the
+    # ideation events block lets the next cycle observe which proposals
+    # WOULD have shipped without operator review while the dry-run
+    # knob is on — same audit-trail need as `auto_approved` itself.
+    "would_auto_approve",
 )
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"
