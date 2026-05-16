@@ -629,3 +629,9 @@
 - **Summary:** Added AP2_AUTO_UNFREEZE_DRY_RUN monitor-only on-ramp: new _auto_unfreeze_dry_run() helper + branch in _maybe_auto_unfreeze that emits would_auto_unfreeze (payload mirrors auto_unfreeze_applied + file/line) instead of patching when dry-run is on; skip events still fire, per-day-cap halt preserved but bullet append skipped, per-task/per-day counters don't increment; event type registered in events.py, ideation.py allowlist, and howto.md schema + knobs sections; new test_tb233 module pins 3 behavioral cases (would-event + per-task-cap skip-wins + per-day-cap halt-without-bullet) plus helper unit + default-off byte-identical pin; full 1532-test regression green.
 - **Files:** ap2/daemon.py, ap2/events.py, ap2/howto.md, ap2/ideation.py, ap2/tests/test_tb233_auto_unfreeze_dry_run.py
 - **Tests:** pass
+
+## [2026-05-16] TB-234: `ap2 doctor` warns when `AP2_AUTO_APPROVE=1` is set but token caps are unset (axis-3 misconfiguration-floor)
+- **Commit:** `f350824`
+- **Summary:** Added auto_approve_audit() to ap2/doctor.py and wired it into diagnose() under section "auto-approve safety floor"; emits INFO when AP2_AUTO_APPROVE is unset, WARN per missing token cap (AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP / AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP) plus a summary "safety floor OFF" WARN when both are unset, using the daemon's parse semantics (unset/empty/non-int/non-positive → disabled). Added ap2/tests/test_tb234_doctor_auto_approve.py with 12 cases (all required behavioral cases plus non-integer parse + end-to-end diagnose() check). Updated ap2/howto.md with a TB-234 Pre-flight surface paragraph cross-linking goal.md L102-113. Full ap2/tests/ suite green (1544 passed).
+- **Files:** ap2/doctor.py, ap2/howto.md, ap2/tests/test_tb234_doctor_auto_approve.py
+- **Tests:** pass
