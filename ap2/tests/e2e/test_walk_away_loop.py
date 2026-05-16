@@ -44,7 +44,7 @@ from pathlib import Path
 
 import pytest
 
-from ap2 import daemon, events, tools
+from ap2 import daemon, events, goal, tools
 from ap2.board import Board
 from ap2.config import Config
 from ap2.cron import save_state
@@ -549,3 +549,277 @@ def test_auto_unfreeze_briefingfix_repairs_frozen_task(
         e.get("type") == "task_updated" and e.get("task") == task_id
         for e in drained
     ), "drain must emit task_updated for the briefing patch"
+
+
+# ===========================================================================
+# Test 3 (TB-237) — axis-4 focus rotation: focus_advanced + roadmap_complete
+# event chain in concert across daemon `_tick` cycles.
+#
+# Sibling to test 1/2 above. TB-230's `## Out of scope` explicitly deferred
+# axis-4 e2e (multi-cycle ideation accumulator pushed the wall-clock beyond
+# TB-230's scope); this test closes that gap so the walk-away promise
+# (goal.md L131-138: "walk-away time scales with the operator-declared
+# roadmap length") is verified end-to-end under real `_tick` dispatch.
+#
+# Setup: two-focus goal.md (focus-a, focus-b) with no `Done when:` block on
+# either — that forces the heuristic empty-cycles path in
+# `_maybe_advance_focus` (the Done-when judge path is skipped when bullets
+# are absent; see daemon.py ~L3619). FakeSDK ideation returns 0 proposals
+# on every invocation (an `ideation_complete` event with no `add_backlog`
+# call), simulating "ideation can't find proposals against the active
+# focus" each cycle.
+#
+# Empty-cycles threshold is set to 2 via `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`.
+# Per the heuristic in `_ideation_empty_against_focus`, BOTH
+# `ideation_empty_board` AND `ideation_complete` events count toward the
+# threshold — so each ideation invocation increments the counter by 2. With
+# threshold=2, one ideation invocation per focus is enough to trip the
+# advance pass on the NEXT tick (the advance pass runs at step 0.6 of
+# `_tick`, BEFORE step 4's `_maybe_ideate`; the events from tick N's
+# ideation are visible to tick N+1's advance pass).
+#
+# Tick-by-tick trace (asserted below):
+#   - Tick 1: advance pass sees 0 empty cycles → no advance; ideation runs
+#     against focus-a (+2 events).
+#   - Tick 2: advance pass sees 2 empty cycles against focus-a → ADVANCE
+#     focus-a → focus-b; ideation runs against focus-b (+2 events; cutoff
+#     starts at tick 2's `focus_advanced to=focus-b`).
+#   - Tick 3: advance pass sees 2 empty cycles against focus-b → ADVANCE
+#     focus-b → "" (pointer past last); ideation runs (no-op for the
+#     pointer since it's already past last).
+#   - Tick 4: advance pass sees `active_idx >= len(foci)` → emits
+#     `roadmap_complete`; ideation runs.
+#
+# After tick 4: assert `focus_advanced` precedes `roadmap_complete`, the
+# halt is active (`goal.roadmap_exhausted(cfg) is True`), no `task_start`
+# events fired (the halt blocks auto-promote — vacuously true here since
+# no Backlog task was seeded; the unit-level pin
+# `test_dispatch_halt_when_roadmap_exhausted_blocks_backlog_promote` in
+# `test_tb226_focus_rotation.py` already exercises the gate against a
+# real dispatchable Backlog row), and an `operator_ack` with the
+# `roadmap_complete` token clears the halt.
+# ===========================================================================
+
+
+# Two-focus goal.md fixture. NEITHER focus carries a `Done when:` sub-block
+# so the heuristic empty-cycles path is the one driving advancement
+# (the Done-when judge branch in `_maybe_advance_focus` only fires when
+# `active.has_done_when() and active.done_when_bullets`). The briefing's
+# scope (2) wording ("Done when: sub-block ... so the heuristic empty-cycles
+# path is what drives advancement") is internally inconsistent with the
+# current code — having Done-when bullets forces the judge path, NOT the
+# heuristic — so we honor the SPIRIT (heuristic-driven advancement) by
+# omitting the Done-when blocks entirely. If a follow-up adds a fall-
+# through from "judge said no" to "heuristic still counts", revisit this
+# fixture to include trivially-met bullets that the stubbed judge marks as
+# `no`.
+_MULTI_FOCUS_GOAL_MD = (
+    "# Project Goals\n\n"
+    "## Mission\n\n"
+    "Drive the project toward end-to-end automation.\n\n"
+    "## Done when\n\n"
+    "- An operator can point ap2 at a fresh project and walk away "
+    "without intervention.\n\n"
+    "## Current focus: focus-a\n\n"
+    "Body for focus-a — first focus in the two-step roadmap.\n\n"
+    "## Current focus: focus-b\n\n"
+    "Body for focus-b — second (and final) focus in the roadmap.\n\n"
+    "## Non-goals\n\n"
+    "- something out of scope.\n"
+)
+
+
+def test_focus_advance_and_roadmap_complete_across_ticks(
+    walk_away_cfg: Config, monkeypatch,
+):
+    cfg = walk_away_cfg
+
+    # Override the walk_away_cfg's single-focus goal.md with a two-focus
+    # one. The fixture's preallocated `Next task ID: TB-10` is irrelevant
+    # here (no tasks are ever queued — FakeSDK ideation returns 0
+    # proposals on every invocation).
+    (cfg.project_root / "goal.md").write_text(_MULTI_FOCUS_GOAL_MD)
+
+    # Bound empty-cycles to 2 so one ideation invocation per focus is
+    # enough to trip the advance pass on the NEXT tick (each invocation
+    # emits BOTH `ideation_empty_board` AND `ideation_complete`, and both
+    # event types count toward the heuristic — see
+    # `_ideation_empty_against_focus` in daemon.py).
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "2")
+    # Kill-switch off (default) so the advance pass is allowed to fire.
+    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    # Enable ideation; cooldown=0 so it fires every tick (default 7200s
+    # would suppress ideation on ticks 2-4).
+    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "0")
+    # Project-override ideation prompt — stable substring for FakeSDK
+    # routing (no need to depend on `ideation.default.md`).
+    override = cfg.project_root / ".cc-autopilot" / "ideation_prompt.md"
+    override.write_text("TB-237 walk-away ideation prompt — propose a task.\n")
+    # Stale the ideation cooldown clock so the first tick's gate passes
+    # cleanly (defensive — cooldown=0 already passes, but explicit is
+    # safer in case the gate-ordering changes upstream).
+    save_state(cfg.cron_state_file, {"ideation": time.time() - 7200})
+
+    # FakeSDK ideation responder: returns 0 proposals on every call. Just
+    # emits an `ideation_complete` event via the same `tools.do_log_event`
+    # path the real ideation agent's `log_event` MCP tool uses. NO
+    # `do_board_edit(add_backlog, ...)` call, so no
+    # `ideation_proposal_recorded` event ever fires (which would reset the
+    # empty-cycles counter — see `_ideation_empty_against_focus`).
+    def ideation_factory(prompt, options):  # noqa: ARG001
+        async def _gen():
+            tools.do_log_event(
+                cfg,
+                {
+                    "type": "ideation_complete",
+                    "summary": (
+                        "no proposals; ideation reports the active focus "
+                        "appears exhausted (test fixture)"
+                    ),
+                },
+            )
+            yield _FakeMixedMsg([
+                _FakeToolUseBlock(
+                    name="log_event",
+                    input={
+                        "type": "ideation_complete",
+                        "summary": "no proposals",
+                    },
+                ),
+            ])
+
+        return _gen()
+
+    sdk = FakeSDK()
+    sdk.on("TB-237 walk-away ideation prompt", ideation_factory)
+
+    # Drive 4 ticks through `daemon._tick`. Each tick runs the focus-
+    # advance pass (step 0.6) and then ideation (step 4). The trace
+    # above this function explains the expected event sequence.
+    for _ in range(4):
+        asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    evts = events.tail(cfg.events_file, 1000)
+
+    # ----- focus_advanced focus-a → focus-b -----
+    fa_a_to_b = [
+        e for e in evts
+        if e.get("type") == "focus_advanced"
+        and e.get("from") == "focus-a"
+        and e.get("to") == "focus-b"
+    ]
+    assert len(fa_a_to_b) == 1, (
+        f"expected exactly one `focus_advanced from=focus-a to=focus-b` "
+        f"event; got: {fa_a_to_b}"
+    )
+    assert fa_a_to_b[0]["trigger"] == "empty_cycles_heuristic", (
+        f"focus-a → focus-b advance must fire via the heuristic path; "
+        f"got trigger={fa_a_to_b[0].get('trigger')!r}"
+    )
+    assert fa_a_to_b[0]["new_index"] == 1
+    assert fa_a_to_b[0]["total_foci"] == 2
+
+    # ----- focus_advanced focus-b → "" (pointer past last) -----
+    # The advance from focus-b pushes the pointer past the last focus
+    # but does NOT itself emit `roadmap_complete` — the next tick's
+    # advance pass detects `active_idx >= len(foci)` and emits the
+    # halt event.
+    fa_b_to_end = [
+        e for e in evts
+        if e.get("type") == "focus_advanced"
+        and e.get("from") == "focus-b"
+    ]
+    assert len(fa_b_to_end) == 1, (
+        f"expected exactly one `focus_advanced from=focus-b` event; "
+        f"got: {fa_b_to_end}"
+    )
+    assert fa_b_to_end[0]["to"] == ""
+    assert fa_b_to_end[0]["new_index"] == 2
+
+    # ----- roadmap_complete fired exactly once -----
+    rc = [e for e in evts if e.get("type") == "roadmap_complete"]
+    assert len(rc) == 1, (
+        f"expected exactly one `roadmap_complete` event; got: {rc}"
+    )
+    assert rc[0]["exhausted_count"] == 2
+    assert rc[0]["trigger"] == "pointer_past_last"
+
+    # ----- Causal ordering: focus_advanced (focus-a → focus-b) strictly
+    # precedes focus_advanced (focus-b → "") strictly precedes
+    # roadmap_complete. Walk events.jsonl in index order. -----
+    idx_fa_a = next(
+        i for i, e in enumerate(evts)
+        if e.get("type") == "focus_advanced"
+        and e.get("from") == "focus-a"
+    )
+    idx_fa_b = next(
+        i for i, e in enumerate(evts)
+        if e.get("type") == "focus_advanced"
+        and e.get("from") == "focus-b"
+    )
+    idx_rc = next(
+        i for i, e in enumerate(evts)
+        if e.get("type") == "roadmap_complete"
+    )
+    assert idx_fa_a < idx_fa_b < idx_rc, (
+        f"event ordering wrong: focus-a→focus-b at {idx_fa_a}, "
+        f"focus-b→\"\" at {idx_fa_b}, roadmap_complete at {idx_rc}"
+    )
+
+    # ----- Halt active: pointer past last + no clearing ack yet. -----
+    assert goal.roadmap_exhausted(cfg) is True, (
+        "roadmap_complete event fired but `goal.roadmap_exhausted` returns "
+        "False — the halt scan is detached from the event emit"
+    )
+
+    # ----- Halt blocks auto-promote: no `task_start` events appear after
+    # `roadmap_complete`. Vacuously true here since no Backlog tasks are
+    # seeded (FakeSDK ideation returns 0 proposals), but the assertion is
+    # the gate-level pin — if a regression somehow caused the daemon's
+    # dispatch path to fire under a halted roadmap (e.g. a refactor
+    # removed the `goal.roadmap_exhausted(cfg)` check from the auto-
+    # promote branch), this assertion still catches it.
+    # `test_dispatch_halt_when_roadmap_exhausted_blocks_backlog_promote`
+    # in `test_tb226_focus_rotation.py` exercises the gate against a
+    # real dispatchable Backlog row at the unit level. -----
+    task_starts_after_halt = [
+        e for e in evts[idx_rc + 1:]
+        if e.get("type") == "task_start"
+    ]
+    assert task_starts_after_halt == [], (
+        f"no `task_start` events should fire after `roadmap_complete`; "
+        f"got: {task_starts_after_halt}"
+    )
+
+    # ----- Ack clears the halt: operator emits `operator_ack` with the
+    # `roadmap_complete` token in the note (same shape
+    # `test_ack_clears_roadmap_complete_halt` in
+    # `test_tb226_focus_rotation.py` exercises). After the ack,
+    # `goal.roadmap_exhausted(cfg)` flips to False. -----
+    events.append(
+        cfg.events_file,
+        "operator_ack",
+        note="ack: roadmap_complete — extended roadmap with axis 5",
+    )
+    assert goal.roadmap_exhausted(cfg) is False, (
+        "operator_ack with the `roadmap_complete` token must clear the "
+        "halt — `goal.roadmap_exhausted` still returns True"
+    )
+
+    # ----- Final ordering pin: `roadmap_complete` strictly precedes the
+    # clearing `operator_ack`. -----
+    evts_after_ack = events.tail(cfg.events_file, 1000)
+    idx_rc2 = next(
+        i for i, e in enumerate(evts_after_ack)
+        if e.get("type") == "roadmap_complete"
+    )
+    idx_ack = next(
+        i for i, e in enumerate(evts_after_ack)
+        if e.get("type") == "operator_ack"
+        and "roadmap_complete" in str(e.get("note") or "")
+    )
+    assert idx_rc2 < idx_ack, (
+        f"roadmap_complete (idx {idx_rc2}) must precede the clearing "
+        f"operator_ack (idx {idx_ack})"
+    )
