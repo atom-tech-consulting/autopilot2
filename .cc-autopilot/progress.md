@@ -653,3 +653,9 @@
 - **Summary:** Tightened the prose-judge prompt (rationale ≤200 chars, FINAL message must be a JSON object only, explicit example) and added full-raw-response dump on parse failure at .cc-autopilot/debug/<run_ts>-<task>-judge-bullet<idx>-response.txt. Added _categorize_parse_error() returning one of 5 PARSE_ERROR_CATEGORIES (no_json_object/trailing_prose_after_json/unescaped_in_string/json_truncated/parse_error_other) surfaced on the judge_call event as `parse_error`. Always-on `response_length` (every call) plus `rationale_length` (success only) and `judge_response_dump` (failure only) fields on the judge_call event. JUDGE_REPO_READ_TOOLS unchanged — only the FINAL message is contracted. Tests: 19 parameterized cases in ap2/tests/test_judge_parse_observability.py (response dumped on failure, no dump on success, event-path threading, 5 category cases pure+e2e, length signals, strict-prompt constants, dump-filename shape). Docs: ap2/howto.md gained a Prose-judge diagnostics subsection under Verification with worked jq workflows. Full ap2/tests/ green: 1579 passed in 126.76s.
 - **Files:** ap2/verify.py, ap2/howto.md, ap2/tests/test_judge_parse_observability.py
 - **Tests:** pass
+
+## [2026-05-16] TB-237: Axis-4 e2e walk-away test: pin `focus_advanced` + `roadmap_complete` event chain in concert across daemon `_tick` cycles
+- **Commit:** `b2fb6b1`
+- **Summary:** Added test_focus_advance_and_roadmap_complete_across_ticks to ap2/tests/e2e/test_walk_away_loop.py: drives 4 daemon._tick cycles through a two-focus goal.md with FakeSDK ideation returning 0 proposals per invocation (AP2_FOCUS_ADVANCE_EMPTY_CYCLES=2) and asserts focus_advanced (focus-a→focus-b, then focus-b→"") strictly precedes roadmap_complete in events.jsonl, halt is active, and operator_ack with the roadmap_complete token clears it; full ap2/tests/ suite (1580 tests) passes.
+- **Files:** ap2/tests/e2e/test_walk_away_loop.py
+- **Tests:** pass
