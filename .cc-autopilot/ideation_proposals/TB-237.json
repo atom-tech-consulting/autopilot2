@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/axis-4-e2e-walk-away-test-pin-focus-adva.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-16T05:48:42Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-16T01:52:57Z",
   "tb_id": "TB-237",
   "why_now": "TB-230 landed at `ad1ae3e` on 2026-05-16T01:13:25Z with\nthe axis-4 deferral explicit; axes 1+2 now have e2e coverage but\naxis 4 does not, leaving the walk-away promise (goal.md L131-138:\n\"walk-away time scales with the operator-declared roadmap length\nweeks-to-months\") unverified in concert. Without this test, an\noperator who configures a multi-focus `goal.md` cannot trust that\nexhaustion-rotation-halt actually fires end-to-end \u2014 every\nexisting axis-4 test exercises ONE helper at a time, not the\nsequence under real `_tick` dispatch."

@@ -152,3 +152,8 @@ ideation won't re-propose decisions logged here._
 - 2026-05-16T01:16:59Z — applied operator-queued reject → TB-231
 - 2026-05-16T01:16:59Z — rejected ideation proposal → TB-231 (Prose-judge: retry once with stricter system prompt on malformed JSON before declaring `unverified`): Patching symptom (retry) without diagnosing root cause. Verifier only logs 200 chars of extracted JSON — we cannot diagnose failures. Right shape is prevention (tighten judge prompt for shorter strict-JSON output) + observability (full raw response dumped on parse failure). Replacement TB bundles both.
 - 2026-05-16T01:17:52Z — applied operator-queued add_backlog → TB-236
+- 2026-05-16T05:48:29Z — applied operator-queued approve → TB-235
+- 2026-05-16T05:48:29Z — applied operator-queued approve → TB-236
+- 2026-05-16T05:48:30Z — applied operator-queued approve → TB-237
+- 2026-05-16T05:48:30Z — applied operator-queued approve → TB-238
+- 2026-05-16T05:48:30Z — applied operator-queued approve → TB-239

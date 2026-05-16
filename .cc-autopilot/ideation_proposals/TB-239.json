@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/ap2-doctor-warns-when-ap2-auto-unfreeze.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-16T05:48:42Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-16T01:53:49Z",
   "tb_id": "TB-239",
   "why_now": "TB-233 (`74bd793`, 2026-05-16T01:32:05Z) just shipped\n`AP2_AUTO_UNFREEZE_DRY_RUN`; TB-234 just shipped the axis-1\ndoctor audit. Without this symmetric mirror on axis 2, the\nfirst operator who flips `AP2_AUTO_UNFREEZE_DRY_RUN=1`\nwithout realizing the allowlist is also required hits a\nsilent-no-op and assumes the feature is broken \u2014 eroding\ntrust in the on-ramp model TB-232/233 just established. The\nTB-234 approval at 01:03:11Z establishes the operator's\nprecedent that pre-flight misconfiguration warnings on\nopt-in automation knobs are in-scope; mirroring that\npattern to axis 2 closes the symmetry gap."
