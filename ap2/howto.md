@@ -913,7 +913,12 @@ land in Frozen).
   real dispatch. The `would_auto_approve_count_24h` field on
   `collect_auto_approve_state` (surfaced via `ap2 status` + web home)
   rises as decisions accumulate so you can confirm at a glance the
-  gate is exercising decisions before flipping the switch.
+  gate is exercising decisions before flipping the switch. TB-238
+  also surfaces the same count as a trailing `*Dry-run window:*`
+  sub-block on the scheduled `status-report` Mattermost post's
+  `## Automation loop activity` section, so a walk-away operator
+  sees the readiness signal in their primary return surface
+  without alt-tabbing to `ap2 status --json`.
 - `AP2_AUTO_APPROVE_GATE_TAGS` (default `#breaking-change,#high-risk`)
   — comma-separated list of tag strings. When auto-approve is on, a
   proposed task carrying ANY of these tags **retains** its
@@ -1114,7 +1119,16 @@ per bootstrap fix-shape (TB-229).
   confirm the gate's decisions match your judgment, then unset
   `AP2_AUTO_UNFREEZE_DRY_RUN` to engage real patching. Sibling
   on-ramp to `AP2_AUTO_APPROVE_DRY_RUN` (TB-232) on the axis-1
-  auto-approve side.
+  auto-approve side. **Operator's primary readiness surface** (TB-238):
+  the scheduled `status-report` Mattermost post's
+  `## Automation loop activity` section grows a trailing
+  `*Dry-run window:*` sub-block while either dry-run knob is on,
+  listing the 24h rolling count of `would_auto_unfreeze`
+  (and/or `would_auto_approve`) events. Watch the count rise post-by-
+  post for confidence the gate is exercising decisions before
+  flipping the knob off; the sub-block is omitted entirely when
+  both dry-runs are off so default-off projects stay byte-identical
+  to TB-228 output.
 
 Audit events: `auto_unfreeze_applied` (success — payload `task`,
 `shape`, `from`, `to`); `auto_unfreeze_skipped` (any guarded skip —

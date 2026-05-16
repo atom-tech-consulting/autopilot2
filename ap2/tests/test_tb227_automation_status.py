@@ -91,6 +91,7 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
     documented."""
     monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
@@ -100,6 +101,9 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
     # `dry_run_enabled` + `would_auto_approve_count_24h` pair as the
     # monitor-only on-ramp surface; the two land in the same dict so
     # CLI / web / JSON renderings consume one source of truth.
+    # TB-238 added the parallel `auto_unfreeze_dry_run_enabled` +
+    # `would_auto_unfreeze_count_24h` pair on the axis-2 side so the
+    # status-report digest can render both dry-runs as one block.
     expected_keys = {
         "auto_approve_enabled", "auto_approve_paused",
         "consecutive_freezes", "freeze_threshold",
@@ -111,6 +115,8 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
         "pause_reason",
         "dry_run_enabled",
         "would_auto_approve_count_24h",
+        "auto_unfreeze_dry_run_enabled",
+        "would_auto_unfreeze_count_24h",
     }
     assert set(state.keys()) == expected_keys
 
@@ -128,6 +134,90 @@ def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypa
     assert state["pause_reason"] is None
     assert state["dry_run_enabled"] is False
     assert state["would_auto_approve_count_24h"] == 0
+    assert state["auto_unfreeze_dry_run_enabled"] is False
+    assert state["would_auto_unfreeze_count_24h"] == 0
+
+
+# ===========================================================================
+# TB-238: auto-unfreeze dry-run sibling keys on the collector surface.
+# ===========================================================================
+
+
+def test_collect_state_auto_unfreeze_dry_run_flag(cfg: Config, monkeypatch):
+    """`AP2_AUTO_UNFREEZE_DRY_RUN=1` → the aggregator's public dict
+    has `auto_unfreeze_dry_run_enabled=True`. Operator-facing CLI /
+    web / JSON / status-report digest surfaces consume this key to
+    render a "dry-run window" sub-block confirming the loop is in
+    monitor mode at a glance.
+
+    Mirror of `test_dry_run_flag_in_collect_auto_approve_state` (TB-232)
+    on the axis-2 side; pinned in TB-227's contract file so the
+    expected-keys set in `test_collect_state_shape_when_knob_off_and_
+    no_activity` and the per-knob behavior pin live alongside the
+    rest of the collector contract.
+    """
+    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    state = automation_status.collect_auto_approve_state(cfg)
+    assert state["auto_unfreeze_dry_run_enabled"] is False
+
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    state = automation_status.collect_auto_approve_state(cfg)
+    assert state["auto_unfreeze_dry_run_enabled"] is True
+
+
+def test_collect_state_would_auto_unfreeze_24h_counter(
+    cfg: Config, monkeypatch,
+):
+    """Two seeded `would_auto_unfreeze` events surface as a 24h
+    counter value of 2 in the aggregator's public dict — parallel to
+    the TB-232 `would_auto_approve_count_24h` counter and the TB-227
+    `auto_unfreeze_applied_count_24h` real-mode counter. Pins the
+    aggregator's tail-scan symmetry across both event streams.
+
+    Sanity-checks that an empty tail (no `would_auto_unfreeze` events
+    seeded) yields zero so the counter doesn't false-positive on
+    other event types.
+    """
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+
+    # Baseline: no events → counter at 0.
+    state = automation_status.collect_auto_approve_state(cfg)
+    assert state["would_auto_unfreeze_count_24h"] == 0
+
+    events.append(
+        cfg.events_file, "would_auto_unfreeze",
+        task="TB-600", shape="blocked_review_typo",
+        **{"from": "x", "to": "y", "file": "f.md", "line": 1, "dry_run": True},
+    )
+    events.append(
+        cfg.events_file, "would_auto_unfreeze",
+        task="TB-601", shape="blocked_review_typo",
+        **{"from": "x", "to": "y", "file": "f.md", "line": 2, "dry_run": True},
+    )
+
+    state = automation_status.collect_auto_approve_state(cfg)
+    assert state["would_auto_unfreeze_count_24h"] == 2, state
+    # Sanity: real-mode auto-unfreeze counter is untouched (no
+    # `auto_unfreeze_applied` events were seeded).
+    assert state["auto_unfreeze_applied_count_24h"] == 0
+
+
+def test_is_auto_unfreeze_dry_run_helper_directly(monkeypatch):
+    """Direct unit pin on the env-knob parser so a future refactor
+    that changes the truthy-set surfaces clearly here instead of
+    cascading through `collect_auto_approve_state`. Mirrors the
+    shape of `test_is_auto_approve_dry_run_helper_directly` in
+    `test_tb232_auto_approve_dry_run.py`."""
+    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    assert automation_status._is_auto_unfreeze_dry_run() is False
+
+    for truthy in ("1", "true", "yes"):
+        monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", truthy)
+        assert automation_status._is_auto_unfreeze_dry_run() is True, truthy
+
+    for falsy in ("0", "false", "no", "", " "):
+        monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", falsy)
+        assert automation_status._is_auto_unfreeze_dry_run() is False, falsy
 
 
 def test_collect_state_knob_on_no_halt(cfg: Config, monkeypatch):

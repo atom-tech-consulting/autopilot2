@@ -645,3 +645,122 @@ def test_find_previous_status_report_idx_returns_minus_one_on_empty():
         )
         == -1
     )
+
+
+# ===========================================================================
+# TB-238: dry-run window sub-block — surfaces the readiness signal that
+# TB-232 + TB-233 emit (`would_auto_approve` / `would_auto_unfreeze`
+# 24h counts) in the operator's primary return surface so a knob-flip
+# can be observed without alt-tabbing to `ap2 logs`.
+# ===========================================================================
+
+
+def test_dry_run_subblock_renders_when_either_knob_on(
+    cfg: Config, monkeypatch,
+):
+    """At least one of `AP2_AUTO_APPROVE_DRY_RUN` /
+    `AP2_AUTO_UNFREEZE_DRY_RUN` truthy → the digest section ends with
+    a `*Dry-run window:*` sub-block. The on-axis line lists the rolling
+    24h count; the off-axis line is suppressed (no zero-noise on the
+    axis the operator hasn't opted in to).
+
+    Pinned shape (auto-approve dry-run on, two seeded `would_auto_
+    approve` events): the sub-block lists `2` `would_auto_approve` in
+    the 24h window. Auto-unfreeze line is absent because that knob is
+    off in this fixture.
+    """
+    # Auto-approve dry-run on; knob also on (real-mode toggle is
+    # required to engage the gate, dry-run flips the WRITE step).
+    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+
+    events.append(
+        cfg.events_file, "would_auto_approve",
+        task="TB-1300", knob="1", dry_run=True,
+    )
+    events.append(
+        cfg.events_file, "would_auto_approve",
+        task="TB-1301", knob="1", dry_run=True,
+    )
+
+    section = render_automation_loop_activity_section(
+        cfg, since_event_idx=_previous_status_report_idx(cfg),
+    )
+    assert "*Dry-run window:*" in section, section
+    # On-axis line: count + event type, both code-spanned for legibility.
+    assert "auto-approve: `2` `would_auto_approve` in 24h" in section
+    # Off-axis line suppressed.
+    assert "would_auto_unfreeze" not in section
+
+
+def test_dry_run_subblock_renders_both_lines_when_both_knobs_on(
+    cfg: Config, monkeypatch,
+):
+    """Both dry-run knobs on → the sub-block lists BOTH axes. Pins the
+    parallel structure so operators reading the post during a paired
+    dry-run window see both readiness signals in one block."""
+    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+
+    events.append(
+        cfg.events_file, "would_auto_approve",
+        task="TB-1400", knob="1", dry_run=True,
+    )
+    events.append(
+        cfg.events_file, "would_auto_unfreeze",
+        task="TB-1401", shape="blocked_review_typo",
+        **{"from": "x", "to": "y", "file": "f.md", "line": 1,
+           "dry_run": True},
+    )
+
+    section = render_automation_loop_activity_section(
+        cfg, since_event_idx=_previous_status_report_idx(cfg),
+    )
+    assert "*Dry-run window:*" in section
+    assert "auto-approve: `1` `would_auto_approve` in 24h" in section
+    assert "auto-unfreeze: `1` `would_auto_unfreeze` in 24h" in section
+
+
+def test_dry_run_subblock_omitted_when_both_dry_runs_off(
+    cfg: Config, monkeypatch,
+):
+    """Default-off byte-identical regression pin (briefing's
+    load-bearing safety check): when neither
+    `AP2_AUTO_APPROVE_DRY_RUN` nor `AP2_AUTO_UNFREEZE_DRY_RUN` is
+    set, the rendered section MUST be byte-identical to TB-228's
+    pre-TB-238 output — no `*Dry-run window:*` header, no per-axis
+    lines, no trailing blank line introduced by the new code path.
+    Pins the omit-on-empty rule that keeps the default operator
+    experience untouched by the new readiness signal.
+
+    Fixture mirrors `test_section_present_when_knob_on_and_counters_
+    zero` (knob on, no halt, no loop events) so the comparison
+    captures the full pre-TB-238 baseline shape.
+    """
+    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+
+    section = render_automation_loop_activity_section(
+        cfg, since_event_idx=_previous_status_report_idx(cfg),
+    )
+    # Both axes' literal tokens absent — the renderer must not have
+    # injected the sub-block at all.
+    assert "Dry-run window" not in section, section
+    assert "would_auto_approve" not in section
+    assert "would_auto_unfreeze" not in section
+    # The pre-TB-238 baseline ends with the auto-approved bullet
+    # (no halt / no skipped → no trailing bullets / no trailing
+    # blank line from the new code path). Exact-match pin on the
+    # full default-off output.
+    expected = (
+        "## Automation loop activity\n\n"
+        "auto-approve: healthy; auto-unfreeze: healthy\n\n"
+        "- 0 tasks auto-approved (0 completed, 0 froze)"
+    )
+    assert section == expected, (
+        f"default-off section must be byte-identical to TB-228 baseline; "
+        f"got:\n{section!r}\nexpected:\n{expected!r}"
+    )

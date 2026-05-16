@@ -159,6 +159,18 @@ def render_automation_loop_activity_section(
         - S auto-unfreeze attempts skipped (reason breakdown)
         - Most recent halt: <ts> <event_type> reason=<x> — run `ap2 ack <verb>` to clear
 
+        *Dry-run window:*
+        - auto-approve: `<N>` `would_auto_approve` in 24h
+        - auto-unfreeze: `<M>` `would_auto_unfreeze` in 24h
+
+    TB-238: the trailing "Dry-run window" sub-block renders only when
+    at least one of `dry_run_enabled` / `auto_unfreeze_dry_run_enabled`
+    is True in the collector output, with only the on-axis line(s)
+    surfaced (the other axis's line is suppressed). When both
+    dry-runs are off, the sub-block is omitted entirely so the
+    default-off digest output stays byte-identical to TB-228 — the
+    load-bearing regression pin operators rely on.
+
     Omit-on-empty: returns "" when knob unset AND all four event-type
     counters in the window are zero. Pin the omission rule with the
     test `test_section_absent_when_knob_off_and_all_counters_zero`.
@@ -247,11 +259,38 @@ def render_automation_loop_activity_section(
             f"`ap2 ack {latest_halt['ack_verb']}` to clear"
         )
 
+    # TB-238: optional "Dry-run window" sub-block. Rendered only when
+    # at least one dry-run knob is on, so the default-off output stays
+    # byte-identical to TB-228 (regression-pinned). The sub-block is
+    # appended at the END of the section so existing readers' muscle
+    # memory for the bullet positions is preserved. Per-axis lines are
+    # suppressed individually so an operator who only flipped one of
+    # the two knobs sees just the on-axis line — no zero-noise from
+    # the off axis.
+    aa_dry_run = state["dry_run_enabled"]
+    au_dry_run = state["auto_unfreeze_dry_run_enabled"]
+    dry_run_lines: list[str] = []
+    if aa_dry_run or au_dry_run:
+        dry_run_lines.append("*Dry-run window:*")
+        if aa_dry_run:
+            dry_run_lines.append(
+                f"- auto-approve: `{state['would_auto_approve_count_24h']}` "
+                f"`would_auto_approve` in 24h"
+            )
+        if au_dry_run:
+            dry_run_lines.append(
+                f"- auto-unfreeze: "
+                f"`{state['would_auto_unfreeze_count_24h']}` "
+                f"`would_auto_unfreeze` in 24h"
+            )
+
     section = (
         f"{_AUTOMATION_DIGEST_HEADING}\n\n"
         f"{headline}\n\n"
         + "\n".join(bullets)
     )
+    if dry_run_lines:
+        section += "\n\n" + "\n".join(dry_run_lines)
     return section
 
 

@@ -108,6 +108,29 @@ def _is_auto_approve_dry_run() -> bool:
     return _is_truthy(os.environ.get("AP2_AUTO_APPROVE_DRY_RUN"))
 
 
+def _is_auto_unfreeze_dry_run() -> bool:
+    """TB-238: True iff `AP2_AUTO_UNFREEZE_DRY_RUN` is set to a truthy
+    value.
+
+    Sibling to `_is_auto_approve_dry_run` (TB-232) on the axis-2
+    auto-unfreeze side. The actual write-step gating lives in
+    `daemon._auto_unfreeze_dry_run` (TB-233); this helper is the
+    aggregator-side mirror so the operator-facing surfaces
+    (`ap2 status` JSON, web home, the status-report digest) can render
+    a "dry-run" badge without dragging in the daemon's import graph.
+    Source-of-truth env name is identical to the daemon helper, so a
+    refactor that renames the knob trips both helpers at the same
+    grep.
+
+    Same permissive truthy-set as `_is_truthy` / `_is_auto_approve_
+    dry_run` so operators tuning the autopilot env file see one
+    consistent boolean convention across knobs. Default unset → False
+    (current TB-225 behavior; byte-identical to pre-TB-233 when the
+    knob has never been set).
+    """
+    return _is_truthy(os.environ.get("AP2_AUTO_UNFREEZE_DRY_RUN"))
+
+
 def _freeze_threshold() -> int:
     """Effective `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`, mirroring
     `daemon._auto_approve_freeze_threshold`.
@@ -353,6 +376,20 @@ def collect_auto_approve_state(
         `auto_approved_count_24h`). Operator watches this rise during
         the dry-run window to confirm the gate is making decisions
         before flipping the dry-run knob off.
+      - `auto_unfreeze_dry_run_enabled` (bool) — TB-238 sibling of
+        `dry_run_enabled` on the axis-2 auto-unfreeze side.
+        `AP2_AUTO_UNFREEZE_DRY_RUN` truthy. Naming note: the
+        auto-approve key shipped (TB-232) without an `auto_approve_`
+        prefix; the new key carries the `auto_unfreeze_` prefix to
+        disambiguate when both surfaces render together (e.g. the
+        status-report digest's dry-run window sub-block, which lists
+        both counts in one block).
+      - `would_auto_unfreeze_count_24h` (int) — TB-238 rolling 24h
+        count of `would_auto_unfreeze` events (parallel to
+        `would_auto_approve_count_24h`). Operator watches this rise
+        during the dry-run window to confirm the auto-unfreeze gate
+        is exercising decisions on the live Frozen set before
+        flipping the dry-run knob off.
 
     `now` (default `datetime.now(UTC)`) and `window_s` are kwargs to
     keep the helper testable without `freezegun` — tests can pass a
@@ -416,6 +453,10 @@ def collect_auto_approve_state(
         tail, event_type="would_auto_approve",
         now_s=now_s, window_s=window_s,
     )
+    would_auto_unfreeze_24h = _count_events_24h(
+        tail, event_type="would_auto_unfreeze",
+        now_s=now_s, window_s=window_s,
+    )
 
     pause_reason = _pause_reason(
         tail, unfreeze_idx=unfreeze_idx, resume_idx=resume_idx,
@@ -442,6 +483,13 @@ def collect_auto_approve_state(
         # flipping the dry-run knob off.
         "dry_run_enabled": _is_auto_approve_dry_run(),
         "would_auto_approve_count_24h": would_auto_approve_24h,
+        # TB-238: auto-unfreeze sibling surface. Placed directly after
+        # the TB-232 auto-approve dry-run keys so the JSON ordering
+        # reflects axis-pairing (auto-approve dry-run → auto-unfreeze
+        # dry-run). The status-report digest renders both counts as
+        # one "dry-run window" sub-block when either knob is on.
+        "auto_unfreeze_dry_run_enabled": _is_auto_unfreeze_dry_run(),
+        "would_auto_unfreeze_count_24h": would_auto_unfreeze_24h,
     }
 
 
