@@ -2817,6 +2817,115 @@ def _auto_approve_already_halted(cfg: Config) -> bool:
     return False
 
 
+def evaluate_auto_approve_decision(
+    cfg: Config,
+    *,
+    tags: list[str] | None,
+) -> str:
+    """TB-232: Auto-approve dispatch path — single-source-of-truth
+    branch over the full gate chain. Returns the WRITE action the
+    proposal-time caller (`tools.do_board_edit`'s `add_backlog` branch)
+    should take.
+
+    Gate-evaluation order (serial; each evaluated top-to-bottom so the
+    judge can read the branch ordering directly):
+
+      1. `tags` — `ideation.should_auto_approve(tags)` excludes
+         proposals carrying any of `AP2_AUTO_APPROVE_GATE_TAGS`
+         (default `#breaking-change,#high-risk`). Existing TB-223 gate.
+         A tag opt-out short-circuits to `"noop"` for both real and
+         dry-run modes — the proposal is treated as non-auto-approved
+         end-to-end.
+      2. `freeze-threshold` — `_auto_approve_paused(cfg)` returns True
+         when N consecutive task failures ended in `retry_exhausted`
+         (TB-223 circuit-breaker; default N=3).
+      3. `per-task-token-cap` + `window-token-cap` —
+         `_auto_approve_check_violations(cfg)` returns non-None when
+         either TB-224 cost-guard tripped (per-task first by
+         precedence, then window-sum).
+
+    Gates 2-3 are evaluated up-front so the dry-run terminal branch
+    can consult their results without re-walking events.jsonl. Their
+    *enforcement* depends on the mode (see terminal branch below).
+
+    Terminal branch — only AFTER gates 1-3 are evaluated:
+
+      - `"dry_run"` (`AP2_AUTO_APPROVE_DRY_RUN` truthy): monitor-only
+        on-ramp. The simulated decision must honor the SAME gates the
+        real-dispatch path honors; if freeze-threshold or any token
+        cap tripped, the simulation returns `"noop"` (no
+        `would_auto_approve` emitted — the simulation matches what
+        real dispatch would do, including the safety halts). When all
+        gates pass, return `"dry_run"` so the caller emits
+        `would_auto_approve` and preserves the `@blocked:review`
+        codespan.
+
+      - `"strip"` (dry-run unset): real auto-approve. Caller strips
+        `review` from `blocked_on` and emits `auto_approved`. The
+        TB-223 freeze-threshold + TB-224 token-cap gates remain the
+        canonical safety check at *dispatch time* in `_tick`
+        (`_was_auto_approved` + `_auto_approve_paused` +
+        `_auto_approve_check_violations`); we deliberately do NOT
+        re-gate them here for real mode because the dispatch-time
+        path is the existing single source of truth for halt events
+        (`auto_approve_paused` / `auto_approve_halted`) and the
+        operator playbook keys off those event types.
+
+    The dry-run branch sits AFTER the tags / freeze-threshold /
+    per-task-token-cap / window-token-cap gate evaluations so it
+    never bypasses an existing safety check — dry-run only changes
+    the WRITE action when all checks pass. The judge confirms this
+    branch order by reading top-to-bottom in this function.
+
+    Caller responsibility: `tags` is the proposal's tag list (may be
+    `None` / empty — `ideation.should_auto_approve` treats both as
+    "no opt-out tag"). The caller pre-checks that the proposal
+    actually carries `@blocked:review` so this helper isn't invoked
+    for operator-driven adds.
+
+    Pure / no I/O beyond `events.jsonl` tail-reads inside the gate
+    helpers; safe to call from `do_board_edit` under the board lock
+    (no extra locking required).
+    """
+    # Late imports avoid a tools/automation_status ⇄ daemon import
+    # cycle. The two modules are already on daemon's import surface
+    # via other call sites, so this is just a lazy-bind of the
+    # already-loaded modules.
+    from . import automation_status as _astatus
+
+    # Gate 1: tags. The TB-223 entry gate — `#breaking-change` /
+    # `#high-risk` proposals (and operator-customized
+    # `AP2_AUTO_APPROVE_GATE_TAGS`) opt out of auto-approve entirely.
+    # Short-circuits both real and dry-run modes — a tag opt-out
+    # means "operator must manually approve", which the
+    # `@blocked:review` codespan already enforces.
+    if not ideation.should_auto_approve(tags):
+        return "noop"
+    # Gate 2: freeze-threshold (TB-223 circuit-breaker). Evaluated
+    # here so the dry-run terminal branch below can honor it; real
+    # mode re-checks at dispatch time in `_tick` and emits
+    # `auto_approve_paused` from that canonical site.
+    freeze_paused = _auto_approve_paused(cfg)
+    # Gate 3: per-task-token-cap + window-token-cap (TB-224
+    # cost/blast-radius guards), evaluated in the precedence
+    # `_auto_approve_check_violations` enforces (task_error >
+    # per_task_cap > window_cap). Same dual-evaluation note as Gate
+    # 2: real mode re-checks at dispatch time.
+    token_violation = _auto_approve_check_violations(cfg)
+    # Terminal branch — sits AFTER the tags / freeze / token-cap
+    # evaluations above. Dry-run mode honors all gates in-place
+    # (no separate dispatch-time pass exists for the simulated
+    # decision); real mode delegates the freeze / token-cap
+    # enforcement to the dispatch-time gate site in `_tick` so the
+    # canonical `auto_approve_paused` / `auto_approve_halted` event
+    # stream stays single-source-of-truth.
+    if _astatus._is_auto_approve_dry_run():
+        if freeze_paused or token_violation is not None:
+            return "noop"
+        return "dry_run"
+    return "strip"
+
+
 def _append_decisions_needed_bullet(cfg: Config, bullet: str) -> None:
     """Append a bullet to the `## Decisions needed from operator`
     section of `.cc-autopilot/ideation_state.md`. Creates the section
@@ -3836,23 +3945,32 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             # auto-promote-from-Backlog path only.
             if backlog is not None and goal.roadmap_exhausted(cfg):
                 backlog = None
-            # TB-232: dry-run on-ramp. When `AP2_AUTO_APPROVE_DRY_RUN=1`
-            # is set alongside `AP2_AUTO_APPROVE=1`, the auto-approve
-            # gate chain still runs but lives at the proposal-time
-            # site (`tools.do_board_edit`'s `add_backlog` branch):
-            # instead of stripping `@blocked:review` and emitting
-            # `auto_approved`, it emits a `would_auto_approve` audit
-            # event and preserves the codespan. That means in dry-run
-            # mode the daemon's freeze-threshold / token-cap branches
-            # below NEVER fire for the simulated decisions —
-            # `_was_auto_approved(cfg, ...)` returns False (no
-            # `auto_approved` event in the tail), so the
-            # would-have-promoted task simply sits in Backlog awaiting
-            # operator-manual `ap2 approve`. Operator observes the
-            # `would_auto_approve` event stream + the
+            # TB-232: dry-run on-ramp. The auto-approve gate chain
+            # (tags / freeze-threshold / per-task-token-cap /
+            # window-token-cap) lives behind a single entry point —
+            # `evaluate_auto_approve_decision(cfg, tags=...)` above —
+            # called from `tools.do_board_edit`'s `add_backlog` branch
+            # at proposal time. The helper runs all four gates in
+            # order; only after all four pass does its terminal
+            # branch decide `"strip"` (real auto-approve →
+            # `auto_approved`) vs `"dry_run"`
+            # (`AP2_AUTO_APPROVE_DRY_RUN=1` → `would_auto_approve`,
+            # `@blocked:review` preserved). The dry-run branch sits
+            # AFTER the four gate checks so it never bypasses a
+            # safety gate; the operator observes the
+            # `would_auto_approve` events + the
             # `would_auto_approve_count_24h` counter
-            # (`collect_auto_approve_state`) for ≥24h, then unsets the
-            # dry-run knob to engage real dispatch.
+            # (`collect_auto_approve_state`) for ≥24h, then unsets
+            # the dry-run knob to engage real dispatch. The TB-223
+            # `_was_auto_approved` + TB-224 `_auto_approve_check_violations`
+            # branches immediately below remain a defense-in-depth
+            # check at promote time even though the
+            # `evaluate_auto_approve_decision` helper already
+            # consulted both of them at proposal time — the events
+            # tail can shift between the two phases (a long-running
+            # task may have emitted a `task_run_usage` after the
+            # auto_approved row was added but before the promote
+            # tick).
             #
             # TB-223: AP2_AUTO_APPROVE cumulative-regression circuit
             # breaker — when `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`

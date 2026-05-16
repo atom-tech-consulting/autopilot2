@@ -1125,22 +1125,17 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 # status-report can surface what auto-approval
                 # shipped without operator review.
                 auto_approved_stripped = False
-                # TB-232: dry-run on-ramp. When the tags gate would
-                # otherwise pass AND `AP2_AUTO_APPROVE_DRY_RUN=1` is
-                # set, do NOT strip the review token; emit a
-                # `would_auto_approve` audit event instead so the
-                # operator can observe what auto-approve WOULD have
-                # shipped without committing to the binary cliff.
-                # `would_auto_approved_simulated` is the local flag
-                # for the post-add emit branch (parallel to
-                # `auto_approved_stripped`).
+                # TB-232: dry-run on-ramp local flag — set when the
+                # full auto-approve gate chain passes but
+                # `AP2_AUTO_APPROVE_DRY_RUN=1` redirects the WRITE
+                # action from strip+emit to preserve+emit-simulated.
+                # Parallel to `auto_approved_stripped`; the post-add
+                # emit branch picks one of the two.
                 would_auto_approved_simulated = False
                 if (
                     action == "add_backlog"
                     and effective_blocked_on
                 ):
-                    from . import ideation as _ideation
-                    from . import automation_status as _astatus
                     tokens = [
                         tok.strip()
                         for tok in effective_blocked_on.split(",")
@@ -1149,24 +1144,46 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     review_present = any(
                         tok.lower() == "review" for tok in tokens
                     )
-                    if review_present and _ideation.should_auto_approve(tags):
-                        if _astatus._is_auto_approve_dry_run():
-                            # Dry-run: gate passed but the WRITE step
-                            # is a no-op on the row. The
-                            # `@blocked:review` codespan survives so
-                            # the task still requires operator
-                            # `ap2 approve` to dispatch.
-                            would_auto_approved_simulated = True
-                        else:
+                    if review_present:
+                        # Delegate the full gate chain to
+                        # `daemon.evaluate_auto_approve_decision`
+                        # (TB-232): tags → freeze-threshold →
+                        # per-task-token-cap → window-token-cap → then
+                        # the dry-run branch decides the WRITE action.
+                        # Lazy import to avoid the tools⇄daemon load-
+                        # time cycle (daemon imports tools at module
+                        # level for `do_board_edit`).
+                        from . import daemon as _daemon
+                        decision = _daemon.evaluate_auto_approve_decision(
+                            cfg, tags=tags,
+                        )
+                        if decision == "strip":
                             # Real auto-approve: strip the review
                             # token so the row's @blocked: codespan
-                            # drops cleanly.
+                            # drops cleanly. All four gates passed
+                            # AND dry-run mode is off.
                             kept = [
                                 tok for tok in tokens
                                 if tok.lower() != "review"
                             ]
                             effective_blocked_on = ",".join(kept)
                             auto_approved_stripped = True
+                        elif decision == "dry_run":
+                            # Monitor-only on-ramp: all four gates
+                            # passed but `AP2_AUTO_APPROVE_DRY_RUN=1`
+                            # redirects the WRITE step. The
+                            # `@blocked:review` codespan survives so
+                            # the task still requires operator
+                            # `ap2 approve` to dispatch — the operator
+                            # observes the resulting
+                            # `would_auto_approve` event for ≥24h
+                            # before flipping the dry-run knob off.
+                            would_auto_approved_simulated = True
+                        # decision == "noop": at least one gate failed
+                        # (tags / freeze / per-task / window). The
+                        # proposal lands with `@blocked:review` intact
+                        # and no audit event — same surface an
+                        # operator-driven `ap2 add` would produce.
                 if effective_blocked_on:
                     meta["blocked"] = effective_blocked_on
                 board.add(
