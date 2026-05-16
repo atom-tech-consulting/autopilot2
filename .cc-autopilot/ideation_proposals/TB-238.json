@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/extend-automation-status-collector-statu.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-16T01:53:22Z",
+  "tb_id": "TB-238",
+  "why_now": "TB-232 + TB-233 landed in concert at\n2026-05-16T01:32:05Z and 2026-05-16T01:49:51Z (the same\nideation cycle's approvals just drained). Without this digest\nextension, the dry-run signal accumulates in `events.jsonl`\nbut never reaches the operator's daily return surface \u2014 the\nshipped on-ramps' promotion path stays operator-manual-recall\n(\"did I remember to grep the logs?\") rather than\noperator-cued-by-cron (\"status report says window has N\ndecisions, ready to flip\")."
+}
