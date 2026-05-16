@@ -1,140 +1,121 @@
 # Ideation State
 
-_Last updated: 2026-05-16T08:08:04Z by ideation cron_
+_Last updated: 2026-05-16T10:14:00Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A/0R/0B/0P/112C/3F (`ap2 status` 2026-05-16T08:08Z;
-daemon 374cdf5). Backlog fully drained — all 4 prior-cycle proposals
-(TB-236/237/238/239) landed Complete between 06:19Z and 07:01Z, plus
-TB-235 at 06:06Z (operator-added briefing-cohesion judge). Five
-substantive Completes in ~2h is a fresh observation window against the
-end-to-end-automation focus.
+Cycle entry: board 0A/0R/3B/0P/112C/3F (`ap2 status` 2026-05-16T10:13Z;
+daemon 3927053). No completes have shipped since the prior ideation
+cycle (2026-05-16T08:08Z) — the last terminal event was TB-239's
+recovery to `complete` at 07:01:39Z. The 3 prior-cycle proposals
+(TB-240/241/242) are all in Backlog with `@blocked:review`, still
+pending operator action; `ideation_empty_board` fired (10:13:28Z)
+only because all 3 are blocker-gated, not workable.
 
-Recent Completes considered:
+Recent Completes considered (unchanged from prior cycle — re-cited):
 
-- TB-239 (`ccfcff1`, 2026-05-16T07:01:39Z) — axis-2 doctor floor:
-  `auto_unfreeze_audit()` WARN on `AP2_AUTO_UNFREEZE_DRY_RUN=1`
-  without `AP2_AUTO_UNFREEZE_FIX_SHAPES`.
-- TB-238 (`d861d83`, 2026-05-16T06:39:03Z) — automation_status
-  collector + status-report digest extended with dry-run readiness
-  signal (`would_auto_*_count_24h`).
-- TB-237 (`b2fb6b1`, 2026-05-16T06:29:37Z) — axis-4 e2e walk-away test
-  pins `focus_advanced` + `roadmap_complete` across daemon `_tick`.
-- TB-236 (`f32374f`, 2026-05-16T06:19:01Z) — prose-judge prompt
-  tighten + full-raw-response dump on parse failure (TB-231 root-cause
-  replacement).
-- TB-235 (`27f6fc9`, 2026-05-16T06:06:23Z) — LLM dependency-coherence
-  check #7 in `_validate_briefing_structure`.
+- TB-239 (`ccfcff1`, 07:01:39Z) — axis-2 doctor floor.
+- TB-238 (`d861d83`, 06:39:03Z) — automation_status collector +
+  status-report digest extended with dry-run readiness.
+- TB-237 (`b2fb6b1`, 06:29:37Z) — axis-4 e2e walk-away test.
+- TB-236 (`f32374f`, 06:19:01Z) — prose-judge prompt tighten +
+  full-raw-response dump (TB-231 root-cause replacement).
+- TB-235 (`27f6fc9`, 06:06:23Z) — LLM dependency-coherence check #7.
 
-All four end-to-end-automation axes now have foundation + on-ramp +
-safety-floor + observability. Fresh gaps surface at the operator-facing
-visibility seam: TB-238 closed it for status-report cron only, leaving
-`ap2 status` text + web home automation card blind to dry-run signals;
-TB-237 closed e2e coverage but axis-4 has zero current-state surface;
-TB-239's verification cycle wasted 2 retries + ended in a cross-task
-file rename (`ccfcff1` renamed TB-234's `test_tb234_doctor_auto_approve.py`
-→ `*_audit.py` so a wrong-path verification bullet would pass), exposing
-a TB-235-shape gap on file-path-coherence.
+This cycle is the empirical test of last cycle's "If next cycle finds
+zero similar gaps, that signals the end-to-end-automation focus is
+approaching exhausted" prediction (prior `## Cycle observations`
+L136-137). The prediction holds: nothing new shipped, no fresh gap
+surfaces, and the 3 prior proposals already cover the three
+visibility / upstream-gate asymmetries that surface review found.
 
 ## Current focus assessment
 
 - **Current focus: end-to-end automation (goal.md L38-151, four axes)**
   - Progress so far:
-    - Axis 1: TB-223 foundation + TB-224 cost caps + TB-232 dry-run +
-      TB-234 doctor.
-    - Axis 2: TB-225 + TB-229 emitter + TB-233 dry-run + TB-239
-      doctor.
-    - Axis 3: TB-224 caps + TB-227 collector + TB-228 digest + TB-234
-      doctor.
-    - Axis 4: TB-226 foundation + TB-237 (`b2fb6b1`) e2e.
-    - Cross-axis: TB-230 axes 1+2 e2e + TB-238 (`d861d83`) dry-run
-      readiness in collector + digest.
-    - Adjacent: TB-235 (`27f6fc9`) briefing dependency-coherence +
-      TB-236 (`f32374f`) prose-judge tighten.
-  - Gaps:
-    (1) **Briefing file-path-coherence**: TB-235 added LLM
-        dependency-coherence (predecessor naming) as check #7 but
-        nothing checks that `## Verification` shell bullets reference
-        files that exist in HEAD OR are `## Scope`-promised. TB-239's
-        bullet `pytest -q ap2/tests/test_tb234_doctor_auto_approve_audit.py`
-        cited a path that didn't exist (TB-234's actual file was
-        `*_auto_approve.py`); operator approved on structural grounds;
-        agent burned 2 retries then renamed TB-234's existing file to
-        match. Concrete cost: ~$2 token spend + a cross-task
-        rename-side-effect. Generalizable LLM-judge fix (not
-        enumeration) sits as the natural #8 extension to TB-235.
-    (2) **Dry-run readiness surface parity**: TB-238 extended
-        `automation_status.collect_auto_approve_state` with
-        `auto_approve_dry_run_enabled` / `would_auto_approve_count_24h`
-        / `auto_unfreeze_dry_run_enabled` / `would_auto_unfreeze_count_24h`
-        and added a status-report cron digest sub-block, but
-        `ap2/cli.py:cmd_status` (L380-385) and `ap2/web.py:_render_automation_card`
-        (L1515-1595) still render only `auto_approved_count_24h` /
-        `auto_unfreeze_applied_count_24h` — `grep "dry_run" ap2/cli.py
-        ap2/web.py` returns zero post-TB-238. Operator flipping a
-        DRY_RUN knob and running `ap2 status` sees nothing changed.
-    (3) **Axis-4 focus-pointer current-state surface**: TB-226 ships
-        `focus_pointer.json` + `goal.active_focus()`; TB-237 pins the
-        `focus_advanced` / `roadmap_complete` event chain end-to-end.
-        Neither `ap2 status` nor web home renders active-focus title
-        / `N of M` position / roadmap-complete halt. `grep -n "focus"
-        ap2/cli.py` returns 2 unrelated matches. Walk-away-time
-        scales with roadmap length (goal.md L131-138) — operator can't
-        observe roadmap position without grepping events for
-        `focus_advanced`.
+    - Axis 1 (manual-approval): TB-223 + TB-224 + TB-232 + TB-234.
+    - Axis 2 (failure-recovery): TB-225 + TB-229 + TB-233 + TB-239.
+    - Axis 3 (cost/blast-radius): TB-224 + TB-227 + TB-228 + TB-234.
+    - Axis 4 (multi-focus): TB-226 + TB-237.
+    - Cross-axis e2e: TB-230 (axes 1+2) + TB-237 (axis 4) + TB-238
+      (dry-run readiness in collector + cron digest).
+    - Adjacent gates: TB-235 (briefing dependency-coherence) +
+      TB-236 (prose-judge tighten).
+  - Gaps (unchanged from prior cycle; all addressed by pending-review
+    Backlog items — no fresh gaps from new completes since nothing
+    has shipped between cycles):
+    (1) **Briefing file-path-coherence** — TB-239's
+        wrong-but-plausible-path bullet cost ~$2 + cross-task rename.
+        Addressed by **TB-240** (pending review).
+    (2) **Dry-run readiness surface parity** — TB-238 extended the
+        collector + cron digest but not `ap2 status` / web home.
+        Addressed by **TB-241** (pending review).
+    (3) **Axis-4 focus-pointer current-state surface** — TB-226/237
+        shipped machinery, no `ap2 status` / web home rendering.
+        Addressed by **TB-242** (pending review).
   - Status: `in-progress`
-  - Reasoning: The four axes are built; the remaining work is
-    closing surface-asymmetries (gaps 2+3) and tightening the
-    upstream gate that TB-239 cost-validated (gap 1). All three are
-    structurally bounded follow-ups against shipped foundations.
+  - Reasoning: All four axes have foundation + on-ramp + safety-floor
+    + observability shipped. The three surface-asymmetry follow-ups
+    are queued and awaiting operator approval. With nothing new
+    shipped this gap-window, there is no new evidence to ground a
+    new proposal against.
 
 ## Non-goal risk check
 
-None. All three proposals stay inside end-to-end automation; none
-mutate `goal.md`, none introduce new automation primitives, none
-relax operator-CLI-only paths (goal.md L184-186).
+None. No new proposals this cycle; pending-review items stay inside
+end-to-end automation per prior-cycle non-goal scan.
 
 ## Considered & deferred this cycle
 
+- **Add a 4th proposal anyway to fill the 2 advertised slots** —
+  rejected. The 3 pending-review items already address every gap
+  this cycle's analysis surfaces; manufacturing a 4th would either
+  duplicate scope or scope-creep into non-gap polish (the failure
+  mode goal.md L61-70's delete-test specifically rejects). Slot
+  count is a ceiling, not a target.
+- **Verify-time "diff exceeds briefing scope" judge** — same
+  rationale as prior cycle: defer in favor of TB-240's upstream
+  prevention; revisit only if rename-shape recurs post-TB-240.
+- **Cross-axis 4-way e2e walk-away test** (axes 1+2+3+4 in concert;
+  TB-230 covers 1+2, TB-237 covers 4 alone) — defer until TB-240/
+  241/242 land. Without operator visibility into axis-4 state
+  (TB-242) the in-concert test's signal is hard for an operator
+  to interpret; sequence-after.
+- **`ap2 doctor` "walk-away readiness" composite section** (cross-
+  axis preflight summarizing all 4 axes' enablement state) — defer
+  until TB-241 + TB-242 land; the doctor would just re-render
+  what those tasks expose in `ap2 status`. Premature aggregation.
 - **Batch the two LLM-judge briefing-validator checks (TB-235 #7 +
-  proposed #8) into a single SDK call per queue-append** — cost
-  optimization (~halve the per-append judge cost). Defer until both
-  checks are live and we can observe whether the per-append cost is
-  actually load-bearing; premature batching trades reusability for
-  unobserved savings.
-- **Verify-time "diff exceeds briefing scope" judge** — would catch
-  TB-239's cross-task rename downstream. Defer in favor of upstream
-  prevention (gap 1's queue-append gate); revisit only if rename-shape
-  recurs after the gate lands.
-- **Wack-a-mole shell-bullet linting (TB-172-shape)** — n=4
-  authoritative reject (operator_log L51, 2026-05-05). Gap-1 proposal
-  is LLM-judge structural, not enumeration; passes the reject criterion.
+  TB-240 proposed #8) into a single SDK call** — same defer-rationale
+  as prior cycle: premature batching trades reusability for unobserved
+  savings; revisit once both checks have ≥30 days of cost data.
+- **Wack-a-mole shell-bullet linting (TB-172-shape)** — n=4 reject
+  (operator_log L51). TB-240 stays LLM-judge structural; passes.
 - **TB-175-shape ideation-quality aggregator** — n=4 reject
-  (operator_log L62, 2026-05-06). Per L80, defer until ~3+ cycles after
-  TB-188; per-proposal records still light.
-- **TB-185-shape `ap2 frozen TB-N` triage** — n=4 reject (operator_log
-  L66). Frozen unchanged at 3 long-standing strategic deferrals.
+  (operator_log L62 + L80 deferral).
+- **TB-185-shape `ap2 frozen TB-N` triage** — n=4 reject
+  (operator_log L66). Frozen unchanged at 3.
 - **TB-231-shape symptom-patch shapes** — n=1 reject (operator_log
-  L153). All three proposals address root cause (gap 1 prevents,
-  gaps 2+3 close surface absence), not retry-symptom patching.
-- **TB-184-shape `--hint` forwarding** — n=4 reject (operator_log L67).
-  goal.md is operator-intent channel.
+  L153).
+- **TB-184-shape `--hint` forwarding** — n=4 reject (operator_log
+  L67).
 
 ## Cycle observations
 
-- TB-239's failure-mode is structurally informative: operator-approved
-  briefing whose verification bullet cited a wrong-but-plausible test
-  path, then agent renamed an existing TB-234 artifact to satisfy
-  it. This is *exactly* the class TB-235's LLM-judge primitive was
-  designed for — extending it to file-path-coherence reuses the
-  primitive rather than enumerating shell-bullet patterns
-  (passes operator's TB-172 generalization bar). Carried this cycle
-  because it grounds gap-1's framing as TB-235-symmetric, not novel.
-- Three Backlog items proposed this cycle all target operator-facing
-  visibility OR upstream-gate tightening — the natural shape once
-  axis foundations land. If next cycle finds zero similar gaps, that
-  signals the end-to-end-automation focus is approaching exhausted.
+- Prior cycle's "0 new gaps → focus approaching exhausted" prediction
+  confirmed this cycle (zero completes shipped, zero new gaps surface).
+  Carried because it informs THIS cycle's "propose 0" decision and
+  next cycle's framing: if the operator approves TB-240/241/242 and
+  no fresh gaps surface after they land, that's the signal to flag
+  `exhausted-needs-operator` for the focus rotation decision.
+- Operator-review-loop is the current binding constraint: 3 prior-
+  cycle proposals queued at 08:12Z, status-report posted at 09:36Z,
+  ~37min later ideation fires again with no operator action observed.
+  Not actionable for the operator (this IS the walk-away mode that
+  goal.md L52-59 names as the deliverable; queue depth at the
+  operator's configured ceiling is expected steady-state). Noted
+  here so a "no operator activity in N hours" pattern doesn't get
+  re-discovered as a Decisions-needed item — it isn't one.
 
 ## Decisions needed from operator
 
@@ -144,9 +125,7 @@ the cron status-report per TB-151 / TB-173 / TB-182.)
 
 ## Proposals this cycle
 
-- TB-240 — Briefing-validator check #8: LLM file-path-coherence
-  (addresses gap 1).
-- TB-241 — Surface dry-run readiness in `ap2 status` text/JSON + web
-  home automation card (addresses gap 2).
-- TB-242 — Surface axis-4 focus-pointer state in `ap2 status` + web
-  home (addresses gap 3).
+Backlog already populated with 3 pending-review proposals from prior
+cycle (TB-240/241/242) that cover every gap this cycle's analysis
+identifies; no completes between cycles produced fresh gaps. No
+proposals this cycle.
