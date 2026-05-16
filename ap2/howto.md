@@ -58,9 +58,9 @@ The 5-section board has a fixed order:
 ## Authoring goal.md
 
 `goal.md` is operator-curated. Ideation reads it every cycle as the source
-of truth for what the project is for and when it's done. Two queue-time
-validators key off its content, so both the section shape and the prose
-substance are load-bearing:
+of truth for what the project is for and when it's done. Three queue-time
+validators key off its content (and the briefing's prose), so both the
+section shape and the prose substance are load-bearing:
 
 - **TB-161 anchor validator** — every briefing's `## Goal` body must cite
   (as a substring) text from goal.md's `## Current focus` or `## Done when`
@@ -69,6 +69,21 @@ substance are load-bearing:
 - **TB-164 Why-now validator** — independent of goal.md content; checks
   the briefing itself has a `Why now:` line. goal.md doesn't need its own
   Why-now section.
+- **TB-235 dependency-coherence validator (LLM judge, Haiku-4.5)** —
+  reads the briefing's prose (Scope / Design / Why now / description)
+  and asks a judge to identify any hard predecessors (other tasks
+  whose work must be on disk before this task's agent can run). Any
+  judge-named TB-N missing from the task's `@blocked:` codespan
+  rejects the briefing with a message naming the missing dependency.
+  Fail-open on judge timeout / SDK error (logs a
+  `validator_judge_{timeout,fail}` event and lets the briefing
+  through — refusing to gate on transient infra failures is the load-
+  bearing trade-off; the cron status-report surfaces a climbing skip
+  rate). Hard off-switch: `AP2_VALIDATOR_JUDGE_DISABLED=1`. Briefing
+  authors: if your prose names another TB-N's artifact as a
+  precondition (a module, env knob, schema field), declare
+  `--blocked TB-N` on the `ap2 add` invocation so the codespan
+  matches what the prose claims.
 
 Ideation reads goal.md in the order Mission → Done when → Current focus →
 Non-goals → Constraints (per `ap2/ideation.default.md`). What each section
@@ -635,6 +650,21 @@ set and the full guard chain would have passed; payload `task`,
 `shape`, `file`, `line`, `from`, `to`; the briefing file is NOT
 mutated and no operator-queue ops are appended).
 
+**Briefing-validator LLM judge (TB-235).** `validator_judge_timeout`
+and `validator_judge_fail` are fail-open audit events from check #7
+in `tools._validate_briefing_structure` (LLM-driven dependency-
+coherence judge). They fire when the Haiku-4.5 judge call exceeds
+`AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 15s) or fails for any other
+reason (network, parse error, model unavailable). The validator's
+policy on judge failure is fail-open — refusing to gate `ap2 add` /
+`ap2 update` on a transient Anthropic API hiccup is the load-
+bearing trade-off — so each skipped call lands as an event for
+operator visibility. Payload: `validator_judge_timeout` carries
+`timeout_s` + `error`; `validator_judge_fail` carries `error` (the
+exception repr or `"non-dict judge response"`). When
+`AP2_VALIDATOR_JUDGE_DISABLED=1` is set, the check is skipped
+entirely and neither event fires (clean bypass, not a fail-open).
+
 **Focus rotation (TB-226 axis 4).** `focus_advanced` and
 `roadmap_complete` track the daemon's in-memory focus-list pointer
 against goal.md's `## Current focus:` headings. See
@@ -727,6 +757,41 @@ fails CI if a new knob is added and not listed here):
 - `AP2_VERIFY_CMD` — project-wide regression gate (e.g.
   `uv run pytest -q`). Unset = no project-wide gate.
 - `AP2_VERIFY_TIMEOUT_S` (600) — timeout for the project-wide gate.
+
+**Briefing validator (LLM-judge dependency coherence, TB-235).** Check
+#7 in `ap2/tools.py::_validate_briefing_structure` runs a Haiku-4.5
+judge over a freshly-authored briefing AFTER the six deterministic
+checks (TB-154 canonical sections, TB-91/TB-102 parseable Verification,
+≥1 bullet, TB-161 goal-anchor, TB-164 Why-now, TB-171 no-Manual)
+pass. The judge identifies "hard predecessors" the briefing's prose
+names implicitly (e.g. "ap2/_shared.py must already exist — created
+by the _locked extraction") and the validator rejects when any judge-
+named TB-N is missing from the task's `@blocked:` codespan. Closes
+the dependency-coherence hole that under `AP2_AUTO_APPROVE=1`
+(TB-223) would let ideation auto-promote a task out of dispatch
+order — TB-220's prose vs codespan mismatch is the canonical
+historical instance. Fail-open by design: on judge timeout / parse
+failure / SDK error the validator logs a `validator_judge_timeout`
+or `validator_judge_fail` event and lets the briefing through (the
+cron status-report surfaces a climbing skip rate so operators
+notice). The check fires on both `do_operator_queue_append`
+(primary surface — ideation, MM handler, operator CLI all hit it)
+and `do_board_edit` (legacy direct-board-mutation path) for shape
+symmetry.
+
+- `AP2_VALIDATOR_JUDGE_DISABLED` — hard off-switch. When set to a
+  truthy value (`1` / `true` / `yes`), check #7 is bypassed
+  entirely and the validator falls back to the six deterministic
+  checks. Operator escape hatch if the judge is causing false-
+  positives during a specific workflow; the deterministic gates
+  still fire so the briefing-shape contract is preserved.
+- `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 15) — wall-clock timeout
+  for the per-briefing judge call. Exceeded → log
+  `validator_judge_timeout` event + skip the check.
+- `AP2_VALIDATOR_JUDGE_MAX_TOKENS` (default 500) — output-token cap
+  for the judge's reasoning. Decision is structured JSON; verbose
+  explanations don't help and inflate cost. Per-invocation cost
+  target is ≤$0.005 at Haiku rates.
 
 **Ideation.**
 - `AP2_IDEATION_DISABLED` — set to `1`/`true` to opt out of empty-board

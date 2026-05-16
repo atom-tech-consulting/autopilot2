@@ -659,13 +659,310 @@ def reconcile_proposal_outcome(
     return target
 
 
+# TB-235: knob defaults for the LLM-driven dependency-coherence check
+# (validator check #7). Module-level so `test_env_knobs.py`-style probes
+# can read the defaults without instantiating the validator, and so the
+# docs-drift gate's source-walk finds the canonical knob names here.
+_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT = 15.0
+_VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT = 500
+# Haiku-4.5 is the cost-target floor for the check (≤$0.005 per
+# briefing at typical token volumes). Sonnet/Opus escalation would
+# blow the budget; if Haiku proves insufficient on real briefings, a
+# future TB introduces a model-override env knob (modeled on the
+# verify-judge knob pattern) so the model swap doesn't rewrite the
+# validator path. Intentionally NOT exposed as an env knob yet —
+# defer until empirical evidence shows Haiku falls short.
+_VALIDATOR_JUDGE_MODEL = "claude-haiku-4-5"
+
+
+class _DepJudgeTimeout(Exception):
+    """Sentinel raised by a `dep_judge_fn` (or the default SDK call)
+    when the judge exceeded `AP2_VALIDATOR_JUDGE_TIMEOUT_S`. The
+    validator's check-#7 dispatch (`_check_dependency_coherence`)
+    distinguishes this from generic failures so the emitted event
+    type is `validator_judge_timeout` vs `validator_judge_fail` —
+    the operator sees the right diagnostic shape in
+    `ap2 logs` / `/events`.
+    """
+
+
+def _judge_dep_coherence_default(
+    *,
+    briefing_text: str,
+    description: str,
+    blocked_tokens: list[str],
+    timeout_s: float,
+    max_tokens: int,
+) -> dict | None:
+    """Real-SDK implementation of the TB-235 dependency-coherence judge.
+
+    Returns the parsed JSON dict from the judge, OR None on any
+    non-timeout failure (network, parse error, model unavailable).
+    Raises `_DepJudgeTimeout` when the SDK call exceeds `timeout_s`
+    so the caller can distinguish timeout from other failures and
+    emit the right event type.
+
+    Lazy-imports `claude_agent_sdk` so test paths that mock the
+    `judge_fn` kwarg don't pull the SDK at validator import time.
+    The judge gets a strict-JSON system prompt + a user payload
+    naming the briefing, the post-em-dash description prose, and the
+    task's current `@blocked:` codespan tokens; the response shape
+    is `{"hard_predecessors": ["TB-N", ...], "reasoning": "<str>"}`.
+    """
+    import asyncio
+
+    try:
+        import claude_agent_sdk as sdk
+    except Exception:
+        return None
+
+    system_text = (
+        "You are validating a task briefing for hard-predecessor "
+        "dependency coherence. A hard predecessor is another task "
+        "whose work must be on disk (committed) before this task's "
+        "agent can do its own work — code modules, schema, env knobs, "
+        "or other artifacts the new task depends on. Soft references "
+        "(historical context, sibling tasks doing parallel work, "
+        "references to docstrings or prior commits for "
+        "reading-comprehension only) are NOT hard predecessors. "
+        "Return strict JSON: "
+        '{"hard_predecessors": ["TB-N", ...], '
+        '"reasoning": "<one-paragraph explanation>"}.'
+    )
+    user_payload = {
+        "briefing_markdown": briefing_text,
+        "task_description": description,
+        "blocked_codespan_tokens": list(blocked_tokens),
+    }
+    prompt = (
+        f"{system_text}\n\n"
+        f"Input:\n```json\n{json.dumps(user_payload, indent=2)}\n```"
+    )
+
+    async def _ask() -> str:
+        options = sdk.ClaudeAgentOptions(
+            permission_mode="bypassPermissions",
+            max_turns=2,
+            model=_VALIDATOR_JUDGE_MODEL,
+            extra_args={"max-tokens": str(max_tokens)},
+        )
+        text = ""
+        async for msg in sdk.query(prompt=prompt, options=options):
+            content = getattr(msg, "content", None)
+            if isinstance(content, list):
+                for part in content:
+                    t = getattr(part, "text", None)
+                    if isinstance(t, str) and t.strip():
+                        text = t.strip()
+            else:
+                t = getattr(msg, "result", None)
+                if isinstance(t, str) and t.strip():
+                    text = t.strip()
+        return text
+
+    # If we're already inside a running event loop (the daemon's tick
+    # is async and calls sync MCP-tool handlers; e2e tests likewise
+    # invoke `do_board_edit` from `asyncio.run(...)`), `asyncio.run`
+    # raises `RuntimeError: cannot be called from a running event
+    # loop`. Run the coroutine in a fresh thread with its own loop so
+    # the sync caller composes correctly in both contexts. The
+    # worker-thread path adds <1ms of overhead on the no-loop branch
+    # too, which is invisible against a multi-second judge call.
+    import threading
+
+    result: dict[str, "str | Exception | None"] = {"text": None, "exc": None}
+
+    def _worker() -> None:
+        try:
+            result["text"] = asyncio.run(
+                asyncio.wait_for(_ask(), timeout=timeout_s),
+            )
+        except asyncio.TimeoutError as exc:
+            result["exc"] = _DepJudgeTimeout(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            result["exc"] = exc
+
+    worker = threading.Thread(target=_worker, daemon=True)
+    worker.start()
+    # The worker has its own `asyncio.wait_for` enforcing the timeout;
+    # the outer `.join` waits a small grace window past that so a
+    # genuinely-stuck worker still surfaces as a timeout to the caller.
+    worker.join(timeout=timeout_s + 5)
+    if worker.is_alive():
+        # Worker overran the inner timeout — treat as timeout so the
+        # validator emits `validator_judge_timeout`. The thread leaks
+        # (daemon=True so it dies at interpreter shutdown).
+        raise _DepJudgeTimeout(
+            f"validator judge worker exceeded {timeout_s + 5:.0f}s"
+        )
+    if isinstance(result["exc"], _DepJudgeTimeout):
+        raise result["exc"]
+    if result["exc"] is not None:
+        return None
+    text = result["text"] or ""
+
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        data = json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _check_dependency_coherence(
+    *,
+    briefing_text: str,
+    description: str,
+    blocked_csv: str,
+    events_file: "Path | None",
+    judge_fn=None,
+) -> str | None:
+    """TB-235 check #7 implementation. See
+    `_validate_briefing_structure`'s docstring for the contract.
+
+    Returns an error-string when the LLM judge identifies any TB-N as a
+    hard predecessor that is not present in the task's `@blocked:`
+    codespan (`blocked_csv`). Returns `None` when:
+      - the briefing is consistent (judge identifies no missing hard
+        predecessors),
+      - the judge returns an empty `hard_predecessors` list (nothing
+        to gate on),
+      - the off-switch `AP2_VALIDATOR_JUDGE_DISABLED=1` is set,
+      - the judge SDK call fails for any reason (timeout / parse
+        error / network). The fail-open path emits a
+        `validator_judge_{timeout,fail}` event when `events_file` is
+        supplied so a rising skip rate is observable in
+        `ap2 logs` / the status-report.
+
+    `judge_fn`: callable matching `_judge_dep_coherence_default`'s
+    signature. Test paths inject a stub; the production path uses the
+    real SDK. The stub must accept the named kwargs
+    `briefing_text`, `description`, `blocked_tokens`, `timeout_s`,
+    `max_tokens`, return a `dict | None`, and may raise
+    `_DepJudgeTimeout` to exercise the timeout branch.
+    """
+    if os.environ.get("AP2_VALIDATOR_JUDGE_DISABLED", "").lower() in {
+        "1", "true", "yes",
+    }:
+        return None
+    try:
+        timeout_s = float(
+            os.environ.get("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "")
+            or _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+        )
+    except ValueError:
+        timeout_s = _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+    try:
+        max_tokens = int(
+            os.environ.get("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "")
+            or _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT
+        )
+    except ValueError:
+        max_tokens = _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT
+    blocked_tokens = [
+        tok.strip()
+        for tok in (blocked_csv or "").split(",")
+        if tok.strip()
+    ]
+
+    fn = judge_fn or _judge_dep_coherence_default
+    try:
+        data = fn(
+            briefing_text=briefing_text,
+            description=description or "",
+            blocked_tokens=blocked_tokens,
+            timeout_s=timeout_s,
+            max_tokens=max_tokens,
+        )
+    except _DepJudgeTimeout as exc:
+        if events_file is not None:
+            try:
+                events.append(
+                    events_file,
+                    "validator_judge_timeout",
+                    timeout_s=timeout_s,
+                    error=str(exc),
+                )
+            except OSError:
+                pass
+        return None
+    except Exception as exc:  # noqa: BLE001
+        if events_file is not None:
+            try:
+                events.append(
+                    events_file,
+                    "validator_judge_fail",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            except OSError:
+                pass
+        return None
+
+    if not isinstance(data, dict):
+        # Malformed JSON / non-object response. Treat as fail-open
+        # (mirrors the SDK-error branch above) so a single judge
+        # hiccup can't block every `ap2 add`. Emit `validator_judge_fail`
+        # so the operator notices if the rate climbs.
+        if events_file is not None:
+            try:
+                events.append(
+                    events_file,
+                    "validator_judge_fail",
+                    error="non-dict judge response",
+                )
+            except OSError:
+                pass
+        return None
+
+    hard_preds = data.get("hard_predecessors")
+    reasoning = str(data.get("reasoning") or "").strip()
+    if not isinstance(hard_preds, list) or not hard_preds:
+        # Empty list (or missing field) → no dependency claim → no
+        # @blocked requirement. Common path; the judge passes most
+        # well-formed briefings through this branch.
+        return None
+    declared_lower = {t.lower() for t in blocked_tokens}
+    for raw in hard_preds:
+        if not isinstance(raw, str):
+            continue
+        tok = raw.strip()
+        if not tok or not tok.upper().startswith("TB-"):
+            continue
+        if tok.lower() in declared_lower:
+            continue
+        # First missing dependency wins — same shape as the
+        # deterministic checks (return on first offender so the
+        # operator's error message is specific rather than a
+        # multi-line aggregate).
+        return (
+            f"briefing structure invalid: judge identified {tok} as a "
+            f"hard predecessor (reasoning: \"{reasoning}\"). Either "
+            f"add @blocked:{tok} to the task's codespan, or rephrase "
+            f"the briefing to not claim {tok} as a hard predecessor "
+            "(TB-235)."
+        )
+    return None
+
+
 def _validate_briefing_structure(
     briefing_text: str,
     *,
     goal_md_path: "Path | None" = None,
     skip_goal_alignment: bool = False,
+    description: str = "",
+    blocked_csv: str = "",
+    events_file: "Path | None" = None,
+    dep_judge_fn=None,
 ) -> str | None:
-    """TB-154 + TB-161 + TB-164: structural gate for a freshly-authored briefing.
+    """TB-154 + TB-161 + TB-164 + TB-171 + TB-235: structural gate for a
+    freshly-authored briefing.
 
     A briefing is structurally valid when:
       1. It contains every section in `BRIEFING_REQUIRED_SECTIONS` at
@@ -715,6 +1012,29 @@ def _validate_briefing_structure(
          Out-of-scope bullets are unaffected — only the `## Verification`
          body is scanned. Match is case-insensitive (covers `Manual:`,
          `manual:`, `[Manual]`, `[manual]`, etc.).
+      7. (TB-235) When `blocked_csv` is supplied (the caller is a real
+         queue-append / board-edit surface, not a unit test that only
+         exercises the deterministic checks), a Haiku-4.5 LLM judge is
+         asked to identify any hard predecessors named implicitly in
+         the briefing prose (Scope / Design / Why-now / description).
+         A hard predecessor is another TB-N whose work must be on disk
+         (committed) before this task's agent can do its own work —
+         not a soft historical / sibling reference. Any judge-named
+         TB-N missing from the task's `@blocked:` codespan rejects the
+         briefing with a message naming the missing dependency and the
+         judge's reasoning verbatim. Closes the dependency-coherence
+         hole that lets briefings like TB-220 ("ap2/_shared.py must
+         already exist — created by the _locked extraction") ship
+         without `@blocked:TB-217`, which under
+         `AP2_AUTO_APPROVE=1` would auto-promote out of dispatch
+         order. Fail-open: timeout / parse failure / SDK error logs a
+         `validator_judge_{timeout,fail}` event and lets the briefing
+         through — refusing to gate on a transient API hiccup. Hard
+         off-switch: `AP2_VALIDATOR_JUDGE_DISABLED=1`. Timeout and
+         output-token budget tunable via `AP2_VALIDATOR_JUDGE_TIMEOUT_S`
+         (default 15) and `AP2_VALIDATOR_JUDGE_MAX_TOKENS` (default
+         500). Test paths inject a stub `dep_judge_fn` to drive the
+         decision logic deterministically without a real SDK call.
 
     `skip_goal_alignment=True` (TB-170) is the operator-CLI escape
     hatch: it skips checks (4) and (5) but runs every other validation
@@ -879,6 +1199,34 @@ def _validate_briefing_structure(
                 "move the bullet to `## Out of scope` if the behavior "
                 "genuinely cannot be auto-verified (TB-171)."
             )
+    # TB-235 check #7: LLM-driven dependency-coherence judge. Runs
+    # AFTER every deterministic check above passes (so the judge never
+    # sees structurally-malformed input — cheaper, and a malformed
+    # briefing already has a clearer rejection reason). The caller
+    # opts into the check by supplying `events_file` (a real
+    # queue-append / board-edit surface) or `dep_judge_fn` (test
+    # injection); unit tests that exercise only the deterministic
+    # checks omit both kwargs and the gate short-circuits.
+    # `dep_judge_fn` is the test-injection seam — production leaves
+    # it None and `_check_dependency_coherence` delegates to the SDK;
+    # tests pass a stub callable to drive the decision logic
+    # deterministically. Fail-open by design (see
+    # `_check_dependency_coherence` docstring): a judge timeout /
+    # parse failure / network error logs a
+    # `validator_judge_{timeout,fail}` event and returns None,
+    # letting the briefing through. Refusing to gate on transient
+    # infrastructure failures is the load-bearing trade-off — auto-
+    # approve mode (TB-223) amplifies the cost of false-positives.
+    if events_file is not None or dep_judge_fn is not None:
+        dep_err = _check_dependency_coherence(
+            briefing_text=briefing_text,
+            description=description or "",
+            blocked_csv=blocked_csv or "",
+            events_file=events_file,
+            judge_fn=dep_judge_fn,
+        )
+        if dep_err:
+            return dep_err
     return None
 
 
@@ -1077,9 +1425,17 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
     # write a briefing file to disk. Mirrors the placement of TB-134's
     # single-line check above.
     if action in add_map:
+        # TB-235: pass `description`, `blocked_csv`, and `events_file` so
+        # check #7 (LLM-judge dependency coherence) fires on this surface
+        # too. `do_board_edit` is the legacy direct-board-mutation path;
+        # the primary surface is `do_operator_queue_append`, but
+        # integrating both keeps the validator-shape symmetric.
         struct_err = _validate_briefing_structure(
             briefing or "",
             goal_md_path=cfg.project_root / "goal.md",
+            description=description,
+            blocked_csv=blocked_on,
+            events_file=cfg.events_file,
         )
         if struct_err:
             return _err(struct_err)
@@ -1900,10 +2256,17 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         # other check unchanged. The flag rides on the queue payload
         # so the drain side can re-validate symmetrically.
         skip_goal_alignment = bool(args.get("skip_goal_alignment"))
+        # TB-235: feed `description`, `blocked_csv`, and `events_file`
+        # so check #7 (LLM-judge dependency coherence) gates this
+        # primary queue-append surface — ideation, MM handler, and
+        # operator CLI all reach the validator through here.
         struct_err = _validate_briefing_structure(
             briefing_content or "",
             goal_md_path=cfg.project_root / "goal.md",
             skip_goal_alignment=skip_goal_alignment,
+            description=description,
+            blocked_csv=blocked_on,
+            events_file=cfg.events_file,
         )
         if struct_err:
             return _err(struct_err)
@@ -2253,10 +2616,36 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             # parseable + non-empty Verification) unchanged.
             update_skip_goal_alignment = bool(args.get("skip_goal_alignment"))
             if has_briefing_edit:
+                # TB-235: feed `description`, `blocked_csv`, and
+                # `events_file` so check #7 (LLM-judge dependency
+                # coherence) also fires on briefing-content updates.
+                # For an update we score the EFFECTIVE post-update
+                # description + blocked codespan, not the prior
+                # values — what the briefing now claims has to match
+                # what the codespan WILL declare after the drain.
+                # Falls back to the existing values when the update
+                # payload doesn't touch those fields.
+                if args.get("clear_blocked"):
+                    eff_blocked = ""
+                elif "blocked" in args and args["blocked"] is not None:
+                    eff_blocked = str(args["blocked"])
+                else:
+                    eff_blocked = (
+                        existing.meta.get("blocked", "") if existing else ""
+                    )
+                if "description" in args and args["description"] is not None:
+                    eff_description = str(args["description"])
+                else:
+                    eff_description = (
+                        existing.description if existing else ""
+                    )
                 struct_err = _validate_briefing_structure(
                     str(briefing_content),
                     goal_md_path=cfg.project_root / "goal.md",
                     skip_goal_alignment=update_skip_goal_alignment,
+                    description=eff_description,
+                    blocked_csv=eff_blocked,
+                    events_file=cfg.events_file,
                 )
                 if struct_err:
                     return _err(struct_err)

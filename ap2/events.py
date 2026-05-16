@@ -84,6 +84,23 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     their judgment on the live Frozen set, then unsets the dry-run
     knob to engage real patching. Sibling on-ramp to TB-232's
     `would_auto_approve` on the axis-1 side.
+  - `validator_judge_timeout` / `validator_judge_fail` (TB-235) —
+    fail-open audit events from the LLM-driven dependency-coherence
+    check (validator check #7 in `tools._validate_briefing_structure`).
+    Fires when the Haiku-4.5 judge's SDK call exceeds
+    `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 15s) or fails for any
+    other reason (network, parse error, model unavailable). The
+    validator's policy on judge failure is fail-open — refusing to
+    gate `ap2 add` / `ap2 update` on a transient Anthropic API
+    hiccup is the load-bearing trade-off — but the operator needs to
+    notice if the skip rate climbs, so each skipped call lands as an
+    event. Payload: `validator_judge_timeout` carries `timeout_s` +
+    `error`; `validator_judge_fail` carries `error` (the exception
+    repr or "non-dict judge response"). Counterpart cron status-
+    report (TB-228) surfaces skip counts so a rising rate prompts
+    operator triage. Counter-event-of-record for the
+    `AP2_VALIDATOR_JUDGE_DISABLED` operator escape hatch (when set,
+    the check is bypassed entirely and neither event fires).
   - `focus_advanced` (TB-226) — daemon advanced its in-memory focus
     pointer past an exhausted `## Current focus:` heading in
     goal.md. Triggered by either an LLM-judge verdict on the

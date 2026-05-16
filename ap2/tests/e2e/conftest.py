@@ -53,6 +53,17 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
     # short cooldown explicitly. Without this, every test with an empty
     # board would inadvertently fire the ideation agent.
     monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    # TB-235: disable the LLM-driven dependency-coherence check (#7) in
+    # `_validate_briefing_structure` by default. The check fires on
+    # `do_board_edit` / `do_operator_queue_append` `add_*` paths, and
+    # without this knob every e2e test that exercises those surfaces
+    # would dispatch a real Haiku-4.5 SDK call (slow, costly, and
+    # potentially makes a live API call from CI). Individual tests
+    # that want to exercise the check explicitly inject a stubbed
+    # `dep_judge_fn`; the dedicated regression-pin lives in
+    # `ap2/tests/test_dep_validator_judge.py` (no SDK touch — all
+    # cases mock the judge round-trip).
+    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
 
     def build(
         *,
