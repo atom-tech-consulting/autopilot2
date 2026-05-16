@@ -677,3 +677,9 @@
 - **Summary:** Surfaced dry-run readiness in `ap2 status` text (new `dry-run: would-approve N | would-unfreeze M` line + heuristic) and web home Automation card (per-axis `would-approved`/`would-unfrozen` rows + `[dry-run]` badge); 1500 unit tests pass including new TB-241 + TB-238 regression-pin modules.
 - **Files:** ap2/cli.py, ap2/web.py, ap2/tests/test_tb241_status_dry_run_surface.py, ap2/tests/test_tb238_automation_status_dry_run.py
 - **Tests:** pass
+
+## [2026-05-16] TB-242: Surface axis-4 focus-pointer state (active focus title + "N of M" position + roadmap-complete halt) in `ap2 status` text/JSON + web home
+- **Commit:** `6704ed52`
+- **Summary:** Surfaced axis-4 focus-rotation state in `ap2 status` text/JSON and web home: added a `focus:` text line near the top of cmd_status output (single-focus: `<title>`; multi-focus: `<title> (N of M)`; halt: `ROADMAP_COMPLETE — \`ap2 ack roadmap_complete\` to resume`), an `active_focus` JSON block (title/index/total/roadmap_complete, null on fresh projects), and a parallel `_render_focus_card` above the automation card on the web home. Pure read-layer composition over TB-226 helpers; no daemon-side changes. 14 new behavioral pins all pass; cli/web/TB-226/TB-237 suites stay green (1519 unit + 3 e2e tests).
+- **Files:** ap2/cli.py, ap2/web.py, ap2/tests/test_tb242_status_active_focus_surface.py
+- **Tests:** pass
