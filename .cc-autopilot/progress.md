@@ -617,3 +617,9 @@
 - **Summary:** Taught the `BriefingFix:` prefix convention on three surfaces (SKILL.md new `## Reporting failures` section with 4 worked examples + originating TB-Ns, prompts.py `_TASK_FOOTER` extends the `blocked` status bullet with the canonical line shape, howto.md cross-reference back to SKILL.md); added 12 new tests in ap2/tests/test_tb229_briefing_fix_teaching.py (incl. parser round-trip) — full suite 1518 passed, no regressions. Note: the briefing's design used `=>` while the live parser (`parse_blocked_summary_fix_shape`) expects ` -> `; I taught the parser-canonical ` -> ` form so the auto-unfreeze sweep can actually fire — recommend operator update the briefing's design block to match.
 - **Files:** skills/ap2-task/SKILL.md, ap2/prompts.py, ap2/howto.md, ap2/tests/test_tb229_briefing_fix_teaching.py
 - **Tests:** pass
+
+## [2026-05-16] TB-230: End-to-end walk-away integration test pinning auto-approve dispatch + auto-unfreeze BriefingFix in concert (axes 1+2)
+- **Commit:** `ad1ae3e`
+- **Summary:** Added ap2/tests/e2e/test_walk_away_loop.py with two in-concert e2e tests: test_auto_approve_dispatches_ideation_proposal_without_operator drives 2 _tick cycles through ideation→auto-approve→backlog-promote→task-complete with AP2_AUTO_APPROVE=1 and asserts the causal chain ideation_empty_board→auto_approved→task_start→task_complete with no operator_queue_append op=approve event; test_auto_unfreeze_briefingfix_repairs_frozen_task drives the BriefingFix sweep+drain over 2 ticks (also with AP2_AUTO_APPROVE=1 set so the in-concert combo is pinned) asserting briefing patched, auto_unfreeze_applied event fired, task off Frozen. Full ap2/tests/ suite green (1520 passed).
+- **Files:** ap2/tests/e2e/test_walk_away_loop.py
+- **Tests:** pass
