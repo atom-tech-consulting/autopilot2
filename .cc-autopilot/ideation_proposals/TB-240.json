@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/add-llm-driven-file-path-coherence-check.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-16T08:12:11Z",
+  "tb_id": "TB-240",
+  "why_now": "TB-239's verification cycle on 2026-05-16 wasted 2 retries (~$2 token spend across `bd1dd62` + the second-retry run) AND ended with a cross-task side-effect \u2014 commit `ccfcff1` renamed `ap2/tests/test_tb234_doctor_auto_approve.py` \u2192 `test_tb234_doctor_auto_approve_audit.py` purely to make the briefing's wrong-path bullet (`uv run pytest -q ap2/tests/test_tb234_doctor_auto_approve_audit.py` \u2014 TB-234 tests stay green) pass. Without this gate, the recurring class is: ideation invents a verification bullet citing a plausible-but-nonexistent file path; operator approves on structural grounds (Goal/Scope/Why-now/Design all valid); agent commits correct work then either retries pointlessly or renames an existing artifact to satisfy the bullet. The TB-235 LLM-judge primitive already exists; the prompt-change cost is bounded."
+}
