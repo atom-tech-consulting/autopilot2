@@ -105,6 +105,82 @@ def _sandbox_clone_path(project_root: Path, user: str) -> Path | None:
     return home / "repos" / project_root.resolve().name
 
 
+def _parse_positive_int(raw: str) -> int:
+    """Mirror `_per_task_token_cap` / `_window_token_cap` parse semantics
+    (ap2/daemon.py:2581-2614): unset / empty / non-integer / non-positive
+    → 0 (disabled). Doctor reusing the same shape avoids the failure mode
+    where doctor reports OK on a value the daemon will treat as disabled.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return 0
+    try:
+        v = int(s)
+    except ValueError:
+        return 0
+    return v if v > 0 else 0
+
+
+def _truthy(raw: str) -> bool:
+    """Same shape as the daemon's `_truthy` env parse for
+    `AP2_AUTO_APPROVE` (`1` / `true` / `yes`, case-insensitive)."""
+    return (raw or "").strip().lower() in ("1", "true", "yes")
+
+
+def auto_approve_audit() -> AuditResult:
+    """Pre-flight check on `AP2_AUTO_APPROVE` + token-cap configuration.
+
+    Goal.md L102-113 frames axis-3 cost guards (per-task cap, window cap,
+    regression pauses) as the safety floor that lets auto-approve ship
+    bounded blast-radius. `_per_task_token_cap` / `_window_token_cap`
+    (daemon.py:2581-2614) deliberately return 0 ("disabled") on unset, so
+    an operator can enable auto-approve without realizing the floor is
+    OFF. This audit fail-loud surfaces that misconfiguration at pre-flight
+    time. WARN, not FAIL: operator authority preserved per goal.md
+    L184-186 — doctor warns, doesn't refuse to run.
+    """
+    res = AuditResult()
+    enabled_raw = os.environ.get("AP2_AUTO_APPROVE", "")
+    if not _truthy(enabled_raw):
+        res.add(
+            "INFO",
+            "auto-approve disabled (AP2_AUTO_APPROVE unset) — "
+            "manual approve required per task",
+        )
+        return res
+
+    per_task = _parse_positive_int(os.environ.get("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", ""))
+    window = _parse_positive_int(os.environ.get("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", ""))
+
+    if per_task > 0:
+        res.add("OK", f"AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP={per_task}")
+    else:
+        res.add(
+            "WARN",
+            "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP unset/zero — per-task cost "
+            "ceiling DISABLED. Fix: export "
+            "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP=<budget>",
+        )
+
+    if window > 0:
+        res.add("OK", f"AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP={window}")
+    else:
+        res.add(
+            "WARN",
+            "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP unset/zero — 24h rolling-"
+            "window cost ceiling DISABLED. Fix: export "
+            "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP=<budget>",
+        )
+
+    if per_task == 0 and window == 0:
+        res.add(
+            "WARN",
+            "auto-approve enabled with no cost ceiling — safety floor OFF; "
+            "see goal.md L102-113 for rationale",
+        )
+    return res
+
+
 def _verify_gate_state() -> AuditResult:
     """Report whether AP2_VERIFY_CMD is configured (project-wide regression gate).
 
@@ -133,6 +209,7 @@ def diagnose(project_root: Path, user: str = DEFAULT_USER) -> DoctorReport:
 
     report.sections.append(("project skeleton", _project_init_state(project_root)))
     report.sections.append(("verify gate", _verify_gate_state()))
+    report.sections.append(("auto-approve safety floor", auto_approve_audit()))
     report.sections.append((f"sandbox user ({user})", user_audit(user)))
     report.sections.append((f"ap2 CLI for {user}", _ap2_installed_for_user(user)))
 

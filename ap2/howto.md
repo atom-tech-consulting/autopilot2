@@ -878,6 +878,23 @@ per preempted auto-promote tick (with the would-have-promoted TB-N)
 so the cumulative skipped-count is visible in `ap2 logs` for
 operators tuning the cap values.
 
+**Pre-flight surface for cap misconfiguration (TB-234).** `ap2 doctor`
+has an `auto-approve safety floor` audit section that fires WARN when
+`AP2_AUTO_APPROVE` is set to a truthy value (`1` / `true` / `yes`) but
+`AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` and/or
+`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` is unset, empty, zero, or
+non-integer. With both caps disabled, an additional summary WARN names
+the configuration as "safety floor OFF" and cross-links `goal.md`
+L102-113. WARN, not FAIL — the operator may have a reason to run
+uncapped for a short window — but loud enough that an `ap2 doctor`
+run after flipping `AP2_AUTO_APPROVE=1` reveals the gap before the
+SDK bill arrives. When auto-approve is unset (the default), the section
+emits a single INFO line stating manual approval is required per task.
+The audit is purely diagnostic: no events written, no daemon state
+mutated. Pair with `ap2 status`'s continuous `automation_status`
+surface (TB-227) — doctor is the one-shot pre-flight, status is the
+ongoing snapshot.
+
 **Auto-unfreeze on agent-diagnosed briefing-shape fixes (TB-225).**
 Self-heals the recurring class of retry-exhausted Frozen tasks whose
 root cause is a briefing-shape regression the agent already diagnosed
