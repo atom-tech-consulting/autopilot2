@@ -149,3 +149,10 @@ is observation-only.
   — a separate misconfiguration shape; defer to a follow-up
   cycle if operator engagement surfaces typo-shaped
   failures.
+## Attempts
+
+### 2026-05-16 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `uv run pytest -q ap2/tests/test_tb234_doctor_auto_approve_audit.py` — TB-234 tests stay green (no regression on the par
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260516T063934Z-TB-239.prompt.md`, `stream: .cc-autopilot/debug/20260516T063934Z-TB-239.stream.jsonl`, `messages: .cc-autopilot/debug/20260516T063934Z-TB-239.messages.jsonl`
