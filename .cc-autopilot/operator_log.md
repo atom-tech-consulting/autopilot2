@@ -145,3 +145,7 @@ ideation won't re-propose decisions logged here._
 - 2026-05-15T17:30:35Z — applied operator-queued approve → TB-228
 - 2026-05-15T17:30:35Z — applied operator-queued approve → TB-229
 - 2026-05-15T23:16:44Z — applied operator-queued add_backlog → TB-235
+- 2026-05-16T01:03:09Z — applied operator-queued approve → TB-230
+- 2026-05-16T01:03:09Z — applied operator-queued approve → TB-232
+- 2026-05-16T01:03:09Z — applied operator-queued approve → TB-233
+- 2026-05-16T01:03:10Z — applied operator-queued approve → TB-234

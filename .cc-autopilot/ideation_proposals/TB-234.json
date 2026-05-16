@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/ap2-doctor-warns-when-ap2-auto-approve-1.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-16T01:03:11Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-15T21:44:26Z",
   "tb_id": "TB-234",
   "why_now": "TB-227 surfaced auto-approve state in `ap2 status` (a continuous surface), but `ap2 status` is a high-noise board snapshot the operator may not read carefully after toggling environment variables on a remote sandbox. The doctor surface is purpose-built for the \"did I configure this correctly?\" pre-flight question \u2014 an operator who runs `ap2 doctor` after flipping `AP2_AUTO_APPROVE=1` should see immediately whether their cost-cap configuration matches the cost-bounded shape goal.md L86-88 requires for the auto-approve mode to ship value. Without this, an operator can enable auto-approve, forget the caps, and only learn the safety floor was off when an SDK bill arrives or the cumulative-regression pause fires after N freezes (TB-224's downstream catch). Pre-flight beats post-incident."
