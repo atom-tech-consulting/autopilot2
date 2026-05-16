@@ -635,3 +635,9 @@
 - **Summary:** Added auto_approve_audit() to ap2/doctor.py and wired it into diagnose() under section "auto-approve safety floor"; emits INFO when AP2_AUTO_APPROVE is unset, WARN per missing token cap (AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP / AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP) plus a summary "safety floor OFF" WARN when both are unset, using the daemon's parse semantics (unset/empty/non-int/non-positive → disabled). Added ap2/tests/test_tb234_doctor_auto_approve.py with 12 cases (all required behavioral cases plus non-integer parse + end-to-end diagnose() check). Updated ap2/howto.md with a TB-234 Pre-flight surface paragraph cross-linking goal.md L102-113. Full ap2/tests/ suite green (1544 passed).
 - **Files:** ap2/doctor.py, ap2/howto.md, ap2/tests/test_tb234_doctor_auto_approve.py
 - **Tests:** pass
+
+## [2026-05-16] TB-232: Monitor-only auto-approve mode: `AP2_AUTO_APPROVE_DRY_RUN=1` emits `would_auto_approve` events without stripping the `@blocked:review` codespan
+- **Commit:** `bfa368a`
+- **Summary:** Follow-up to 5676d81 which failed the prose verification ("logic lives at proposal-time in tools.do_board_edit not daemon dispatch"). Extracted the full gate chain into `evaluate_auto_approve_decision(cfg, *, tags)` in daemon.py with explicit top-to-bottom branch ordering: tags → freeze-threshold → per-task+window-token-caps → dry-run terminal branch. tools.do_board_edit now delegates to the helper (lazy import to avoid tools⇄daemon cycle) and only owns the WRITE action. Real-mode behavior preserved (dispatch-time gates in `_tick` remain the canonical halt site emitting `auto_approve_paused` / `auto_approve_halted`); dry-run mode enforces all four gates in-place. All 1544 tests green including TB-223/224/227/232.
+- **Files:** ap2/daemon.py, ap2/tools.py
+- **Tests:** pass
