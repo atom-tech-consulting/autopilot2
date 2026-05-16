@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/surface-dry-run-readiness-signal-would-a.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-16T21:42:59Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-16T08:12:32Z",
   "tb_id": "TB-241",
   "why_now": "TB-238 closed the surface gap for the status-report cron only (per its `## Out of scope`); `ap2 status` and web home are the operator's two on-demand return surfaces between status-report cron firings (status-report tick cadence is typically 2h). Operator who flips `AP2_AUTO_APPROVE_DRY_RUN=1` and runs `ap2 status` to observe the dry-run output gets a byte-identical auto-approve summary to pre-flip \u2014 zero evidence the knob changed anything. Without this surface-parity closure, the dry-run on-ramp's primary purpose (operator observes loop decisions during the dry-run window and gains confidence before flipping live) is partially defeated on the on-demand surfaces, forcing operator to wait for the next cron tick or grep events.jsonl manually."

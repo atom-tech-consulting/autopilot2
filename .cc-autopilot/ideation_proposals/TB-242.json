@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/surface-axis-4-focus-pointer-state-activ.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-16T21:42:59Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-16T08:12:49Z",
   "tb_id": "TB-242",
   "why_now": "TB-226 emits `focus_advanced` and `roadmap_complete` event types but those are append-only events, not a current-state surface. Today the operator's only way to answer \"what focus am I on, and how many remain?\" is `ap2 logs -n N | grep focus_advanced` (last-event reconstruction) or manually reading `focus_pointer.json`. After TB-237 pinned the chain end-to-end, the natural next step is the operator-facing render parity that TB-227 / TB-228 already deliver for axes 1+2+3. Without this, axis 4 stays \"shipped but not observable\" and the walk-away-scaling claim stays unverifiable to the operator without manual file reading."
