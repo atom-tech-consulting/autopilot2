@@ -641,3 +641,9 @@
 - **Summary:** Follow-up to 5676d81 which failed the prose verification ("logic lives at proposal-time in tools.do_board_edit not daemon dispatch"). Extracted the full gate chain into `evaluate_auto_approve_decision(cfg, *, tags)` in daemon.py with explicit top-to-bottom branch ordering: tags → freeze-threshold → per-task+window-token-caps → dry-run terminal branch. tools.do_board_edit now delegates to the helper (lazy import to avoid tools⇄daemon cycle) and only owns the WRITE action. Real-mode behavior preserved (dispatch-time gates in `_tick` remain the canonical halt site emitting `auto_approve_paused` / `auto_approve_halted`); dry-run mode enforces all four gates in-place. All 1544 tests green including TB-223/224/227/232.
 - **Files:** ap2/daemon.py, ap2/tools.py
 - **Tests:** pass
+
+## [2026-05-16] TB-235: Add LLM-driven dependency-coherence check to briefing validator: reject when prose names a hard predecessor that `@blocked:TB-N` doesn't declare
+- **Commit:** `27f6fc9`
+- **Summary:** Added LLM-driven dependency-coherence check (#7) to _validate_briefing_structure: Haiku-4.5 judge identifies hard predecessors named implicitly in briefing prose and rejects when any judge-named TB-N is missing from the task's @blocked: codespan. Fail-open via validator_judge_{timeout,fail} events on SDK errors; AP2_VALIDATOR_JUDGE_DISABLED=1 hard off-switch; AP2_VALIDATOR_JUDGE_TIMEOUT_S (15) and AP2_VALIDATOR_JUDGE_MAX_TOKENS (500) tunables. Worker-thread wrapping so the sync validator path composes with both CLI-sync and daemon-async callers. Wired into do_board_edit and do_operator_queue_append (add + update branches). 16 new regression-pin tests in ap2/tests/test_dep_validator_judge.py; full suite 1560/1560 green.
+- **Files:** ap2/tools.py, ap2/events.py, ap2/howto.md, ap2/tests/test_dep_validator_judge.py, ap2/tests/e2e/conftest.py
+- **Tests:** pass
