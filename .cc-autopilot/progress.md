@@ -659,3 +659,9 @@
 - **Summary:** Added test_focus_advance_and_roadmap_complete_across_ticks to ap2/tests/e2e/test_walk_away_loop.py: drives 4 daemon._tick cycles through a two-focus goal.md with FakeSDK ideation returning 0 proposals per invocation (AP2_FOCUS_ADVANCE_EMPTY_CYCLES=2) and asserts focus_advanced (focus-a→focus-b, then focus-b→"") strictly precedes roadmap_complete in events.jsonl, halt is active, and operator_ack with the roadmap_complete token clears it; full ap2/tests/ suite (1580 tests) passes.
 - **Files:** ap2/tests/e2e/test_walk_away_loop.py
 - **Tests:** pass
+
+## [2026-05-16] TB-238: Extend `automation_status` collector + status-report digest with dry-run readiness signal (`would_auto_approve` / `would_auto_unfreeze` 24h counts + auto-unfreeze dry-run badge)
+- **Commit:** `d861d83`
+- **Summary:** Added `auto_unfreeze_dry_run_enabled` + `would_auto_unfreeze_count_24h` collector keys (parallel to TB-232 pair) and a trailing `*Dry-run window:*` digest sub-block in `render_automation_loop_activity_section` that renders only on-axis lines when either dry-run is on, with a byte-identical default-off regression pin; all 1586 tests pass.
+- **Files:** ap2/automation_status.py, ap2/status_report.py, ap2/howto.md, ap2/tests/test_tb227_automation_status.py, ap2/tests/test_tb228_status_report_automation_digest.py
+- **Tests:** pass
