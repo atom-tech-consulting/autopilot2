@@ -181,6 +181,100 @@ def auto_approve_audit() -> AuditResult:
     return res
 
 
+def _parse_nonneg_int_with_default(raw: str, default: int) -> int:
+    """Mirror `_auto_unfreeze_max_per_task` / `_auto_unfreeze_max_per_day`
+    parse semantics (ap2/daemon.py:3084-3091 / 3109-3116): empty /
+    non-integer / negative falls back to `default`; non-negative integers
+    are honored (including 0, which the daemon treats as "cap disabled").
+    Doctor reusing the same shape avoids the failure mode where doctor
+    reports a cap value the daemon will treat differently.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return default
+    try:
+        v = int(s)
+    except ValueError:
+        return default
+    return v if v >= 0 else default
+
+
+def auto_unfreeze_audit() -> AuditResult:
+    """Pre-flight check on `AP2_AUTO_UNFREEZE_FIX_SHAPES` +
+    `AP2_AUTO_UNFREEZE_DRY_RUN` configuration (TB-239, axis-2 mirror
+    of `auto_approve_audit()`).
+
+    `_maybe_auto_unfreeze` (daemon.py:3301-3303) silently early-returns
+    when `AP2_AUTO_UNFREEZE_FIX_SHAPES` is unset/empty — EVEN when
+    `AP2_AUTO_UNFREEZE_DRY_RUN=1` is set. An operator who flips dry-run
+    expecting observation gets a silent no-op (zero
+    `would_auto_unfreeze` events, zero `auto_unfreeze_skipped` events,
+    no doctor warning). This audit fail-loud surfaces that
+    misconfiguration at pre-flight time. WARN, not FAIL: operator
+    authority preserved per goal.md L184-186 — doctor warns, doesn't
+    refuse to run.
+
+    Note on default asymmetry vs `auto_approve_audit()`: axis-1
+    defaults are permissive (caps default to 0 = disabled = unbounded),
+    so enabling auto-approve without caps is the loud-warn shape.
+    Axis-2 defaults are conservative (allowlist defaults to empty =
+    no-op; per-task cap defaults to 1; per-day cap defaults to 3), so
+    the loud-warn shape here is flipping the dry-run knob without
+    populating the allowlist (silent no-op).
+    """
+    res = AuditResult()
+    allowlist_raw = os.environ.get("AP2_AUTO_UNFREEZE_FIX_SHAPES", "").strip()
+    shapes = [s.strip() for s in allowlist_raw.split(",") if s.strip()]
+    dry_run = _truthy(os.environ.get("AP2_AUTO_UNFREEZE_DRY_RUN", ""))
+    per_task_cap = _parse_nonneg_int_with_default(
+        os.environ.get("AP2_AUTO_UNFREEZE_MAX_PER_TASK", ""), 1,
+    )
+    per_day_cap = _parse_nonneg_int_with_default(
+        os.environ.get("AP2_AUTO_UNFREEZE_MAX_PER_DAY", ""), 3,
+    )
+
+    if not shapes and not dry_run:
+        # Default-off case: feature unconfigured, no operator engagement.
+        res.add(
+            "INFO",
+            "auto-unfreeze disabled (allowlist unset) — "
+            "set AP2_AUTO_UNFREEZE_FIX_SHAPES=<comma-list> to opt in",
+        )
+        return res
+
+    if not shapes and dry_run:
+        # The misconfiguration shape: dry-run set without allowlist.
+        # `_maybe_auto_unfreeze` (daemon.py:3301-3303) early-returns
+        # silently on empty allowlist BEFORE the dry-run check at
+        # daemon.py:3416 — zero observable events, silent no-op.
+        res.add(
+            "WARN",
+            "auto-unfreeze dry-run set without allowlist — silent no-op. "
+            "`_maybe_auto_unfreeze` (ap2/daemon.py:3301-3303) early-"
+            "returns on empty allowlist BEFORE the dry-run check, so "
+            "zero `would_auto_unfreeze` events fire. Fix: set "
+            "AP2_AUTO_UNFREEZE_FIX_SHAPES=<comma-list> before dry-run "
+            "will emit observable decisions.",
+        )
+        return res
+
+    # From here shapes is non-empty.
+    n = len(shapes)
+    if dry_run:
+        res.add(
+            "INFO",
+            f"auto-unfreeze dry-run armed: {n} shapes, "
+            f"per-task cap {per_task_cap}, per-day cap {per_day_cap}",
+        )
+    else:
+        res.add(
+            "INFO",
+            f"auto-unfreeze live: {n} shapes, "
+            f"per-task cap {per_task_cap}, per-day cap {per_day_cap}",
+        )
+    return res
+
+
 def _verify_gate_state() -> AuditResult:
     """Report whether AP2_VERIFY_CMD is configured (project-wide regression gate).
 
@@ -210,6 +304,7 @@ def diagnose(project_root: Path, user: str = DEFAULT_USER) -> DoctorReport:
     report.sections.append(("project skeleton", _project_init_state(project_root)))
     report.sections.append(("verify gate", _verify_gate_state()))
     report.sections.append(("auto-approve safety floor", auto_approve_audit()))
+    report.sections.append(("auto-unfreeze safety floor", auto_unfreeze_audit()))
     report.sections.append((f"sandbox user ({user})", user_audit(user)))
     report.sections.append((f"ap2 CLI for {user}", _ap2_installed_for_user(user)))
 

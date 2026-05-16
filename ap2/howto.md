@@ -1119,7 +1119,14 @@ per bootstrap fix-shape (TB-229).
   confirm the gate's decisions match your judgment, then unset
   `AP2_AUTO_UNFREEZE_DRY_RUN` to engage real patching. Sibling
   on-ramp to `AP2_AUTO_APPROVE_DRY_RUN` (TB-232) on the axis-1
-  auto-approve side. **Operator's primary readiness surface** (TB-238):
+  auto-approve side. **Pre-flight diagnostic** (TB-239): `ap2 doctor`
+  emits a WARN in the `auto-unfreeze safety floor` section when
+  `AP2_AUTO_UNFREEZE_DRY_RUN=1` is set without
+  `AP2_AUTO_UNFREEZE_FIX_SHAPES` — `_maybe_auto_unfreeze` early-
+  returns on empty allowlist BEFORE the dry-run check, so the
+  observation knob is a silent no-op without the allowlist. Run
+  `ap2 doctor` after flipping the dry-run knob to confirm both env
+  vars are wired. **Operator's primary readiness surface** (TB-238):
   the scheduled `status-report` Mattermost post's
   `## Automation loop activity` section grows a trailing
   `*Dry-run window:*` sub-block while either dry-run knob is on,
