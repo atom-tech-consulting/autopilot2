@@ -665,3 +665,9 @@
 - **Summary:** Added `auto_unfreeze_dry_run_enabled` + `would_auto_unfreeze_count_24h` collector keys (parallel to TB-232 pair) and a trailing `*Dry-run window:*` digest sub-block in `render_automation_loop_activity_section` that renders only on-axis lines when either dry-run is on, with a byte-identical default-off regression pin; all 1586 tests pass.
 - **Files:** ap2/automation_status.py, ap2/status_report.py, ap2/howto.md, ap2/tests/test_tb227_automation_status.py, ap2/tests/test_tb228_status_report_automation_digest.py
 - **Tests:** pass
+
+## [2026-05-16] TB-239: `ap2 doctor` warns when `AP2_AUTO_UNFREEZE_DRY_RUN=1` is set but `AP2_AUTO_UNFREEZE_FIX_SHAPES` is unset/empty (axis-2 misconfiguration floor)
+- **Commit:** `ccfcff1`
+- **Summary:** Prior commit bd1dd62 already implemented the full TB-239 briefing (auto_unfreeze_audit + diagnose wiring + 19-test module + howto.md note); two prior verifier runs failed only because briefing's verification line names test_tb234_doctor_auto_approve_audit.py but the TB-234 file shipped as test_tb234_doctor_auto_approve.py. This commit (ccfcff1) git-mv's the TB-234 test file to the briefing-expected name (no content change). All 31 TB-234+TB-239 audit tests pass; full ap2/tests/ suite 1605 passed.
+- **Files:** ap2/tests/test_tb234_doctor_auto_approve_audit.py
+- **Tests:** pass
