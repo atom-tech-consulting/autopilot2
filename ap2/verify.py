@@ -498,10 +498,34 @@ async def _judge_prose_bullet(
         "You are evaluating ONE acceptance bullet from a task's verification "
         "section against the agent's CUMULATIVE diff (every code commit "
         "across any retries of this task, with daemon state-file noise "
-        "filtered out) AND the project's working tree at HEAD. Answer with "
-        "ONE LINE of JSON: "
-        '{"status": "pass" | "fail", "rationale": "<one sentence>"}. '
-        "Do not include any other text outside that JSON line.\n\n"
+        "filtered out) AND the project's working tree at HEAD.\n\n"
+        # TB-236: tightened final-message contract. The pre-TB-236 prompt
+        # asked for "ONE LINE of JSON" but did not cap rationale length,
+        # did not forbid markdown code fences, and did not show an
+        # explicit example. Observed failure (TB-228 bullet 7) was a
+        # 1100-token response with a long rationale containing unescaped
+        # JSON-breaking characters; bullet 6 from the same task succeeded
+        # at ~510 tokens with a short rationale. The shorter the
+        # rationale, the smaller the surface area for JSON-escape bugs.
+        # The constraint applies ONLY to the FINAL message — intermediate
+        # Read/Grep tool calls (legal via JUDGE_REPO_READ_TOOLS) are
+        # unconstrained.
+        "OUTPUT CONTRACT — your FINAL message must be a JSON object only:\n"
+        '  {"status": "pass", "rationale": "X exists per L42"}\n'
+        "Rules for the FINAL message:\n"
+        "  - It is a JSON object only. No markdown code fences (no ```json"
+        " or ``` wrapping). No leading prose (no 'Here is the verdict:'"
+        " preamble). No trailing commentary after the closing brace.\n"
+        "  - `status` is exactly `\"pass\"` or `\"fail\"` (lowercase).\n"
+        "  - `rationale` is a single short sentence, MAXIMUM 200 characters."
+        " Cite a file:line or symbol name when possible; do NOT quote long"
+        " code blocks or paste diff hunks into the rationale.\n"
+        "  - If the rationale would naturally exceed 200 characters,"
+        " summarize: cite the strongest single piece of evidence and"
+        " stop.\n"
+        "  - Intermediate tool calls (Read, Glob, Grep) during reasoning"
+        " are unconstrained — only the FINAL message must satisfy this"
+        " contract.\n\n"
         "Evidence priority — when the diff and the working tree disagree, "
         "the working tree at HEAD is AUTHORITATIVE. The diff can be "
         "truncated, span renames, or simply not show what's actually on "
@@ -585,13 +609,50 @@ async def _judge_prose_bullet(
             notes=f"judge error: {type(e).__name__}: {e}",
         )
 
-    verdict = _parse_judge_response(bullet.text, text)
+    outcome = _parse_judge_response(bullet.text, text)
+    verdict = outcome.verdict
+
+    # TB-236: when the response can't be parsed into a verdict, dump the
+    # FULL raw last-assistant-text to a per-bullet debug file so the
+    # operator can diagnose WHY without being limited to the 200-char
+    # truncated preview the verifier carries in `notes`. Categorization
+    # (`parse_error`) + length metrics (`response_length` /
+    # `rationale_length`) ride on the `judge_call` event so events.jsonl
+    # alone is enough to pattern-detect across many failures without
+    # opening dumps. Dumps are written ONLY on parse failure — successful
+    # judge calls leave no trace on disk beyond the existing event.
+    dump_path: Path | None = None
+    if outcome.parse_error is not None and events_file is not None:
+        try:
+            import datetime as _dt
+            debug_dir = events_file.parent / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            bullet_label = (
+                bullet_idx if bullet_idx is not None else -1
+            )
+            task_label = task_id or "unknown"
+            dump_path = (
+                debug_dir
+                / f"{ts}-{task_label}-judge-bullet{bullet_label}-response.txt"
+            )
+            dump_path.write_text(text or "")
+        except Exception:  # noqa: BLE001
+            # Diagnostic write must never break verification. If the
+            # write fails, drop the path (event won't carry it either).
+            dump_path = None
 
     # TB-157: emit `judge_call` so events.jsonl is the canonical aggregation
     # surface for prose-judge cost. Composes with `events.tail`, the web
     # events table, and the diagnose report — same envelope shape as
     # `task_complete`, `verification_failed`, etc. Best-effort: a write
     # failure here must not flip the judge's verdict.
+    # TB-236: extended with `response_length` (always), `rationale_length`
+    # (on successful parse), `parse_error` (on parse failure), and
+    # `judge_response_dump` (path to the per-bullet dump file, when the
+    # dump fired). The length fields are present on every call so an
+    # operator can track whether the prompt-tightening prevention is
+    # actually shortening rationales over time.
     if events_file is not None:
         try:
             from . import events as _events
@@ -601,7 +662,14 @@ async def _judge_prose_bullet(
                 "bullet_kind": bullet.kind,
                 "verdict": verdict.status,
                 "duration_s": round(duration_s, 3),
+                "response_length": len(text or ""),
             }
+            if outcome.rationale_length is not None:
+                payload["rationale_length"] = outcome.rationale_length
+            if outcome.parse_error is not None:
+                payload["parse_error"] = outcome.parse_error
+            if dump_path is not None:
+                payload["judge_response_dump"] = str(dump_path)
             for k in ("model", "num_turns", "total_cost_usd",
                       "stop_reason", "usage", "model_usage"):
                 if k in result_meta:
@@ -614,42 +682,181 @@ async def _judge_prose_bullet(
     return verdict
 
 
-def _parse_judge_response(bullet_text: str, response: str) -> CriterionResult:
+#: TB-236: parse-failure categorization labels. When the judge's final
+#: response can't be turned into a `{"status": ..., "rationale": ...}`
+#: verdict, the failure is classified into one of these labels so the
+#: operator can pattern-detect across dump files without reading every
+#: one. Ordered roughly from "structural" (no JSON at all) to "subtle"
+#: (JSON content bug):
+#:   - `no_json_object`         — response is empty or missing `{` / `}`
+#:   - `trailing_prose_after_json` — `{...}` parses cleanly but non-
+#:     whitespace follows the closing brace (judge added commentary)
+#:   - `unescaped_in_string`    — `JSONDecodeError.msg` matched
+#:     "Expecting" / "Invalid" / similar; usually an unescaped `"` or
+#:     `\\` inside a string value
+#:   - `json_truncated`         — `JSONDecodeError.msg` matched
+#:     "Unterminated string"; response cut off mid-value
+#:   - `parse_error_other`      — catch-all so the enum is closed
+PARSE_ERROR_CATEGORIES: tuple[str, ...] = (
+    "no_json_object",
+    "trailing_prose_after_json",
+    "unescaped_in_string",
+    "json_truncated",
+    "parse_error_other",
+)
+
+
+def _categorize_parse_error(response: str) -> str:
+    """TB-236: classify why ``_parse_judge_response`` couldn't extract a
+    verdict from ``response``. Returns one of ``PARSE_ERROR_CATEGORIES``.
+
+    Heuristic-only — no SDK, no IO. The categorization is meant to be
+    coarse enough that human operators (or a future LLM pattern detector)
+    can answer "is this a prompt-tightening bug or a parser bug?" at a
+    glance. The full raw response is dumped separately by the caller for
+    cases where the category alone isn't enough.
+    """
+    if not response:
+        return "no_json_object"
+    start = response.find("{")
+    if start == -1:
+        return "no_json_object"
+    end = response.rfind("}")
+    if end == -1 or end <= start:
+        # Opening brace present but no closing brace at all. Probe the
+        # suffix from the opener: if `json.loads` reports "Unterminated
+        # string", the response was cut off mid-rationale (the observed
+        # TB-228 shape). Other JSONDecodeError messages here (e.g.
+        # "Expecting property name" / "Expecting value") also point at
+        # truncation since the JSON is structurally incomplete. Only
+        # collapse to `no_json_object` if there's so little content that
+        # truncation isn't a plausible explanation.
+        try:
+            json.loads(response[start:])
+        except json.JSONDecodeError as e:
+            msg = (e.msg or "").lower()
+            if "unterminated string" in msg or "expecting" in msg:
+                return "json_truncated"
+            return "no_json_object"
+        # If a closing-brace-less suffix somehow parsed, the response is
+        # too degenerate to classify; fall through to the catch-all.
+        return "parse_error_other"
+    candidate = response[start:end + 1]
+    try:
+        json.loads(candidate)
+    except json.JSONDecodeError as e:
+        msg = (e.msg or "").lower()
+        # `json` raises "Unterminated string starting at" when a `"`-
+        # opened string value has no matching close inside the candidate.
+        # This is the truncation signature: model ran out of budget mid-
+        # rationale.
+        if "unterminated string" in msg:
+            return "json_truncated"
+        # Most other failures inside a string value surface as
+        # "Expecting ',' delimiter" or "Expecting value" or
+        # "Invalid \\escape" — all consistent with an unescaped quote /
+        # backslash inside the rationale.
+        if "expecting" in msg or "invalid" in msg:
+            return "unescaped_in_string"
+        return "parse_error_other"
+    # Candidate parsed cleanly. If non-whitespace follows the closing
+    # brace, the judge appended commentary — separable from a content bug.
+    trailing = response[end + 1:].strip()
+    if trailing:
+        return "trailing_prose_after_json"
+    return "parse_error_other"
+
+
+@dataclass
+class _ParseOutcome:
+    """TB-236: result + diagnostics from ``_parse_judge_response``.
+
+    Carries the criterion verdict plus optional metrics so
+    ``_judge_prose_bullet`` can decide whether to dump the response and
+    which length / categorization fields to add to the `judge_call`
+    event. None values mean "not applicable for this outcome".
+    """
+    verdict: CriterionResult
+    parse_error: str | None = None  # PARSE_ERROR_CATEGORIES value
+    rationale_length: int | None = None  # len(rationale) on successful parse
+
+
+def _parse_judge_response(bullet_text: str, response: str) -> _ParseOutcome:
     """Extract the JSON verdict from the judge's reply.
 
     The response should be `{"status": ..., "rationale": ...}` on one line.
     Tolerates extra text by extracting the first balanced `{...}` substring.
+
+    TB-236: returns a ``_ParseOutcome`` carrying the verdict plus
+    diagnostic fields. ``parse_error`` is set on every failure path
+    where the response could not be turned into a structurally-valid
+    JSON object (empty / no JSON / malformed JSON), and ``None`` on
+    successful parse OR on the "unknown status" path (JSON parsed
+    fine, the value of ``status`` just wasn't `pass` / `fail`).
+    ``rationale_length`` is populated whenever a rationale field was
+    extracted (including the "unknown status" path), so the always-on
+    length signal on `judge_call` events covers as many calls as
+    possible.
     """
     if not response:
-        return CriterionResult(
-            bullet=bullet_text, kind="prose", status="unverified",
-            notes="empty judge response",
+        return _ParseOutcome(
+            verdict=CriterionResult(
+                bullet=bullet_text, kind="prose", status="unverified",
+                notes="empty judge response",
+            ),
+            parse_error=_categorize_parse_error(response),
         )
     # Find the first JSON object in the response.
     start = response.find("{")
     end = response.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        return CriterionResult(
-            bullet=bullet_text, kind="prose", status="unverified",
-            notes=f"no JSON object in response: {response[:200]!r}",
+        return _ParseOutcome(
+            verdict=CriterionResult(
+                bullet=bullet_text, kind="prose", status="unverified",
+                notes=f"no JSON object in response: {response[:200]!r}",
+            ),
+            parse_error=_categorize_parse_error(response),
         )
     try:
         data = json.loads(response[start:end + 1])
     except json.JSONDecodeError:
-        return CriterionResult(
-            bullet=bullet_text, kind="prose", status="unverified",
-            notes=f"malformed JSON: {response[start:end + 1][:200]!r}",
+        return _ParseOutcome(
+            verdict=CriterionResult(
+                bullet=bullet_text, kind="prose", status="unverified",
+                notes=f"malformed JSON: {response[start:end + 1][:200]!r}",
+            ),
+            parse_error=_categorize_parse_error(response),
         )
     status = str(data.get("status", "")).lower().strip()
     rationale = str(data.get("rationale", "")).strip()
     if status not in ("pass", "fail"):
-        return CriterionResult(
-            bullet=bullet_text, kind="prose", status="unverified",
-            notes=f"unknown status {status!r}; rationale: {rationale[:200]}",
+        return _ParseOutcome(
+            verdict=CriterionResult(
+                bullet=bullet_text, kind="prose", status="unverified",
+                notes=f"unknown status {status!r}; rationale: {rationale[:200]}",
+            ),
+            # JSON parsed fine — this isn't a parse failure, just an
+            # invalid `status` value. Leave parse_error as None so the
+            # dump file isn't written for this case (per Scope §2, dumps
+            # are for parse failures, not all unverifieds).
+            parse_error=None,
+            rationale_length=len(rationale),
         )
-    return CriterionResult(
-        bullet=bullet_text, kind="prose", status=status,
-        notes=rationale,
+    # TB-236: trailing prose after a valid JSON object is recoverable
+    # (we still extract a verdict), but it's a prompt-contract violation
+    # worth tracking — surface it as `parse_error="trailing_prose_after_json"`
+    # so the operator can see prompt-drift creeping in without flipping
+    # the verdict to unverified.
+    trailing_parse_error: str | None = None
+    if response[end + 1:].strip():
+        trailing_parse_error = "trailing_prose_after_json"
+    return _ParseOutcome(
+        verdict=CriterionResult(
+            bullet=bullet_text, kind="prose", status=status,
+            notes=rationale,
+        ),
+        parse_error=trailing_parse_error,
+        rationale_length=len(rationale),
     )
 
 

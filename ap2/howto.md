@@ -360,6 +360,70 @@ post-pipeline as `_sweep_pipeline_pending` re-runs it.)
 per-task gate. Typical: `uv run pytest -q`. `--no-verify` tag opts
 specific tasks out (e.g. docs-only changes).
 
+### Prose-judge diagnostics
+
+The prose judge (`ap2/verify.py::_judge_prose_bullet`) emits a
+`judge_call` event for every call (TB-157) carrying usage / cost /
+verdict. TB-236 extended that event with prevention- and observability-
+fields so silently-skipped prose bullets under `AP2_AUTO_APPROVE=1` are
+no longer invisible:
+
+- **Prompt constraint (prevention).** The judge prompt now caps the
+  rationale at ≤200 characters and is explicit that the FINAL message
+  must be a JSON object only (no markdown fences, no preamble, no
+  trailing prose). Intermediate `Read` / `Grep` / `Glob` tool calls are
+  unconstrained — only the last message is.
+- **`response_length`** (always present on every `judge_call`). Length
+  in characters of the judge's final assistant text. Lets operators
+  watch the prompt-tightening effect over time.
+- **`rationale_length`** (present on successful parse). Length of the
+  extracted `rationale` field. If this drifts above ~200 over a week
+  the prompt constraint is slipping and either the model is ignoring it
+  or the prompt rewrite lost the cap.
+- **`parse_error`** (present on parse failure). One of:
+  - `no_json_object` — response had no `{` / `}` at all.
+  - `trailing_prose_after_json` — `{...}` parses cleanly but non-
+    whitespace follows the closing brace (judge added commentary).
+  - `unescaped_in_string` — usually an unescaped `"` or `\` inside a
+    string value.
+  - `json_truncated` — response cut off mid-string-value.
+  - `parse_error_other` — catch-all.
+  The full enum lives in `ap2/verify.py::PARSE_ERROR_CATEGORIES`.
+- **`judge_response_dump`** (present on parse failure). Absolute path to
+  the per-bullet dump file at
+  `.cc-autopilot/debug/<run_ts>-<task>-judge-bullet<idx>-response.txt`.
+  The file holds the FULL raw last-assistant-text — not the 200-char
+  preview the event's `notes` field carries. Open it when you need to
+  see what the judge actually emitted (unescaped backticks, prose
+  preamble, etc.). Successful judge parses leave no dump on disk; the
+  field is absent on those events.
+
+Pattern-detection workflow:
+
+```
+ap2 events tail -n 500 | jq 'select(.type=="judge_call" and .parse_error)'
+```
+
+Counts by category, last 24h:
+
+```
+ap2 events tail -n 2000 | jq -r 'select(.type=="judge_call") | .parse_error // "ok"' | sort | uniq -c
+```
+
+Open the worst-offender dump:
+
+```
+ap2 events tail -n 500 | jq -r 'select(.type=="judge_call" and .judge_response_dump) | .judge_response_dump' | tail -1 | xargs cat
+```
+
+Failure recovery for prose-judge parse failures stays soft-pass:
+`verification_partial` → Complete (per the existing aggregator). The
+fields above don't change that policy — they just make the partials
+diagnosable rather than silent. If a single category dominates (e.g.
+`unescaped_in_string` >50% of failures over a week), the appropriate
+follow-up is a TB to either tighten the prompt further or harden the
+parser — informed by the dump files instead of guessing.
+
 ## Authoring `## Verification` bullets (briefing convention)
 
 Bullets in a briefing's `## Verification` section are the per-task gate's
