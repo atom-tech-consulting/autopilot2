@@ -128,6 +128,15 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
     # WOULD have shipped without operator review while the dry-run
     # knob is on — same audit-trail need as `auto_approved` itself.
     "would_auto_approve",
+    # TB-233: dry-run sibling of `auto_unfreeze_applied` (axis-2
+    # on-ramp). Surfacing it in the ideation events block lets the
+    # next cycle observe which Frozen tasks WOULD have been
+    # auto-unfrozen while `AP2_AUTO_UNFREEZE_DRY_RUN=1` is on —
+    # parallel to the `auto_unfreeze_applied` surfacing on the
+    # real-application path. Without it, dry-run decisions would be
+    # invisible to ideation and the next cycle would miss the
+    # signal that the allowlist is actually getting exercised.
+    "would_auto_unfreeze",
 )
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"

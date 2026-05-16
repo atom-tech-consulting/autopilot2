@@ -628,7 +628,12 @@ auto-applied to a Frozen task; payload `task`, `shape`, `from`, `to`),
 one of the layered guards; payload `task` + `reason` token, where
 reason is one of `shape_not_in_allowlist`, `briefing_mismatch`,
 `briefing_path_missing`, `per_task_cap`, `per_day_cap`, `queue_error`,
-`sweep_error`).
+`sweep_error`), `would_auto_unfreeze` (TB-233 monitor-only dry-run
+sibling of `auto_unfreeze_applied` — fires when both
+`AP2_AUTO_UNFREEZE_FIX_SHAPES` and `AP2_AUTO_UNFREEZE_DRY_RUN=1` are
+set and the full guard chain would have passed; payload `task`,
+`shape`, `file`, `line`, `from`, `to`; the briefing file is NOT
+mutated and no operator-queue ops are appended).
 
 **Focus rotation (TB-226 axis 4).** `focus_advanced` and
 `roadmap_complete` track the daemon's in-memory focus-list pointer
@@ -942,6 +947,28 @@ per bootstrap fix-shape (TB-229).
   tick AND appends a `## Decisions needed from operator` bullet to
   `.cc-autopilot/ideation_state.md` so `ap2 status` surfaces the
   systemic-regression signal. `0` disables the per-day cap.
+- `AP2_AUTO_UNFREEZE_DRY_RUN` — TB-233 monitor-only on-ramp.
+  **Unset by default.** When set to a truthy value (`1` / `true` /
+  `yes`, case-insensitive) alongside a non-empty
+  `AP2_AUTO_UNFREEZE_FIX_SHAPES`, the auto-unfreeze guard chain
+  (allowlist + per-task cap + per-day cap + briefing-line match)
+  still runs but the WRITE step is a no-op: instead of calling
+  `_apply_auto_unfreeze_patch` (which queues `update` + `unfreeze`
+  ops on the operator queue and mutates the briefing file), the
+  daemon emits a `would_auto_unfreeze` audit event with the same
+  payload shape as `auto_unfreeze_applied` plus the
+  `file` + `line` fields from the parsed `BriefingFix:` prefix.
+  The per-day-count + per-task-prior counters do NOT increment in
+  dry-run (no real application). Use this to observe the loop's
+  decisions on the live Frozen set without committing to the binary
+  cliff. **Enablement on-ramp:** set both
+  `AP2_AUTO_UNFREEZE_FIX_SHAPES=<shapes>` AND
+  `AP2_AUTO_UNFREEZE_DRY_RUN=1`, leave the daemon running for a
+  window (e.g. ≥24h), read `ap2 logs --type would_auto_unfreeze` to
+  confirm the gate's decisions match your judgment, then unset
+  `AP2_AUTO_UNFREEZE_DRY_RUN` to engage real patching. Sibling
+  on-ramp to `AP2_AUTO_APPROVE_DRY_RUN` (TB-232) on the axis-1
+  auto-approve side.
 
 Audit events: `auto_unfreeze_applied` (success — payload `task`,
 `shape`, `from`, `to`); `auto_unfreeze_skipped` (any guarded skip —

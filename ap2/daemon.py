@@ -2928,6 +2928,36 @@ def _auto_unfreeze_allowlist() -> frozenset[str]:
     return frozenset(s.strip() for s in raw.split(",") if s.strip())
 
 
+def _auto_unfreeze_dry_run() -> bool:
+    """TB-233: True iff `AP2_AUTO_UNFREEZE_DRY_RUN` is set to a truthy
+    value (`"1"` / `"true"` / `"yes"`, case-insensitive).
+
+    Monitor-only on-ramp for the auto-unfreeze loop (TB-225), sibling
+    of `automation_status._is_auto_approve_dry_run` (TB-232) on the
+    axis-1 side. When both `AP2_AUTO_UNFREEZE_FIX_SHAPES` (non-empty)
+    AND `AP2_AUTO_UNFREEZE_DRY_RUN=1` are set, `_maybe_auto_unfreeze`
+    runs the entire guard chain (allowlist + per-task cap + per-day
+    cap + briefing-line match) but, instead of calling
+    `_apply_auto_unfreeze_patch`, emits a `would_auto_unfreeze` audit
+    event with the same payload shape as `auto_unfreeze_applied`. The
+    briefing file is NOT mutated and no operator-queue ops are
+    appended; the per-day-count counter does NOT increment in dry-run
+    (no real application). Operator observes the simulated decisions
+    in `ap2 logs --type would_auto_unfreeze` (and the status-report's
+    automation-loop digest from TB-228) for a window, gains confidence
+    on the live Frozen set, then flips the dry-run knob off to engage
+    real patching.
+
+    Default unset → False (current TB-225 behavior; byte-identical to
+    pre-TB-233 when the knob has never been set). Permissive parse
+    mirrors the boolean shape used by `_is_truthy` in
+    `automation_status.py` so operators tuning the autopilot env file
+    see one consistent convention across knobs.
+    """
+    raw = os.environ.get("AP2_AUTO_UNFREEZE_DRY_RUN", "").strip().lower()
+    return raw in ("1", "true", "yes")
+
+
 def _auto_unfreeze_max_per_task() -> int:
     """Per-task cap from `AP2_AUTO_UNFREEZE_MAX_PER_TASK` (default 1).
 
@@ -3225,6 +3255,20 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
                 applied=day_count,
                 cap=per_day_cap,
             )
+            # TB-233: in dry-run the per-day cap halt is still the
+            # right signal that the allowlist would generate more
+            # applications than the safety floor allows — surface it
+            # pre-flight. The decisions-needed bullet AND the
+            # `## Decisions needed from operator` mutation, however,
+            # belong to the real-application path only; dry-run is
+            # monitor-only and must NOT touch board / state. Skip the
+            # bullet append in dry-run and short-circuit the same way
+            # the real path does. Operator sees the skip event +
+            # (over the dry-run window) the would_auto_unfreeze stream
+            # and infers the systemic-regression signal directly from
+            # the auto_unfreeze_skipped count.
+            if _auto_unfreeze_dry_run():
+                return
             try:
                 _append_decisions_needed_bullet(
                     cfg,
@@ -3245,6 +3289,32 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
             # remaining Frozen tasks (if any) stay Frozen until the
             # window rolls forward or the operator intervenes.
             return
+        # TB-233: dry-run check happens AFTER all skip-emission so
+        # the operator's dry-run window observes the same
+        # `auto_unfreeze_skipped` events it would see live — the only
+        # change in dry-run is the WRITE step: instead of calling
+        # `_apply_auto_unfreeze_patch` (which queues `update` +
+        # `unfreeze` ops on the operator queue and mutates the
+        # briefing file), emit a `would_auto_unfreeze` audit event
+        # with the same payload shape as `auto_unfreeze_applied` and
+        # continue. The per-day-count + per-task-prior-count
+        # counters do NOT increment in dry-run (no real application),
+        # so a dry-run window can observe MORE simulated decisions
+        # than the per-day cap would normally allow — that's the
+        # right shape (the operator wants to see the full Frozen-set
+        # decision before flipping the switch). When dry-run is off,
+        # behavior is byte-identical to pre-TB-233.
+        if _auto_unfreeze_dry_run():
+            events.append(
+                cfg.events_file,
+                "would_auto_unfreeze",
+                task=task.id,
+                shape=fix["shape"],
+                file=fix["file"],
+                line=fix["line"],
+                **{"from": fix["from"], "to": fix["to"]},
+            )
+            continue
         skip_reason = _apply_auto_unfreeze_patch(
             cfg, task_id=task.id, fix=fix,
         )

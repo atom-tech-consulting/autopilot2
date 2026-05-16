@@ -68,6 +68,22 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `queue_error`, `sweep_error`). The `knob_unset` case does NOT
     emit per-tick — the feature is opt-in and operators who haven't
     set `AP2_AUTO_UNFREEZE_FIX_SHAPES` shouldn't see noise.
+  - `would_auto_unfreeze` (TB-233) — monitor-only dry-run sibling
+    of `auto_unfreeze_applied`. Fires when both
+    `AP2_AUTO_UNFREEZE_FIX_SHAPES` (non-empty) AND
+    `AP2_AUTO_UNFREEZE_DRY_RUN=1` are set and the full guard chain
+    (allowlist + per-task cap + per-day cap + briefing-line match)
+    would have passed. The briefing file is NOT mutated and no
+    operator-queue ops are appended; per-day-count + per-task-prior
+    counters do NOT increment in dry-run (no real application). The
+    payload mirrors `auto_unfreeze_applied` plus the
+    `file` + `line` fields from the parsed `BriefingFix:` prefix:
+    `task` (TB-N), `shape` (allowlist token), `file` (briefing
+    path), `line` (1-indexed line number), `from`, `to`. Operator
+    runs the dry-run window to confirm the loop's decisions match
+    their judgment on the live Frozen set, then unsets the dry-run
+    knob to engage real patching. Sibling on-ramp to TB-232's
+    `would_auto_approve` on the axis-1 side.
   - `focus_advanced` (TB-226) — daemon advanced its in-memory focus
     pointer past an exhausted `## Current focus:` heading in
     goal.md. Triggered by either an LLM-judge verdict on the
