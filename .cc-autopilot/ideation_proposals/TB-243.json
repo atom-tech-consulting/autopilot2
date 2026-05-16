@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/surface-validator-judge-fail-validator-j.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-16T23:49:48Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-16T22:25:09Z",
   "tb_id": "TB-243",
   "why_now": "TB-241 (fc14fe3, 21:50:26Z) just landed dry-run readiness\nparity in `ap2 status` and the web home automation card; the\ncollector + surface pattern is fresh in the test+rendering modules,\nmaking this the cheapest moment to add the parallel validator-judge\npair before context decays. Without this, the auto-approve safety\nnarrative depends on a gate whose health the operator cannot\nobserve \u2014 every step toward \"walk away\" implicitly trusts a\nfail-open without a way to detect failure mode bias."
