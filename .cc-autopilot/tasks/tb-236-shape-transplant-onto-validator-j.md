@@ -172,3 +172,10 @@ warrants):
 - **exit_code:** None
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T080648Z-TB-247.prompt.md`, `stream: .cc-autopilot/debug/20260517T080648Z-TB-247.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T080648Z-TB-247.messages.jsonl`
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T104247Z-TB-247.prompt.md`, `stream: .cc-autopilot/debug/20260517T104247Z-TB-247.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T104247Z-TB-247.messages.jsonl`
