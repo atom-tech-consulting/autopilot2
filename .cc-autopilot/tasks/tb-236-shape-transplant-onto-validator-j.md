@@ -163,3 +163,12 @@ warrants):
 - Status-report / `ap2 status` / web surface changes — TB-243
   already covers the count surface; this task is purely about
   per-failure diagnostic capture.
+## Attempts
+
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T080648Z-TB-247.prompt.md`, `stream: .cc-autopilot/debug/20260517T080648Z-TB-247.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T080648Z-TB-247.messages.jsonl`
