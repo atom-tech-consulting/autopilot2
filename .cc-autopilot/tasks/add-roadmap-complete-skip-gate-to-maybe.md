@@ -164,3 +164,12 @@ events block.
 - Combining the focus-exhausted and roadmap-complete signals into a single ideation gate — different semantic levels (ideator self-report vs. daemon-side halt); collapsing them loses the regression pin on the older TB-174 path and conflates two distinct project states (single-focus exhausted vs. multi-focus roadmap end).
 - Changes to `_status_report_should_skip` or `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` — `ideation_skipped` is already excluded from the report's interesting types (only halt + completion events drive the digest); no new wiring needed there.
 - Symmetric ideation gate for `auto_approve_paused` (axis-3 consecutive-freezes halt) — different cost profile (minutes-recoverable vs. days-to-weeks); deferred pending evidence the halt durations justify gating ideation cost.
+## Attempts
+
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T072635Z-TB-246.prompt.md`, `stream: .cc-autopilot/debug/20260517T072635Z-TB-246.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T072635Z-TB-246.messages.jsonl`
