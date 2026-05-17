@@ -55,3 +55,12 @@ Why now: I just hit it filing TB-248 (`/tmp/tb-audit-cmd.md`), confirmed via `gr
 - Migrating other SDK call sites to a shared `_sdk_extra_args(effort, ...)` helper — that's a separate threshold-three case (currently 5 call sites use `{"effort": ...}`); a follow-up TB can extract if the pattern doesn't shift further.
 - Adding a "validator health check" command (e.g. `ap2 doctor` audit for validator-judge fail rate) — separate observability surface; TB-243 already covers the surfacing, this fix restores the underlying functionality.
 - Changing the prompt the validator sends to the SDK — the prompt was correct, only the invocation args were wrong. Prompt iteration is a future cycle question if operator engagement shows the validator over- or under-flags hard predecessors.
+## Attempts
+
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T060342Z-TB-249.prompt.md`, `stream: .cc-autopilot/debug/20260517T060342Z-TB-249.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T060342Z-TB-249.messages.jsonl`
