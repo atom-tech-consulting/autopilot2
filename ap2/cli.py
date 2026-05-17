@@ -480,18 +480,44 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         + a["validator_judge_timeout_count_24h"]
     ) > 0
     if a["auto_approve_enabled"] or _has_24h_activity:
-        if a["auto_approve_paused"]:
-            print(
-                f"auto-approve: PAUSED (reason={a['pause_reason']}; "
-                f"{a['consecutive_freezes']} consecutive freezes / "
-                f"threshold {a['freeze_threshold']}) — "
-                f"`ap2 ack auto_approve_window_resume`"
-            )
+        # TB-250: split the auto-approve top-line into three branches so
+        # the rendered text honestly reflects knob state, even when
+        # `_has_24h_activity` is truthy purely because the TB-243
+        # validator-judge counters fired. Pre-TB-250 the `else` branch
+        # printed `auto-approve: enabled (24h: ...)` whenever the outer
+        # `if` matched — which meant a `validator_judge_fail` event in
+        # the 24h window made the line claim the knob was on, even with
+        # `AP2_AUTO_APPROVE` unset. JSON output (`auto_approve_enabled`)
+        # always stayed correct; the bug was local to this text render.
+        #
+        #   - knob ON  + paused        → `auto-approve: PAUSED (...)`.
+        #   - knob ON  + healthy       → `auto-approve: enabled (24h: ...)`.
+        #   - knob OFF + has activity  → `auto-approve: disabled (
+        #     validator-judge 24h: N fail, M timeout)`. Surfaces the
+        #     activity that justified printing the block without
+        #     misrepresenting the master switch.
+        #   - knob OFF + no activity   → outer `if` evaluates false, the
+        #     whole block is suppressed (existing TB-227 behavior; the
+        #     fresh-project zero-line stays absent).
+        if a["auto_approve_enabled"]:
+            if a["auto_approve_paused"]:
+                print(
+                    f"auto-approve: PAUSED (reason={a['pause_reason']}; "
+                    f"{a['consecutive_freezes']} consecutive freezes / "
+                    f"threshold {a['freeze_threshold']}) — "
+                    f"`ap2 ack auto_approve_window_resume`"
+                )
+            else:
+                print(
+                    f"auto-approve: enabled (24h: "
+                    f"{a['auto_approved_count_24h']} approved, "
+                    f"{a['auto_unfreeze_applied_count_24h']} auto-unfrozen)"
+                )
         else:
             print(
-                f"auto-approve: enabled (24h: "
-                f"{a['auto_approved_count_24h']} approved, "
-                f"{a['auto_unfreeze_applied_count_24h']} auto-unfrozen)"
+                f"auto-approve: disabled (validator-judge 24h: "
+                f"{a['validator_judge_fail_count_24h']} fail, "
+                f"{a['validator_judge_timeout_count_24h']} timeout)"
             )
         # TB-241: surface the dry-run readiness signal (sibling of the
         # TB-238 status-report digest `*Dry-run window:*` sub-block) on
