@@ -170,3 +170,12 @@ or TB-247 cheap if a third event-class needs the same shape.
 - Mattermost push-on-noisy (immediate post when threshold crossed) — daemon has no outbound MM helper today (`ap2/mattermost.py` is inbound-only); 2h cron cadence is the interim push channel; revisit if latency proves insufficient.
 - Auto-pause auto-approve on validator-judge fail-open rate threshold — policy change requiring operator deliberation; observability ships first, gating policy later.
 - Web home renderer for axis-4 focus rotation history — out of scope here; web home already renders the current focus card via TB-242 and the operator can drill into events via the existing /events page.
+## Attempts
+
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T064516Z-TB-245.prompt.md`, `stream: .cc-autopilot/debug/20260517T064516Z-TB-245.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T064516Z-TB-245.messages.jsonl`
