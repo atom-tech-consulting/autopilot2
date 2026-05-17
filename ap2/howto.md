@@ -866,10 +866,24 @@ symmetry.
 - `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 15) — wall-clock timeout
   for the per-briefing judge call. Exceeded → log
   `validator_judge_timeout` event + skip the check.
-- `AP2_VALIDATOR_JUDGE_MAX_TOKENS` (default 500) — output-token cap
-  for the judge's reasoning. Decision is structured JSON; verbose
-  explanations don't help and inflate cost. Per-invocation cost
-  target is ≤$0.005 at Haiku rates.
+- `AP2_VALIDATOR_JUDGE_MAX_TURNS` (default 2) — TB-249 canonical
+  budget knob. Bounds the judge's SDK turn count. The validator is a
+  single-shot JSON-emitting judge: one assistant message (the verdict)
+  + one optional tool call (Read/Grep) is plenty; `2` keeps the call
+  bounded and the cost ≤$0.005 at Haiku rates. Mirrors the
+  `AP2_VERIFY_JUDGE_MAX_TURNS` / `AP2_JANITOR_JUDGE_MAX_TURNS` knob
+  pattern (the SDK's native budget primitive).
+- `AP2_VALIDATOR_JUDGE_MAX_TOKENS` — **deprecated** alias kept for
+  one-cycle backward compatibility (TB-249). If set AND
+  `AP2_VALIDATOR_JUDGE_MAX_TURNS` is unset, the value is reused as
+  `max_turns`, ceiling-capped at 5 (so a stale `500` from the pre-
+  TB-249 default doesn't translate into a 500-turn runaway). Emits a
+  one-shot-per-process `validator_judge_deprecated_knob` event the
+  first time the alias resolves; a future TB removes the alias once
+  operator engagement confirms no env files still carry it. Migration:
+  rename to `AP2_VALIDATOR_JUDGE_MAX_TURNS` with a value in `[1, 5]`
+  (default `2`) — the old `500` (output-token cap) translates to a
+  turn budget of `5` after the cap.
 - `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5) — TB-243 surface
   threshold. When the rolling 24h sum
   `validator_judge_fail_count_24h + validator_judge_timeout_count_24h`

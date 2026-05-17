@@ -362,9 +362,13 @@ def test_dep_judge_timeout_env_knob_parses(tmp_path, monkeypatch):
     assert captured[0]["timeout_s"] == 42.0
 
 
-# Env-knob smoke: AP2_VALIDATOR_JUDGE_MAX_TOKENS parses correctly.
-def test_dep_judge_max_tokens_env_knob_parses(tmp_path, monkeypatch):
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "750")
+# Env-knob smoke: AP2_VALIDATOR_JUDGE_MAX_TURNS parses correctly
+# (TB-249: replaced AP2_VALIDATOR_JUDGE_MAX_TOKENS — the legacy knob
+# now resolves into `max_turns` via a deprecated-alias path covered by
+# `test_tb_validator_judge_sdk_args.py`).
+def test_dep_judge_max_turns_env_knob_parses(tmp_path, monkeypatch):
+    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", "4")
     captured: list[dict] = []
     judge = _make_judge(
         {"hard_predecessors": [], "reasoning": "x"},
@@ -378,16 +382,19 @@ def test_dep_judge_max_tokens_env_knob_parses(tmp_path, monkeypatch):
         dep_judge_fn=judge,
     )
     assert err is None
-    assert captured[0]["max_tokens"] == 750
+    assert captured[0]["max_turns"] == 4
 
 
 # Env-knob default smoke: with neither env var set, the validator
-# falls back to the module-level defaults (15s timeout, 500 max
-# tokens). Pin the defaults so a future tweak to the constants
-# trips this test (forcing the env-knob docs to update in lockstep).
+# falls back to the module-level defaults (15s timeout, 2 max turns —
+# TB-249 migrated from max_tokens to max_turns, per the SDK's native
+# budget primitive). Pin the defaults so a future tweak to the
+# constants trips this test (forcing the env-knob docs to update in
+# lockstep).
 def test_dep_judge_env_knob_defaults(tmp_path, monkeypatch):
     monkeypatch.delenv("AP2_VALIDATOR_JUDGE_TIMEOUT_S", raising=False)
     monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", raising=False)
     captured: list[dict] = []
     judge = _make_judge(
         {"hard_predecessors": [], "reasoning": "x"},
@@ -402,7 +409,7 @@ def test_dep_judge_env_knob_defaults(tmp_path, monkeypatch):
     )
     assert err is None
     assert captured[0]["timeout_s"] == tools._VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
-    assert captured[0]["max_tokens"] == tools._VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT
+    assert captured[0]["max_turns"] == tools._VALIDATOR_JUDGE_MAX_TURNS_DEFAULT
 
 
 # Real-SDK haiku model pin: the production helper targets Haiku-4.5

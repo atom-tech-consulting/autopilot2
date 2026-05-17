@@ -664,7 +664,30 @@ def reconcile_proposal_outcome(
 # can read the defaults without instantiating the validator, and so the
 # docs-drift gate's source-walk finds the canonical knob names here.
 _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT = 15.0
+# TB-249: the SDK budget primitive is `max_turns` (the Claude Agent SDK
+# does NOT accept the pre-TB-249 output-token extra-arg — every other
+# ap2 SDK call site uses `max_turns`; see verify.py:571, janitor.py:724,
+# daemon.py:208). `max_turns=2` allows ONE assistant message (the JSON
+# verdict) + ONE optional tool call (Read/Grep), which the validator's
+# inline-payload prompt shouldn't need but kept as a small escape
+# hatch. Operator-tunable via `AP2_VALIDATOR_JUDGE_MAX_TURNS`.
+_VALIDATOR_JUDGE_MAX_TURNS_DEFAULT = 2
+# TB-249 deprecated-alias ceiling. If an operator still has
+# `AP2_VALIDATOR_JUDGE_MAX_TOKENS` set from the pre-TB-249 era, we
+# accept the value as a `max_turns` override but cap it so a stale
+# value like `500` (the old default) doesn't translate into a 500-turn
+# runaway. 5 keeps even a wildly-mis-set value bounded.
+_VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL = 5
+# TB-235: legacy default kept ONLY for backward-compatibility lookups
+# (test_dep_judge_env_knob_defaults pins the historical value, and the
+# AP2_VALIDATOR_JUDGE_MAX_TOKENS alias path needs a sentinel to compare
+# against). The runtime no longer threads this through the SDK call;
+# `max_turns` is the primitive now.
 _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT = 500
+# TB-249: process-once flag so the deprecated-knob warning event fires
+# exactly once per process, not once per `ap2 add` invocation. Reset
+# from the test suite via `tools._VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED.clear()`.
+_VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED: set[str] = set()
 # Haiku-4.5 is the cost-target floor for the check (≤$0.005 per
 # briefing at typical token volumes). Sonnet/Opus escalation would
 # blow the budget; if Haiku proves insufficient on real briefings, a
@@ -692,7 +715,7 @@ def _judge_dep_coherence_default(
     description: str,
     blocked_tokens: list[str],
     timeout_s: float,
-    max_tokens: int,
+    max_turns: int,
 ) -> dict | None:
     """Real-SDK implementation of the TB-235 dependency-coherence judge.
 
@@ -708,6 +731,15 @@ def _judge_dep_coherence_default(
     naming the briefing, the post-em-dash description prose, and the
     task's current `@blocked:` codespan tokens; the response shape
     is `{"hard_predecessors": ["TB-N", ...], "reasoning": "<str>"}`.
+
+    TB-249: budget control is `max_turns` (the SDK-native primitive).
+    The TB-235 shipping version passed an output-token extra-arg that
+    the Claude Agent SDK rejects as an unknown option — every judge
+    call failed with the SDK's `unknown option` stderr and the
+    fail-open posture hid the regression from operators (TB-243
+    surfaced the climbing `validator_judge_fail_count_24h`).
+    `max_turns` matches verify.py / janitor.py / daemon.py's SDK call
+    sites and is what the SDK actually accepts as its budget bound.
     """
     import asyncio
 
@@ -740,11 +772,15 @@ def _judge_dep_coherence_default(
     )
 
     async def _ask() -> str:
+        # TB-249: NO `extra_args=` here. The SDK rejects the historical
+        # output-token extra-arg as unknown; that pre-TB-249 call was
+        # 100% non-functional (every call failed, fail-open path
+        # swallowed it). Budget is enforced via `max_turns` — SDK-
+        # native primitive every other ap2 call site uses.
         options = sdk.ClaudeAgentOptions(
             permission_mode="bypassPermissions",
-            max_turns=2,
+            max_turns=max_turns,
             model=_VALIDATOR_JUDGE_MODEL,
-            extra_args={"max-tokens": str(max_tokens)},
         )
         text = ""
         async for msg in sdk.query(prompt=prompt, options=options):
@@ -845,8 +881,19 @@ def _check_dependency_coherence(
     signature. Test paths inject a stub; the production path uses the
     real SDK. The stub must accept the named kwargs
     `briefing_text`, `description`, `blocked_tokens`, `timeout_s`,
-    `max_tokens`, return a `dict | None`, and may raise
+    `max_turns`, return a `dict | None`, and may raise
     `_DepJudgeTimeout` to exercise the timeout branch.
+
+    TB-249: budget is `max_turns` (SDK-native), resolved from
+    `AP2_VALIDATOR_JUDGE_MAX_TURNS` (default 2). The pre-TB-249
+    `AP2_VALIDATOR_JUDGE_MAX_TOKENS` knob is kept as a deprecated
+    alias: if set AND `AP2_VALIDATOR_JUDGE_MAX_TURNS` is unset, its
+    value is reused as `max_turns` (ceiling-capped at
+    `_VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL=5` so a stale `500` from
+    the old default doesn't translate into a 500-turn runaway). A
+    `validator_judge_deprecated_knob` event fires once per process on
+    the first such resolution so the operator sees the deprecation
+    without it spamming the event log on every `ap2 add`.
     """
     if os.environ.get("AP2_VALIDATOR_JUDGE_DISABLED", "").lower() in {
         "1", "true", "yes",
@@ -859,13 +906,55 @@ def _check_dependency_coherence(
         )
     except ValueError:
         timeout_s = _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
-    try:
-        max_tokens = int(
-            os.environ.get("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "")
-            or _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT
-        )
-    except ValueError:
-        max_tokens = _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT
+    # TB-249: resolve `max_turns` with a layered preference:
+    #   (1) AP2_VALIDATOR_JUDGE_MAX_TURNS — canonical knob, default 2.
+    #   (2) AP2_VALIDATOR_JUDGE_MAX_TOKENS — deprecated alias; if set
+    #       AND (1) is unset, used as `max_turns` capped at
+    #       _VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL. A
+    #       `validator_judge_deprecated_knob` event fires once per
+    #       process on the first hit.
+    #   (3) module default — _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT.
+    raw_turns = os.environ.get("AP2_VALIDATOR_JUDGE_MAX_TURNS", "")
+    raw_tokens_legacy = os.environ.get("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "")
+    max_turns = _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT
+    if raw_turns:
+        try:
+            parsed = int(raw_turns)
+            if parsed > 0:
+                max_turns = parsed
+        except ValueError:
+            pass
+    elif raw_tokens_legacy:
+        try:
+            legacy_val = int(raw_tokens_legacy)
+        except ValueError:
+            legacy_val = 0
+        if legacy_val > 0:
+            capped = min(legacy_val, _VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL)
+            max_turns = capped
+            # One-shot per-process deprecation notice. The set is
+            # module-level so tests can clear it; key on the knob name
+            # in case future deprecations land here.
+            if (
+                events_file is not None
+                and "AP2_VALIDATOR_JUDGE_MAX_TOKENS"
+                not in _VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED
+            ):
+                try:
+                    events.append(
+                        events_file,
+                        "validator_judge_deprecated_knob",
+                        knob="AP2_VALIDATOR_JUDGE_MAX_TOKENS",
+                        replacement="AP2_VALIDATOR_JUDGE_MAX_TURNS",
+                        legacy_value=legacy_val,
+                        applied_max_turns=capped,
+                        ceiling=_VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL,
+                    )
+                except OSError:
+                    pass
+                _VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED.add(
+                    "AP2_VALIDATOR_JUDGE_MAX_TOKENS"
+                )
     blocked_tokens = [
         tok.strip()
         for tok in (blocked_csv or "").split(",")
@@ -879,7 +968,7 @@ def _check_dependency_coherence(
             description=description or "",
             blocked_tokens=blocked_tokens,
             timeout_s=timeout_s,
-            max_tokens=max_tokens,
+            max_turns=max_turns,
         )
     except _DepJudgeTimeout as exc:
         if events_file is not None:
@@ -1031,10 +1120,14 @@ def _validate_briefing_structure(
          `validator_judge_{timeout,fail}` event and lets the briefing
          through — refusing to gate on a transient API hiccup. Hard
          off-switch: `AP2_VALIDATOR_JUDGE_DISABLED=1`. Timeout and
-         output-token budget tunable via `AP2_VALIDATOR_JUDGE_TIMEOUT_S`
-         (default 15) and `AP2_VALIDATOR_JUDGE_MAX_TOKENS` (default
-         500). Test paths inject a stub `dep_judge_fn` to drive the
-         decision logic deterministically without a real SDK call.
+         budget tunable via `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default
+         15) and `AP2_VALIDATOR_JUDGE_MAX_TURNS` (default 2; TB-249
+         replaced the pre-existing `AP2_VALIDATOR_JUDGE_MAX_TOKENS`
+         knob, which the Claude Agent SDK rejected as an unknown
+         arg — see `_judge_dep_coherence_default` for the migration
+         note and the deprecated-alias contract). Test paths inject
+         a stub `dep_judge_fn` to drive the decision logic
+         deterministically without a real SDK call.
 
     `skip_goal_alignment=True` (TB-170) is the operator-CLI escape
     hatch: it skips checks (4) and (5) but runs every other validation
