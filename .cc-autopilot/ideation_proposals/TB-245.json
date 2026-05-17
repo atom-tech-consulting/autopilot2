@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/extend-status-report-cron-digest-with-va.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-17T00:29:15Z",
+  "tb_id": "TB-245",
+  "why_now": "TB-243 shipped pull-surface observability for these events\nlast cycle (commit `647b771`, 2026-05-16T23:59Z) but explicitly left\nthe push surface uncovered \u2014 same gap shape TB-244 (`aa971f8`,\n2026-05-17T00:09Z) closed for axis-4 focus rotation one tick later.\nWithout parity closure, the walk-away-time promise (goal.md L57-59\n\"walk away for a week without intervention\") stays partially\ndelivered: pull observability works for the operator who logs in,\nbut the operator who walks away gets no validator-judge signal\nthrough the only channel that pushes to them."
+}

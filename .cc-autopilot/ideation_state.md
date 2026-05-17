@@ -1,158 +1,141 @@
 # Ideation State
 
-_Last updated: 2026-05-16T22:21:48Z by ideation cron_
+_Last updated: 2026-05-17T00:27:00Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A/0R/0B/0P/114C/3F (prompt header
-2026-05-16T22:21:48Z), proposal slots 5. **State change since prior
-cycle**: at 21:41-21:59Z the operator drained the entire
-pending-review queue — rejected TB-240 with a substantive reason
-(operator_log.md L160-161: "high bar for letting agents 'fix'
-verification — easy to slide into cheating") and approved
-TB-241+TB-242, both of which auto-promoted and shipped (fc14fe3 +
-6704ed52). The 6-cycle 0-completes stretch broke; the
-exhaustion-criterion decision-needed entry is substantively resolved
-(queue cleared, fresh completes shipped, this cycle gets to test the
-"one more 0-gap cycle vs. fresh completes" half of the criterion).
+Cycle entry: board 0A/0R/0B/0P/116C/3F (prompt header 2026-05-17T00:26:07Z),
+proposal slots 5 (ceiling not target). **State change since prior cycle**:
+prior cycle's two proposals (TB-243 + TB-244) were approved at 23:49:44Z and
+both auto-promoted + shipped within 20 min (TB-243 `647b771` at 23:59:49Z;
+TB-244 `aa971f8` at 00:09:20Z). Queue fully drained again — second
+consecutive 2-for-2 approval cycle with sub-30-min ship-time post-approve.
+Walk-away cadence is functional this window.
 
-Recent Completes considered (refreshed — two new completes since prior
-cycle):
+Recent Completes considered (refreshed — two new since prior cycle):
 
-- TB-242 (`6704ed52`, 21:59:15Z) — axis-4 focus-pointer state in
-  `ap2 status` text/JSON + web home (active focus title + N-of-M
-  position + roadmap-complete halt with ack hint).
-- TB-241 (`fc14fe3`, 21:50:26Z) — dry-run readiness in `ap2 status`
-  text + web home automation card (would-approve/would-unfreeze
-  24h counts + dry-run badge).
-- TB-239 (`ccfcff1`, 07:01:39Z) — axis-2 doctor floor.
-- TB-238 (`d861d83`, 06:39:03Z) — automation_status collector +
-  status-report digest extended with dry-run readiness.
-- TB-237 (`b2fb6b1`, 06:29:37Z) — axis-4 e2e walk-away test.
+- TB-244 (`aa971f8`, 00:09:20Z) — extend status-report cron digest with
+  axis-4 focus rotation (`focus_advanced` + `roadmap_complete`); push-surface
+  parity closure for TB-242.
+- TB-243 (`647b771`, 23:59:49Z) — validator-judge fail-open audit counts on
+  `ap2 status` text/JSON + web home automation card (pull surface; close
+  TB-235 quiet-degradation hazard).
+- TB-242 (`6704ed52`, 21:59:15Z) — axis-4 focus-pointer state in `ap2 status`
+  text/JSON + web home.
+- TB-241 (`fc14fe3`, 21:50:26Z) — dry-run readiness in `ap2 status` text +
+  web home automation card.
+- TB-239 (`ccfcff1`, 07:01:39Z) — axis-2 doctor floor warn (mirror of TB-234).
 
 ## Current focus assessment
 
 - **Current focus: end-to-end automation (goal.md L38-151, four axes)**
   - Progress so far:
-    - Axis 1 (manual-approval): TB-223 + TB-224 + TB-232 + TB-234 +
-      TB-241 (dry-run readiness surface).
+    - Axis 1 (manual-approval): TB-223 + TB-224 + TB-232 + TB-234 + TB-241
+      (dry-run readiness on pull surface) + TB-243 (validator-judge fail-open
+      observability on pull surface).
     - Axis 2 (failure-recovery): TB-225 + TB-229 + TB-233 + TB-239.
     - Axis 3 (cost/blast-radius): TB-224 + TB-227 + TB-228 + TB-234.
-    - Axis 4 (multi-focus): TB-226 + TB-237 + TB-242 (status/web
-      surface for active focus + halt).
-    - Cross-axis e2e: TB-230 (axes 1+2) + TB-237 (axis 4) + TB-238
-      (dry-run readiness in collector + cron digest).
-    - Adjacent gates: TB-235 (briefing dependency-coherence judge,
-      fail-open) + TB-236 (prose-judge tighten).
-  - Gaps (refreshed against fresh completes — two new gaps surfaced
-    by TB-241 + TB-242 shipping the *pull-surface* halves but leaving
-    the *push-surface* halves uncovered, plus one quiet-degradation
-    hazard adjacent to TB-235):
-    (1) **Axis-4 push surface** — TB-242 surfaced `roadmap_complete`
-        in `ap2 status` + web home (pull-only). The cron status-report
-        digest (TB-228 / TB-238) covers axes 1+2+3 but NOT axis 4:
-        `roadmap_complete` and `focus_advanced` are absent from
-        `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES`
-        (status_report.py:426-432) AND from
-        `render_automation_loop_activity_section`
-        (status_report.py:137). When the daemon halts on
-        roadmap-exhaustion at 03:00Z, the operator's only push channel
-        (cron post) carries no axis-4 line — walk-away time on the
-        rotation-halt signal stays bounded by manual status checks.
-    (2) **TB-235 fail-open quiet degradation hazard** — the
-        dependency-coherence judge emits `validator_judge_fail` /
-        `validator_judge_timeout` events when the SDK call errors
-        (events.py:87), but no surface anywhere consumes them: not
-        `automation_status.collect_auto_approve_state`
-        (automation_status.py:331), not `ap2 status` (cli.py:106),
-        not the web automation card (web.py:1584). If the judge
-        starts silently timing out, the dep-coherence gate goes dark
-        without operator awareness — directly weakens the
-        auto-approve safety claim (goal.md L82-85: "upstream gates
-        already make this safe in practice").
-    (3) **Auto-unfreeze fix-shape coverage telemetry** — operator
-        tunes `AP2_AUTO_UNFREEZE_FIX_SHAPES` blind. No view shows
-        what fraction of recent Frozen tasks emitted a
-        `BriefingFix:` shape, or what fraction of those shapes
-        matched the currently-enabled allowlist. Deferred this
-        cycle (sample size still tiny; revisit when Frozen
-        accumulates enough fix-shape data).
+    - Axis 4 (multi-focus): TB-226 + TB-237 + TB-242 (pull surface) + TB-244
+      (push surface — `focus_advanced` + `roadmap_complete` added to
+      `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` + parallel renderer).
+    - Cross-axis e2e: TB-230 (axes 1+2) + TB-237 (axis 4) + TB-238 (dry-run
+      readiness in collector + cron digest).
+    - Adjacent gates: TB-235 (dependency-coherence judge, fail-open) +
+      TB-236 (prose-judge tighten).
+  - Gaps (refreshed against fresh completes — one push-surface asymmetry
+    surfaced by TB-243 + TB-244 shipping unevenly: TB-244 closed axis-4
+    push side while TB-243's validator-judge work covered only pull side,
+    leaving the operator's 2h walk-away channel blind to the validator-judge
+    fail-open signal it was built to monitor):
+    (1) **Validator-judge push-surface asymmetry** — TB-243 surfaced
+        `validator_judge_fail` + `validator_judge_timeout` 24h counts in
+        `ap2 status` text/JSON (cli.py) + web home automation card (web.py),
+        but NOT in the status-report cron digest. Confirmed:
+        `grep validator_judge ap2/status_report.py` returns zero matches,
+        and `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES`
+        (status_report.py:548-557) lacks both event types — so a fresh
+        `validator_judge_fail` won't even un-skip the status-report's no-op
+        gate (`_status_report_should_skip` reads the same frozenset). The
+        2h Mattermost push channel (operator's primary walk-away signal
+        per TB-228 / TB-238 / TB-244) carries zero validator-judge
+        observability. Directly weakens the goal.md L82-85 "upstream gates
+        already make this safe in practice" auto-approve safety claim:
+        if the dep-coherence judge silently degrades during a walk-away
+        weekend, only the pull surface (operator-initiated `ap2 status`)
+        carries the signal. Exact TB-244-shape parallel for the
+        validator-judge axis — same closure mechanism, different event
+        types.
+    (2) **Auto-unfreeze fix-shape coverage telemetry** — operator tunes
+        `AP2_AUTO_UNFREEZE_FIX_SHAPES` blind. No view shows what fraction
+        of recent Frozen tasks emitted a `BriefingFix:` shape that
+        matched the allowlist. Deferred this cycle (Frozen count still
+        3; insufficient data to ground a useful threshold).
+    (3) **Doctor runtime-signal extension** — doctor's current shape is
+        env-knob-based misconfig detection (TB-234 + TB-239). Could
+        extend to read recent `validator_judge_fail`/`_timeout` counts
+        and WARN when `AP2_AUTO_APPROVE=1` is set AND counts cross
+        `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`. Useful but scope-creeps
+        doctor into runtime-signal territory; the pull + push surfaces
+        already cover the same operator need without changing doctor's
+        shape. Defer pending evidence the pre-flight check is needed.
   - Status: `in-progress`
-  - Reasoning: Two fresh completes landed two-axis surface parity
-    (TB-241 axis-1+3 dry-run, TB-242 axis-4 focus pointer). The
-    pull-surface side is now consistent across all axes; the
-    push-surface side (cron status-report digest) hasn't caught up
-    on axis 4. Plus TB-235's fail-open hazard never had observability.
-    Two narrow proposals close both gaps without scope creep.
+  - Reasoning: Last cycle's two proposals shipped same-day. One narrow
+    push-surface asymmetry remains (TB-243 closed pull only; TB-244 shape
+    transplanted to validator-judge axis closes it). Other deferred items
+    have valid hold-rationale; not pushed this cycle.
 
 ## Non-goal risk check
 
-None. Both proposals are observability extensions of existing
-collectors/renderers — no goal.md mutation, no new agent-fix
-mechanism (avoids the TB-240 "high bar for letting agents fix
+None. The proposal is an observability extension of an existing collector
++ renderer pair — exact TB-244-shape transplant, no goal.md mutation, no
+new agent-fix mechanism (avoids TB-240 "high bar for letting agents fix
 verification" rejection shape), no cross-project orchestration.
 
 ## Considered & deferred this cycle
 
-- **Auto-unfreeze fix-shape coverage view** — sample size too small
-  to ground a meaningful "shape X covers N% of recent freezes"
-  signal (3 in Frozen, classification not yet attempted on those).
-  Revisit once 10+ Frozen with BriefingFix summaries accumulate.
-- **`ap2 doctor` cross-axis "walk-away readiness" composite** —
-  same defer as last cycle. Doctor would just re-render what the
-  collector exposes; the gap is the underlying signals, not the
-  aggregator. Surface the missing axis-4 + validator-judge signals
-  first (proposals this cycle); composite later if value remains.
-- **Mattermost push-on-halt (immediate post when `roadmap_complete`
-  / `auto_approve_paused` fires)** — would close the
-  detection-latency-bounded-by-2h-cron gap end-to-end, but the
-  daemon currently has no outbound Mattermost helper
-  (`ap2/mattermost.py` is inbound-only; agents post via the
-  `mattermost_reply` MCP tool). Adding a daemon-direct push
-  surface is a non-trivial new arch shape. Proposal #1 below
-  (add roadmap_complete to digest) is the cheaper interim — gets
-  axis-4 into the existing 2h push channel without new
-  infrastructure. Revisit push-on-halt if 2h latency proves
-  insufficient in practice.
-- **Verify-time "diff exceeds briefing scope" judge** — same defer
-  rationale as prior cycles; TB-235's upstream coherence check
-  covers most of this surface. Reconsider if a fabricated-scope
-  case actually bites.
-- **TB-240-shape file-path-coherence checks** — explicitly rejected
-  (operator_log.md L160-161). Operator's "high bar for letting
-  agents fix verification" principle generalizes: don't propose
-  more verification-fabrication detection without recurrence
-  evidence.
-- **Wack-a-mole shell-bullet linting (TB-172-shape)** — n=6 reject.
-- **TB-175-shape ideation-quality aggregator** — n=6 reject.
-- **TB-185-shape `ap2 frozen TB-N` triage** — n=6 reject.
-- **TB-184-shape `--hint` forwarding** — n=6 reject.
-- **TB-231-shape symptom-patch shapes** — n=3 reject.
+- **Doctor runtime-signal extension (warn on validator-judge noisy in
+  last 24h when AP2_AUTO_APPROVE=1)** — pull + push surfaces (proposed
+  this cycle) close the same operator need. Doctor's env-knob-misconfig
+  shape stays cleaner without runtime-signal coupling. Revisit if a
+  walk-away weekend shows operators want pre-flight warning explicitly.
+- **Auto-unfreeze fix-shape coverage view** — still 3 Frozen, none with
+  fix-shape data; revisit at 10+.
+- **`ap2 doctor` cross-axis "walk-away readiness" composite** — same
+  defer as prior cycles; doctor would re-render existing collector
+  signals; aggregator value still low.
+- **Mattermost push-on-halt / push-on-noisy** — daemon has no outbound
+  MM helper (`ap2/mattermost.py` is inbound-only). Status-report 2h
+  cadence is the interim push channel; revisit if latency proves
+  insufficient.
+- **Verify-time "diff exceeds briefing scope" judge** — defer rationale
+  unchanged.
+- **TB-240-shape file-path-coherence checks** — rejected (operator_log
+  L160-161 principle: high bar for letting agents fix verification).
+- **Wack-a-mole shell-bullet linting (TB-172-shape)** — n=6+ reject.
+- **TB-175-shape ideation-quality aggregator** — n=6+ reject.
+- **TB-185-shape `ap2 frozen TB-N` triage** — n=6+ reject.
+- **TB-184-shape `--hint` forwarding** — n=6+ reject.
+- **TB-231-shape symptom-patch shapes** — n=3+ reject.
 
 ## Cycle observations
 
-- Operator drained the queue at 21:41-21:59Z (rejected TB-240,
-  approved TB-241+TB-242). The 6-cycle 0-completes streak observation
-  is now stale (broke at this cycle); dropping. The
-  exhaustion-criterion decision-needed entry from prior cycles is
-  substantively resolved by the queue-drain + fresh completes; not
-  re-carrying. Net: zero carried bullets this cycle — first clean
-  triage in several cycles.
+- Second consecutive 2-for-2 approval cycle with sub-30-min ship-time
+  (TB-241+TB-242 prior cycle, TB-243+TB-244 this cycle). Both pairs
+  targeted surface-parity gaps; both were operator-approved without
+  edit. Suggests "narrow observability closures anchored to a fresh
+  Complete" is a high-yield shape against the current focus. Single
+  carry-forward observation, retained because it informs ranking
+  (this cycle's TB-245 follows the same shape).
 
 ## Decisions needed from operator
 
-(none this cycle — prior cycles' exhaustion-criterion entry resolved
-by the 21:41-21:59Z queue drain; no new operator-action items
-surfaced by the two new gaps this cycle, which are scoped tightly
-enough to land via the standard add_backlog + approve path.)
+(none this cycle — no actionable operator decisions surface; the one
+proposal is scoped to land via the standard add_backlog + approve path.)
 
 ## Proposals this cycle
 
-- TB-243 — Extend `automation_status` collector + `ap2 status`
-  text/JSON + web home automation card with `validator_judge_fail`
-  + `validator_judge_timeout` 24h counts (closes TB-235 fail-open
-  quiet-degradation hazard).
-- TB-244 — Extend status-report cron digest with axis-4 focus
-  rotation activity (focus_advanced + roadmap_complete) and add
-  `roadmap_complete` to `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES`
-  (TB-228 / TB-238 surface-parity closure for axis 4 push channel).
+- TB-245 — Extend status-report cron digest with validator-judge
+  fail-open activity (`validator_judge_fail` + `validator_judge_timeout`)
+  and add both to `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES`
+  (TB-243 push-surface parity closure for axis-1 dep-coherence safety
+  net; exact TB-244-shape transplant for the validator-judge axis).

@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-245** **Extend status-report cron digest with validator-judge fail-open activity (`validator_judge_fail` + `validator_judge_timeout`) and add both to `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` (TB-243 push-surface parity closure for axis-1 dep-coherence safety net)** `#autopilot` `#observability` `#status-report` `#validator-judge` `#axis-1` `#auto-approve` `#regression-pin` `@blocked:review` — TB-243 (`647b771`) surfaced `validator_judge_fail` + `validator_judge_timeout` 24h counts in `ap2 status` text/JSON + web home automation card (pull surface), but the status-report cron digest is silent: `grep validator_judge ap2/status_report.py` returns zero matches and `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` (status_report.py:548-557) lacks both event types — so a fresh validator-judge fail-open event won't even un-skip the no-op gate. Operator's 2h push channel for walk-away monitoring carries zero observability for the load-bearing TB-235 dep-coherence judge — directly weakens goal.md L82-85 "upstream gates already make this safe in practice". Exact TB-244-shape parallel for the validator-judge axis: extend the frozenset + add a parallel collector helper + renderer + wire into `state_extras` + cross-reference in howto.md. [→ brief](.cc-autopilot/tasks/extend-status-report-cron-digest-with-va.md)
 
 ## Pipeline Pending
 
