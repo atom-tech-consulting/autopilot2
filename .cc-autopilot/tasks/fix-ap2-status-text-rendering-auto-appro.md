@@ -52,3 +52,12 @@ The conflation in TB-243 was a missed test case during implementation — the un
 - Suppressing the auto-approve block entirely when only validator-judge activity is present (no auto-approve counts) — see Design "Why three branches": the activity IS worth surfacing on the operator's primary observability surface; just label it honestly.
 - Backfilling text-rendering tests for sibling observability surfaces (dry-run line, focus line) — those weren't regressed; this fix is scoped to the one observed defect.
 - Adding `ap2 doctor` check for "auto-approve text rendering matches JSON" — over-engineering for a per-cycle test surface, not a runtime check.
+## Attempts
+
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T084645Z-TB-250.prompt.md`, `stream: .cc-autopilot/debug/20260517T084645Z-TB-250.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T084645Z-TB-250.messages.jsonl`
