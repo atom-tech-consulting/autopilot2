@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 import uuid as _uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from . import events, retry
 from .board import Board, board_file_lock, locked_board, parse_task_line
@@ -709,6 +709,182 @@ class _DepJudgeTimeout(Exception):
     """
 
 
+# TB-247: parse-failure categorization labels surfaced as `parse_error`
+# on `validator_judge_fail` events so operators can pattern-detect
+# across many failures without opening every dump. Mirrors TB-236's
+# `PARSE_ERROR_CATEGORIES` in `ap2/verify.py` — same idea, different
+# branch shapes because the dep-judge response is a dict (not a
+# pass/fail/rationale envelope), so the failure modes differ:
+#   - `empty_text`     — SDK returned no last-assistant-text at all.
+#   - `no_braces`      — text exists but has no `{` / `}` to anchor
+#                        the JSON-object extraction.
+#   - `json_decode`    — `{...}` candidate parsed-failed
+#                        (JSONDecodeError).
+#   - `non_dict`       — parsed cleanly but the value isn't a dict
+#                        (e.g. judge returned `[1, 2, 3]` or a bare
+#                        string).
+#   - `sdk_exception`  — the SDK call itself raised before any text
+#                        came back; categorized at the
+#                        `_check_dependency_coherence` emission site
+#                        (no raw text to dump for this branch).
+_DEP_JUDGE_PARSE_ERRORS: tuple[str, ...] = (
+    "empty_text",
+    "no_braces",
+    "json_decode",
+    "non_dict",
+    "sdk_exception",
+)
+
+
+class _DepJudgeOutcome(NamedTuple):
+    """TB-247: result + diagnostics from the dependency-coherence judge.
+
+    Mirrors `ap2/verify.py::_ParseOutcome` (TB-236, commit `f32374f`).
+    Carries the parsed judge data plus optional diagnostic fields so
+    `_check_dependency_coherence` can enrich `validator_judge_fail`
+    events with the dump-file path and a parse-error category — the
+    operator-pre-blessed fix shape (TB-231 rejection text named it,
+    TB-236 implemented it for the prose judge, TB-247 transplants it
+    onto the validator judge).
+
+    Fields:
+      - `data` — parsed `{"hard_predecessors": [...], "reasoning": ...}`
+        dict on a clean parse; `None` on every parse-failure branch.
+        The `_check_dependency_coherence` caller treats `data is None`
+        as fail-open exactly the way the pre-TB-247 code treated
+        `judge_fn(...) is None`.
+      - `parse_error` — one of `_DEP_JUDGE_PARSE_ERRORS` on every
+        parse-failure path, `None` on success.
+      - `dump_path` — per-call debug file at
+        `<events_file.parent>/debug/<UTC-ts>-validator-judge-response.txt`
+        when a parse failure landed AND the diagnostic write succeeded.
+        `None` when the parse succeeded (no dump on disk) OR when the
+        dump write hit an OSError (best-effort swallow, mirrors
+        TB-236's pattern — a full-disk / permission failure must NEVER
+        propagate out of the judge call).
+
+    The dispatcher (`_check_dependency_coherence`) also accepts a
+    legacy `dict | None` return value from existing test stubs that
+    pre-date TB-247 — those are wrapped as
+    `_DepJudgeOutcome(data=..., parse_error=None, dump_path=None)`
+    so the diagnostic enrichment is purely additive and the existing
+    test_dep_validator_judge module stays green without edits.
+    """
+
+    data: dict | None
+    parse_error: str | None
+    dump_path: "Path | None"
+
+
+def _parse_dep_judge_response(
+    text: str,
+    *,
+    events_file: "Path | None",
+) -> _DepJudgeOutcome:
+    """TB-247: parse the dep-judge SDK response into a `_DepJudgeOutcome`.
+
+    Extracted from `_judge_dep_coherence_default` so the parse + dump
+    logic is testable without an SDK stub — mirrors how TB-236's
+    `_parse_judge_response` is a separable, pure-ish function over the
+    raw text. The function is impure only by design: on parse failure
+    it writes the FULL raw `text` to
+    `<events_file.parent>/debug/<UTC-ts>-validator-judge-response.txt`
+    so the operator can diagnose WHY the judge returned the shape it
+    did without being limited to the catch-all "non-dict judge
+    response" error string the pre-TB-247 event carried.
+
+    Successful parses leave NOTHING on disk — the dump is opt-in on
+    failure only so steady-state successful judging doesn't bloat the
+    debug dir.
+
+    Best-effort write: any OSError on `debug/` mkdir or file write is
+    swallowed and `dump_path` stays None on the returned outcome.
+    Mirrors TB-236's `try / except` swallow in
+    `_judge_prose_bullet` — a diagnostic-write failure must never take
+    down the validator path.
+
+    `events_file=None` (e.g. unit tests that don't care about the
+    event emission) suppresses the dump entirely; the outcome still
+    carries `data` + `parse_error` so the caller's fail-open path
+    works the same way.
+    """
+    parse_error: str | None = None
+    data: dict | None = None
+
+    if not text:
+        parse_error = "empty_text"
+    else:
+        # TB-247: two-pass parse. The pre-TB-247 logic jumped straight
+        # to `{`..`}` substring extraction, which had a degenerate
+        # blind spot — a judge returning a JSON LIST (e.g.
+        # `[1, 2, 3]`) had no `{` at all and fell into the
+        # `no_braces` branch, hiding the "valid JSON, wrong shape"
+        # failure mode under the structural-noise label. Briefing
+        # §Scope (b) wants `[1, 2, 3]` categorized as `non_dict`.
+        # Try whole-text JSON first; on parse failure, fall back to
+        # the substring extraction so preamble/trailing-prose
+        # responses (the operator-named TB-228 shape that motivated
+        # TB-236) still get extracted cleanly.
+        stripped = text.strip()
+        try:
+            whole = json.loads(stripped)
+        except json.JSONDecodeError:
+            whole_parsed = False
+        else:
+            whole_parsed = True
+            if isinstance(whole, dict):
+                data = whole
+            else:
+                parse_error = "non_dict"
+
+        if not whole_parsed:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start == -1 or end <= start:
+                parse_error = "no_braces"
+            else:
+                try:
+                    parsed = json.loads(text[start:end + 1])
+                except json.JSONDecodeError:
+                    parse_error = "json_decode"
+                else:
+                    if not isinstance(parsed, dict):
+                        # Defensive: the substring `text[start:end+1]`
+                        # starts with `{` and ends with `}`, so JSON
+                        # semantics make this branch nearly impossible
+                        # in practice — but the category exists for
+                        # closure across the enum.
+                        parse_error = "non_dict"
+                    else:
+                        data = parsed
+
+    dump_path: "Path | None" = None
+    if parse_error is not None and events_file is not None:
+        try:
+            debug_dir = events_file.parent / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            ts = _dt.datetime.now(_dt.timezone.utc).strftime(
+                "%Y%m%dT%H%M%SZ",
+            )
+            candidate = debug_dir / f"{ts}-validator-judge-response.txt"
+            # Write FULL raw text — no truncation. The pre-TB-247
+            # event's `notes` field topped out at the SDK error string;
+            # the dump captures the literal bytes the SDK returned so a
+            # future investigator can see unescaped quotes / markdown
+            # fences / preamble that the categorization heuristic
+            # collapsed to a single label.
+            candidate.write_text(text or "")
+            dump_path = candidate
+        except OSError:
+            # Best-effort: diagnostic-write failure must never block
+            # the judge. Drop the path (event won't carry it either).
+            dump_path = None
+
+    return _DepJudgeOutcome(
+        data=data, parse_error=parse_error, dump_path=dump_path,
+    )
+
+
 def _judge_dep_coherence_default(
     *,
     briefing_text: str,
@@ -716,14 +892,29 @@ def _judge_dep_coherence_default(
     blocked_tokens: list[str],
     timeout_s: float,
     max_turns: int,
-) -> dict | None:
+    events_file: "Path | None" = None,
+) -> _DepJudgeOutcome:
     """Real-SDK implementation of the TB-235 dependency-coherence judge.
 
-    Returns the parsed JSON dict from the judge, OR None on any
-    non-timeout failure (network, parse error, model unavailable).
-    Raises `_DepJudgeTimeout` when the SDK call exceeds `timeout_s`
-    so the caller can distinguish timeout from other failures and
-    emit the right event type.
+    Returns a `_DepJudgeOutcome` carrying the parsed JSON dict (when
+    the judge produced one) plus optional diagnostic fields — the
+    dump path of the raw response (on parse failure) and the
+    parse-error category. Returns `_DepJudgeOutcome(data=None, ...)`
+    on any non-timeout failure (network, parse error, non-dict
+    response). Raises `_DepJudgeTimeout` when the SDK call exceeds
+    `timeout_s` so the caller can distinguish timeout from other
+    failures and emit the right event type.
+
+    TB-247: the return type is now `_DepJudgeOutcome` (NamedTuple)
+    instead of `dict | None`. The dispatcher
+    (`_check_dependency_coherence`) also accepts legacy `dict | None`
+    return values from test stubs that pre-date this change — those
+    are wrapped at the call site, so the existing
+    `test_dep_validator_judge` module stays green without edits. The
+    NamedTuple choice (rather than an out-parameter mutable ref) was
+    picked here because it composes naturally with `events.append(
+    **payload)` at the emission site and parallels TB-236's
+    `_ParseOutcome` shape — see `_DepJudgeOutcome`'s docstring.
 
     Lazy-imports `claude_agent_sdk` so test paths that mock the
     `judge_fn` kwarg don't pull the SDK at validator import time.
@@ -746,8 +937,21 @@ def _judge_dep_coherence_default(
     try:
         import claude_agent_sdk as sdk
     except Exception:
-        return None
+        return _DepJudgeOutcome(data=None, parse_error=None, dump_path=None)
 
+    # TB-247: tightened final-message contract. Pre-TB-247 the prompt
+    # asked for "strict JSON" but did NOT forbid markdown code fences,
+    # did NOT cap the reasoning-field length, did NOT show an explicit
+    # example, and did NOT ban preamble / trailing prose. Within
+    # <4h of TB-243 shipping the count surface, 2/2 wild calls failed
+    # with "non-dict judge response" — the dispatcher's pre-TB-247
+    # catch-all that hid the underlying shape from the operator. This
+    # tightening mirrors TB-236's prose-judge prompt rewrite verbatim
+    # (commit `f32374f`); shorter `reasoning` = smaller surface area
+    # for JSON-escape bugs (the TB-236 root cause for the prose judge).
+    # Intermediate tool calls stay unconstrained (the judge runs
+    # without Read/Glob/Grep today, but if those land later the
+    # contract is on the FINAL message only — same as TB-236).
     system_text = (
         "You are validating a task briefing for hard-predecessor "
         "dependency coherence. A hard predecessor is another task "
@@ -756,10 +960,26 @@ def _judge_dep_coherence_default(
         "or other artifacts the new task depends on. Soft references "
         "(historical context, sibling tasks doing parallel work, "
         "references to docstrings or prior commits for "
-        "reading-comprehension only) are NOT hard predecessors. "
-        "Return strict JSON: "
-        '{"hard_predecessors": ["TB-N", ...], '
-        '"reasoning": "<one-paragraph explanation>"}.'
+        "reading-comprehension only) are NOT hard predecessors.\n\n"
+        "OUTPUT CONTRACT — your FINAL message must be a JSON object "
+        "only:\n"
+        '  {"hard_predecessors": ["TB-217"], '
+        '"reasoning": "TB-217 created ap2/_shared.py which this '
+        'briefing imports"}\n'
+        "Rules for the FINAL message:\n"
+        "  - It is a JSON object only. No markdown code fences (no "
+        "```json or ``` wrapping). No leading prose (no 'Here is the "
+        "verdict:' preamble). No trailing commentary after the closing "
+        "brace.\n"
+        "  - `hard_predecessors` is a (possibly empty) list of strings,"
+        " each of the form 'TB-N'.\n"
+        "  - `reasoning` is a single short paragraph, MAXIMUM 200 "
+        "characters. Cite the briefing file:section or symbol "
+        "triggering the dep claim; do NOT quote long briefing excerpts "
+        "or paste prose blocks.\n"
+        "  - If the reasoning would naturally exceed 200 characters, "
+        "summarize: name the strongest single piece of evidence and "
+        "stop.\n"
     )
     user_payload = {
         "briefing_markdown": briefing_text,
@@ -834,22 +1054,24 @@ def _judge_dep_coherence_default(
     if isinstance(result["exc"], _DepJudgeTimeout):
         raise result["exc"]
     if result["exc"] is not None:
-        return None
+        # Non-timeout SDK exception. No raw text to dump (we never got
+        # past the worker). Return an outcome with no parse_error /
+        # dump_path so the dispatcher emits the SDK-exception branch's
+        # `validator_judge_fail` event with parse_error="sdk_exception"
+        # (categorized at the emission site since the exception object
+        # is what the dispatcher actually catches).
+        return _DepJudgeOutcome(
+            data=None, parse_error=None, dump_path=None,
+        )
     text = result["text"] or ""
 
-    if not text:
-        return None
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end <= start:
-        return None
-    try:
-        data = json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data
+    # TB-247: delegate parse + dump to the testable helper so the
+    # four parse-failure branches (empty / no braces / json_decode /
+    # non_dict) all flow through one place. The helper writes the
+    # FULL raw text to `<events_file.parent>/debug/<ts>-validator-
+    # judge-response.txt` on failure and returns the outcome with
+    # both `parse_error` and `dump_path` populated.
+    return _parse_dep_judge_response(text, events_file=events_file)
 
 
 def _check_dependency_coherence(
@@ -881,8 +1103,13 @@ def _check_dependency_coherence(
     signature. Test paths inject a stub; the production path uses the
     real SDK. The stub must accept the named kwargs
     `briefing_text`, `description`, `blocked_tokens`, `timeout_s`,
-    `max_turns`, return a `dict | None`, and may raise
-    `_DepJudgeTimeout` to exercise the timeout branch.
+    `max_turns`, return a `dict | None` OR a `_DepJudgeOutcome`
+    (TB-247), and may raise `_DepJudgeTimeout` to exercise the
+    timeout branch. TB-247 added an optional `events_file` kwarg used
+    by the production path for the parse-failure dump dir; stubs that
+    don't accept it fall through a `TypeError` retry that calls the
+    stub without it (so pre-TB-247 test stubs stay green without
+    edits).
 
     TB-249: budget is `max_turns` (SDK-native), resolved from
     `AP2_VALIDATOR_JUDGE_MAX_TURNS` (default 2). The pre-TB-249
@@ -963,12 +1190,13 @@ def _check_dependency_coherence(
 
     fn = judge_fn or _judge_dep_coherence_default
     try:
-        data = fn(
+        raw_ret = fn(
             briefing_text=briefing_text,
             description=description or "",
             blocked_tokens=blocked_tokens,
             timeout_s=timeout_s,
             max_turns=max_turns,
+            events_file=events_file,
         )
     except _DepJudgeTimeout as exc:
         if events_file is not None:
@@ -982,6 +1210,48 @@ def _check_dependency_coherence(
             except OSError:
                 pass
         return None
+    except TypeError:
+        # TB-247: pre-TB-247 test stubs don't accept the new
+        # `events_file` kwarg. Retry without it so legacy stubs
+        # (test_dep_validator_judge module) stay green without edits.
+        # Production (`_judge_dep_coherence_default`) accepts it
+        # natively so this branch never fires in the real path.
+        try:
+            raw_ret = fn(
+                briefing_text=briefing_text,
+                description=description or "",
+                blocked_tokens=blocked_tokens,
+                timeout_s=timeout_s,
+                max_turns=max_turns,
+            )
+        except _DepJudgeTimeout as exc:
+            if events_file is not None:
+                try:
+                    events.append(
+                        events_file,
+                        "validator_judge_timeout",
+                        timeout_s=timeout_s,
+                        error=str(exc),
+                    )
+                except OSError:
+                    pass
+            return None
+        except Exception as exc:  # noqa: BLE001
+            if events_file is not None:
+                try:
+                    events.append(
+                        events_file,
+                        "validator_judge_fail",
+                        error=f"{type(exc).__name__}: {exc}",
+                        # TB-247: categorize SDK exceptions so events
+                        # readers can filter `parse_error=="sdk_exception"`
+                        # to find non-text failures (no raw response to
+                        # dump for this branch).
+                        parse_error="sdk_exception",
+                    )
+                except OSError:
+                    pass
+            return None
     except Exception as exc:  # noqa: BLE001
         if events_file is not None:
             try:
@@ -989,27 +1259,61 @@ def _check_dependency_coherence(
                     events_file,
                     "validator_judge_fail",
                     error=f"{type(exc).__name__}: {exc}",
+                    # TB-247: categorize SDK exceptions so events
+                    # readers can filter `parse_error=="sdk_exception"`
+                    # to find non-text failures (no raw response to
+                    # dump for this branch).
+                    parse_error="sdk_exception",
                 )
             except OSError:
                 pass
         return None
 
-    if not isinstance(data, dict):
+    # TB-247: normalize the judge return value into a `_DepJudgeOutcome`.
+    # The production path (`_judge_dep_coherence_default`) already
+    # returns the NamedTuple post-TB-247; legacy test stubs that
+    # return plain `dict | None` are wrapped here so their behavior is
+    # unchanged (no diagnostic enrichment when the stub gave us none).
+    if isinstance(raw_ret, _DepJudgeOutcome):
+        outcome = raw_ret
+    else:
+        outcome = _DepJudgeOutcome(
+            data=raw_ret if isinstance(raw_ret, dict) else None,
+            parse_error=None,
+            dump_path=None,
+        )
+
+    if not isinstance(outcome.data, dict):
         # Malformed JSON / non-object response. Treat as fail-open
         # (mirrors the SDK-error branch above) so a single judge
         # hiccup can't block every `ap2 add`. Emit `validator_judge_fail`
         # so the operator notices if the rate climbs.
         if events_file is not None:
             try:
+                # TB-247: enrich the event with `debug_path` + `parse_error`
+                # when the outcome carries them (production path post-
+                # TB-247). The catch-all `error="non-dict judge response"`
+                # string stays so TB-243's count surface (which keys off
+                # the event type, not the error string) keeps working
+                # and the legacy-stub path (no parse_error in the
+                # outcome) still emits the same shape as pre-TB-247.
+                payload: dict[str, Any] = {
+                    "error": "non-dict judge response",
+                }
+                if outcome.parse_error is not None:
+                    payload["parse_error"] = outcome.parse_error
+                if outcome.dump_path is not None:
+                    payload["debug_path"] = str(outcome.dump_path)
                 events.append(
                     events_file,
                     "validator_judge_fail",
-                    error="non-dict judge response",
+                    **payload,
                 )
             except OSError:
                 pass
         return None
 
+    data = outcome.data
     hard_preds = data.get("hard_predecessors")
     reasoning = str(data.get("reasoning") or "").strip()
     if not isinstance(hard_preds, list) or not hard_preds:
