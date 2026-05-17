@@ -689,3 +689,9 @@
 - **Summary:** Surfaced TB-235 validator-judge fail-open audit counts on ap2 status (text sub-line + nested auto_approve.validator_judge JSON object) and the web home Automation card (new "Validator judge (24h)" row with warn-tint), gated by new AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD env knob (default 5); added 21-test pin module and updated TB-227 shape pin; full suite 1651 passes.
 - **Files:** ap2/automation_status.py, ap2/cli.py, ap2/web.py, ap2/howto.md, ap2/tests/test_tb243_validator_judge_surface.py, ap2/tests/test_tb227_automation_status.py
 - **Tests:** pass
+
+## [2026-05-17] TB-244: Extend status-report cron digest with axis-4 focus-rotation activity (`focus_advanced` + `roadmap_complete`) and add `roadmap_complete` to `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` (TB-228/TB-238 surface-parity closure for axis 4 push channel)
+- **Commit:** `aa971f8`
+- **Summary:** Extended status-report cron digest with axis-4 focus-rotation activity: added `focus_advanced` + `roadmap_complete` to `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES`, new `collect_window_focus_rotation` helper + parallel `render_focus_rotation_activity_section` renderer (option B), wired into `run_status_report` `state_extras`, updated `_STATUS_REPORT_CONTRACT` / `STATUS_REPORT_PROMPT` / `cron.default.yaml` stub for verbatim-forwarding, cross-referenced in howto.md, 20 new tests pass + full 1671-test suite green.
+- **Files:** ap2/automation_status.py, ap2/cron.default.yaml, ap2/howto.md, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_tb244_status_report_focus_rotation_digest.py
+- **Tests:** pass
