@@ -743,6 +743,23 @@ silently-timed-out judge calls used to take ≥2h (the next
 status-report cron tick) to surface — now they appear on the
 on-demand pull surfaces immediately.
 
+TB-245 closes the push-surface half of the same observability gap:
+the 2h status-report Mattermost cron post (operator's primary
+walk-away channel) now also carries a
+`*Validator-judge fail-open window (24h):*` sub-block listing the
+same two 24h counts, with the same `[noisy]` suffix when
+`(fail + timeout) >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default
+5). Window is identical to TB-243's pull-surface 24h so the
+operator never has to reconcile two different validator-judge
+counts between `ap2 status` and the cron post. Sub-block is
+omitted when both counts are zero (quiet windows stay
+byte-identical to the pre-TB-245 baseline); both event types are
+also listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` in
+`ap2/status_report.py` so a lone fresh fail-open event keeps the
+skip-gate from firing — operator never misses a degradation
+signal because the 2h post coincided with an otherwise-quiet
+window.
+
 **Focus rotation (TB-226 axis 4).** `focus_advanced` and
 `roadmap_complete` track the daemon's in-memory focus-list pointer
 against goal.md's `## Current focus:` headings. See

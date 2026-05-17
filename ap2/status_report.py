@@ -394,6 +394,85 @@ def render_focus_rotation_activity_section(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# TB-245: Validator-judge fail-open activity sub-section for the cron
+# status-report digest. Parallels `render_focus_rotation_activity_section`
+# above — same omit-on-empty rule, same `state_extras` wiring shape — but
+# scopes counts to a rolling 24h window (matching TB-243's pull-surface
+# window so the operator never has to reconcile two different validator-
+# judge counts between pull and push surfaces).
+#
+# Closes TB-243's push-surface gap on axis 1: the operator's primary
+# walk-away surface (the 2h status-report Mattermost post) was silent
+# on `validator_judge_fail` / `validator_judge_timeout`, which weakens
+# goal.md L82-85 ("upstream gates already make this safe in practice")
+# because the TB-235 dep-coherence judge IS one of those upstream gates
+# and a fail-open gate without push-channel observability is
+# functionally invisible during the walk-away window goal.md L57-59
+# promises ("walk away for a week without intervention"). A judge
+# silently degrading at 03:00Z used to wait for the operator's next
+# manual `ap2 status` to surface; now it lands in the very next 2h
+# cron post.
+
+_VALIDATOR_JUDGE_HEADING = "*Validator-judge fail-open window (24h):*"
+
+
+def render_validator_judge_activity_section(
+    state: dict,
+) -> list[str]:
+    """Return the Markdown lines for the `*Validator-judge fail-open
+    window (24h):*` sub-section the cron agent forwards verbatim into
+    the Mattermost post, or `[]` when the sub-section should be
+    omitted entirely (no validator-judge events in the rolling 24h
+    window).
+
+    `state` is the dict returned by
+    `automation_status.collect_window_validator_judge` — pre-computed
+    by the caller so the renderer stays pure / no I/O and tests can
+    drive it with fabricated state dicts without spinning up a real
+    events file (parallel to TB-238's dry-run sub-block pattern).
+
+    Shape (when rendered, `[noisy]` suffix conditional on
+    `state["is_noisy"]`):
+
+        *Validator-judge fail-open window (24h):* [noisy]
+        - validator_judge_fail: N
+        - validator_judge_timeout: M
+
+    Both per-event-type lines are always emitted when `total > 0`
+    (even when one of the two counts is zero) so the operator scanning
+    the digest sees the same two-row shape every post — symmetric to
+    TB-243's pull-surface text line which always names both counts
+    when either is non-zero.
+
+    Omit-on-empty: returns `[]` when `state["total"] == 0`. This is
+    the load-bearing default-off byte-identical regression pin —
+    operators today get zero validator-judge output and most days that
+    should continue (a healthy judge has 0/0 counts and the digest
+    stays untouched). Returns `list[str]` (not `str`) so the caller
+    can join with `"\\n"` or extend its own `state_extras` list
+    directly; the wiring in `run_status_report` joins and appends as
+    one block so the section reads as a unit.
+    """
+    if state.get("total", 0) == 0:
+        return []
+
+    header = _VALIDATOR_JUDGE_HEADING
+    if state.get("is_noisy"):
+        # `[noisy]` badge mirrors TB-243's pull-side CLI text suffix
+        # (` [noisy]` appended to the `validator-judge: ...` sub-line
+        # when the threshold trips). Both surfaces light up in
+        # lockstep when the operator tunes
+        # `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`.
+        header = f"{header} [noisy]"
+
+    return [
+        header,
+        f"- validator_judge_fail: {state['validator_judge_fail_count']}",
+        f"- validator_judge_timeout: {state['validator_judge_timeout_count']}",
+    ]
+
+
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
 # field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
 # the daemon's `run_cron` short-circuits status-report jobs to
@@ -505,6 +584,22 @@ Body shape (when posting):
   the walk-away operator sees both axis-1/2/3 and axis-4 activity
   as distinct blocks. Absent ⇒ no rotation activity in the window
   ⇒ omit.
+- TB-245: if the snapshot's `## Current state` block carries a
+  `*Validator-judge fail-open window (24h):*` sub-block (italicized
+  header — possibly carrying a ` [noisy]` suffix — plus two
+  bullets for the rolling 24h counts of `validator_judge_fail` and
+  `validator_judge_timeout`), copy that entire sub-block VERBATIM
+  into your post (preserve the header AND both bullets, including
+  the `[noisy]` suffix on the header when present). Same
+  verbatim-forwarding contract as TB-228 / TB-244 — the daemon
+  owns the rendering; do NOT recompute, paraphrase, or drop
+  bullets. Position the sub-block AFTER the focus-rotation
+  section (or AFTER the automation digest when focus-rotation is
+  absent, or AFTER your bullet list when both are absent) so the
+  axis-1 safety-net signal lands at the bottom of the digest —
+  mirrors TB-243's web home placement of the validator-judge row
+  at the bottom of the automation card. Absent ⇒ 0/0 fail-open
+  counts in the last 24h ⇒ omit.
 
 After posting (or skipping), call
 `log_event(type="status_report", summary="<one sentence>")` so the
@@ -545,6 +640,18 @@ _STATUS_REPORT_BORING_TYPES = frozenset(
 # status` cadence contradicts axis 4's own framing
 # ("walk-away time scales with the operator-declared roadmap length",
 # goal.md L137-138).
+#
+# TB-245: extended with axis-1 validator-judge fail-open events
+# (`validator_judge_fail`, `validator_judge_timeout`) so a fresh
+# fail-open event on the TB-235 dep-coherence judge un-skips the
+# status-report digest and surfaces on the operator's primary
+# walk-away channel within 2h. Without this, the silent-degradation
+# hazard TB-235's fail-open design carries (judge skips a briefing
+# on a transient API hiccup; briefing is admitted regardless) had
+# zero push-channel observability — directly weakened the goal.md
+# L82-85 auto-approve safety claim ("upstream gates already make
+# this safe in practice"), because the dep-coherence judge IS one
+# of those upstream gates and an invisible gate is a missing gate.
 _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
     "auto_approve_paused",
     "auto_approve_halted",
@@ -554,6 +661,9 @@ _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
     # TB-244: axis-4 focus-rotation events.
     "focus_advanced",
     "roadmap_complete",
+    # TB-245: axis-1 validator-judge fail-open events.
+    "validator_judge_fail",
+    "validator_judge_timeout",
 })
 
 
@@ -593,6 +703,15 @@ def _status_report_should_skip(cfg: Config) -> bool:
     report from skipping, so the operator's primary push channel
     carries the rotation-state change without waiting on the next
     `task_complete` or other automation-loop event.
+
+    TB-245: axis-1 validator-judge fail-open events
+    (`validator_judge_fail`, `validator_judge_timeout`) are also
+    treated as interesting — a fresh fail-open landing in the
+    window must keep the report from skipping so the operator's
+    primary push channel surfaces silent-degradation of the TB-235
+    dep-coherence judge without waiting on a manual `ap2 status`.
+    Parallel push-surface closure to TB-244 on the validator-judge
+    axis (TB-243 shipped the pull surfaces last cycle).
     """
     evts = events.tail(cfg.events_file, n=200)
     last_done_idx = -1
@@ -882,6 +1001,25 @@ async def run_status_report(
     )
     if focus_rotation_section:
         state_extras.append(focus_rotation_section)
+    # TB-245: render the axis-1 validator-judge fail-open sub-block
+    # (parallel to the TB-244 focus-rotation digest above). Window is
+    # rolling 24h to match TB-243's pull-surface so operator never
+    # reconciles two counts between `ap2 status` and the cron post.
+    # Placed AFTER the focus-rotation block so the digest reads top-
+    # down as "automation activity → focus rotation → validator-judge
+    # fail-open" (axis-1 safety net rendered last so the eye lands on
+    # it; mirrors TB-243's web home placement of the validator-judge
+    # row at the bottom of the automation card). Renderer returns []
+    # when both 24h counts are zero — quiet windows stay byte-identical
+    # to the pre-TB-245 baseline.
+    validator_judge_state = automation_status.collect_window_validator_judge(
+        cfg,
+    )
+    validator_judge_lines = render_validator_judge_activity_section(
+        validator_judge_state,
+    )
+    if validator_judge_lines:
+        state_extras.append("\n".join(validator_judge_lines))
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
         state_extras=state_extras,

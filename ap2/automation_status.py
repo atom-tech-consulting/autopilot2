@@ -872,6 +872,115 @@ def collect_window_focus_rotation(
     }
 
 
+# ---------------------------------------------------------------------------
+# TB-245: axis-1 validator-judge fail-open activity in the rolling 24h
+# window for the status-report cron digest's push surface.
+#
+# TB-243 (`647b771`) surfaces the rolling 24h counts of
+# `validator_judge_fail` + `validator_judge_timeout` on the *pull*
+# surfaces (`ap2 status` text/JSON + web home automation card). TB-245
+# closes the push-surface gap by exposing the same 24h aggregation
+# through a dedicated collector that the status-report cron renderer
+# consumes — operator's primary walk-away channel (the 2h Mattermost
+# post) now carries the load-bearing TB-235 dep-coherence judge's
+# fail-open signal without waiting on a manual `ap2 status`.
+#
+# Window choice: 24h (not "since previous status-report") to match
+# TB-243's pull-surface window so the operator never has to reconcile
+# two different validator-judge counts between the on-demand and
+# scheduled surfaces. The TB-244 focus-rotation surface uses
+# since-last-report scoping because axis-4 events ARE the rotation
+# state — every event should be visible exactly once per report; for
+# axis-1 fail-open events the operator-attention question is "is the
+# judge degrading right now" which is a steady-state rate
+# (events / 24h) better measured on a fixed window.
+#
+# Boundary alignment with TB-243: separate from `collect_auto_approve_
+# state` (the renderer reads its own keyed state-extras block, not
+# the auto-approve state object), but the threshold helper
+# (`validator_judge_noisy_threshold()`) is shared so both surfaces
+# warn-tint / `[noisy]`-suffix in lockstep when the operator tunes
+# `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`.
+
+
+def collect_window_validator_judge(
+    cfg: "Config",
+    *,
+    now: _dt.datetime | None = None,
+    window_s: int = 86400,
+) -> dict:
+    """Aggregate axis-1 validator-judge fail-open activity over the
+    rolling `window_s` window for TB-245's digest sub-block.
+
+    `now` (default `datetime.now(UTC)`) and `window_s` (default 86400 =
+    24h) are kwargs to keep the helper testable without `freezegun` —
+    tests pass a pinned `now` and a small `window_s` to exercise the
+    24h-counter edge cases (parallel to `collect_auto_approve_state`'s
+    kwarg shape).
+
+    Returned dict (always present, machine-stable shape):
+
+      - `validator_judge_fail_count` (int) — 24h rolling count of
+        `validator_judge_fail` events emitted by the TB-235 dependency-
+        coherence judge in `tools._validate_briefing_structure` check
+        #7 (judge SDK call returned a non-dict response or otherwise
+        raised). Same value semantics as
+        `collect_auto_approve_state`'s `validator_judge_fail_count_24h`
+        — TB-245 deliberately re-uses TB-243's pull-surface window so
+        operator never has to reconcile two counts between pull and
+        push surfaces.
+      - `validator_judge_timeout_count` (int) — 24h rolling count of
+        `validator_judge_timeout` events (judge SDK call exceeded
+        `AP2_VALIDATOR_JUDGE_TIMEOUT_S`). Split from `_fail` so the
+        operator can tell a flaky API (mostly timeouts) from a model
+        / parse regression (mostly fails) without alt-tabbing to
+        `ap2 logs`.
+      - `total` (int) — sum of the two counts. Renderers use this to
+        gate the entire sub-block (omit-on-empty rule: `total == 0` →
+        return empty list).
+      - `noisy_threshold` (int) — effective
+        `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5; see
+        `validator_judge_noisy_threshold()`). Carried in the dict so
+        the renderer doesn't need to re-read the env knob; tests can
+        monkeypatch the env once and verify the threshold flows
+        through.
+      - `is_noisy` (bool) — `total >= noisy_threshold`. Renderers use
+        this to flip the `[noisy]` badge on the sub-section header,
+        mirroring TB-243's pull-side warn-tint convention so both
+        surfaces light up in lockstep.
+
+    Pure / no I/O beyond reading `cfg.events_file`; safe to call from
+    request handlers or the status-report routine.
+    """
+    if now is None:
+        now = _dt.datetime.now(_dt.timezone.utc)
+    now_s = now.timestamp()
+
+    if cfg.events_file.exists():
+        tail = events.tail(cfg.events_file, 2000)
+    else:
+        tail = []
+
+    fail_count = _count_events_24h(
+        tail, event_type="validator_judge_fail",
+        now_s=now_s, window_s=window_s,
+    )
+    timeout_count = _count_events_24h(
+        tail, event_type="validator_judge_timeout",
+        now_s=now_s, window_s=window_s,
+    )
+    threshold = validator_judge_noisy_threshold()
+    total = fail_count + timeout_count
+
+    return {
+        "validator_judge_fail_count": fail_count,
+        "validator_judge_timeout_count": timeout_count,
+        "total": total,
+        "noisy_threshold": threshold,
+        "is_noisy": total >= threshold,
+    }
+
+
 def find_previous_status_report_idx(tail: list[dict]) -> int:
     """Return the positional index of the most recent
     `cron_complete job=status-report` event in `tail`, or `-1` if none

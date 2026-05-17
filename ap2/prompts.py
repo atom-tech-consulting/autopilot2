@@ -189,6 +189,17 @@ _STATUS_REPORT_CONTRACT = """\
   recomputing or paraphrasing risks the same stale-text regression
   class. When the section is absent no rotation activity landed in
   the window — omit.
+- TB-245: if the `## Current state` block carries a
+  `*Validator-judge fail-open window (24h):*` sub-block (axis-1
+  `validator_judge_fail` / `validator_judge_timeout` 24h counts the
+  daemon aggregated for the rolling window), copy that entire
+  sub-block VERBATIM into your Mattermost post — italicized header
+  (including the `[noisy]` suffix when present) and both per-event-
+  type bullets. Same daemon-owned deterministic-rendering contract
+  as TB-228 / TB-244; recomputing or paraphrasing risks the same
+  stale-text regression class. When the sub-block is absent the
+  TB-235 dep-coherence judge has been healthy in the last 24h
+  (0/0 fail-open counts) — omit.
 - Always call `log_event(type="status_report", summary=...)` before
   finishing — posted or skipped.
 """

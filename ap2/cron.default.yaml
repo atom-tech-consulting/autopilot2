@@ -20,6 +20,15 @@ jobs:
       landed in the inter-report window; the canonical prompt also
       teaches verbatim-forwarding for that sub-block so a
       roadmap-complete halt at 03:00Z surfaces in the very next 2h cron
-      post instead of waiting on a manual `ap2 status`.)
+      post instead of waiting on a manual `ap2 status`.
+      TB-245: the routine likewise injects a
+      `*Validator-judge fail-open window (24h):*` sub-block when
+      axis-1 `validator_judge_fail` / `validator_judge_timeout` events
+      landed in the last 24h (with a `[noisy]` suffix when the count
+      crosses `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`); the canonical
+      prompt teaches verbatim-forwarding for that sub-block so silent
+      degradation of the TB-235 dep-coherence judge surfaces in the
+      very next 2h cron post instead of waiting on a manual
+      `ap2 status`.)
     max_turns: 10
     created_by: bootstrap
