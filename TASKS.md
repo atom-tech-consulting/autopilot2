@@ -10,6 +10,7 @@
 
 - [ ] **TB-248** **Add `ap2 audit` CLI verb for retrospective review of unreviewed Complete + Frozen tasks; state derived from operator_log.md (no new file)** `#autopilot` `#cli` `#operator-surface` `#code-quality` `#regression-pin` `@blocked:review` [→ brief](.cc-autopilot/tasks/add-ap2-audit-cli-verb-for-retrospective.md)
 - [ ] **TB-251** **Expand `IMPACT_VERDICTS` with `negative` (4 total) — gradient bucket for "actively regressed" outcomes distinct from "no impact"** `#autopilot` `#operator-surface` `#cli` `#classify` `#regression-pin` `@blocked:review` [→ brief](.cc-autopilot/tasks/expand-impact-verdicts-with-negative-4-t.md)
+- [ ] **TB-252** **`ap2 doctor` warns when `AP2_VERIFY_TIMEOUT_S` is configured below the observed-typical successful full-suite `verify_run` duration (TB-234/TB-239-shape preventive surface for axis-2 failure-recovery)** `#autopilot` `#doctor` `#operator-surface` `#failure-recovery` `#axis-2` `#observability` `#regression-pin` `@blocked:review` — Doctor audit emits WARN when AP2_VERIFY_TIMEOUT_S (default 600s) is below the recent observed-typical successful project-wide verify-run duration; mirrors TB-234/TB-239 misconfiguration-floor pattern. Anchored to n=5 retry_exhausted cascade (TB-245/246/247/249/250) on 2026-05-17 where the 600s default vs 1349s suite runtime silently froze all five. [→ brief](.cc-autopilot/tasks/ap2-doctor-warns-when-ap2-verify-timeout.md)
 
 ## Pipeline Pending
 
