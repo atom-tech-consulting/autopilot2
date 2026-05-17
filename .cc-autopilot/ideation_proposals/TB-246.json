@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/add-roadmap-complete-skip-gate-to-maybe.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-17T02:33:01Z",
+  "tb_id": "TB-246",
+  "why_now": "TB-244 (`aa971f8`, 2026-05-17T00:09Z) just closed the\npush-surface half of axis-4 visibility and TB-245 closes the\nvalidator-judge push surface; axis-4 surface parity across pull +\npush is now complete. The next walk-away gap on axis 4 is no longer\nobservability \u2014 it's ideation cost discipline during the halt\nitself. Concrete cost: 60-min cooldown \u00d7 48h weekend = up to 48\nwasted ideation SDK calls plus an unbounded backlog clutter the\noperator must triage on return. Exact TB-174-shape transplant: same\nskip-with-event-emit + `mark_run` pattern, different gate (daemon-\nside `goal.roadmap_exhausted` vs. ideator self-report)."
+}
