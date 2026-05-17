@@ -179,3 +179,10 @@ or TB-247 cheap if a third event-class needs the same shape.
 - **exit_code:** None
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T064516Z-TB-245.prompt.md`, `stream: .cc-autopilot/debug/20260517T064516Z-TB-245.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T064516Z-TB-245.messages.jsonl`
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T095725Z-TB-245.prompt.md`, `stream: .cc-autopilot/debug/20260517T095725Z-TB-245.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T095725Z-TB-245.messages.jsonl`
