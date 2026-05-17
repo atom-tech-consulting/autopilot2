@@ -64,3 +64,10 @@ Why now: I just hit it filing TB-248 (`/tmp/tb-audit-cmd.md`), confirmed via `gr
 - **exit_code:** None
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T060342Z-TB-249.prompt.md`, `stream: .cc-autopilot/debug/20260517T060342Z-TB-249.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T060342Z-TB-249.messages.jsonl`
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T092220Z-TB-249.prompt.md`, `stream: .cc-autopilot/debug/20260517T092220Z-TB-249.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T092220Z-TB-249.messages.jsonl`
