@@ -1335,13 +1335,27 @@ trigger=pointer_past_last` (once, suppressed via the pointer's
 needed from operator` bullet to `ideation_state.md`. The dispatch
 path's `goal.roadmap_exhausted(cfg)` check then blocks Backlog
 auto-promotion (Ready-section tasks still dispatch — the halt is
-targeted at the auto-promote-from-Backlog gate). Operator clears
-via `ap2 ack roadmap_complete --reason "extended roadmap with
-axis 5"`; the daemon's events-jsonl scan detects an `operator_ack`
-event whose `note` carries the `roadmap_complete` token AFTER the
-most recent `roadmap_complete` event and clears the halt. Same
-shape TB-223's `auto_approve_unfreeze` / TB-224's
-`auto_approve_window_resume` use.
+targeted at the auto-promote-from-Backlog gate). The auto-approve
+gate (`tools.py`) honors the same predicate so a halt mid-window
+can't sneak `auto_approved` rows onto the board. Ideation also
+skips for the same predicate (TB-246, `_maybe_ideate`): a skip
+emits `ideation_skipped reason=roadmap_complete` and bumps the
+cooldown, so a walk-away weekend that exhausts the roadmap stops
+piling speculative proposals against an already-exhausted focus
+list (without this gate, a 60-min cooldown × 48h weekend wastes
+up to ~48 ideation SDK calls and the operator returns to a
+clutter of `@blocked:review` rows the dispatch gate refused to
+advance anyway). The skip-gate sibling to TB-174's
+focus-exhausted gate (same `ideation_skipped` event shape with a
+different `reason` field; `force_ideate` bypasses both so
+`ap2 ideate --force` works on the operator's recovery path).
+Operator clears via `ap2 ack roadmap_complete --reason "extended
+roadmap with axis 5"`; the daemon's events-jsonl scan detects an
+`operator_ack` event whose `note` carries the
+`roadmap_complete` token AFTER the most recent `roadmap_complete`
+event and clears the halt. Same shape TB-223's
+`auto_approve_unfreeze` / TB-224's `auto_approve_window_resume`
+use.
 
 **Status-report push surface (TB-244).**
 Axis-4 events (`focus_advanced` / `roadmap_complete`) also

@@ -822,6 +822,36 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
         )
         mark_run(cfg.cron_state_file, IDEATION_NAME)
         return
+    # TB-246: roadmap-complete gate — when the focus-list pointer has
+    # advanced past the LAST `## Current focus:` heading in goal.md AND
+    # the operator has not yet acked the `roadmap_complete` halt for
+    # the current foci-list length, the daemon's axis-4 dispatch
+    # (`daemon.py`) and auto-approve (`tools.py`) paths already block
+    # forward motion via `goal.roadmap_exhausted(cfg)`. Without a
+    # matching ideation gate, ideation keeps firing every cooldown
+    # window during a walk-away weekend and proposals pile up as
+    # `@blocked:review` against an already-exhausted roadmap (up to
+    # ~48 wasted SDK calls per 48h × 60-min cooldown). Mirrors the
+    # TB-174 focus-exhausted gate's shape (same `ideation_skipped`
+    # event type with a structured `reason` field, same `mark_run`
+    # cooldown bump) and uses the SAME canonical predicate the
+    # dispatch + auto-approve gates use — single source of truth, no
+    # new state file. Cheaper than the focus-exhausted gate below
+    # (dict load + bounded event-tail scan vs. ideation_state.md
+    # parse) so it runs first. `force_ideate` bypasses this gate
+    # alongside the focus-exhausted gate so the operator's recovery
+    # path (`ap2 ack roadmap_complete && ap2 update-goal && ap2
+    # ideate --force`) still works if the ack hasn't propagated to
+    # the pointer state yet.
+    from . import goal as _goal  # local import to avoid module-load cycle
+    if _goal.roadmap_exhausted(cfg):
+        events.append(
+            cfg.events_file,
+            "ideation_skipped",
+            reason="roadmap_complete",
+        )
+        mark_run(cfg.cron_state_file, IDEATION_NAME)
+        return
     # TB-174: focus-exhausted gate — if the prior cycle's
     # ideation_state.md self-reports `Status: exhausted-needs-operator`
     # for every focus item under `## Current focus assessment`, skip
@@ -850,16 +880,21 @@ async def force_ideate(cfg: Config, sdk, mcp_server) -> None:
     """Run ideation unconditionally — manual operator trigger (TB-159).
 
     Bypasses the `AP2_IDEATION_DISABLED` opt-out, the cooldown, the
-    Ready+Backlog queue-depth gate, and the TB-174 focus-exhausted
-    gate (i.e. fires even when every focus item in
-    `ideation_state.md` self-reports `Status:
-    exhausted-needs-operator` — that's the precise scenario where the
-    operator triggers a forced run after refreshing goal.md so the
-    fresh focus has somewhere to land its first proposals). Does NOT
-    bypass the Active hard gate — that check lives at queue-append
-    time in `do_operator_queue_append({"op": "ideate", ...})` and at
-    drain time is implicit (the daemon won't dispatch the forced run
-    while a task agent is sharing the SDK slot).
+    Ready+Backlog queue-depth gate, the TB-174 focus-exhausted gate
+    (i.e. fires even when every focus item in `ideation_state.md`
+    self-reports `Status: exhausted-needs-operator` — that's the
+    precise scenario where the operator triggers a forced run after
+    refreshing goal.md so the fresh focus has somewhere to land its
+    first proposals), AND the TB-246 roadmap-complete gate (i.e.
+    fires even when `goal.roadmap_exhausted(cfg)` is True — the
+    operator's standard recovery path is `ap2 ack roadmap_complete
+    && ap2 update-goal && ap2 ideate --force`, and the forced run
+    must work even when the ack hasn't yet propagated to the pointer
+    state). Does NOT bypass the Active hard gate — that check lives
+    at queue-append time in `do_operator_queue_append({"op":
+    "ideate", ...})` and at drain time is implicit (the daemon won't
+    dispatch the forced run while a task agent is sharing the SDK
+    slot).
 
     Still calls `mark_run` (via `_run_ideation`) after the run so the
     NEXT natural cooldown clock resets — i.e. running `ap2 ideate` ten
