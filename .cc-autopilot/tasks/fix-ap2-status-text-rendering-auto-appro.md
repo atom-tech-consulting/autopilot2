@@ -61,3 +61,10 @@ The conflation in TB-243 was a missed test case during implementation — the un
 - **exit_code:** None
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T084645Z-TB-250.prompt.md`, `stream: .cc-autopilot/debug/20260517T084645Z-TB-250.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T084645Z-TB-250.messages.jsonl`
+### 2026-05-17 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260517T105639Z-TB-250.prompt.md`, `stream: .cc-autopilot/debug/20260517T105639Z-TB-250.stream.jsonl`, `messages: .cc-autopilot/debug/20260517T105639Z-TB-250.messages.jsonl`
