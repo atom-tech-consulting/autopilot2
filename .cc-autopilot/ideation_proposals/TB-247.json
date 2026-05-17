@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/tb-236-shape-transplant-onto-validator-j.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-17T06:45:16Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-17T04:36:22Z",
   "tb_id": "TB-247",
   "why_now": "TB-243 (`647b771`, 2026-05-16T23:59Z) shipped the\n`validator_judge_fail` count surface in `ap2 status` + web home; the\nvery next two ideation cycles (00:29:15Z TB-245 proposal + 02:33:01Z\nTB-246 proposal) both hit `validator_judge_fail\nerror=\"non-dict judge response\"` \u2014 2-for-2 wild failure rate within\n4 hours of the surface going live. Under live auto-approve mode (per\nstatus: \"auto-approve: enabled\"), the dep-coherence gate is the\nupstream-trustworthiness anchor for axis-1 walk-away; a 100%\nsilent-fail rate with no raw-response dump means the operator sees\na number climb but has zero diagnostic data to act on. The operator\nexplicitly named this fix shape in the TB-231 rejection\n(2026-05-16T01:16:59Z): \"Right shape is prevention (tighten judge\nprompt for shorter strict-JSON output) + observability (full raw\nresponse dumped on parse failure).\" TB-236 applied it to the prose\njudge; TB-247 applies it to the validator judge. Without this work,\nTB-243's count surface stays half-feature and the next investigator\nof \"why does the dep-coherence judge keep failing\" has nothing but\nthe same 200-char truncated `notes` field that motivated TB-231 \u2192\nTB-236 in the first place."
