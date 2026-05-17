@@ -14,6 +14,12 @@ jobs:
       section into the snapshot block when the auto-approve /
       auto-unfreeze loop has been active since the last report; the
       canonical prompt teaches the agent to forward that section
-      verbatim into the Mattermost post.)
+      verbatim into the Mattermost post.
+      TB-244: the routine likewise injects a `## Focus rotation activity`
+      sub-block when axis-4 `focus_advanced` / `roadmap_complete` events
+      landed in the inter-report window; the canonical prompt also
+      teaches verbatim-forwarding for that sub-block so a
+      roadmap-complete halt at 03:00Z surfaces in the very next 2h cron
+      post instead of waiting on a manual `ap2 status`.)
     max_turns: 10
     created_by: bootstrap

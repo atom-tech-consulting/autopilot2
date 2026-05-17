@@ -294,6 +294,106 @@ def render_automation_loop_activity_section(
     return section
 
 
+# ---------------------------------------------------------------------------
+# TB-244: Focus rotation activity sub-section for the cron status-report
+# digest. Parallels `render_automation_loop_activity_section` above —
+# same omit-on-empty rule, same `state_extras` wiring shape, but a
+# distinct heading + helper so the axis-1/2/3 digest's existing test
+# expectations stay byte-identical (the briefing's option B).
+#
+# Closes TB-228 / TB-238's surface-parity gap on the push channel: the
+# operator's primary walk-away surface (the 2h status-report Mattermost
+# post) was silent on axis-4 (`focus_advanced` / `roadmap_complete`),
+# which contradicts axis 4's own framing ("walk-away time scales with
+# the operator-declared roadmap length", goal.md L137-138). A
+# `roadmap_complete` halt at 03:00Z used to wait for the operator's
+# next manual `ap2 status` to surface; now it lands in the very next
+# 2h cron post.
+
+_FOCUS_ROTATION_HEADING = "## Focus rotation activity"
+
+
+def render_focus_rotation_activity_section(
+    cfg: Config,
+    *,
+    since_event_idx: int,
+    tail: list[dict] | None = None,
+) -> str:
+    """Return the Markdown `## Focus rotation activity` sub-section
+    the cron agent forwards verbatim into the Mattermost post, or ""
+    when the section should be omitted entirely (no axis-4 events
+    landed in the inter-report window).
+
+    `since_event_idx` is the positional index of the previous
+    `cron_complete job=status-report` event in the tail; counts in
+    the rendered section are scoped to events at indices > that.
+
+    Shape (when rendered):
+
+        ## Focus rotation activity
+
+        - focus_advanced: <from-title> → <to-title> (N of M)
+        - roadmap_complete: all foci exhausted — `ap2 ack roadmap_complete` to resume
+
+    Each line is rendered once per event in the window (so a window
+    with 2 advances + 1 halt yields 3 lines). The lines preserve
+    tail order (TB-226 emits `focus_advanced` first when the advance
+    crosses the last focus, then `roadmap_complete` on the same
+    tick) so a multi-event window reads chronologically.
+
+    Omit-on-empty: returns "" when the helper's `total` is 0 — no
+    axis-4 events in the window means no sub-block. Symmetric to
+    TB-228's `render_automation_loop_activity_section` rule (knob
+    off + all counters zero); axis 4 has no opt-in knob (the focus
+    list is operator-curated and the daemon always tracks the
+    pointer when the focus list is non-empty), so the only gate is
+    the "did something happen" counter.
+    """
+    if tail is None:
+        if cfg.events_file.exists():
+            tail = events.tail(cfg.events_file, 2000)
+        else:
+            tail = []
+
+    activity = automation_status.collect_window_focus_rotation(
+        cfg, since_event_idx=since_event_idx, tail=tail,
+    )
+    if activity["total"] == 0:
+        return ""
+
+    lines: list[str] = [_FOCUS_ROTATION_HEADING, ""]
+    # `focus_advanced` rendering: include the (N of M) position when
+    # the daemon's payload carried it (TB-226 always does, but be
+    # defensive about a future schema change). `from` / `to` are
+    # always present in the payload; an empty `to` means the advance
+    # crossed past the last focus (and `roadmap_complete` fired on
+    # the same tick — see the second loop below).
+    for ev in activity["focus_advanced"]:
+        from_title = ev.get("from") or "(none)"
+        to_title = ev.get("to") or "(none)"
+        new_index = ev.get("new_index")
+        total_foci = ev.get("total_foci")
+        if isinstance(new_index, int) and isinstance(total_foci, int):
+            # `new_index` is 0-based in the event payload; the
+            # operator-facing "N of M" uses 1-based to match
+            # TB-242's `ap2 status` rendering (`alpha (1 of 3)`).
+            position = f" ({new_index + 1} of {total_foci})"
+        else:
+            position = ""
+        lines.append(
+            f"- focus_advanced: {from_title} → {to_title}{position}"
+        )
+    # `roadmap_complete` rendering: the ack hint is verbatim so the
+    # operator can copy-paste it from the Mattermost post — same
+    # shape TB-228 uses for the auto-approve `ap2 ack ...` line.
+    for _ev in activity["roadmap_complete"]:
+        lines.append(
+            "- roadmap_complete: all foci exhausted — "
+            "`ap2 ack roadmap_complete` to resume"
+        )
+    return "\n".join(lines)
+
+
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
 # field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
 # the daemon's `run_cron` short-circuits status-report jobs to
@@ -393,6 +493,18 @@ Body shape (when posting):
   walk-away operator scanning the post sees the digest as a
   distinct block. Absent ⇒ pre-opt-in project / quiet window ⇒
   omit (the daemon renders nothing in that case).
+- TB-244: if the snapshot's `## Current state` block carries a
+  `## Focus rotation activity` section (heading + one bullet per
+  `focus_advanced` / `roadmap_complete` event landed in the
+  inter-report window), copy that entire section VERBATIM into
+  your post (preserve the heading and every bullet). Same
+  verbatim-forwarding contract as TB-228's automation digest — the
+  daemon owns the rendering; do NOT recompute, paraphrase, or drop
+  bullets. Position the section AFTER the automation digest (or
+  AFTER your bullet list when the automation digest is absent) so
+  the walk-away operator sees both axis-1/2/3 and axis-4 activity
+  as distinct blocks. Absent ⇒ no rotation activity in the window
+  ⇒ omit.
 
 After posting (or skipping), call
 `log_event(type="status_report", summary="<one sentence>")` so the
@@ -423,12 +535,25 @@ _STATUS_REPORT_BORING_TYPES = frozenset(
 # loop activity as interesting. The set is referenced from
 # `_status_report_should_skip`'s docstring and from the TB-228 tests
 # (`test_should_skip_false_when_auto_approve_paused_in_window`).
+#
+# TB-244: extended with axis-4 focus-rotation events (`focus_advanced`,
+# `roadmap_complete`) so the push surface (status-report cron post)
+# carries the same operator-attention signal that TB-242 added to the
+# pull surfaces (`ap2 status` text/JSON + web home). The
+# `roadmap_complete` halt is especially load-bearing — the operator's
+# walk-away time on a roadmap-exhaustion bounded by the manual `ap2
+# status` cadence contradicts axis 4's own framing
+# ("walk-away time scales with the operator-declared roadmap length",
+# goal.md L137-138).
 _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
     "auto_approve_paused",
     "auto_approve_halted",
     "auto_unfreeze_applied",
     "auto_unfreeze_skipped",
     "auto_approved",
+    # TB-244: axis-4 focus-rotation events.
+    "focus_advanced",
+    "roadmap_complete",
 })
 
 
@@ -460,6 +585,14 @@ def _status_report_should_skip(cfg: Config) -> bool:
     and fall through the boring-types denylist below. An operator
     walking away should see the digest the moment a halt or fix
     landed, even if no other board state changed.
+
+    TB-244: axis-4 focus-rotation events (`focus_advanced`,
+    `roadmap_complete`) are also surfaced in
+    `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` — a focus advance
+    or roadmap-complete halt landing in the window must keep the
+    report from skipping, so the operator's primary push channel
+    carries the rotation-state change without waiting on the next
+    `task_complete` or other automation-loop event.
     """
     evts = events.tail(cfg.events_file, n=200)
     last_done_idx = -1
@@ -737,6 +870,18 @@ async def run_status_report(
     )
     if automation_section:
         state_extras.append(automation_section)
+    # TB-244: render the axis-4 focus-rotation sub-block (parallel to
+    # the TB-228 automation digest above). Same `since_idx` scoping so
+    # both surfaces share one inter-report window; the renderer returns
+    # "" when no `focus_advanced` / `roadmap_complete` events landed in
+    # the window. Wiring lives here so axis-1/2/3 digest tests stay
+    # byte-identical when axis-4 is quiet — the briefing's option B
+    # (parallel renderer, not in-place extension).
+    focus_rotation_section = render_focus_rotation_activity_section(
+        cfg, since_event_idx=since_idx, tail=activity_tail,
+    )
+    if focus_rotation_section:
+        state_extras.append(focus_rotation_section)
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
         state_extras=state_extras,

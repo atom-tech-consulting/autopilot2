@@ -180,6 +180,15 @@ _STATUS_REPORT_CONTRACT = """\
   deterministic across runs; recomputing or paraphrasing risks the
   TB-128 stale-text regression class. When the section is absent the
   loop has been quiet (or the operator hasn't opted in) — omit.
+- TB-244: if the `## Current state` block carries a
+  `## Focus rotation activity` section (axis-4 `focus_advanced` /
+  `roadmap_complete` events the daemon aggregated for the
+  inter-report window), copy that entire section VERBATIM into your
+  Mattermost post — heading and every bullet. Same daemon-owned
+  deterministic-rendering contract as TB-228's automation digest;
+  recomputing or paraphrasing risks the same stale-text regression
+  class. When the section is absent no rotation activity landed in
+  the window — omit.
 - Always call `log_event(type="status_report", summary=...)` before
   finishing — posted or skipped.
 """

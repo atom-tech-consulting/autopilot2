@@ -1312,6 +1312,29 @@ most recent `roadmap_complete` event and clears the halt. Same
 shape TB-223's `auto_approve_unfreeze` / TB-224's
 `auto_approve_window_resume` use.
 
+**Status-report push surface (TB-244).**
+Axis-4 events (`focus_advanced` / `roadmap_complete`) also
+surface in the 2h status-report Mattermost cron post — the
+operator's primary walk-away channel. The routine renders a
+`## Focus rotation activity` sub-block (parallel to TB-228's
+`## Automation loop activity` digest) listing one bullet per
+event in the inter-report window, with the `ap2 ack
+roadmap_complete` resume hint rendered verbatim on the halt
+line so the operator can copy-paste it from the post. Closes
+the push-surface gap TB-242 left open: the pull surfaces
+(`ap2 status` text/JSON + web home) showed the active focus +
+position + halt state on-demand, but a `roadmap_complete` halt
+at 03:00Z used to wait for the operator's next manual `ap2
+status` to surface. Now the next 2h cron post carries it.
+Omit-on-empty: the sub-block is suppressed when no axis-4
+events landed in the window, so quiet windows stay
+byte-identical to the pre-TB-244 baseline. The
+`_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` frozenset in
+`ap2/status_report.py` also lists both event types so a lone
+axis-4 event keeps the routine's skip-gate from firing —
+operator never misses a rotation-state change because the
+2h post coincided with an otherwise-quiet window.
+
 **Why never auto-mutate goal.md.**
 Goal.md L187-191 names goal.md auto-rotation as a Non-goal. The
 operator owns the focus list; the daemon advances its pointer

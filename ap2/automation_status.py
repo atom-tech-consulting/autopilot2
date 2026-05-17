@@ -780,6 +780,98 @@ def _outcome_breakdown(
     return completed, froze
 
 
+# ---------------------------------------------------------------------------
+# TB-244: axis-4 focus-rotation activity in the inter-status-report window.
+#
+# TB-226 ships `focus_advanced` + `roadmap_complete` events; TB-242 added
+# the pull surfaces (`ap2 status` text/JSON + web home active-focus
+# card). TB-244 closes the push-surface gap by surfacing both event
+# types in the 2h status-report Mattermost post — the operator's primary
+# walk-away channel. Helper parallels `collect_window_loop_activity`
+# above (since-last-report scoping, pure tail-walk, machine-stable
+# return shape) so the renderer in `status_report.py` can consume both
+# helpers with the same `since_event_idx` kwarg.
+
+
+def collect_window_focus_rotation(
+    cfg: "Config",
+    *,
+    since_event_idx: int,
+    tail: list[dict] | None = None,
+) -> dict:
+    """Aggregate axis-4 focus-rotation activity in the inter-status-
+    report window for TB-244's digest sub-block.
+
+    `since_event_idx` is the *positional* index of the previous
+    `cron_complete job=status-report` event in the tail; events at
+    indices `> since_event_idx` count toward the digest. Use `-1` to
+    count from the start of the tail (first-ever status report).
+
+    `tail` is passed in when the caller already has it (the routine
+    walks the tail once to find `since_event_idx`); when omitted, the
+    helper loads the same 2000-event tail
+    `collect_auto_approve_state` / `collect_window_loop_activity` use.
+
+    Returned dict (always present, machine-stable shape):
+
+      - `focus_advanced` (list[dict]) — one entry per
+        `focus_advanced` event in the window, in tail order. Each
+        entry: `{"from": <old_title>, "to": <new_title>,
+        "new_index": <int>, "total_foci": <int>}`. The TB-226 event
+        payload carries these fields directly; the helper preserves
+        them so the renderer can emit `(N of M)`-shaped lines
+        without re-reading goal.md.
+      - `roadmap_complete` (list[dict]) — one entry per
+        `roadmap_complete` event in the window, in tail order. Each
+        entry: `{"exhausted_count": <int>}` (the foci-list length
+        at exhaustion; mirrors TB-226's event payload). The list is
+        usually 0 or 1 entries (the daemon emits at most once per
+        exhaustion episode), but tail bounds can carry more across a
+        multi-day window where the operator extended + re-exhausted
+        the roadmap.
+      - `total` (int) — sum of the two list lengths. Renderers use
+        this to gate the entire sub-block (omit-on-empty rule:
+        `total == 0` → return "").
+
+    Pure / no I/O beyond reading `cfg.events_file` when `tail` is
+    omitted; safe to call from request handlers.
+    """
+    if tail is None:
+        if cfg.events_file.exists():
+            tail = events.tail(cfg.events_file, 2000)
+        else:
+            tail = []
+
+    slice_ = tail[since_event_idx + 1:] if since_event_idx >= -1 else tail
+
+    advanced: list[dict] = []
+    completed: list[dict] = []
+
+    for e in slice_:
+        typ = e.get("type")
+        if typ == "focus_advanced":
+            # Preserve the four payload fields TB-226 emits. `from` /
+            # `to` are required (the daemon never emits the event
+            # without them); defensive `str(...)` keeps the renderer
+            # safe against a future schema drift that stores ints.
+            advanced.append({
+                "from": str(e.get("from") or ""),
+                "to": str(e.get("to") or ""),
+                "new_index": e.get("new_index"),
+                "total_foci": e.get("total_foci"),
+            })
+        elif typ == "roadmap_complete":
+            completed.append({
+                "exhausted_count": e.get("exhausted_count"),
+            })
+
+    return {
+        "focus_advanced": advanced,
+        "roadmap_complete": completed,
+        "total": len(advanced) + len(completed),
+    }
+
+
 def find_previous_status_report_idx(tail: list[dict]) -> int:
     """Return the positional index of the most recent
     `cron_complete job=status-report` event in `tail`, or `-1` if none
