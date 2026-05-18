@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/surface-stats-window-aggregates-task-bul.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-18T18:25:36Z",
+  "tb_id": "TB-259",
+  "why_now": "walk-away monitoring needs a top-line \"what's happened since last report\" digest of task volume + median duration + ideation cadence without the operator opening a browser tab \u2014 without it, the stats dashboard pays rent only during active operator sessions, not during the walk-away promise (goal.md L28-30 \"walk away for a week without intervention\") the focus is built around."
+}

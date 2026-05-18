@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/surface-ap2-audit-unreviewed-count-on-ap.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-18T18:25:06Z",
+  "tb_id": "TB-258",
+  "why_now": "walk-away requires a return surface that names the \"unreviewed shipped\" count without an extra command \u2014 without it, the operator's first sighting of an unreviewed-task pile is one manual `ap2 audit` invocation later than the system already knew it was true, which weakens the goal.md L28-30 done-when bullet \"walk away for a week without intervention.\""
+}
