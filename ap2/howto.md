@@ -998,8 +998,57 @@ truncate to 120 chars per field, `--json` gives full payloads.
 
 The `ap2 web` command starts a read-only HTTP UI at `127.0.0.1:7820`
 with `/events`, `/tasks`, `/task/<TB-N>`, `/pipelines`, `/insights`,
-`/ideation_state`, `/commits` pages. Useful when you want to scan
-visually rather than ask the session to summarize.
+`/ideation_state`, `/commits`, `/stats` pages. Useful when you want
+to scan visually rather than ask the session to summarize.
+
+## Stats dashboard
+
+The `/stats` page (HTML, server-rendered, no JS) and `/stats.json`
+endpoint (JSON, scripting-friendly) surface trend aggregates over
+an operator-configurable window — the return-and-review surface for
+multi-day walk-away cycles. URLs:
+
+- `http://127.0.0.1:8730/stats` — human-readable dashboard.
+- `http://127.0.0.1:8730/stats.json` — machine-readable contract.
+
+`?window=` accepts `1d` / `7d` (default) / `30d`, plus arbitrary
+`Nh` / `Nm` / `Nd` suffixes. Values are clamped to `[1h, 90d]` so a
+typo doesn't either flood the events.jsonl scan or render an empty
+page.
+
+Metrics surfaced:
+
+| Section | Metric |
+|---|---|
+| Tasks | total count, completion rate, avg/p50/p95 duration + num_turns, total + avg cost, top-10 longest, top-10 most expensive, duration-bucket histogram (≤1m / 1–5m / 5–15m / 15–30m / 30–60m / >60m), attempts-per-task histogram (1st-try / 2nd / 3rd / retry-exhausted), frozen rate |
+| Per-bullet verifier | total prose-judge call count, avg/p50/p95 duration, top-10 slowest, validator-judge fail + timeout counts (window-bounded — `automation_status`'s `_24h` counters are the 24h-only sibling) |
+| Ideation | cycle count, avg/p50/p95 duration + turns + cost, proposals recorded, proposals/cycle, rejection rate |
+| Cron | per-job cycle count + avg duration + avg cost (auto-discovered by `control_run_usage label=cron-*`) |
+
+**What to look for during walk-away review**: rising avg cost or
+p95 duration relative to a prior week is the silent-overhead-creep
+signal TB-235 (the LLM-judge regression that quintupled test-suite
+runtime; see `.cc-autopilot/insights/test-suite-slowness-2026-05-17.md`)
+would have surfaced earlier. Climbing frozen-rate or
+validator-judge-fail counts indicate gate erosion. Climbing top-10-
+most-expensive against a fairly stable top-10-longest indicates
+silent token spend per turn — likely a model regression or prompt
+bloat.
+
+The JSON contract is the stable interface; HTML layout can change
+without breaking scripted consumers. Top-level shape:
+
+```json
+{
+  "window": "7d",
+  "window_s": 604800,
+  "computed_at": "2026-05-18T16:42:00Z",
+  "tasks":    {...},
+  "verifier": {...},
+  "ideation": {...},
+  "cron":     {...}
+}
+```
 
 ## Configuration knobs
 
