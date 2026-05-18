@@ -549,9 +549,18 @@ _CSS = """<style>
                                   border-left-color: #2a8 }
   .automation-status.is-paused  { background: #fff7f7;
                                   border-left-color: #c33 }
+  /* TB-256: knob OFF + 24h activity present (typically TB-243
+     validator-judge fail / timeout counts) — grey-tinted so the
+     operator visually distinguishes "card visible but auto-approve
+     is off / informational" from the green-flag healthy state. Sits
+     between the green is-healthy and red is-paused tints in
+     urgency. */
+  .automation-status.is-disabled-but-active { background: #f4f4f4;
+                                              border-left-color: #888 }
   .automation-status .as-header { font-weight: 600; margin-right: 0.4rem }
   .automation-status.is-healthy .as-header { color: #1a6f2a }
   .automation-status.is-paused  .as-header { color: #8a1818 }
+  .automation-status.is-disabled-but-active .as-header { color: #555 }
   .automation-status .as-body { color: #333 }
   .automation-status .as-meta { color: #888; font-size: 12px;
                                 font-family: ui-monospace, monospace;
@@ -1655,6 +1664,30 @@ def _render_automation_card(cfg: Config) -> str:
         else ''
     )
 
+    # TB-256: split the body render into three state branches so the
+    # rendered text honestly reflects knob state, even when
+    # `counters_total > 0` purely because the TB-243 validator-judge
+    # counters fired. Pre-TB-256 the `else` branch unconditionally
+    # printed `enabled — circuit healthy` whenever the outer
+    # `if not enabled and counters_total == 0: return ""` guard fell
+    # through — which meant a `validator_judge_fail` event in the 24h
+    # window made the card claim the knob was on even with
+    # `AP2_AUTO_APPROVE` unset. JSON output (`auto_approve_enabled`)
+    # always stayed correct; the bug was local to this text render.
+    # Symmetric mirror of TB-250's fix to `cli.py:cmd_status`.
+    #
+    #   - State A         knob ON  + healthy  → "enabled — circuit healthy"
+    #                                            (is-healthy, green).
+    #   - State A-paused  knob ON  + paused   → "PAUSED (reason=...; ...)"
+    #                                            (is-paused, red).
+    #   - State B         knob OFF + activity → "disabled (validator-judge
+    #                                            24h: N fail, M timeout)"
+    #                                            (is-disabled-but-active,
+    #                                            grey — informational,
+    #                                            not green-flag).
+    #   - State C         knob OFF + no act.  → outer guard returns ""
+    #                                            (existing behavior at
+    #                                            L1642; unchanged).
     if state["auto_approve_paused"]:
         klass = "automation-status is-paused"
         header = "Auto-approve — PAUSED"
@@ -1665,10 +1698,25 @@ def _render_automation_card(cfg: Config) -> str:
             f'threshold {state["freeze_threshold"]} — '
             '<code>ap2 ack auto_approve_window_resume</code>'
         )
-    else:
+    elif enabled:
         klass = "automation-status is-healthy"
         header = "Auto-approve"
         body = "enabled — circuit healthy"
+    else:
+        # State B: knob is OFF but the card is visible because
+        # `counters_total > 0` — surface the activity that justified
+        # rendering the card without misrepresenting the master switch.
+        # Validator-judge counts get top billing because they are the
+        # TB-243 silent-degradation hazard that prompted the outer
+        # aggregator's expansion; other 24h activity (auto-approved /
+        # auto-unfrozen events) still surfaces via the rows below.
+        klass = "automation-status is-disabled-but-active"
+        header = "Auto-approve"
+        body = (
+            f'disabled (validator-judge 24h: '
+            f'{state["validator_judge_fail_count_24h"]} fail, '
+            f'{state["validator_judge_timeout_count_24h"]} timeout)'
+        )
 
     approved_buckets = _hourly_sparkline_buckets(cfg, "auto_approved")
     unfrozen_buckets = _hourly_sparkline_buckets(cfg, "auto_unfreeze_applied")
