@@ -124,6 +124,21 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     suppresses re-emission via the pointer's
     `roadmap_complete_emitted` flag, which resets on the next
     advance after the operator extends the roadmap.
+  - `verify_passed` (TB-252) — project-wide `AP2_VERIFY_CMD` ran to
+    completion AND exited zero (the successful sibling of
+    `verification_failed`). Emitted from daemon.py's
+    post-`_run_verify` success branch on both the synchronous task
+    path and the pipeline-pending re-verify path. Payload: `task`
+    (TB-N owning the run), `command` (the resolved verify command),
+    `exit_code` (0 by contract — kept in the payload so the shape
+    mirrors `verification_failed` for symmetric tooling),
+    `duration_s` (wall-clock seconds), optional `source`
+    (`pipeline_pending` on the async path). Consumed by
+    `verify_timeout_audit` in `ap2/doctor.py` to size
+    `AP2_VERIFY_TIMEOUT_S` (default 600s) against the
+    observed-typical successful run duration — anchors the doctor
+    WARN that goal.md axis-2 calls for on env-knob-vs-workload
+    drift (TB-245/246/247/249/250 cascade).
 
 The full canonical list lives in `ap2/howto.md`'s `## Event schema`
 section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)

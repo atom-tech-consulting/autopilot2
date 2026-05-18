@@ -1024,7 +1024,10 @@ def cmd_check(cfg: Config, args: argparse.Namespace) -> int:
 def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     """One-shot environment-readiness check (project skeleton + sandbox + CLI)."""
     user = args.user or sandbox.DEFAULT_USER
-    rep = doctor.diagnose(cfg.project_root, user)
+    # TB-252: thread cfg through so `verify_timeout_audit` can read
+    # `cfg.verify_timeout_s` (the resolved env value) without
+    # re-loading the project env from inside doctor.
+    rep = doctor.diagnose(cfg.project_root, user, cfg=cfg)
     rep.print()
     return 0 if rep.ok else 1
 

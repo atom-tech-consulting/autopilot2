@@ -10,12 +10,15 @@ the setup-project skill.
 """
 from __future__ import annotations
 
+import datetime as _dt
+import json
+import math
 import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import DEFAULT_VERIFY_TIMEOUT_S
+from .config import Config, DEFAULT_VERIFY_TIMEOUT_S, EVENTS_FILE
 from .sandbox import (
     AuditResult,
     DEFAULT_USER,
@@ -298,11 +301,258 @@ def _verify_gate_state() -> AuditResult:
     return res
 
 
-def diagnose(project_root: Path, user: str = DEFAULT_USER) -> DoctorReport:
+# TB-252: window + band constants for `verify_timeout_audit`. Internal
+# constants (no env knobs) — the audit's job is to surface
+# `AP2_VERIFY_TIMEOUT_S` misconfiguration, not to introduce another knob
+# that itself can be misconfigured. Lives at module scope alongside the
+# audit function so the values are easy to find when tuning.
+#
+# `_VERIFY_TIMEOUT_AUDIT_WINDOW_DAYS` / `_VERIFY_TIMEOUT_AUDIT_MIN_SAMPLES`
+# define the sample window per the briefing: "last 7 days OR last 20
+# successful samples, whichever covers more". Implementation reads the
+# tail and applies both filters, picking the LARGER resulting set so a
+# burst week + a slow week both surface adequate signal.
+#
+# `_VERIFY_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES` is the floor below which
+# the audit emits INFO ("insufficient data") rather than WARN — avoids
+# false-positives on fresh installs where one slow run would otherwise
+# trip the alarm. Three samples is the briefing-spec'd floor.
+#
+# `_VERIFY_TIMEOUT_AUDIT_WARN_RATIO` / `_VERIFY_TIMEOUT_AUDIT_INFO_RATIO`
+# are the headroom bands: ratio < 1.0 → WARN (timeout below worst-case
+# successful run); ratio < 1.5 → INFO "tight" (some headroom but
+# operator should consider bumping); else INFO "comfortable".
+_VERIFY_TIMEOUT_AUDIT_WINDOW_DAYS = 7
+_VERIFY_TIMEOUT_AUDIT_MAX_SAMPLES = 20
+_VERIFY_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES = 3
+_VERIFY_TIMEOUT_AUDIT_WARN_RATIO = 1.0
+_VERIFY_TIMEOUT_AUDIT_INFO_RATIO = 1.5
+# Recommendation multiplier when emitting the WARN fix line: bump the
+# operator's timeout to ceil(typical * 1.5) so the new floor has a
+# 50% safety margin over the observed-typical worst-case.
+_VERIFY_TIMEOUT_AUDIT_FIX_MULT = 1.5
+
+
+def _iter_verify_passed_durations(
+    events_file: Path,
+    *,
+    window_days: int,
+    max_samples: int,
+    now: _dt.datetime | None = None,
+) -> tuple[list[float], int]:
+    """Return (durations, sample_days) for recent successful project-wide
+    verify runs (`verify_passed` events emitted at daemon.py's
+    post-`_run_verify` branch, TB-252).
+
+    Window selection: take the tail of events.jsonl, filter to
+    `verify_passed` rows with a numeric `duration_s` field, then choose
+    whichever of (last `max_samples` samples) and (samples within the
+    last `window_days` days) yields the LARGER set — the briefing's
+    "whichever covers more" rule. `sample_days` returned is the actual
+    span (days, ceiling) of the chosen sample set, used for the
+    audit's "n=N over D days" attribution.
+
+    Returns ([], 0) when the events file doesn't exist or no qualifying
+    events are present — the audit treats that as "insufficient data"
+    (INFO branch).
+    """
+    if not events_file.exists():
+        return [], 0
+
+    # Tail-scan up to a generous bound so the 7d window can capture a
+    # weeks-quiet project. 5000 lines is well under 1MB on real
+    # events.jsonl shapes (each event is a few hundred bytes); pulling
+    # the whole tail in one shot is simpler than a streaming filter.
+    # If a project's events.jsonl is so large that even 5000 lines'
+    # tail-read is concerning, the audit's INFO-on-insufficient branch
+    # still degrades safely.
+    cutoff_dt: _dt.datetime | None = None
+    if window_days > 0:
+        now = now or _dt.datetime.now(_dt.timezone.utc)
+        cutoff_dt = now - _dt.timedelta(days=window_days)
+
+    recent_samples: list[tuple[_dt.datetime | None, float]] = []
+    try:
+        with events_file.open("r") as f:
+            # Read all lines; events.jsonl is append-only and bounded
+            # by project age. For very large files the test gate
+            # `test_verify_timeout_audit_handles_missing_events_file`
+            # exercises the missing-file branch; the present branch
+            # always has a path that exists at this point.
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    evt = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(evt, dict):
+                    continue
+                if evt.get("type") != "verify_passed":
+                    continue
+                dur = evt.get("duration_s")
+                if not isinstance(dur, (int, float)):
+                    continue
+                ts_raw = evt.get("ts")
+                ts_dt: _dt.datetime | None = None
+                if isinstance(ts_raw, str):
+                    try:
+                        ts_dt = _dt.datetime.strptime(
+                            ts_raw, "%Y-%m-%dT%H:%M:%SZ",
+                        ).replace(tzinfo=_dt.timezone.utc)
+                    except ValueError:
+                        ts_dt = None
+                recent_samples.append((ts_dt, float(dur)))
+    except OSError:
+        return [], 0
+
+    # Compute the two candidate sample sets:
+    #   A) last `max_samples` (regardless of age)
+    #   B) all samples within `window_days`
+    # Return whichever has more elements (ties → A).
+    by_recent = recent_samples[-max_samples:] if max_samples > 0 else []
+    by_window = (
+        [s for s in recent_samples if s[0] is not None and s[0] >= cutoff_dt]
+        if cutoff_dt is not None
+        else []
+    )
+    chosen = by_window if len(by_window) > len(by_recent) else by_recent
+
+    durations = [d for _, d in chosen]
+    # Sample-span days: from the earliest dated sample in the chosen set
+    # to "now", rounded up. Falls back to window_days when no sample
+    # carries a parseable timestamp (rare — the canonical writer always
+    # stamps).
+    dated = [t for t, _ in chosen if t is not None]
+    if dated:
+        oldest = min(dated)
+        now = now or _dt.datetime.now(_dt.timezone.utc)
+        span = max(1, math.ceil((now - oldest).total_seconds() / 86400.0))
+    else:
+        span = window_days
+    return durations, span
+
+
+def verify_timeout_audit(state_dir: Path, cfg: Config) -> AuditResult:
+    """Pre-flight check on `AP2_VERIFY_TIMEOUT_S` vs observed-typical
+    successful full-suite verify duration (TB-252, axis-2 mirror of
+    TB-234's auto-approve cap audit + TB-239's auto-unfreeze allowlist
+    audit).
+
+    Anchored to the 2026-05-17 retry_exhausted cascade (TB-245 / 246 /
+    247 / 249 / 250) where the project-wide verifier killed five
+    consecutive task runs at the 600s `AP2_VERIFY_TIMEOUT_S` default
+    while the actual `uv run pytest -q ap2/tests/` suite took
+    1320-1349s on a healthy commit. Goal.md axis 2 (failure-recovery
+    operator dependency, L88-100) commits the harness to surfacing
+    misconfiguration before it cascades; this audit closes the
+    env-knob-vs-current-workload gap that TB-225 BriefingFix /
+    TB-233 dry-run / TB-239 misconfiguration-floor surfaces don't
+    catch (they audit static env config, not workload-relative fit).
+
+    Reads `.cc-autopilot/events.jsonl` for `verify_passed` events
+    (emitted by daemon.py's post-`_run_verify` success branch) within
+    the last `_VERIFY_TIMEOUT_AUDIT_WINDOW_DAYS` OR up to
+    `_VERIFY_TIMEOUT_AUDIT_MAX_SAMPLES` recent samples, whichever
+    yields more. Uses `max()` over durations (NOT `mean()` — the
+    worst-case successful run is the realistic ceiling for sizing
+    the timeout; a 1349s P100 matters more than an 850s mean when
+    the timeout is 600s).
+
+    Verdict bands:
+      - <3 samples → INFO "insufficient data" (avoids false-positives
+        on fresh installs).
+      - timeout < typical * 1.0 → WARN with one-line fix
+        recommending `ceil(typical * 1.5)`.
+      - typical * 1.0 ≤ timeout < typical * 1.5 → INFO "tight
+        headroom".
+      - timeout ≥ typical * 1.5 → INFO "comfortable headroom".
+
+    WARN (not FAIL) per goal.md L184-186: operator authority
+    preserved; doctor warns, doesn't refuse to run.
+    """
+    res = AuditResult()
+    events_file = state_dir / EVENTS_FILE
+    timeout = int(cfg.verify_timeout_s)
+    durations, sample_days = _iter_verify_passed_durations(
+        events_file,
+        window_days=_VERIFY_TIMEOUT_AUDIT_WINDOW_DAYS,
+        max_samples=_VERIFY_TIMEOUT_AUDIT_MAX_SAMPLES,
+    )
+    n = len(durations)
+    if n < _VERIFY_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES:
+        res.add(
+            "INFO",
+            f"insufficient data to assess `AP2_VERIFY_TIMEOUT_S` "
+            f"headroom (n={n} successful verify samples; need "
+            f">={_VERIFY_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES})",
+        )
+        return res
+
+    # Worst-case successful run is what blows up the timeout. Don't use
+    # mean/median — the P100 matters here, not central tendency.
+    typical = max(durations)
+    if timeout < typical * _VERIFY_TIMEOUT_AUDIT_WARN_RATIO:
+        recommended = int(math.ceil(typical * _VERIFY_TIMEOUT_AUDIT_FIX_MULT))
+        res.add(
+            "WARN",
+            f"AP2_VERIFY_TIMEOUT_S={timeout}s is below observed-"
+            f"typical successful verify duration ({typical:.0f}s, "
+            f"n={n} samples over {sample_days} days); recommend "
+            f"`export AP2_VERIFY_TIMEOUT_S={recommended}` and "
+            f"`ap2 unfreeze TB-N` for any 600s-timeout-shape Frozen "
+            f"tasks.",
+        )
+        return res
+
+    if timeout < typical * _VERIFY_TIMEOUT_AUDIT_INFO_RATIO:
+        # "Tight" band — operator survived the worst case but margin is
+        # below the recommended 1.5× safety buffer. INFO, not WARN: no
+        # active failure to surface, just a nudge.
+        headroom_pct = (timeout / typical - 1.0) * 100.0
+        res.add(
+            "INFO",
+            f"AP2_VERIFY_TIMEOUT_S={timeout}s has {headroom_pct:.0f}% "
+            f"headroom over recent verifies (observed-typical "
+            f"{typical:.0f}s, n={n} samples over {sample_days} days) "
+            f"— consider bumping for safety margin.",
+        )
+        return res
+
+    res.add(
+        "INFO",
+        f"AP2_VERIFY_TIMEOUT_S={timeout}s has comfortable headroom "
+        f"over observed-typical {typical:.0f}s (n={n} samples over "
+        f"{sample_days} days).",
+    )
+    return res
+
+
+def diagnose(
+    project_root: Path,
+    user: str = DEFAULT_USER,
+    cfg: Config | None = None,
+) -> DoctorReport:
     report = DoctorReport()
 
     report.sections.append(("project skeleton", _project_init_state(project_root)))
     report.sections.append(("verify gate", _verify_gate_state()))
+    # TB-252: workload-relative timeout fit. Section sits next to the
+    # static "verify gate" config check so the operator sees both the
+    # gate's command (what runs) and the gate's timeout headroom (how
+    # long it has to run) as a paired block. `cfg` is optional for
+    # backward-compat with legacy test fixtures; when absent we
+    # synthesize a minimal cfg from the project root + env so the
+    # audit still runs against today's `AP2_VERIFY_TIMEOUT_S`.
+    if cfg is None:
+        cfg_for_audit = Config.load(project_root)
+    else:
+        cfg_for_audit = cfg
+    report.sections.append((
+        "verify timeout headroom",
+        verify_timeout_audit(project_root, cfg_for_audit),
+    ))
     report.sections.append(("auto-approve safety floor", auto_approve_audit()))
     report.sections.append(("auto-unfreeze safety floor", auto_unfreeze_audit()))
     report.sections.append((f"sandbox user ({user})", user_audit(user)))

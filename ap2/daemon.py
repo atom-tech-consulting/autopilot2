@@ -509,6 +509,24 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             )
             final_status = "verification_failed"
         else:
+            # TB-252: emit a `verify_passed` audit event on successful
+            # project-wide verify so the doctor's `verify_timeout_audit`
+            # has a per-run duration signal to size `AP2_VERIFY_TIMEOUT_S`
+            # against. Mirror of `verification_failed` payload shape
+            # (task, command, exit_code, duration_s) so events.jsonl
+            # carries the same fields for both terminal paths; the
+            # difference is only the type discriminator + the
+            # `passed=True` invariant. Skipped when the gate is
+            # unconfigured (`verify_res is None`).
+            if verify_res is not None:
+                events.append(
+                    cfg.events_file,
+                    "verify_passed",
+                    task=task.id,
+                    command=verify_res.command,
+                    exit_code=verify_res.exit_code,
+                    duration_s=round(verify_res.duration_s, 2),
+                )
             # Per-task verification (TB-69): run the briefing's `## Verification`
             # bullets after the project-wide gate (TB-66) but before
             # move_to_complete. Skip when no briefing or no section.
@@ -1821,6 +1839,22 @@ async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
             )
             final_status = "verification_failed"
         else:
+            # TB-252: same `verify_passed` audit emission as the
+            # synchronous path above — gives the doctor's
+            # `verify_timeout_audit` a duration signal from the
+            # pipeline-pending verify path too. Carries `source` so
+            # the audit can distinguish path-of-origin if needed
+            # (today the audit aggregates both).
+            if verify_res is not None:
+                events.append(
+                    cfg.events_file,
+                    "verify_passed",
+                    task=task.id,
+                    source="pipeline_pending",
+                    command=verify_res.command,
+                    exit_code=verify_res.exit_code,
+                    duration_s=round(verify_res.duration_s, 2),
+                )
             per_verdict = await _maybe_per_task_verify(cfg, sdk, task)
             if per_verdict is not None and per_verdict.overall == "fail":
                 events.append(

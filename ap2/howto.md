@@ -842,7 +842,12 @@ seeding of `cron.yaml` from `cron.default.yaml`), `ideation_empty_board`
 Per-run cost/usage: `task_run_usage` (per task agent run, TB-180),
 `control_run_usage` (per cron / ideation / MM-handler run, TB-179),
 `judge_call` (per per-task-verifier prose-bullet judge invocation,
-TB-69 + TB-181).
+TB-69 + TB-181). Verifier per-run wall-clock: `verify_passed` (TB-252
+— project-wide `AP2_VERIFY_CMD` ran to completion AND exited zero;
+payload mirrors `verification_failed` shape (task, command,
+exit_code, duration_s); consumed by `verify_timeout_audit` to size
+`AP2_VERIFY_TIMEOUT_S` against observed-typical successful run
+duration).
 
 **Failure.** `task_error`, `task_timeout`, `task_state_violation` (TB-110
 post-hoc fenced-file check tripped), `task_rollback` (TB-110
@@ -1036,6 +1041,10 @@ fails CI if a new knob is added and not listed here):
 - `AP2_VERIFY_CMD` — project-wide regression gate (e.g.
   `uv run pytest -q`). Unset = no project-wide gate.
 - `AP2_VERIFY_TIMEOUT_S` (600) — timeout for the project-wide gate.
+  `ap2 doctor` warns when set below observed-typical successful verify
+  duration (TB-252; reads `verify_passed` events for the last 7 days
+  or 20 samples, whichever is larger; uses `max()` of durations so the
+  worst-case successful run sizes the recommendation).
 
 **Briefing validator (LLM-judge dependency coherence, TB-235).** Check
 #7 in `ap2/tools.py::_validate_briefing_structure` runs a Haiku-4.5
