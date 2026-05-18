@@ -142,3 +142,10 @@ Operator can scrape this for external dashboards or use it in scripts; the HTML 
 - WebSocket / live-updating — recompute-on-refresh is sufficient.
 - Backfilling pre-event-stream historical data — events.jsonl only.
 - Cross-project aggregation — single-project model per goal.md non-goals.
+## Attempts
+
+### 2026-05-18 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `[ "$(grep -cE 'window' ap2/automation_status.py ap2/automation_stats.py 2>/dev/null)" -ge 3 ]` — at least 3 mentions of
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260518T172430Z-TB-255.prompt.md`, `stream: .cc-autopilot/debug/20260518T172430Z-TB-255.stream.jsonl`, `messages: .cc-autopilot/debug/20260518T172430Z-TB-255.messages.jsonl`
