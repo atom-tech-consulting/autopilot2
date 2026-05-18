@@ -761,3 +761,9 @@
 - **Summary:** Previously committed in 891c406 (TB-255: stats dashboard at /stats + /stats.json). Verified against the updated briefing: `uv run pytest -q ap2/tests/test_stats_dashboard.py` 13/13 pass, `uv run pytest -q ap2/tests/` 1785/1785 pass, all 6 shell grep bullets exit 0 — including the operator-patched `grep -hE 'window' ... | wc -l >= 3` bullet which now returns 144 (well above the threshold); the prior judge run already passed all 3 prose bullets (no `<script>` in /stats; JSON top-level keys {window, computed_at, tasks, verifier, ideation, cron}; window-boundary edge case documented in `_build_attempts_histogram` docstring). The sole prior-run blocker was the briefing-shape bug in the window-mention bullet (`grep -cE` over multiple files emits `path:N` lines that fail `[ ... -ge 3 ]`); the operator's update to `grep -hE | wc -l` resolves it without code changes.
 - **Files:** ap2/automation_stats.py, ap2/web.py, ap2/howto.md, ap2/tests/test_stats_dashboard.py
 - **Tests:** pass
+
+## [2026-05-18] TB-256: Fix `_render_automation_card` in `web.py` — mirror TB-250's three-state rendering on the web home (auto-approve OFF + activity → renders "disabled", not "enabled")
+- **Commit:** `95eb6e8`
+- **Summary:** TB-256: split `_render_automation_card` body into three explicit branches (enabled / paused / disabled-with-activity) mirroring TB-250's CLI fix; added `is-disabled-but-active` CSS klass (grey-tinted) so web home no longer falsely renders "enabled — circuit healthy" when `AP2_AUTO_APPROVE` is off but validator-judge counters are non-zero; new regression-pin test module covers all 4 states; full suite 1789 passed.
+- **Files:** ap2/web.py, ap2/tests/test_tb_web_automation_card_rendering.py
+- **Tests:** pass
