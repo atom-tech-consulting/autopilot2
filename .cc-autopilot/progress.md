@@ -743,3 +743,9 @@
 - **Summary:** Previously committed in 64e760b (TB-247: transplant TB-236 prompt+dump+event pattern onto validator-judge). Verified completeness: ran `uv run pytest -q ap2/tests/test_tb247_validator_judge_observability.py` (20 passed) and `uv run pytest -q ap2/tests/` (1772 passed in 91.85s); all briefing grep pins present in ap2/tools.py ("JSON object only", "200 characters", "validator-judge-response", "debug_path", "parse_error", "TB-247"); test module exists on disk. Earlier verification_failed attempts (2026-05-17) were due to the now-resolved TB-249 SDK-arg + TB-254 conftest-shield test-suite timing regression, not the TB-247 work itself.
 - **Files:** ap2/tools.py, ap2/tests/test_tb247_validator_judge_observability.py
 - **Tests:** pass
+
+## [2026-05-18] TB-249: Fix TB-235 validator-judge: `extra_args={"max-tokens": ...}` is rejected by SDK; replace with valid budget control or drop
+- **Commit:** `11898cf`
+- **Summary:** Previously committed in 11898cf: TB-249 validator-judge SDK arg fix is fully in place — `extra_args={"max-tokens": ...}` removed from `_judge_dep_coherence_default`, `max_turns=2` wired with `AP2_VALIDATOR_JUDGE_MAX_TURNS` (default 2) as canonical knob and `AP2_VALIDATOR_JUDGE_MAX_TOKENS` kept as deprecated alias (ceiling-capped at 5, one-shot `validator_judge_deprecated_knob` event), howto.md updated, dedicated tests + real-SDK smoke added. Verified completeness: all 6 briefing grep checks pass (no `max-tokens` literal; `max_turns=` present at tools.py:1006; `AP2_VALIDATOR_JUDGE_MAX_TURNS` in both tools.py and howto.md; `validator_judge_deprecated_knob` event emitted); `uv run pytest -q ap2/tests/` = 1772 passed; ap2 status shows `validator-judge: 0 fail | 3 timeout (24h)` confirming the fail-count regression is closed.
+- **Files:** ap2/tools.py, ap2/howto.md, ap2/tests/test_tb_validator_judge_sdk_args.py, ap2/tests/test_dep_validator_judge.py, ap2/tests/smoke/test_validator_judge_real_sdk.py
+- **Tests:** pass
