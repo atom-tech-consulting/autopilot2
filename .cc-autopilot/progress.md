@@ -767,3 +767,9 @@
 - **Summary:** TB-256: split `_render_automation_card` body into three explicit branches (enabled / paused / disabled-with-activity) mirroring TB-250's CLI fix; added `is-disabled-but-active` CSS klass (grey-tinted) so web home no longer falsely renders "enabled — circuit healthy" when `AP2_AUTO_APPROVE` is off but validator-judge counters are non-zero; new regression-pin test module covers all 4 states; full suite 1789 passed.
 - **Files:** ap2/web.py, ap2/tests/test_tb_web_automation_card_rendering.py
 - **Tests:** pass
+
+## [2026-05-18] TB-257: Investigate validator-judge dep-coherence timeout (6 events / 25h, 100% fail-open on operator queue-appends); produce categorized investigation artifact at `.cc-autopilot/insights/` (TB-253-shape)
+- **Commit:** `f5215c4`
+- **Summary:** TB-257: wrote TB-253-shape investigation artifact at .cc-autopilot/insights/validator-judge-timeout-2026-05-18.md enumerating 8 validator_judge_timeout events (last 7d, 6 in trailing 25h) cross-referenced with triggering operator-queue op + briefing byte size; manual 3x measurement against _judge_dep_coherence_default shows judge succeeds at 17.6-46.8s wall-clock per call so the 15s default + 5s grace ceiling (ap2/tools.py:670,1050) sits below median completion time of the smallest briefing measured — dominant factor categorized as `timeout-too-tight`, secondary `prompt-too-heavy`, with `max_turns-too-tight`/`sdk-cold-start`/`network-flake` explicitly ruled out with data per category; added ap2/tests/test_tb256_validator_judge_timeout_artifact.py (9 checks, TB-253 mirror) pinning file existence + YAML front-matter parse + all 6 category labels + ≥5 ISO-timestamped table rows; 1798 tests pass; no production code touched.
+- **Files:** .cc-autopilot/insights/validator-judge-timeout-2026-05-18.md, ap2/tests/test_tb256_validator_judge_timeout_artifact.py
+- **Tests:** pass
