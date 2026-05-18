@@ -8,7 +8,7 @@
 
 ## Backlog
 
-- [ ] **TB-255** **Add stats dashboard at `/stats` (HTML) + `/stats.json` (JSON) — task / bullet / ideation timing + turn + attempt aggregates from events.jsonl** `#autopilot` `#web` `#observability` `#operator-surface` `#cli` `#regression-pin` `@blocked:review` [→ brief](.cc-autopilot/tasks/add-stats-dashboard-at-stats-html-stats.md)
+- [ ] **TB-255** **Add stats dashboard at `/stats` (HTML) + `/stats.json` (JSON) — task / bullet / ideation timing + turn + attempt aggregates from events.jsonl** `#autopilot` `#web` `#observability` `#operator-surface` `#cli` `#regression-pin` [→ brief](.cc-autopilot/tasks/add-stats-dashboard-at-stats-html-stats.md)
 
 ## Pipeline Pending
 
