@@ -14,7 +14,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import doctor, events, rollback, sandbox
+from . import audit, doctor, events, rollback, sandbox
 from ap2._shared import read_pid, short
 from .board import Board, _norm_tag, board_file_lock
 from .config import Config
@@ -1259,6 +1259,258 @@ def cmd_classify(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def _cursor_label(cursor: str | None) -> str:
+    """Human-readable cursor for the `N unreviewed since <cursor>` line."""
+    return cursor if cursor else "the beginning of time"
+
+
+def cmd_audit(cfg: Config, args: argparse.Namespace) -> int:
+    """Retrospective audit of unreviewed shipped tasks (TB-248).
+
+    Default invocation lists every unreviewed Complete + Frozen task
+    since the most recent `ran audit (...)` line in operator_log.md.
+    `--interactive` walks the list one task at a time and prompts for
+    `[c]lassify | [s]kip | [n]ext | [q]uit`. `--json` emits the same
+    data as a machine-readable list. `--since <iso-date>` overrides the
+    cursor; `--frozen-only` / `--auto-approved-only` filter the shape.
+
+    State derivation is grep-only over `.cc-autopilot/operator_log.md`
+    — no new state file is introduced. The audit cursor is the most
+    recent `<ts> — ran audit (...)` line; the reviewed set is the
+    union of `classified TB-N` / `audit-skipped TB-N` / `rejected
+    TB-N` lines.
+
+    The command WRITES nothing to disk directly. The cursor update
+    (`ran audit (...)`) is queued via the existing `ack` op-shape; the
+    `[s]kip` action queues via the new `audit_skip` op-shape (TB-248);
+    the `[c]lassify` action queues via the existing `classify` op-shape
+    by reusing `cmd_classify`'s handler. All three writes serialize
+    through `do_operator_queue_append` so the daemon's drain stays the
+    single owner of operator_log.md writes.
+
+    Rollback as an interactive-prompt action is intentionally out of
+    scope per the briefing (a follow-up TB will decide between
+    walk-back-N / rollback-this-TB / revert-and-classify shapes). The
+    operator can still `ap2 rollback` outside the audit walk.
+    """
+    cursor = args.since if args.since else audit.parse_audit_cursor(cfg)
+    rows = audit.list_unreviewed(
+        cfg,
+        since=args.since,
+        frozen_only=bool(args.frozen_only),
+        auto_approved_only=bool(args.auto_approved_only),
+    )
+
+    if args.json:
+        # Machine-readable shape. Mirrors `UnreviewedTask`'s dataclass
+        # fields verbatim so a downstream dashboard tool can `.task_id`
+        # / `.auto_approved` / etc. without translation. The cursor +
+        # filter context goes alongside so the consumer doesn't have to
+        # re-derive them.
+        payload = {
+            "cursor": cursor or "",
+            "filter": {
+                "frozen_only": bool(args.frozen_only),
+                "auto_approved_only": bool(args.auto_approved_only),
+                "since_override": bool(args.since),
+            },
+            "unreviewed": [
+                {
+                    "task_id": r.task_id,
+                    "status": r.status,
+                    "commit": r.commit,
+                    "auto_approved": r.auto_approved,
+                    "summary": r.summary,
+                    "completed_at": r.completed_at,
+                    "briefing_path": r.briefing_path,
+                }
+                for r in rows
+            ],
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    if not rows:
+        print(
+            f"0 unreviewed since {_cursor_label(cursor)}; nothing to review"
+        )
+        _queue_audit_run_cursor(cfg, len(rows))
+        return 0
+
+    if not args.interactive:
+        print(audit.format_table(rows))
+        print()
+        print(
+            f"{len(rows)} unreviewed since {_cursor_label(cursor)}; "
+            f"run `ap2 audit --interactive` to walk through"
+        )
+        _queue_audit_run_cursor(cfg, len(rows))
+        return 0
+
+    # --interactive: per-task walkthrough.
+    reviewed_n = 0
+    skipped_n = 0
+    deferred_n = 0
+    for i, r in enumerate(rows, 1):
+        print()
+        print(f"=== [{i}/{len(rows)}] {r.task_id} ({r.status}) ===")
+        if r.completed_at:
+            print(f"completed_at:  {r.completed_at}")
+        if r.commit:
+            print(f"commit:        {r.commit}")
+        print(f"auto_approved: {'yes' if r.auto_approved else 'no'}")
+        if r.briefing_path:
+            print(f"briefing:      {r.briefing_path}")
+        if r.summary:
+            print(f"summary:       {r.summary}")
+        print()
+        choice = _prompt_audit_action()
+        if choice == "q":
+            break
+        if choice == "n":
+            deferred_n += 1
+            continue
+        if choice == "s":
+            reason = input(f"  skip reason for {r.task_id} (optional): ").strip()
+            res = tools.do_operator_queue_append(
+                cfg,
+                {
+                    "op": "audit_skip",
+                    "task_id": r.task_id,
+                    "reason": reason,
+                },
+            )
+            if res.get("isError"):
+                print(
+                    f"  ! queue-append failed: "
+                    f"{res['content'][0]['text']}",
+                    file=sys.stderr,
+                )
+                # Don't bump the counter on failure — operator can
+                # re-decide next walk.
+                continue
+            skipped_n += 1
+            print(f"  queued audit_skip {r.task_id}")
+            continue
+        if choice == "c":
+            verdict = _prompt_impact_verdict()
+            if verdict is None:
+                # Invalid input: treat as "[n]ext", not a hard exit.
+                deferred_n += 1
+                continue
+            reason = input(
+                f"  classify reason for {r.task_id} (optional): "
+            ).strip()
+            res = tools.do_operator_queue_append(
+                cfg,
+                {
+                    "op": "classify",
+                    "task_id": r.task_id,
+                    "verdict": verdict,
+                    "reason": reason,
+                },
+            )
+            if res.get("isError"):
+                print(
+                    f"  ! queue-append failed: "
+                    f"{res['content'][0]['text']}",
+                    file=sys.stderr,
+                )
+                continue
+            reviewed_n += 1
+            print(
+                f"  queued classify {r.task_id} impact={verdict}"
+            )
+            continue
+        # Any other key: treat as next.
+        deferred_n += 1
+
+    # End-of-walk cursor line. Captures the per-walk verb tallies so
+    # operator_log.md tells the future audit what happened in this
+    # session without re-grepping the per-op lines.
+    print()
+    print(
+        f"audit walk complete: reviewed {reviewed_n}, "
+        f"skipped {skipped_n}, deferred {deferred_n}"
+    )
+    _queue_audit_run_cursor(
+        cfg,
+        len(rows),
+        reviewed=reviewed_n,
+        skipped=skipped_n,
+        deferred=deferred_n,
+    )
+    return 0
+
+
+def _prompt_audit_action() -> str:
+    """Return the single-letter action (`c` / `s` / `n` / `q`).
+
+    Anything else is treated as `n` (next) by the caller — defensive
+    against accidental enters / typos so an interactive session
+    doesn't crash the walk.
+    """
+    try:
+        raw = input("[c]lassify | [s]kip | [n]ext | [q]uit > ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return "q"
+    return raw[:1] if raw else "n"
+
+
+def _prompt_impact_verdict() -> str | None:
+    """Prompt for one of `IMPACT_VERDICTS`. Returns None on invalid input
+    so the caller can treat it as "skip to next without recording."
+    """
+    verdicts = list(tools.IMPACT_VERDICTS)
+    print(f"  impact verdicts: {', '.join(verdicts)}")
+    try:
+        raw = input("  verdict > ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if raw in verdicts:
+        return raw
+    print(f"  ! unknown verdict {raw!r}; skipping (no record written)",
+          file=sys.stderr)
+    return None
+
+
+def _queue_audit_run_cursor(
+    cfg: Config,
+    unreviewed_count: int,
+    *,
+    reviewed: int | None = None,
+    skipped: int | None = None,
+    deferred: int | None = None,
+) -> None:
+    """Queue the `ran audit (...)` cursor line via the existing `ack`
+    op-shape so the next `ap2 audit` invocation's cursor advances past
+    this walk's completion timestamp.
+
+    Per the briefing's Out-of-scope §7, we deliberately do NOT add a
+    distinct `audit_run` op-shape — the `ack` op's free-form note
+    field carries the structured `ran audit (...)` body. The audit
+    cursor regex (`_RAN_AUDIT_RE` in `ap2/audit.py`) matches the
+    operator_log.md line the `ack` drain produces.
+    """
+    if reviewed is not None:
+        note = (
+            f"ran audit (reviewed {reviewed}, "
+            f"skipped {skipped or 0}, "
+            f"deferred {deferred or 0})"
+        )
+    else:
+        note = f"ran audit ({unreviewed_count} unreviewed)"
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "ack", "note": note, "task_id": ""}
+    )
+    if res.get("isError"):
+        print(
+            f"warning: audit cursor write failed: "
+            f"{res['content'][0]['text']}",
+            file=sys.stderr,
+        )
+
+
 def cmd_ideate(cfg: Config, args: argparse.Namespace) -> int:
     """Manually trigger an ideation pass on the daemon's next tick (TB-159).
 
@@ -2028,6 +2280,73 @@ def build_parser() -> argparse.ArgumentParser:
              "converts it into a learnable signal.",
     )
     s.set_defaults(func=cmd_classify)
+
+    s = sub.add_parser(
+        "audit",
+        help="retrospective review of unreviewed Complete + Frozen "
+             "tasks since the last `ap2 audit` cursor (TB-248). Default "
+             "prints a table; `--interactive` walks the list one task "
+             "at a time with [c]lassify / [s]kip / [n]ext / [q]uit "
+             "prompts. State derives from `operator_log.md` grep "
+             "(`classified TB-N` / `audit-skipped TB-N` / `rejected "
+             "TB-N` reviewed-set + `ran audit (...)` cursor); no new "
+             "state file. Closes the retrospective review surface gap "
+             "the auto-approve path opens — under `AP2_AUTO_APPROVE=1` "
+             "this is the operator's ONLY judgment surface, so pair "
+             "with `--auto-approved-only` for the after-walk-away "
+             "review workflow.",
+    )
+    s.add_argument(
+        "--interactive",
+        action="store_true",
+        help="walk through each unreviewed task one at a time with a "
+             "[c]lassify / [s]kip / [n]ext / [q]uit prompt. `c` "
+             "queues `ap2 classify` (asks for verdict + reason); `s` "
+             "queues an `audit_skip` op (asks for an optional reason); "
+             "`n` advances without recording; `q` exits and records a "
+             "`ran audit (reviewed M, skipped K, deferred L)` cursor "
+             "line. Rollback as an in-walk action is deliberately "
+             "out-of-scope this iteration — use `ap2 rollback` "
+             "outside the walk if needed.",
+    )
+    s.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the unreviewed list as JSON (for scripting / "
+             "external dashboards consuming `ap2 audit --json`). "
+             "Mirrors the table columns plus a `cursor` + `filter` "
+             "context block.",
+    )
+    s.add_argument(
+        "--since",
+        default=None,
+        metavar="ISO-DATE",
+        help="override the natural audit cursor — useful for "
+             "re-reviewing a window (e.g. `--since 2026-04-01T00:00:00Z` "
+             "to revisit last month). When omitted, the most recent "
+             "`<ts> — ran audit (...)` line in operator_log.md is "
+             "used; when no such line exists, all shipped tasks are "
+             "listed.",
+    )
+    grp = s.add_mutually_exclusive_group()
+    grp.add_argument(
+        "--frozen-only",
+        action="store_true",
+        help="restrict the list to Frozen tasks (operator triaging the "
+             "freeze pile — Frozen tasks are the highest-signal review "
+             "candidates because they've already cost agent attempts).",
+    )
+    grp.add_argument(
+        "--auto-approved-only",
+        action="store_true",
+        help="restrict the list to tasks the daemon auto-promoted "
+             "via the `AP2_AUTO_APPROVE` path (identified by an "
+             "`auto_approved` event in events.jsonl). The natural "
+             "filter for the after-walk-away review workflow: shows "
+             "what shipped without operator-in-the-loop review at "
+             "dispatch time.",
+    )
+    s.set_defaults(func=cmd_audit)
 
     s = sub.add_parser(
         "ideate",

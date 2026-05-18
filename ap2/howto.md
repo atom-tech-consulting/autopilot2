@@ -619,6 +619,7 @@ never the operator.
 | `ap2 delete TB-N [-f]` | Permanently remove a task from the board (row + briefing file) — emits `task_deleted` for audit. | Refuses Active/Ready without `--force`. Use `ap2 reject` instead for ideation proposals still gated by `@blocked:review`, so the rejection reason feeds ideation Step 0's "don't re-propose" learning. |
 | `ap2 reject TB-N [--reason TEXT]` | Reject an ideation-proposed Backlog task (TB-152): drops the row + briefing AND logs the reason. | Writes `rejected ideation proposal → TB-N (<title>): <reason>` to `operator_log.md`; the reason becomes a learnable signal for the next ideation cycle, and `(no reason given)` is itself a (weak) signal. |
 | `ap2 classify TB-N --impact VERDICT [--reason TEXT]` | Record the operator's retrospective impact verdict (`advanced-goal` / `pro-forma` / `unclear`) on a shipped proposal (TB-189). | Captures whether the task substantively moved the goal forward or merely satisfied validators (goal.md L66-76's failure mode); reasons feed TB-188 per-proposal records and `operator_log.md` so future ideation cycles can learn which proposal shapes actually pay off. |
+| `ap2 audit [--interactive] [--json] [--since ISO] [--frozen-only \| --auto-approved-only]` | Retrospective walk through unreviewed Complete + Frozen tasks since the last `ap2 audit` cursor (TB-248). | The "I just came back from a week away" verb under `AP2_AUTO_APPROVE=1` — closes the retrospective review surface gap auto-approve opens. State derivation is grep over `operator_log.md` (no new state file); `--interactive` walks one task at a time with `[c]lassify / [s]kip / [n]ext / [q]uit` prompts. See `## Retrospective audit workflow` below. |
 | `ap2 ack NOTE [-t TB-N]` | Record an out-of-band operator decision in `operator_log.md` so ideation stops re-proposing actions whose effects aren't filesystem-visible (TB-106). | Use for "I already decided X out-of-band" announcements and for clearing decisions-needed nudges the daemon keeps surfacing. |
 | `ap2 approve TB-N` | Approve an ideation-proposed task (TB-121) — strips its `@blocked:review` codespan so the next tick auto-promotes it out of Backlog. | The thumbs-up half of the `approve` / `reject` pair on freshly-ideated proposals; refuses if the task isn't on the board at all. |
 | `ap2 unfreeze TB-N` | Move a Frozen task back to Backlog and clear its retry counter. | Run after fixing the underlying blocker (flaky test, missing dep); refuses if the task isn't currently Frozen so you can't accidentally reset a healthy task. |
@@ -641,6 +642,128 @@ never the operator.
 | `ap2 sandbox install-channel PROJECT CHANNEL [--user U]` | Resolve a Mattermost channel name to an ID and write `AP2_MM_CHANNELS` into `<project>/.cc-autopilot/env`. | Run after `project-setup` if you skipped `--mm-channel` then; idempotent overwrite. |
 | `ap2 sandbox project-audit PATH [--user U]` | Verify an isolated project clone is well-formed — ownership, git identity, env file. | The diagnostic for "did `project-setup` finish correctly?" — catches half-completed setups before they confuse `ap2 doctor` later. |
 | `ap2 sandbox sync-skills [--apply] [--dest DIR]` | Sync `<repo>/skills/*` into `$HOME/.claude/skills/` (TB-140). | Default is a dry-run drift summary; pass `--apply` to actually copy. Run after editing a skill in the repo if you want the change live for the sandbox user's interactive Claude sessions. |
+
+## Retrospective audit workflow
+
+The `ap2 audit` verb (TB-248) is the operator's retrospective review
+surface — the "I just came back from a week of unattended operation,
+what shipped and what's worth a verdict?" path. It's distinct from
+queue-time approval (`ap2 approve` / `ap2 reject` for ideation
+proposals), distinct from per-task classification (`ap2 classify` for
+shipped-task impact verdicts), and complementary to both: `ap2 audit`
+surfaces the list of unreviewed-shipped tasks since the last walk and
+routes per-task decisions back through those existing verbs.
+
+**When to reach for it.** Under `AP2_AUTO_APPROVE=1` (the focus item's
+unblock-condition for the walk-away promise), every auto-approved task
+ships without operator-in-the-loop review at dispatch time, so
+retrospective review is the operator's ONLY judgment surface. Without
+`ap2 audit`, the surface is fragmented across `ap2 status`,
+`ap2 logs --since`, Mattermost scrollback, `git log`, and per-task
+`ap2 classify` invocations — none consolidated; none answering "which
+tasks have I NOT yet reviewed?" directly. `ap2 audit` consolidates the
+five-place pull into one verb with a coherent cursor and reviewed-set.
+
+**Default invocation — the consolidated table.** `ap2 audit` (no
+flags) prints a table of every unreviewed Complete + Frozen task since
+the most recent `<ts> — ran audit (...)` line in operator_log.md, in
+chronological completion order (oldest first). Columns: TB-ID, status,
+commit, auto_approved flag, one-line summary, completed_at. After the
+table the command appends a `ran audit (N unreviewed)` line to
+operator_log.md via the operator queue (the existing `ack` op-shape
+with a structured note — no new op-shape per the briefing's
+op-shape-proliferation guard) so the next invocation's cursor advances
+past this walk's completion timestamp.
+
+**`--interactive` — per-task walkthrough.** Walks the unreviewed list
+one task at a time, displaying the full task summary + auto-approved
+status + briefing path. Per-task prompt:
+
+    [c]lassify | [s]kip | [n]ext | [q]uit
+
+- `c` — sub-prompt for `--impact <verdict>` (must be one of
+  `advanced-goal` / `pro-forma` / `unclear` per `IMPACT_VERDICTS`) +
+  optional reason; queues `ap2 classify` through the operator queue.
+  Reuses the existing TB-189 classify path so the per-proposal record's
+  `impact` block lands alongside the operator_log line.
+- `s` — sub-prompt for an optional skip reason; queues the new
+  `audit_skip` operator-queue op-shape. The drain handler appends
+  `<ts> — audit-skipped TB-N: <reason>` to operator_log.md and emits
+  a `task_audit_skipped` event. Distinct from `classify`: the operator
+  considered the task and chose NOT to record a verdict (vs. the
+  pre-audit "operator hasn't looked yet" state). Future audit walks
+  treat `audit-skipped` as "reviewed" — the task won't re-surface
+  unless the operator explicitly `--since`-rewinds.
+- `n` — advance to next task without recording anything (operator
+  wants to think about this one later; the task stays in the
+  unreviewed set on the next walk).
+- `q` — exit the walk and record a `ran audit (reviewed M, skipped K,
+  deferred L)` cursor line so the next walk's cursor sits at the
+  end-of-walk timestamp.
+
+**Rollback intentionally out-of-scope.** A `[r]ollback` action is
+deliberately NOT in the first iteration — see the briefing's Out-of-
+scope §1 for why (the rollback shape question — walk-back-N vs.
+rollback-this-specific-TB vs. revert-and-classify-as-pro-forma — is
+non-obvious and deserves its own TB after `ap2 audit` lands and
+operator-engagement reveals which shape is wanted). The operator can
+still `ap2 rollback` outside the audit walk; the audit just doesn't
+have a one-keystroke shortcut for it yet.
+
+**State derivation (no new state file).** The audit cursor + reviewed-
+set both come from grep over `.cc-autopilot/operator_log.md`:
+
+- **Cursor (last-audit-ts)**: most recent line matching
+  `^- (\S+) — ran audit \(.*\)$`. When no such line exists (first-ever
+  invocation), cursor defaults to the beginning of time — all shipped
+  tasks are listed.
+- **Reviewed set**: union of (a) tasks with a
+  `<ts> — classified TB-N impact=...` line (TB-189 classify writer),
+  (b) tasks with a `<ts> — audit-skipped TB-N: ...` line (TB-248
+  audit-skip writer), (c) tasks with a `<ts> — rejected ideation
+  proposal → TB-N` line (TB-152 reject writer — counted as reviewed
+  because the operator made an explicit decision).
+- **Unreviewed set**: tasks in TASKS.md's Complete + Frozen sections
+  with `task_complete` timestamps strictly greater than the cursor,
+  minus the reviewed set.
+
+The design promise — no new state file — buys two things: (1) no sync
+question between operator_log.md and a hypothetical audit-state
+sidecar (if the sidecar says reviewed but the log doesn't, who wins?),
+and (2) the grep cost is trivial because operator_log.md stays
+single-digit MB at multi-year scale (ideation already reads it every
+cycle).
+
+**Filter flags.**
+
+- `--since <iso-date>` — override the natural cursor. Useful for
+  "re-review tasks from last month" sweeps.
+- `--frozen-only` — restrict to Frozen tasks. Frozen tasks are the
+  highest-signal review candidates (they've already cost agent attempts
+  and operator attention); operator may want to triage the freeze pile
+  separately from the Complete-task review.
+- `--auto-approved-only` — restrict to tasks the daemon auto-promoted
+  via the `AP2_AUTO_APPROVE` path (identified by an `auto_approved`
+  event in events.jsonl). The natural filter for the after-walk-away
+  workflow: shows specifically what shipped without operator review
+  at dispatch time. Pair this with `ap2 audit --interactive
+  --auto-approved-only` for the canonical "I was gone, what did the
+  loop choose to ship?" walk.
+
+**`--json` output.** Machine-readable shape for scripting / external
+dashboards consuming `ap2 audit --json`. Top-level dict with `cursor`
+(the last-audit-ts string), `filter` (which restriction flags were
+active), and `unreviewed` (a list mirroring `UnreviewedTask`'s
+dataclass fields: task_id, status, commit, auto_approved, summary,
+completed_at, briefing_path).
+
+**No direct writes.** `ap2 audit` itself WRITES nothing to disk
+directly — every mutation routes through `do_operator_queue_append`
+(the cursor line via the `ack` op-shape; the `[s]kip` action via the
+new `audit_skip` op-shape; the `[c]lassify` action via the existing
+`classify` op-shape). This preserves the daemon-vs-CLI race
+serialization the operator queue exists for and keeps operator_log.md
+under a single writer at any moment (the drain holds `board_file_lock`).
 
 ## Event schema (the canonical timeline)
 

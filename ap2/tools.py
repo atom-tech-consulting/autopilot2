@@ -2549,6 +2549,24 @@ OPERATOR_QUEUE_OPS = (
     # audit pointer). Mirrors TB-189 (`classify`) / TB-193
     # (`update_goal`) retrofit shape.
     "ack",
+    # TB-248: operator-CLI-only `audit-skip` op recorded during an
+    # `ap2 audit --interactive` walk when the operator wants to mark
+    # a shipped task as "I looked at this but have no verdict to
+    # record right now" without rolling back / classifying. The op
+    # carries `task_id` (required) and `reason` (optional, single-
+    # line). Drain-side handler is metadata-only — no board
+    # mutation — and emits the richer `<ts> — audit-skipped TB-N:
+    # <reason>` line via `_append_operator_audit_line` so the audit
+    # state-derivation grep (the reviewed-set parser in
+    # `ap2/audit.py`) picks it up alongside `classified TB-N` and
+    # `rejected TB-N` entries as a third "operator has weighed in"
+    # signal. Routed through the queue (rather than written
+    # synchronously by the CLI) for the same reason TB-201
+    # retrofitted `ack`: operator_log.md is fenced + protected by
+    # `board_file_lock` at drain time, so a CLI-side mid-task write
+    # would race the daemon's own writes. Symmetric to `ack` /
+    # `classify` / `reject` audit shape.
+    "audit_skip",
 )
 
 
@@ -2873,6 +2891,35 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             return _err("note is required for ack")
         task_id = (args.get("task_id") or "").strip()
         rec_args = {"note": note, "task_id": task_id}
+    elif op == "audit_skip":
+        # TB-248: `[s]kip` action inside `ap2 audit --interactive`.
+        # Metadata-only at drain time — no board mutation; the verb
+        # records "operator considered this task and chose not to
+        # classify right now" so the audit reviewed-set grep
+        # (`ap2/audit.py::parse_reviewed_set`) skips it on the next
+        # `ap2 audit` walk. Snapshot-validate `task_id` is on the
+        # board (Complete + Frozen tasks are the audit targets;
+        # but `find()` matches every section so we don't gate on
+        # section here — operator may legitimately skip a still-
+        # Active task if their audit walk catches it mid-run).
+        # Reason is optional + single-line per TB-134; empty reason
+        # collapses to `(no reason given)` at drain time, mirroring
+        # the reject branch's signal-vs-silence distinction.
+        task_id = (args.get("task_id") or "").strip()
+        if not task_id:
+            return _err("task_id is required for audit_skip")
+        raw_reason = args.get("reason")
+        reason = (raw_reason if raw_reason is not None else "").strip()
+        if reason:
+            err = _validate_single_line("reason", reason)
+            if err:
+                return _err(err)
+        with board_file_lock(cfg.tasks_file):
+            board = Board.load(cfg.tasks_file)
+            loc = board.find(task_id)
+        if loc is None:
+            return _err(f"{task_id} not on board")
+        rec_args = {"task_id": task_id, "reason": reason}
     else:
         task_id = (args.get("task_id") or "").strip()
         if not task_id:
@@ -3607,6 +3654,28 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
         }
         _atomic_write_json(target, record)
         return
+    if op == "audit_skip":
+        # TB-248: drain-side audit-skip. Metadata-only — no board
+        # mutation. The rich `<ts> — audit-skipped TB-N: <reason>`
+        # line is appended by `_append_operator_audit_line`'s
+        # audit_skip branch at end-of-drain (under the same
+        # `board_file_lock` the rest of the drain holds, so a
+        # concurrent reader of operator_log.md never observes a
+        # partial line). Emit a structured `task_audit_skipped`
+        # event so events.jsonl carries the same audit trail shape
+        # as `task_classified` (TB-189) for symmetric downstream
+        # consumption.
+        tid = args.get("task_id", "")
+        if not tid:
+            raise RuntimeError("audit_skip op missing task_id")
+        reason = args.get("reason", "") or ""
+        events.append(
+            cfg.events_file,
+            "task_audit_skipped",
+            task=tid,
+            reason=reason,
+        )
+        return
     if op == "ack":
         # TB-201: drain-side ack. Performs the actual operator_log.md
         # append the pre-TB-201 synchronous `do_operator_log_append`
@@ -3772,6 +3841,21 @@ def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
         c_reason_part = f": {c_reason}" if c_reason else ""
         lines.append(
             f"- {ts} — classified {task} impact={verdict}{c_reason_part}\n"
+        )
+    if op == "audit_skip":
+        # TB-248: in addition to the standard `applied operator-queued
+        # audit_skip → TB-N` audit line above, emit the richer
+        # `<ts> — audit-skipped TB-N: <reason>` line that the audit
+        # state-derivation grep (`ap2/audit.py::parse_reviewed_set`)
+        # reads as the third "operator has weighed in" signal
+        # alongside `classified TB-N` and `rejected TB-N`. Empty
+        # reason collapses to `(no reason given)` so the line is
+        # always a single-shape grep target (the placeholder is
+        # itself a signal — operator skipped without articulating
+        # why; future audit walks can spot the difference).
+        s_reason = (args.get("reason") or "").strip() or "(no reason given)"
+        lines.append(
+            f"- {ts} — audit-skipped {task}: {s_reason}\n"
         )
     with log_path.open("a") as f:
         for line in lines:
