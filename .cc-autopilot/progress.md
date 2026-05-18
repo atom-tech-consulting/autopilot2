@@ -737,3 +737,9 @@
 - **Summary:** Previously committed in fe1dfa6 — verified by reading the diff (TB-246 gate in ap2/ideation.py:825-854 calls goal.roadmap_exhausted, emits ideation_skipped reason=roadmap_complete, calls mark_run; placed AFTER slots check and BEFORE TB-174 focus-exhausted gate; force_ideate docstring enumerates both bypassed gates and body still calls _run_ideation unconditionally; howto.md:1535 cross-references the new gate; test module ap2/tests/test_tb246_ideation_roadmap_complete_gate.py exists with 4 passing cases) and re-running tests: full ap2 suite 1772 passed in 85s, TB-246 module 4/4, TB-174 regression test_ideation_trigger.py 28/28.
 - **Files:** ap2/ideation.py, ap2/howto.md, ap2/tests/test_tb246_ideation_roadmap_complete_gate.py
 - **Tests:** pass
+
+## [2026-05-18] TB-247: TB-236-shape transplant onto validator-judge (`_judge_dep_coherence_default`): tighten strict-JSON prompt + dump full raw response to `.cc-autopilot/debug/` on parse-failure / non-dict branches + enrich `validator_judge_fail` payload with `debug_path` + `parse_error` categorization
+- **Commit:** `64e760b`
+- **Summary:** Previously committed in 64e760b (TB-247: transplant TB-236 prompt+dump+event pattern onto validator-judge). Verified completeness: ran `uv run pytest -q ap2/tests/test_tb247_validator_judge_observability.py` (20 passed) and `uv run pytest -q ap2/tests/` (1772 passed in 91.85s); all briefing grep pins present in ap2/tools.py ("JSON object only", "200 characters", "validator-judge-response", "debug_path", "parse_error", "TB-247"); test module exists on disk. Earlier verification_failed attempts (2026-05-17) were due to the now-resolved TB-249 SDK-arg + TB-254 conftest-shield test-suite timing regression, not the TB-247 work itself.
+- **Files:** ap2/tools.py, ap2/tests/test_tb247_validator_judge_observability.py
+- **Tests:** pass
