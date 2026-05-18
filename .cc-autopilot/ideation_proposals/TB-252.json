@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/ap2-doctor-warns-when-ap2-verify-timeout.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-18T16:19:54Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-17T15:00:28Z",
   "tb_id": "TB-252",
   "why_now": "On 2026-05-17 between 11:30Z and 14:22Z, FIVE consecutive\ntasks (TB-245, TB-246, TB-247, TB-249, TB-250) hit\n`retry_exhausted last_status=verification_failed` with the IDENTICAL\nfingerprint `command=uv run pytest -q ap2/tests/ exit_code=None\nduration_s=600.01` \u2014 the verifier killed the project-wide regression-\npin bullet at exactly the 600s `AP2_VERIFY_TIMEOUT_S` default while\nthe agent's own re-run measures the suite at 1320-1349s (TB-245 +\nTB-250 summaries name the exact figure: \"1734 passed in 1320s\" /\n\"1734 passed in 1349s\"). All 5 task implementations are in HEAD; only\nthe verifier's budget-vs-runtime gap blocks completion. This is\nexactly the \"failure-recovery operator dependency\" cascade goal.md\naxis 2 exists to prevent \u2014 and the existing axis-2 surfaces missed\nit because none of them measure env-knob fitness for current\nworkload. The current focus on end-to-end automation directly fails\nits own delete-test (goal.md L86-88) when this regression goes\nsilent: the walk-away promise breaks the moment a single task hits\nthe timeout. Had this doctor WARN existed, the operator would have\nseen \"AP2_VERIFY_TIMEOUT_S (600s) is below observed-typical successful\nverify duration (1349s); recommend bumping to >=1800s\" before the\ncascade."
