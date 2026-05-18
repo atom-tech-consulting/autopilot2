@@ -725,3 +725,9 @@
 - **Summary:** Expanded IMPACT_VERDICTS to 4 values (added `negative` as the actively-harmful bucket distinct from `pro-forma`'s neutral-no-impact); updated cli help, status renderer (now iterates the tuple), howto.md `## Classify verdicts` section, MM-handler prompt, and tests (parameterized accept-each-verdict, reject-invalid, tuple-length pin, 4-bucket renderer test). Full ap2 suite green (1766 passed in 98s).
 - **Files:** ap2/tools.py, ap2/cli.py, ap2/howto.md, ap2/prompts.py, ap2/tests/test_cli.py, ap2/tests/test_operator_queue.py, ap2/tests/e2e/test_tb189_mm_classify_routing.py
 - **Tests:** pass
+
+## [2026-05-18] TB-252: `ap2 doctor` warns when `AP2_VERIFY_TIMEOUT_S` is configured below the observed-typical successful full-suite `verify_run` duration (TB-234/TB-239-shape preventive surface for axis-2 failure-recovery)
+- **Commit:** `d9e5039`
+- **Summary:** Added verify_timeout_audit to ap2/doctor.py (WARN/INFO bands over max() of recent verify_passed durations; 7-day or 20-sample window), emitted new verify_passed event from daemon.py on successful project-wide verify (sync + pipeline_pending paths), wired the audit into diagnose() directly after the verify-gate section, documented the new event in events.py + howto.md, and added the AP2_VERIFY_TIMEOUT_S doctor cross-reference. 6 new tests pass; full ap2/tests/ suite (1772 tests) green.
+- **Files:** ap2/cli.py, ap2/daemon.py, ap2/doctor.py, ap2/events.py, ap2/howto.md, ap2/tests/test_doctor_verify_timeout.py
+- **Tests:** pass
