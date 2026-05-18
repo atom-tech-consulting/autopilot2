@@ -203,3 +203,81 @@ Re-run cadence: this is a one-shot snapshot. If suite runtime grows
 further the operator runs another TB-253-shaped investigation; the
 2026-05-17 datestamp keeps this artifact useful as a historical
 baseline rather than something that gets overwritten.
+
+## Post-fix measurement (TB-254)
+
+TB-254 landed the smallest-blast-radius fix (Option 1 in the headline
+finding): a new top-level `ap2/tests/conftest.py` that sets
+`AP2_VALIDATOR_JUDGE_DISABLED=1` by default for the unit-test session.
+Re-ran the same command after the fix shipped.
+
+**Suite total: 1743 passed in 91.98s (~1:32).**
+
+Same shape (`uv run pytest -q ap2/tests/ --durations=20`), same HEAD
+tree, same machine. Delta: **-1244s (-93.1%)** vs the 1336.06s baseline
+captured above. The TB-253 projection of "~300-500s shaved" was a
+conservative lower bound; the actual reduction was ~4x larger.
+
+The shield doesn't change test pass/fail outcomes — 1743 passed
+(vs 1734 in the baseline) because the diff also added 3 new
+regression-pin tests in `ap2/tests/test_conftest_judge_shield.py`
+(the conftest's own coverage) plus 1 smoke-test signature change
+(`monkeypatch` parameter added to fix a tangential env-var leak in
+`ap2/tests/smoke/test_validator_judge_real_sdk.py` that was clobbering
+the shield in `AP2_REAL_SDK=1` environments). The same test count
++ all-green outcome was the briefing's correctness floor.
+
+### Post-fix top-20 (durations from the post-fix run)
+
+```
+13.66s call     ap2/tests/smoke/test_pipeline_task_start_real_sdk.py::test_pipeline_task_start_round_trip_via_real_sdk
+11.93s call     ap2/tests/smoke/test_cron_propose_real_sdk.py::test_cron_propose_round_trip_via_real_sdk
+ 9.92s call     ap2/tests/smoke/test_prose_judge_real_sdk.py::test_prose_judge_fails_obvious_fail_case
+ 8.73s call     ap2/tests/smoke/test_report_result_real_sdk.py::test_report_result_round_trip_via_real_sdk
+ 7.02s call     ap2/tests/smoke/test_prose_judge_real_sdk.py::test_prose_judge_passes_obvious_pass_case
+ 5.01s call     ap2/tests/e2e/test_pipeline.py::test_pipeline_task_start_emits_event_no_validation_task
+ 1.28s call     ap2/tests/test_rollback.py::test_list_alive_pipelines_skips_events_before_boundary
+ 1.01s call     ap2/tests/e2e/test_verify.py::test_verify_timeout_treated_as_fail
+ 1.01s call     ap2/tests/test_daemon_recovery.py::test_task_timeout_moves_to_backlog
+ 1.01s call     ap2/tests/test_daemon_recovery.py::test_timeout_appends_attempts_with_debug_paths
+ 1.01s call     ap2/tests/test_daemon_recovery.py::test_task_run_usage_event_on_timeout_uses_stream_incomplete_note
+ 1.00s call     ap2/tests/test_control_run_usage.py::test_ideation_timeout_emits_both_events
+ 1.00s call     ap2/tests/test_control_run_usage.py::test_control_run_usage_event_on_timeout_uses_stream_incomplete_note
+ 0.54s call     ap2/tests/test_web.py::test_serve_async_serves_and_cancels_cleanly
+ 0.52s call     ap2/tests/test_web.py::test_serve_async_auto_enumerates_on_conflict
+ 0.51s call     ap2/tests/e2e/test_concurrent_mm.py::test_mattermost_reply_lands_within_30s_of_mention_during_long_task
+ 0.51s call     ap2/tests/test_daemon_web.py::test_web_loop_auto_enumerates_on_single_port_clash
+ 0.50s call     ap2/tests/test_daemon_web.py::test_web_loop_emits_start_and_stop
+ 0.50s call     ap2/tests/test_web.py::test_serve_async_no_conflict_binds_start_port
+ 0.42s call     ap2/tests/e2e/test_rollback_e2e.py::test_rollback_refuses_non_ancestor_to
+```
+
+What changed in the shape of the top-20:
+
+- **The 18 `add_*`-shape unit tests that dominated the pre-fix top-20
+  are gone.** The shield short-circuits `_check_dependency_coherence`
+  before the SDK call, so each previously-30s row now runs in
+  sub-second time and falls out of the top-20 entirely. Spot-check:
+  `test_operator_queue_append_non_empty_briefing_payload_succeeds`
+  (pre-fix row 1, 37.81s) measured **0.01s** post-fix in a
+  standalone re-run — a ~3800x speedup on that single row.
+- **What's left at the top is essential-slow, not fixable-slow.** Top
+  5 are all `AP2_REAL_SDK=1` smoke tests (real Haiku-4.5 / Sonnet
+  round-trips that genuinely need the wall-clock and are gated to
+  opt-in only — they're skipped in default CI). Next is one e2e
+  pipeline test (subprocess lifecycle), then explicit 1s-budget
+  timeout-behavior pins. None of these have a fixable-slow root
+  cause; they pay the wall-clock for what they're actually testing.
+- **No new outliers introduced by the fix.** The shield is pure
+  subtraction — nothing was added to the test wall-clock budget.
+
+### Implication for the operator
+
+- The 1800s `AP2_VERIFY_TIMEOUT_S` bump (made on 2026-05-17 to absorb
+  the 1336s suite) is now ~19x the typical per-task verification cost.
+  Rolling it back to the original 600s default is a follow-up
+  decision (per TB-254 Scope §7) — that's now headroom rather than
+  required survival.
+- The auto-approve walk-away cost target from goal.md drops in step:
+  ~22min/task pre-fix → ~1.5min/task post-fix. At ~50 tasks/day under
+  auto-approve, that's ~18h/day → ~1.25h/day of CI-equivalent compute.

@@ -69,6 +69,24 @@ from ap2.tests._briefing_fixtures import canonical_briefing
 _CANONICAL = canonical_briefing("TB-300", title="dep-judge target")
 
 
+@pytest.fixture(autouse=True)
+def _unshield_validator_judge(monkeypatch):
+    """TB-254: override the top-level `ap2/tests/conftest.py` shield.
+
+    The shield sets `AP2_VALIDATOR_JUDGE_DISABLED=1` for the whole
+    unit-test session so most tests don't accidentally trigger real
+    Haiku-4.5 SDK calls. This module's end-to-end cases call
+    `_validate_briefing_structure` with a `dep_judge_fn` stub and
+    expect the judge stub to fire (so its parse-failure outcomes
+    surface in `validator_judge_fail` event payloads); the shield
+    would short-circuit `_check_dependency_coherence` before the
+    stub ever runs. delenv at test-start lets the stub fire, and
+    monkeypatch restores the shield on teardown so the shield's
+    cross-module guarantee is preserved.
+    """
+    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+
+
 # ---------------------------------------------------------------------------
 # (a) – (d): pure parse + dump function
 # ---------------------------------------------------------------------------

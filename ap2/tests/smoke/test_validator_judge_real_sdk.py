@@ -77,7 +77,7 @@ Trivial smoke target. No design.
 """
 
 
-def test_validator_judge_real_sdk_happy_path(tmp_path):
+def test_validator_judge_real_sdk_happy_path(tmp_path, monkeypatch):
     """Real Claude Haiku-4.5 judge + structurally-valid briefing → no
     fail/timeout events, validator returns None."""
     from ap2 import events, tools
@@ -88,8 +88,16 @@ def test_validator_judge_real_sdk_happy_path(tmp_path):
 
     # Ensure the legacy alias is NOT set; we want the canonical
     # max_turns path to fire.
-    os.environ.pop("AP2_VALIDATOR_JUDGE_MAX_TOKENS", None)
-    os.environ.pop("AP2_VALIDATOR_JUDGE_DISABLED", None)
+    # TB-254: use monkeypatch so the env-var deletions are reverted on
+    # teardown. The pre-TB-254 code used `os.environ.pop` directly,
+    # which permanently clobbered the env var for the rest of the
+    # session — including the `AP2_VALIDATOR_JUDGE_DISABLED=1` shield
+    # set by `ap2/tests/conftest.py`. Under `AP2_REAL_SDK=1` (CI /
+    # dev) the smoke ran early and re-leaked all subsequent unit
+    # tests to real Haiku-4.5 calls. monkeypatch keeps the
+    # short-lived unsets scoped to this one test.
+    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
 
     events_file = tmp_path / "events.jsonl"
     err = tools._validate_briefing_structure(

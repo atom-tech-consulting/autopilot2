@@ -43,11 +43,28 @@ import re
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from ap2 import events, tools
 from ap2.tests._briefing_fixtures import canonical_briefing
 
 
 _CANONICAL = canonical_briefing("TB-301", title="tb-249 regression target")
+
+
+@pytest.fixture(autouse=True)
+def _unshield_validator_judge(monkeypatch):
+    """TB-254: override the top-level `ap2/tests/conftest.py` shield.
+
+    This module's cases exercise the validator's interaction with the
+    judge's SDK kwargs (`max_turns`, deprecated `max-tokens` alias).
+    The shield short-circuits `_check_dependency_coherence` before
+    the judge's kwargs are constructed, so the regression-pins would
+    silently no-op without this fixture. delenv at test-start lets
+    the judge stub fire and inspect what kwargs the validator passed;
+    monkeypatch restores the shield on teardown.
+    """
+    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
 
 
 def _events_file(tmp_path: Path) -> Path:

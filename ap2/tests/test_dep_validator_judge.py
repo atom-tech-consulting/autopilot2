@@ -47,6 +47,25 @@ from ap2.tests._briefing_fixtures import (
 _CANONICAL = canonical_briefing("TB-300", title="dep-judge target")
 
 
+@pytest.fixture(autouse=True)
+def _unshield_validator_judge(monkeypatch):
+    """Override the top-level `ap2/tests/conftest.py` shield (TB-254).
+
+    The shield sets `AP2_VALIDATOR_JUDGE_DISABLED=1` by default for the
+    unit-test session so the >18 tests that exercise `add_*` paths
+    don't dispatch real Haiku-4.5 SDK calls. This module is the
+    intentional-judge-exercising regression-pin for TB-235 check #7,
+    so it MUST run with the shield off — the `dep_judge_fn` stubs
+    only matter if `_check_dependency_coherence` doesn't short-circuit
+    on the env var first. Test (f) below
+    (`test_dep_judge_disabled_skips_check`) re-sets the env var
+    locally to pin the off-switch path; this fixture's `delenv` is
+    safely undone by that test's `monkeypatch.setenv` in monkeypatch's
+    LIFO stack.
+    """
+    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+
+
 def _events_file(tmp_path: Path) -> Path:
     """Return a per-test events file path. No daemon, no Config — we
     just need a writable path so `_check_dependency_coherence`'s
