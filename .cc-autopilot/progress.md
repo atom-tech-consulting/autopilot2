@@ -707,3 +707,9 @@
 - **Summary:** Profiled pytest --durations=20 (1734 tests / 1336s); produced top-20 categorized artifact at .cc-autopilot/insights/test-suite-slowness-2026-05-17.md (19 fixable-slow, 1 candidate-for-removal) + 3 artifact-shape tests at ap2/tests/test_tb_investigate_suite_slow_artifact.py. Headline: 18/20 slowest tests pay 10-18s each for a real validator-judge SDK call because the unit-test files don't set AP2_VALIDATOR_JUDGE_DISABLED=1 the way ap2/tests/e2e/conftest.py does.
 - **Files:** .cc-autopilot/insights/test-suite-slowness-2026-05-17.md, ap2/tests/test_tb_investigate_suite_slow_artifact.py
 - **Tests:** pass
+
+## [2026-05-18] TB-254: Add `ap2/tests/conftest.py` shield: set `AP2_VALIDATOR_JUDGE_DISABLED=1` by default for unit tests (mirror existing e2e shield; TB-253 Option 1)
+- **Commit:** `214f027`
+- **Summary:** Shield added; suite 1336s to 92s post-fix.
+- **Files:** ap2/tests/conftest.py
+- **Tests:** pass
