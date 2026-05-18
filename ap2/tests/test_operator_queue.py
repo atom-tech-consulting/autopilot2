@@ -1906,8 +1906,15 @@ def test_operator_queue_ops_includes_classify():
 def test_impact_verdicts_stable():
     """Pin `IMPACT_VERDICTS` directly — the per-proposal record's
     `impact.verdict` field, the operator_log line shape, and the
-    status counter keys all rely on these literal strings."""
-    assert tools.IMPACT_VERDICTS == ("advanced-goal", "pro-forma", "unclear")
+    status counter keys all rely on these literal strings. TB-251
+    expanded the tuple to 4 values (added `negative` as the actively-
+    harmful bucket distinct from `pro-forma`'s neutral-no-impact)."""
+    assert tools.IMPACT_VERDICTS == (
+        "advanced-goal",
+        "pro-forma",
+        "negative",
+        "unclear",
+    )
 
 
 def test_queue_append_classify_rejects_unknown_verdict(cfg: Config):
@@ -2223,6 +2230,7 @@ def test_classifications_last_30d_by_verdict_aggregates(cfg: Config):
     assert counts == {
         "advanced-goal": 2,
         "pro-forma": 1,
+        "negative": 0,
         "unclear": 0,
     }
 

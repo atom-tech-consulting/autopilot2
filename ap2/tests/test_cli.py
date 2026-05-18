@@ -3143,9 +3143,9 @@ def test_classify_unknown_task_returns_error(tmp_path: Path, capsys):
 
 def test_status_renders_classifications_30d(tmp_path: Path, capsys):
     """Briefing-spec verification: `ap2 status --json` includes
-    `classifications_last_30d_by_verdict` with the three integer keys.
-    Always-present (zeros for fresh projects); populated after a
-    classify lands."""
+    `classifications_last_30d_by_verdict` with the four integer keys
+    (TB-251 added `negative`). Always-present (zeros for fresh
+    projects); populated after a classify lands."""
     from ap2.cli import cmd_status, cmd_classify
     import json as _json
 
@@ -3158,6 +3158,7 @@ def test_status_renders_classifications_30d(tmp_path: Path, capsys):
     assert out["classifications_last_30d_by_verdict"] == {
         "advanced-goal": 0,
         "pro-forma": 0,
+        "negative": 0,
         "unclear": 0,
     }
 
@@ -3180,6 +3181,7 @@ def test_status_renders_classifications_30d(tmp_path: Path, capsys):
     counts = out["classifications_last_30d_by_verdict"]
     assert counts["pro-forma"] == 1
     assert counts["advanced-goal"] == 0
+    assert counts["negative"] == 0
     assert counts["unclear"] == 0
 
 
@@ -3187,9 +3189,12 @@ def test_status_text_renders_classifications_line_when_present(
     tmp_path: Path, capsys,
 ):
     """Text-mode status renders the `classifications last 30d:
-    advanced-goal=<n>, pro-forma=<m>, unclear=<k>` line when at least
-    one classification lives in the window. Empty windows skip the
-    line entirely (no zero-noise on fresh projects)."""
+    advanced-goal=<n>, pro-forma=<m>, negative=<k>, unclear=<j>` line
+    when at least one classification lives in the window. Empty windows
+    skip the line entirely (no zero-noise on fresh projects). TB-251
+    added `negative` as the fourth bucket; the renderer iterates
+    `IMPACT_VERDICTS` so all four bucket counts appear with `=0` for
+    any verdict with no observations."""
     from ap2.cli import cmd_status, cmd_classify
 
     cfg = _project(tmp_path)
@@ -3221,17 +3226,117 @@ def test_status_text_renders_classifications_line_when_present(
     assert "classifications last 30d:" in out
     assert "advanced-goal=1" in out
     assert "pro-forma=1" in out
+    assert "negative=0" in out
     assert "unclear=0" in out
 
 
 def test_impact_verdicts_enum_stable():
     """Briefing-spec pin: the `IMPACT_VERDICTS` tuple is exposed and
-    the three values are exactly what goal.md L61-76 names. Adding
-    values is welcome (one-line tuple edit) but must not silently
-    rename or drop any of the three current values — downstream
+    the four values are exactly what goal.md L61-76 plus TB-251 name.
+    Adding values is welcome (one-line tuple edit) but must not
+    silently rename or drop any of the current values — downstream
     consumers (per-proposal record `impact.verdict`, operator_log
     line shape, status counter keys) rely on the literal strings."""
-    assert tools.IMPACT_VERDICTS == ("advanced-goal", "pro-forma", "unclear")
+    assert tools.IMPACT_VERDICTS == (
+        "advanced-goal",
+        "pro-forma",
+        "negative",
+        "unclear",
+    )
+
+
+def test_impact_verdicts_tuple_length():
+    """TB-251 regression-pin: explicit `len(IMPACT_VERDICTS) == 4`
+    check so an accidental removal in a future refactor (e.g. someone
+    rolling back to the 3-bucket vocabulary) trips a clearly-named
+    test rather than only the broader enum-stable comparison above.
+    Tuple shape is the contract."""
+    assert len(tools.IMPACT_VERDICTS) == 4
+    assert "negative" in tools.IMPACT_VERDICTS
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    ["advanced-goal", "pro-forma", "negative", "unclear"],
+)
+def test_classify_accepts_each_impact_verdict(
+    tmp_path: Path, capsys, verdict: str,
+):
+    """TB-251: each of the 4 verdicts is accepted by `ap2 classify`
+    without validation error — the queue op is generated and the
+    drain handler lands it in operator_log.md. Parameterized so
+    every bucket flows the same path (no special-case for
+    `negative`)."""
+    from ap2.cli import cmd_classify
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    board.add("Complete", task_id="TB-860", title="for verdict gradient")
+    board.save()
+    rc = cmd_classify(
+        cfg,
+        Namespace(task_id="TB-860", impact=verdict, reason=f"checking {verdict}"),
+    )
+    assert rc == 0
+    _drain(cfg)
+    log = (cfg.project_root / ".cc-autopilot" / "operator_log.md").read_text()
+    assert f"classified TB-860 impact={verdict}" in log
+
+
+def test_classify_rejects_invalid_verdict(tmp_path: Path, capsys):
+    """TB-251: an invalid `--impact` value is rejected by argparse
+    (via `choices=`), exits non-zero, and the error names the 4
+    valid choices so the operator sees the full menu in the failure
+    message."""
+    from ap2.cli import build_parser
+
+    cfg = _project(tmp_path)
+    parser = build_parser()
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(
+            [
+                "--project",
+                str(cfg.project_root),
+                "classify",
+                "TB-861",
+                "--impact",
+                "bogus",
+            ]
+        )
+    assert excinfo.value.code != 0
+    err = capsys.readouterr().err
+    # All four valid choices appear in the argparse error message.
+    for v in ("advanced-goal", "pro-forma", "negative", "unclear"):
+        assert v in err
+
+
+def test_classifications_last_30d_renders_all_4_verdicts(
+    tmp_path: Path, capsys,
+):
+    """TB-251: seed events for each of the 4 verdicts; assert the
+    text-mode status line lists all 4 with correct counts. Pins the
+    renderer to iterate `IMPACT_VERDICTS` (so adding a verdict to the
+    tuple flows through without a render edit)."""
+    from ap2.cli import cmd_status, cmd_classify
+
+    cfg = _project(tmp_path)
+    board = Board.load(cfg.tasks_file)
+    for i, _ in enumerate(tools.IMPACT_VERDICTS):
+        board.add("Complete", task_id=f"TB-87{i}", title=f"bucket {i}")
+    board.save()
+    for i, v in enumerate(tools.IMPACT_VERDICTS):
+        cmd_classify(
+            cfg, Namespace(task_id=f"TB-87{i}", impact=v, reason=None),
+        )
+    _drain(cfg)
+    capsys.readouterr()
+
+    rc = cmd_status(cfg, Namespace(json=False))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "classifications last 30d:" in out
+    for v in tools.IMPACT_VERDICTS:
+        assert f"{v}=1" in out
 
 
 # ---------------------------------------------------------------------------

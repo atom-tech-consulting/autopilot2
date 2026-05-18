@@ -618,7 +618,7 @@ never the operator.
 | `ap2 update TB-N [--title T] [--tags CSV] [--blocked CSV] [--description D] [--clear-tags] [--clear-blocked] [--briefing-file PATH] [--force] [--skip-goal-alignment]` | In-place edit a task's board-line fields and/or its briefing file (TB-153). | Routes through the operator queue so the mutation lands at a tick boundary, never mid-task-run; omitted flag = field unchanged. `--force` lets board-line edits land on Active / Pipeline Pending tasks (briefing edits stay hard-refused). |
 | `ap2 delete TB-N [-f]` | Permanently remove a task from the board (row + briefing file) — emits `task_deleted` for audit. | Refuses Active/Ready without `--force`. Use `ap2 reject` instead for ideation proposals still gated by `@blocked:review`, so the rejection reason feeds ideation Step 0's "don't re-propose" learning. |
 | `ap2 reject TB-N [--reason TEXT]` | Reject an ideation-proposed Backlog task (TB-152): drops the row + briefing AND logs the reason. | Writes `rejected ideation proposal → TB-N (<title>): <reason>` to `operator_log.md`; the reason becomes a learnable signal for the next ideation cycle, and `(no reason given)` is itself a (weak) signal. |
-| `ap2 classify TB-N --impact VERDICT [--reason TEXT]` | Record the operator's retrospective impact verdict (`advanced-goal` / `pro-forma` / `unclear`) on a shipped proposal (TB-189). | Captures whether the task substantively moved the goal forward or merely satisfied validators (goal.md L66-76's failure mode); reasons feed TB-188 per-proposal records and `operator_log.md` so future ideation cycles can learn which proposal shapes actually pay off. |
+| `ap2 classify TB-N --impact VERDICT [--reason TEXT]` | Record the operator's retrospective impact verdict (`advanced-goal` / `pro-forma` / `negative` / `unclear`) on a shipped proposal (TB-189 / TB-251). | Captures whether the task substantively moved the goal forward, merely satisfied validators (goal.md L66-76's failure mode), or actively regressed the codebase; reasons feed TB-188 per-proposal records and `operator_log.md` so future ideation cycles can learn which proposal shapes actually pay off (and which to strongly avoid). See `## Classify verdicts` below for the `pro-forma` vs `negative` distinction. |
 | `ap2 audit [--interactive] [--json] [--since ISO] [--frozen-only \| --auto-approved-only]` | Retrospective walk through unreviewed Complete + Frozen tasks since the last `ap2 audit` cursor (TB-248). | The "I just came back from a week away" verb under `AP2_AUTO_APPROVE=1` — closes the retrospective review surface gap auto-approve opens. State derivation is grep over `operator_log.md` (no new state file); `--interactive` walks one task at a time with `[c]lassify / [s]kip / [n]ext / [q]uit` prompts. See `## Retrospective audit workflow` below. |
 | `ap2 ack NOTE [-t TB-N]` | Record an out-of-band operator decision in `operator_log.md` so ideation stops re-proposing actions whose effects aren't filesystem-visible (TB-106). | Use for "I already decided X out-of-band" announcements and for clearing decisions-needed nudges the daemon keeps surfacing. |
 | `ap2 approve TB-N` | Approve an ideation-proposed task (TB-121) — strips its `@blocked:review` codespan so the next tick auto-promotes it out of Backlog. | The thumbs-up half of the `approve` / `reject` pair on freshly-ideated proposals; refuses if the task isn't on the board at all. |
@@ -682,10 +682,13 @@ status + briefing path. Per-task prompt:
     [c]lassify | [s]kip | [n]ext | [q]uit
 
 - `c` — sub-prompt for `--impact <verdict>` (must be one of
-  `advanced-goal` / `pro-forma` / `unclear` per `IMPACT_VERDICTS`) +
-  optional reason; queues `ap2 classify` through the operator queue.
-  Reuses the existing TB-189 classify path so the per-proposal record's
-  `impact` block lands alongside the operator_log line.
+  `advanced-goal` / `pro-forma` / `negative` / `unclear` per
+  `IMPACT_VERDICTS`; TB-251 added `negative` as the actively-harmful
+  bucket distinct from `pro-forma`'s neutral-no-impact — see
+  `## Classify verdicts` below) + optional reason; queues
+  `ap2 classify` through the operator queue. Reuses the existing
+  TB-189 classify path so the per-proposal record's `impact` block
+  lands alongside the operator_log line.
 - `s` — sub-prompt for an optional skip reason; queues the new
   `audit_skip` operator-queue op-shape. The drain handler appends
   `<ts> — audit-skipped TB-N: <reason>` to operator_log.md and emits
@@ -764,6 +767,64 @@ new `audit_skip` op-shape; the `[c]lassify` action via the existing
 `classify` op-shape). This preserves the daemon-vs-CLI race
 serialization the operator queue exists for and keeps operator_log.md
 under a single writer at any moment (the drain holds `board_file_lock`).
+
+## Classify verdicts
+
+`ap2 classify TB-N --impact <verdict>` accepts one of four values from
+`IMPACT_VERDICTS` (single source of truth at `ap2/tools.py`). The four
+buckets form a gradient — substantive-positive → compliance-neutral →
+actively-harmful — with `unclear` as the explicit "can't tell yet"
+bucket. Pick the verdict by running two delete-tests in sequence:
+
+- **`advanced-goal`** — substantively advanced the goal (positive).
+  Passes the base delete-test: "if we deleted this task, would the
+  goal still ship?" Answer: no — the goal would be visibly worse off
+  without this work. Use when the task moved the focus's Done-when
+  criteria closer, unblocked a downstream task, or shipped a
+  user-visible capability the goal names.
+
+- **`pro-forma`** — goal-shaped but didn't advance — compliance signal
+  (no-impact + no-harm). Fails the base delete-test: deleting this
+  task would leave the goal in the same place. But also passes the
+  stronger delete-test below: deleting it wouldn't make the codebase
+  BETTER either — it just sat there, goal-shaped, satisfying
+  validators without moving the needle. Use when the task satisfied
+  its briefing on paper but the operator can't point to where the
+  goal moved (goal.md L66-76's named failure mode).
+
+- **`negative`** — actively regressed something OR made the codebase
+  worse (no-impact + harm). Fails BOTH the base delete-test AND the
+  stronger delete-test: "if we deleted this work, would the codebase
+  be BETTER, not just neutral?" Yes → `negative`. Use when a
+  regression slipped through, test coverage was inadvertently
+  weakened, a refactor landed but increased complexity beyond the
+  briefing's intent, or some other codebase-WORSE outcome — the kind
+  of shape ideation should strongly avoid proposing again. The load-
+  bearing distinction from `pro-forma` is the harm dimension:
+  `pro-forma` is "neutral, didn't help"; `negative` is "neutral on
+  the goal AND made the codebase worse."
+
+- **`unclear`** — impact not yet legible (uncertain — defer). Use
+  when the operator can't honestly answer either delete-test yet —
+  the work is too recent, depends on downstream behavior that hasn't
+  shipped, or surfaces a question rather than a verdict. Distinct
+  from skipping (`ap2 audit [s]kip`): `unclear` records that you
+  looked AND decided you can't decide; skip records that you didn't
+  decide. Re-classify later when the impact becomes legible.
+
+The `pro-forma` ↔ `negative` distinction (TB-251) is the load-bearing
+new signal: under `AP2_AUTO_APPROVE=1` the classify stream is the
+primary judgment surface for ideation prompt-tuning, and collapsing
+"neutral-but-low-value" and "actively-harmful" into one bucket loses
+the signal ideation needs to strongly avoid harmful shapes vs merely
+de-prioritize compliance-shaped ones. When in doubt between the two,
+ask: "after this shipped, was the codebase in a strictly worse state
+than before? (regressed test, weakened invariant, accreted
+complexity)" — if yes, `negative`; if no, `pro-forma`.
+
+Historical classifications stand — TB-251 did not backfill prior
+`pro-forma` records as `negative`. Future classifications use the
+richer vocabulary.
 
 ## Event schema (the canonical timeline)
 

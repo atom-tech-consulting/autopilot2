@@ -171,13 +171,14 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
 
     janitor_counts = _recent_finding_counts(cfg)
     janitor_findings = sum(janitor_counts.values())
-    # TB-189: count operator-authored impact verdicts (`task_classified`
-    # events) in the last 30 days, broken down by verdict. Operators
-    # learn faster when "we kept calling these proposals pro-forma" is
-    # visible at-a-glance — same surfacing pattern as
+    # TB-189 / TB-251: count operator-authored impact verdicts
+    # (`task_classified` events) in the last 30 days, broken down by
+    # verdict. Operators learn faster when "we kept calling these
+    # proposals pro-forma" (or now: "this batch slipped a `negative`")
+    # is visible at-a-glance — same surfacing pattern as
     # `pending_review` / `janitor_findings` (counters operators glance
     # at on every status check). Empty status (no classifications in
-    # the window) renders as zeros across all three keys in JSON; the
+    # the window) renders as zeros across all four keys in JSON; the
     # text branch omits the line entirely so a fresh project doesn't
     # grow zero-noise.
     classifications_30d = tools.classifications_last_30d_by_verdict(cfg)
@@ -260,12 +261,13 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # ambiguous independently. Always all three keys, defaulting
             # to 0.
             "janitor_findings_by_verdict": janitor_counts,
-            # TB-189: operator-authored impact verdicts in the last 30
-            # days (sourced from `task_classified` events). Always all
-            # three keys (`advanced-goal` / `pro-forma` / `unclear`),
-            # defaulting to 0 — so machine consumers always see the
-            # full shape regardless of activity. The text branch below
-            # omits the line entirely when total is 0.
+            # TB-189 / TB-251: operator-authored impact verdicts in the
+            # last 30 days (sourced from `task_classified` events).
+            # Always all four keys (`advanced-goal` / `pro-forma` /
+            # `negative` / `unclear`), defaulting to 0 — so machine
+            # consumers always see the full shape regardless of
+            # activity. The text branch below omits the line entirely
+            # when total is 0.
             "classifications_last_30d_by_verdict": classifications_30d,
             # TB-227: auto-approve / auto-unfreeze loop state. Keys are
             # always present regardless of knob-state (machine consumers
@@ -380,18 +382,18 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             f"          (`ap2 approve TB-N`)"
         )
     if classifications_30d_total:
-        # TB-189: render the impact-verdict counts as a single compact
-        # line so the operator sees the trend at-a-glance. Format
-        # mirrors the briefing's pin: `classifications last 30d:
-        # advanced-goal=<n>, pro-forma=<m>, unclear=<k>`. Only emitted
-        # when at least one verdict exists in the window — fresh
-        # projects don't grow a zero-line.
+        # TB-189 / TB-251: render the impact-verdict counts as a single
+        # compact line so the operator sees the trend at-a-glance.
+        # Format iterates `IMPACT_VERDICTS` so adding new verdicts to
+        # the tuple flows through without a render edit. Missing-bucket
+        # fallback is "0" (via `.get(v, 0)`) so projects that haven't
+        # classified a particular verdict yet still show the full
+        # gradient. Only emitted when at least one verdict exists in
+        # the window — fresh projects don't grow a zero-line.
         c = classifications_30d
+        parts = [f"{v}={c.get(v, 0)}" for v in tools.IMPACT_VERDICTS]
         print(
-            f"classifications last 30d: "
-            f"advanced-goal={c['advanced-goal']}, "
-            f"pro-forma={c['pro-forma']}, "
-            f"unclear={c['unclear']}"
+            "classifications last 30d: " + ", ".join(parts)
         )
     if janitor_findings:
         # TB-177 + TB-178: surface stranded git state without making the
@@ -2268,8 +2270,13 @@ def build_parser() -> argparse.ArgumentParser:
              f"{', '.join(tools.IMPACT_VERDICTS)}). `advanced-goal` = "
              "the proposal substantively moved the goal forward; "
              "`pro-forma` = it satisfied validators but did not move "
-             "the goal forward (the failure mode goal.md L66-76 names); "
-             "`unclear` = impact not yet legible.",
+             "the goal forward (the failure mode goal.md L66-76 names) "
+             "— no-impact + no-harm; `negative` = the proposal actively "
+             "regressed something or made the codebase worse (a "
+             "regression slipped through, test coverage was inadvertently "
+             "weakened, a refactor increased complexity beyond the "
+             "briefing's intent) — no-impact + harm (TB-251); `unclear` "
+             "= impact not yet legible.",
     )
     s.add_argument(
         "--reason",

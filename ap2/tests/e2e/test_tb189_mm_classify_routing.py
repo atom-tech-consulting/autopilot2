@@ -50,7 +50,7 @@ def _classify_msg(text: str) -> dict:
 # handler to do — not a regex the production handler would use, just
 # enough to drive the test SDK toward the routing decision.
 _CLASSIFY_RE = re.compile(
-    r"classify\s+(TB-\d+)\s+(advanced-goal|pro-forma|unclear)"
+    r"classify\s+(TB-\d+)\s+(advanced-goal|pro-forma|negative|unclear)"
     r"(?:\s+reason:\s*(.+))?",
     re.IGNORECASE,
 )

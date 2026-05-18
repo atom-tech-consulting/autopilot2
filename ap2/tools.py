@@ -574,19 +574,23 @@ _PROPOSAL_DECISION_KINDS = (
 )
 
 
-# TB-189: operator-authored retrospective verdict on a shipped proposal.
-# Three fixed values by intent — goal.md L61-70 names the impact
-# diagnostic ("if we delete this and the goal still ships, was it
-# useful?") and reserves a third bucket for proposals whose impact
-# isn't yet legible. Single source of truth: imported by the CLI
-# (cmd_classify validates `--impact <verdict>` against this), the
+# TB-189 / TB-251: operator-authored retrospective verdict on a shipped
+# proposal. Four fixed values, ordered as a gradient
+# (substantive-positive → compliance-neutral → actively-harmful) with
+# `unclear` as the explicit "can't tell yet" bucket last. goal.md L61-70
+# names the base impact diagnostic ("if we delete this and the goal
+# still ships, was it useful?"); TB-251 adds the stronger delete-test
+# ("would the codebase be BETTER, not just neutral?") to separate
+# `negative` from `pro-forma`. Single source of truth: imported by the
+# CLI (cmd_classify validates `--impact <verdict>` against this), the
 # operator-queue drain (the `classify` op handler), and the tests.
 # Adding values is a one-line tuple edit; expanding via the operator's
 # CLI is the briefing's intentional follow-up.
 IMPACT_VERDICTS: tuple[str, ...] = (
-    "advanced-goal",
-    "pro-forma",
-    "unclear",
+    "advanced-goal",  # substantively advanced the goal (positive)
+    "pro-forma",      # goal-shaped but didn't advance — compliance signal (no harm; just no impact)
+    "negative",       # actively regressed something OR made the codebase worse — failed the stronger delete-test (would deletion make things BETTER, not just neutral?)
+    "unclear",        # impact not yet legible (uncertain — defer)
 )
 
 
