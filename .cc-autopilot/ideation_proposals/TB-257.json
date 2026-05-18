@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/investigate-validator-judge-dep-coherenc.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-18T23:42:09Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-18T18:24:04Z",
   "tb_id": "TB-257",
   "why_now": "6/6 recent operator queue-appends timed out the dep-coherence judge in the last 25h, but the fail-open hides it from the symptom surface \u2014 the operator's safety floor for axis-1 auto-approve (goal.md L106-110) sits on a gate that fires zero gating decisions today, so a TB-253-shape categorized artifact must precede any calibration to avoid blind tuning."
