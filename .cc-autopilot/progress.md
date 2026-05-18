@@ -731,3 +731,9 @@
 - **Summary:** Added verify_timeout_audit to ap2/doctor.py (WARN/INFO bands over max() of recent verify_passed durations; 7-day or 20-sample window), emitted new verify_passed event from daemon.py on successful project-wide verify (sync + pipeline_pending paths), wired the audit into diagnose() directly after the verify-gate section, documented the new event in events.py + howto.md, and added the AP2_VERIFY_TIMEOUT_S doctor cross-reference. 6 new tests pass; full ap2/tests/ suite (1772 tests) green.
 - **Files:** ap2/cli.py, ap2/daemon.py, ap2/doctor.py, ap2/events.py, ap2/howto.md, ap2/tests/test_doctor_verify_timeout.py
 - **Tests:** pass
+
+## [2026-05-18] TB-246: Add `roadmap_complete` skip gate to `_maybe_ideate` (TB-174 sibling for axis-4 walk-away halt)
+- **Commit:** `fe1dfa6`
+- **Summary:** Previously committed in fe1dfa6 — verified by reading the diff (TB-246 gate in ap2/ideation.py:825-854 calls goal.roadmap_exhausted, emits ideation_skipped reason=roadmap_complete, calls mark_run; placed AFTER slots check and BEFORE TB-174 focus-exhausted gate; force_ideate docstring enumerates both bypassed gates and body still calls _run_ideation unconditionally; howto.md:1535 cross-references the new gate; test module ap2/tests/test_tb246_ideation_roadmap_complete_gate.py exists with 4 passing cases) and re-running tests: full ap2 suite 1772 passed in 85s, TB-246 module 4/4, TB-174 regression test_ideation_trigger.py 28/28.
+- **Files:** ap2/ideation.py, ap2/howto.md, ap2/tests/test_tb246_ideation_roadmap_complete_gate.py
+- **Tests:** pass
