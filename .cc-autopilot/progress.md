@@ -713,3 +713,9 @@
 - **Summary:** Shield added; suite 1336s to 92s post-fix.
 - **Files:** ap2/tests/conftest.py
 - **Tests:** pass
+
+## [2026-05-18] TB-248: Add `ap2 audit` CLI verb for retrospective review of unreviewed Complete + Frozen tasks; state derived from operator_log.md (no new file)
+- **Commit:** `1c4dbeff`
+- **Summary:** Added `ap2 audit` CLI verb (TB-248): new ap2/audit.py state-derivation module (cursor + reviewed-set grep over operator_log.md, no new state file), new `audit_skip` operator-queue op-shape in ap2/tools.py with drain handler + rich-line writer, cmd_audit in ap2/cli.py supporting default/--interactive/--json/--since/--frozen-only/--auto-approved-only, new `## Retrospective audit workflow` section + CLI-verbs table row in ap2/howto.md, and 16-case ap2/tests/test_audit_cmd.py exercising scope §4's 10 required cases plus operator-queue contract pins. Full suite green (1759 passed in 83.9s); all 7 shell-bullet verification checks pass.
+- **Files:** ap2/audit.py, ap2/cli.py, ap2/howto.md, ap2/tools.py, ap2/tests/test_audit_cmd.py
+- **Tests:** pass
