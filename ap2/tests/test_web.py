@@ -1718,15 +1718,23 @@ def test_summarize_verification_failed_shared_helper_is_grep_visible():
     """TB-158 verification gate: `summarize_verification_failed` is
     referenced by name in events.py, cli_diagnostic.py (was cli.py
     pre-TB-264 — the `ap2 logs` rendering moved with `cmd_logs` to
-    the diagnostic sibling), AND web.py. The briefing's `grep -qE`
-    bullet pins this so a refactor that drops the call from either
-    surface would silently break the consistent rendering."""
+    the diagnostic sibling), AND somewhere across the `web*.py` family
+    (the TB-265 split routed it to `web_chrome.py`). The briefing's
+    `grep -qE` bullet pins this so a refactor that drops the call from
+    either surface would silently break the consistent rendering."""
     from pathlib import Path as _P
 
     root = _P(web.__file__).resolve().parent
-    for fname in ("events.py", "cli_diagnostic.py", "web.py"):
+    for fname in ("events.py", "cli_diagnostic.py"):
         text = (root / fname).read_text()
         assert "summarize_verification_failed" in text, fname
+    # TB-265: helper was lifted into `web_chrome.py` when web.py was
+    # split by route group; the test now requires it appear somewhere
+    # in the `web*.py` family (web.py + sibling modules).
+    web_family_text = "\n".join(
+        p.read_text() for p in sorted(root.glob("web*.py"))
+    )
+    assert "summarize_verification_failed" in web_family_text
 
 
 # ---------------------------------------------------------------------------
@@ -2012,12 +2020,15 @@ def test_event_token_summary_helper_survives_refactor():
 
 def test_compact_usage_event_types_referenced_in_web_module():
     """TB-179 verification gate: all three event types are name-referenced
-    in `ap2/web.py` — specifically near the `verification_failed`
-    special-case branch in `_events_table`. The briefing's `grep -nE`
-    bullet pins this."""
+    somewhere in the `web*.py` family — TB-265 split the events-table
+    rendering into `web_chrome.py`, which now owns the
+    `verification_failed` special-case branch in `_events_table`. The
+    briefing's `grep -nE` bullet still pins this so a refactor that
+    drops the three types silently breaks the row rendering."""
     from pathlib import Path as _P
 
-    text = (_P(web.__file__).resolve().parent / "web.py").read_text()
+    root = _P(web.__file__).resolve().parent
+    text = "\n".join(p.read_text() for p in sorted(root.glob("web*.py")))
     for typ in ("judge_call", "task_run_usage", "control_run_usage"):
         assert typ in text, typ
 
@@ -2025,17 +2036,23 @@ def test_compact_usage_event_types_referenced_in_web_module():
 def test_summarize_usage_event_helper_consumed_by_web_module():
     """TB-180 verification gate: the shared compact formatter
     `summarize_usage_event` lives in `ap2/events.py` AND is consumed by
-    `ap2/web.py` (and `ap2/cli_diagnostic.py` — was `ap2/cli.py`
-    pre-TB-264; `cmd_logs` moved with the diagnostic sibling). Pinning
-    by name in all three files catches a refactor that drops one
-    surface and silently de-syncs the rendering between `ap2 logs`
-    and `/events`."""
+    the web UI (post-TB-265 split: `web_chrome.py`) plus
+    `ap2/cli_diagnostic.py` (was `ap2/cli.py` pre-TB-264; `cmd_logs`
+    moved with the diagnostic sibling). Pinning by name on both
+    surfaces catches a refactor that drops one and silently
+    de-syncs the rendering between `ap2 logs` and `/events`."""
     from pathlib import Path as _P
 
     root = _P(web.__file__).resolve().parent
-    for fname in ("events.py", "cli_diagnostic.py", "web.py"):
+    for fname in ("events.py", "cli_diagnostic.py"):
         text = (root / fname).read_text()
         assert "summarize_usage_event" in text, fname
+    # TB-265: web.py consumer moved into web_chrome.py with the split;
+    # check across all web*.py siblings.
+    web_family_text = "\n".join(
+        p.read_text() for p in sorted(root.glob("web*.py"))
+    )
+    assert "summarize_usage_event" in web_family_text
 
 
 def test_compact_usage_row_html_byte_identical_post_extraction(project: Config):
@@ -2244,11 +2261,14 @@ def test_pending_queue_filters_out_drained_entries(project: Config):
 def test_pending_queue_helper_is_grep_visible():
     """The briefing's `grep -nE "def _render_pending_queue"` and
     `grep -qE "pending-queue"` verification bullets pin both the helper
-    name and the CSS class name to web.py source. A refactor that
-    drops either would silently break the operator-facing card."""
+    name and the CSS class name to the web module family. TB-265 split
+    web.py by route group; the helper now lives in `web_home.py` and
+    the CSS class in `web_chrome.py`. A refactor that drops either
+    would silently break the operator-facing card."""
     from pathlib import Path as _P
 
-    text = (_P(web.__file__)).read_text()
+    root = _P(web.__file__).resolve().parent
+    text = "\n".join(p.read_text() for p in sorted(root.glob("web*.py")))
     assert "def _render_pending_queue" in text
     assert "pending-queue" in text
 
@@ -2378,11 +2398,14 @@ def test_operator_decisions_card_escapes_html(project: Config):
 
 def test_operator_decisions_helper_is_grep_visible():
     """Mirrors `test_pending_queue_helper_is_grep_visible` — pins the
-    helper name + CSS class to web.py source so a refactor that drops
-    either silently breaks the operator-facing card."""
+    helper name + CSS class to the web module family so a refactor
+    that drops either silently breaks the operator-facing card.
+    TB-265: the helper lives in `web_home.py` and the CSS class in
+    `web_chrome.py` post-split."""
     from pathlib import Path as _P
 
-    text = (_P(web.__file__)).read_text()
+    root = _P(web.__file__).resolve().parent
+    text = "\n".join(p.read_text() for p in sorted(root.glob("web*.py")))
     assert "def _render_operator_decisions" in text
     assert "operator-decisions" in text
     assert "parse_operator_decisions" in text
@@ -2793,22 +2816,27 @@ def test_usage_dashboard_per_task_aggregation_sums_run_plus_judges(
 
 def test_usage_route_handler_wired_into_dispatch():
     """TB-181 verification gate: `_render_usage` and the literal `/usage`
-    URL are both name-referenced in `ap2/web.py`. Pinned by the
-    briefing's `grep -nE "_render_usage|/usage" ap2/web.py` bullet."""
+    URL are both name-referenced in the web module family. Pinned by
+    the briefing's `grep -nE "_render_usage|/usage" ap2/web.py`
+    bullet. TB-265: post-split, the helper lives in `web_usage.py`
+    and `web.py` re-imports + dispatches it."""
     from pathlib import Path as _P
 
-    text = (_P(web.__file__)).read_text()
+    root = _P(web.__file__).resolve().parent
+    text = "\n".join(p.read_text() for p in sorted(root.glob("web*.py")))
     assert "_render_usage" in text
     assert "/usage" in text
 
 
 def test_usage_chart_helpers_present_in_web_py():
-    """TB-181 verification gate: both SVG helpers are present.
-    Pinned by `grep -nE "_render_cost_chart_svg|_render_cache_chart_svg"
-    ap2/web.py`."""
+    """TB-181 verification gate: both SVG helpers are present somewhere
+    in the web module family. Pinned by `grep -nE
+    "_render_cost_chart_svg|_render_cache_chart_svg"`. TB-265: both
+    live in `web_usage.py` post-split."""
     from pathlib import Path as _P
 
-    text = (_P(web.__file__)).read_text()
+    root = _P(web.__file__).resolve().parent
+    text = "\n".join(p.read_text() for p in sorted(root.glob("web*.py")))
     assert "_render_cost_chart_svg" in text
     assert "_render_cache_chart_svg" in text
 
@@ -3128,11 +3156,14 @@ def test_ideation_status_helper_is_grep_visible():
     """Mirrors `test_pending_queue_helper_is_grep_visible` and
     `test_operator_decisions_helper_is_grep_visible` — the briefing's
     verification bullets pin both the helper names AND the CSS class
-    name to web.py source so a refactor that drops any of them silently
-    breaks the operator-facing card."""
+    name to the web module family so a refactor that drops any of them
+    silently breaks the operator-facing card. TB-265: post-split,
+    both helpers live in `web_home.py` and the CSS class in
+    `web_chrome.py`."""
     from pathlib import Path as _P
 
-    text = _P(web.__file__).read_text()
+    root = _P(web.__file__).resolve().parent
+    text = "\n".join(p.read_text() for p in sorted(root.glob("web*.py")))
     assert "def _render_ideation_status_block" in text
     assert "def _ideation_gate_state" in text
     assert "ideation-status" in text
