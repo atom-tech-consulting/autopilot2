@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-262** **Split `ap2/tools.py` (224KB / ~5000 LOC) by surface area into focused sibling modules** `#autopilot` `#refactor` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-tools-py-224kb-5000-loc-by-sur.md)
 
 ## Pipeline Pending
 
