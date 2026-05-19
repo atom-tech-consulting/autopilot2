@@ -49,3 +49,10 @@ Why now: cli.py is the third-largest module and the easiest split of the four be
 - Consolidating argparse setup across new modules — argparse-builder stays in `cli.py`.
 - Splitting `tools.py` / `daemon.py` / `web.py` — separate TBs in this batch.
 - Refactoring handler internals beyond what's needed for the move — mechanical lift only.
+## Attempts
+
+### 2026-05-19 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `ap2 --project /tmp/nonexistent status 2>&1 | head -1 | grep -qE '(error|ERROR|not found)' && echo ok` — `cmd_status` st
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260519T215004Z-TB-264.prompt.md`, `stream: .cc-autopilot/debug/20260519T215004Z-TB-264.stream.jsonl`, `messages: .cc-autopilot/debug/20260519T215004Z-TB-264.messages.jsonl`
