@@ -803,3 +803,9 @@
 - **Summary:** TB-262: split ap2/tools.py (224KB → 57KB) into four flat sibling modules — briefing_validators.py (44KB), validator_judge.py (34KB), operator_queue.py (85KB), board_edits.py (17KB); tools.py keeps MCP dispatch + `_ok`/`_err`/`slugify` shared plumb + agent toolsets + re-exports for backward compat. Mechanical move (no symbol/signature/behavior changes), all 14 MCP @tool registrations stay in build_mcp_server; full suite 1865 passed.
 - **Files:** ap2/tools.py, ap2/briefing_validators.py, ap2/validator_judge.py, ap2/operator_queue.py, ap2/board_edits.py
 - **Tests:** pass
+
+## [2026-05-19] TB-263: Split `ap2/daemon.py` (187KB) by responsibility: orchestrator stays, lift auto-unfreeze / auto-approve / state-commit / watchdog to siblings
+- **Commit:** `8be43e1`
+- **Summary:** Split ap2/daemon.py 187KB → 87KB by lifting nine cohesive axes to flat siblings: the four briefing-named (state_commit, auto_approve, auto_unfreeze, watchdog) plus focus_advance, message_dump, pipeline_sweep, daemon_state, verify_harness to clear the <90KB target. Every public-ish symbol re-exported from daemon.py; late-binding through `from . import daemon` preserves the `monkeypatch.setattr(daemon, ...)` test seam for `_judge_done_when` and the verify-harness helpers. Pure mechanical move — full pytest suite passes (1865/1865).
+- **Files:** ap2/daemon.py, ap2/state_commit.py, ap2/auto_approve.py, ap2/auto_unfreeze.py, ap2/watchdog.py, ap2/focus_advance.py, ap2/message_dump.py, ap2/pipeline_sweep.py, ap2/daemon_state.py, ap2/verify_harness.py
+- **Tests:** pass
