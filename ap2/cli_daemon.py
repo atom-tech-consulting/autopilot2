@@ -142,6 +142,21 @@ def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
+    # TB-264: refuse to render a synthetic-empty status against a project
+    # root that doesn't exist on disk. Pre-TB-264 cmd_status silently
+    # printed "daemon: stopped (pid -) / board: 0A / 0R / ..." for a
+    # nonexistent --project path because every loader downstream tolerates
+    # missing files; that masked typo'd --project flags as healthy fresh
+    # projects. The briefing's verification bullet (`ap2 --project
+    # /tmp/nonexistent status` must `head -1 | grep -qE
+    # '(error|ERROR|not found)'`) pins the corrected behavior so future
+    # CLI refactors can't quietly re-introduce the silent-empty regression.
+    if not cfg.project_root.is_dir():
+        print(
+            f"error: project not found: {cfg.project_root}",
+            file=sys.stderr,
+        )
+        return 1
     pid = read_pid(cfg)
     running = _is_running(pid)
     board = Board.load(cfg.tasks_file)
