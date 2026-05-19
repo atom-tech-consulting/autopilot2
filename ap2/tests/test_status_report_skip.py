@@ -597,8 +597,14 @@ def test_run_status_report_truncates_pending_review_in_snapshot(
 def test_run_status_report_omits_pending_review_line_when_zero(
     tmp_path, monkeypatch,
 ):
-    """Clean board (zero review-gated tasks) → no snapshot line, so a
-    routine post doesn't grow a noisy "0 pending" bullet."""
+    """Clean board (zero review-gated tasks) → no `Pending operator
+    review (N)` snapshot line, so a routine post doesn't grow a noisy
+    "0 pending" bullet. Scope is the pending-review line specifically,
+    NOT a global "extras must be empty" assertion — TB-228 / TB-244 /
+    TB-245 / TB-258 / TB-259 layer in additional axis-parity digest
+    sub-blocks (automation / focus-rotation / validator-judge / audit /
+    stats-window) whose render-or-not gates are orthogonal to this
+    test's review-line scope."""
     # TB-190: the daemon now also injects a `post target channel:` line
     # when either env var is set. This test asserts the strictly-empty
     # extras path, so isolate from the operator's actual env (the user
@@ -622,8 +628,17 @@ def test_run_status_report_omits_pending_review_line_when_zero(
         run_status_report(cfg, sdk, mcp_server=None, trigger="cron")
     )
 
-    # Nothing injected — list is empty.
-    assert captured["extras"] == []
+    # Pending-review line specifically must NOT appear (this test's
+    # scope). Other sub-blocks that TB-228 / TB-244 / TB-245 / TB-258
+    # / TB-259 render under their own gates are out-of-scope here —
+    # narrow the assertion so a future axis-parity addition doesn't
+    # spuriously trip a test whose intent is "no review-gated tasks
+    # → no review line".
+    joined = "\n".join(captured["extras"])
+    assert "Pending operator review" not in joined, (
+        f"pending-review line must not appear when zero review-gated "
+        f"tasks; extras={captured['extras']!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

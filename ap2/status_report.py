@@ -28,11 +28,12 @@ operator asked for.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import os
 from dataclasses import dataclass
 from typing import Literal
 
-from . import automation_status, events
+from . import automation_stats, automation_status, events
 from .board import Board
 from .config import Config
 from .cron import mark_run
@@ -539,6 +540,111 @@ def render_audit_state_section(
     ]
 
 
+# ---------------------------------------------------------------------------
+# TB-259: Stats window aggregates sub-section for the cron status-report
+# digest. Parallels `render_audit_state_section` above — same omit-on-empty
+# rule, same `state_extras` wiring shape, same verbatim-forwarding contract.
+#
+# Closes the push-vs-pull surface-parity gap that TB-255 left open. TB-255
+# shipped the `/stats` HTML + `/stats.json` PULL surface for task / bullet /
+# ideation timing + turn + attempt aggregates over events.jsonl (helper:
+# `automation_stats.collect_stats(cfg, window_s=...)`). But the cron
+# status-report digest — the operator's primary walk-away PUSH channel —
+# carried no top-line aggregates summary. The dashboard pays rent only
+# during active operator sessions, not during the walk-away promise
+# (goal.md L28-30: "walk away for a week without intervention") the
+# Current focus is built around. This wraps the existing collector and
+# renders one Markdown sub-block the agent forwards verbatim into the
+# Mattermost post; same axis-parity shape TB-241 / TB-242 / TB-244 /
+# TB-245 closed on their axes.
+#
+# Omit-on-empty rule (no zero-noise on quiet windows): the section renders
+# ONLY when the window's task-completion count is non-zero. A 24h-quiet
+# project that completed nothing has nothing to summarize — and the
+# `/stats` pull surface still renders the full zero-state dashboard for
+# operators who load it directly.
+
+_STATS_WINDOW_HEADING_FMT = "*Stats window aggregates ({window}):*"
+
+# TB-259: window fallback when no parseable previous-report ts exists
+# (first-ever status-report run, or the prior one rolled out of the
+# tail). 24h matches the operator's natural-cadence return rhythm and
+# stays inside `automation_stats.MIN_WINDOW_S` / `MAX_WINDOW_S` bounds.
+_DEFAULT_STATS_WINDOW_S = 86400
+
+
+def render_stats_window_section(stats: dict) -> list[str]:
+    """Return the Markdown lines for the `*Stats window aggregates
+    (<window>):*` sub-section the cron agent forwards verbatim into
+    the Mattermost post, or `[]` when the sub-section should be
+    omitted entirely (zero task completions in window).
+
+    `stats` is the dict returned by
+    `automation_stats.collect_stats(cfg, window_s=...)` — pre-computed
+    by the caller so the renderer stays pure / no I/O and tests can
+    drive it with fabricated state dicts without spinning up a real
+    events file (parallel to TB-245's validator-judge / TB-258's
+    audit-state sub-block patterns).
+
+    Shape (when rendered, 3-5 lines):
+
+        *Stats window aggregates (7d):*
+        - tasks: 12 completed (p50 240s, p95 1800s)
+        - ideation: 4 cycles, 8 proposals
+        - bullet judges: 35 evaluations, 1 fail-open
+
+    Omit-on-empty: returns `[]` when
+    `stats["tasks"]["complete_count"] <= 0`. Load-bearing default-off
+    byte-identical regression pin — quiet windows stay byte-identical
+    to the pre-TB-259 digest baseline so the prior axis-parity tests
+    (TB-228 / TB-244 / TB-245 / TB-258) continue to pass when the
+    `collect_stats` window has nothing to summarize. Returns
+    `list[str]` (not `str`) so the caller can extend its own
+    `state_extras` list directly; the wiring in `run_status_report`
+    joins and appends as one block so the section reads as a unit.
+
+    The `bullet judges: <N> evaluations, <M> fail-open` line counts
+    `judge_call_count` (per-bullet prose-judge invocations) and the
+    sum of `validator_judge_fail_count + validator_judge_timeout_count`
+    (TB-235's fail-open audit events). Both fields are in the
+    existing `collect_stats` shape — no new aggregates were added
+    (Out-of-scope per briefing).
+    """
+    tasks = stats.get("tasks") or {}
+    if int(tasks.get("complete_count") or 0) <= 0:
+        return []
+
+    window_label = stats.get("window") or "?"
+    header = _STATS_WINDOW_HEADING_FMT.format(window=window_label)
+
+    duration = tasks.get("duration_s") or {}
+    p50 = float(duration.get("p50") or 0.0)
+    p95 = float(duration.get("p95") or 0.0)
+    tasks_line = (
+        f"- tasks: {int(tasks.get('complete_count') or 0)} completed "
+        f"(p50 {p50:.0f}s, p95 {p95:.0f}s)"
+    )
+
+    ideation = stats.get("ideation") or {}
+    ideation_line = (
+        f"- ideation: {int(ideation.get('cycle_count') or 0)} cycles, "
+        f"{int(ideation.get('proposals_recorded') or 0)} proposals"
+    )
+
+    verifier = stats.get("verifier") or {}
+    judge_count = int(verifier.get("judge_call_count") or 0)
+    fail_count = (
+        int(verifier.get("validator_judge_fail_count") or 0)
+        + int(verifier.get("validator_judge_timeout_count") or 0)
+    )
+    bullet_line = (
+        f"- bullet judges: {judge_count} evaluations, "
+        f"{fail_count} fail-open"
+    )
+
+    return [header, tasks_line, ideation_line, bullet_line]
+
+
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
 # field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
 # the daemon's `run_cron` short-circuits status-report jobs to
@@ -680,6 +786,22 @@ Body shape (when posting):
   bottom of the digest — the natural call-to-action position.
   Absent ⇒ 0 unreviewed shipped tasks (fully-reviewed / fresh
   project) ⇒ omit.
+- TB-259: if the snapshot's `## Current state` block carries a
+  `*Stats window aggregates (<window>):*` sub-block (italicized
+  header naming the inter-report window + 3 bullets summarizing
+  task completions with p50/p95 duration, ideation cycles +
+  proposals, and bullet-judge evaluations + fail-open count over
+  the same window), copy that entire sub-block VERBATIM into
+  your post (preserve the header and every bullet). Same
+  verbatim-forwarding contract as TB-228 / TB-244 / TB-245 /
+  TB-258 — the daemon owns the rendering; do NOT recompute,
+  paraphrase, or drop bullets. Position the sub-block AFTER the
+  audit sub-block (or AFTER whichever digest section ends the
+  body when audit is absent) so the "what happened since last
+  report" top-line glance lands at the bottom of the digest —
+  parallels the `/stats` pull-surface aggregates the operator
+  opens on-demand. Absent ⇒ 0 task completions in window (quiet
+  window / fresh project) ⇒ omit.
 
 After posting (or skipping), call
 `log_event(type="status_report", summary="<one sentence>")` so the
@@ -1120,6 +1242,46 @@ async def run_status_report(
     audit_lines = render_audit_state_section(audit_state)
     if audit_lines:
         state_extras.append("\n".join(audit_lines))
+    # TB-259: render the `*Stats window aggregates (<window>):*`
+    # sub-block (parallel to the TB-258 audit sub-block above). Pure
+    # read-layer composition over the existing-in-HEAD
+    # `automation_stats.collect_stats` helper TB-255 built for the
+    # `/stats` HTML + `/stats.json` PULL surface; this push wiring
+    # reuses the same aggregates (no new collect_stats fields). Window
+    # is scoped to "now - last status-report cron_complete ts" so the
+    # digest matches the inter-report window the TB-228 / TB-244 /
+    # TB-245 / TB-258 sub-blocks above scope against; falls back to
+    # 24h when no prior report ts is parseable (first-ever run, or
+    # the previous one rolled out of the tail). Renderer returns []
+    # when the window's task-completion count is zero — quiet
+    # windows stay byte-identical to the pre-TB-259 baseline.
+    stats_window_s = _DEFAULT_STATS_WINDOW_S
+    if since_idx >= 0 and since_idx < len(activity_tail):
+        last_ts_raw = activity_tail[since_idx].get("ts")
+        if isinstance(last_ts_raw, str) and last_ts_raw:
+            try:
+                last_dt = _dt.datetime.strptime(
+                    last_ts_raw, "%Y-%m-%dT%H:%M:%SZ",
+                ).replace(tzinfo=_dt.timezone.utc)
+                delta_s = (
+                    _dt.datetime.now(_dt.timezone.utc) - last_dt
+                ).total_seconds()
+                # Floor at `automation_stats.MIN_WINDOW_S` (1h) so a
+                # back-to-back-second report doesn't compute a
+                # zero-width window that excludes every event by
+                # `>= start_dt` arithmetic — mirrors `parse_window`'s
+                # same-named clamp on the pull surface so push and pull
+                # windows align at the edge case.
+                if delta_s >= automation_stats.MIN_WINDOW_S:
+                    stats_window_s = int(delta_s)
+                elif delta_s > 0:
+                    stats_window_s = automation_stats.MIN_WINDOW_S
+            except (ValueError, TypeError):
+                pass
+    stats = automation_stats.collect_stats(cfg, window_s=stats_window_s)
+    stats_lines = render_stats_window_section(stats)
+    if stats_lines:
+        state_extras.append("\n".join(stats_lines))
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
         state_extras=state_extras,

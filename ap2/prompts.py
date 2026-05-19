@@ -213,6 +213,20 @@ _STATUS_REPORT_CONTRACT = """\
   TB-245; recomputing or paraphrasing risks the same stale-text
   regression class. When the sub-block is absent the audit pile is
   empty (fully-reviewed / fresh project) — omit.
+- TB-259: if the `## Current state` block carries a
+  `*Stats window aggregates (<window>):*` sub-block (italicized
+  header naming the inter-report window + 3 bullets summarizing
+  task completions with p50/p95 duration, ideation cycles +
+  proposals, and bullet-judge evaluations + fail-open count over
+  the same window — schema field `"stats_window"` in this
+  contract; mirrors the `/stats` pull-surface aggregates the
+  operator opens on-demand), copy that entire sub-block VERBATIM
+  into your Mattermost post — italicized header and every bullet.
+  Same daemon-owned deterministic-rendering contract as TB-228 /
+  TB-244 / TB-245 / TB-258; recomputing or paraphrasing risks the
+  same stale-text regression class. When the sub-block is absent
+  the window had zero task completions (quiet window / fresh
+  project) — omit.
 - Always call `log_event(type="status_report", summary=...)` before
   finishing — posted or skipped.
 """

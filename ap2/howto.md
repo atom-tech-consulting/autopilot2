@@ -1072,6 +1072,32 @@ without breaking scripted consumers. Top-level shape:
 }
 ```
 
+**Status-report push surface (TB-259).** The 2h status-report
+Mattermost cron post (operator's primary walk-away channel) also
+carries a top-line digest of the same aggregates as a
+`*Stats window aggregates (<window>):*` sub-block — three bullets
+summarizing task completions (with p50/p95 duration), ideation
+cycles + proposals, and bullet-judge evaluations + fail-open count
+over the inter-report window. Closes the push-vs-pull parity gap
+TB-255 left open: the dashboard pays rent only during active
+operator sessions, but the walk-away promise (goal.md L28-30
+"walk away for a week without intervention") needs the digest to
+land without the operator opening a browser tab. Window is scoped
+to "now - last status-report cron_complete ts" so the sub-block
+matches the inter-report window the TB-228 / TB-244 / TB-245 /
+TB-258 sub-blocks above it scope against; falls back to 24h when
+no parseable previous-report ts exists (first-ever run, or the
+previous one rolled out of the tail). Omit-on-empty: the sub-block
+is suppressed when the window's task-completion count is zero, so
+quiet windows stay byte-identical to the pre-TB-259 baseline and
+the `/stats` pull surface still renders the full zero-state
+dashboard for operators who load it directly. Mirrors the
+wrap-helper-into-state-extras pattern shipped across prior
+axis-parity tasks (TB-241 / TB-242 / TB-244 / TB-245 / TB-258).
+Pure read-layer composition over the existing `collect_stats`
+helper — no new aggregates, no new state file, no daemon-side
+changes, no new env knobs.
+
 ## Configuration knobs
 
 Set in shell, in `<project>/.cc-autopilot/env`, or in
