@@ -619,7 +619,7 @@ never the operator.
 | `ap2 delete TB-N [-f]` | Permanently remove a task from the board (row + briefing file) — emits `task_deleted` for audit. | Refuses Active/Ready without `--force`. Use `ap2 reject` instead for ideation proposals still gated by `@blocked:review`, so the rejection reason feeds ideation Step 0's "don't re-propose" learning. |
 | `ap2 reject TB-N [--reason TEXT]` | Reject an ideation-proposed Backlog task (TB-152): drops the row + briefing AND logs the reason. | Writes `rejected ideation proposal → TB-N (<title>): <reason>` to `operator_log.md`; the reason becomes a learnable signal for the next ideation cycle, and `(no reason given)` is itself a (weak) signal. |
 | `ap2 classify TB-N --impact VERDICT [--reason TEXT]` | Record the operator's retrospective impact verdict (`advanced-goal` / `pro-forma` / `negative` / `unclear`) on a shipped proposal (TB-189 / TB-251). | Captures whether the task substantively moved the goal forward, merely satisfied validators (goal.md L66-76's failure mode), or actively regressed the codebase; reasons feed TB-188 per-proposal records and `operator_log.md` so future ideation cycles can learn which proposal shapes actually pay off (and which to strongly avoid). See `## Classify verdicts` below for the `pro-forma` vs `negative` distinction. |
-| `ap2 audit [--interactive] [--json] [--since ISO] [--frozen-only \| --auto-approved-only]` | Retrospective walk through unreviewed Complete + Frozen tasks since the last `ap2 audit` cursor (TB-248). | The "I just came back from a week away" verb under `AP2_AUTO_APPROVE=1` — closes the retrospective review surface gap auto-approve opens. State derivation is grep over `operator_log.md` (no new state file); `--interactive` walks one task at a time with `[c]lassify / [s]kip / [n]ext / [q]uit` prompts. See `## Retrospective audit workflow` below. |
+| `ap2 audit [--interactive] [--json] [--since ISO] [--frozen-only \| --auto-approved-only]` | Retrospective walk through unreviewed Complete + Frozen tasks since the last `ap2 audit` cursor (TB-248). | The "I just came back from a week away" verb under `AP2_AUTO_APPROVE=1` — closes the retrospective review surface gap auto-approve opens. State derivation is grep over `operator_log.md` (no new state file); `--interactive` walks one task at a time with `[c]lassify / [s]kip / [n]ext / [q]uit` prompts. See `## Retrospective audit workflow` below. TB-258 wires the unreviewed-count onto the natural-cadence return surfaces: `ap2 status` carries an `audit: N unreviewed since <ts>` line (text, omitted when N=0) + an always-present `audit` block in `--json`; the 2h cron status-report Mattermost post carries a `*Retrospective audit (unreviewed shipped):*` sub-block (omitted when N=0). Walk-away operators see the count without running `ap2 audit` first. |
 | `ap2 ack NOTE [-t TB-N]` | Record an out-of-band operator decision in `operator_log.md` so ideation stops re-proposing actions whose effects aren't filesystem-visible (TB-106). | Use for "I already decided X out-of-band" announcements and for clearing decisions-needed nudges the daemon keeps surfacing. |
 | `ap2 approve TB-N` | Approve an ideation-proposed task (TB-121) — strips its `@blocked:review` codespan so the next tick auto-promotes it out of Backlog. | The thumbs-up half of the `approve` / `reject` pair on freshly-ideated proposals; refuses if the task isn't on the board at all. |
 | `ap2 unfreeze TB-N` | Move a Frozen task back to Backlog and clear its retry counter. | Run after fixing the underlying blocker (flaky test, missing dep); refuses if the task isn't currently Frozen so you can't accidentally reset a healthy task. |
@@ -767,6 +767,28 @@ new `audit_skip` op-shape; the `[c]lassify` action via the existing
 `classify` op-shape). This preserves the daemon-vs-CLI race
 serialization the operator queue exists for and keeps operator_log.md
 under a single writer at any moment (the drain holds `board_file_lock`).
+
+**Natural-cadence return surfaces (TB-258).** TB-248 ships the PULL
+surface — the operator runs `ap2 audit` to see the unreviewed pile.
+TB-258 closes the push-vs-pull parity gap by wiring the same
+unreviewed-count onto the two natural-cadence return surfaces the
+walk-away operator hits without thinking: (a) `ap2 status` text
+mode prints an `audit: N unreviewed since <cursor-ts> — `ap2 audit``
+line in the operator-attention cluster (after `decisions needed`,
+before `auto-approve:`); omit-on-empty so fresh / fully-reviewed
+projects stay silent; (b) `ap2 status --json` ALWAYS carries an
+`audit: {unreviewed_count, cursor_ts}` block (parser-stability
+mirror of the `auto_approve` block); (c) the 2h status-report
+Mattermost cron post carries a `*Retrospective audit (unreviewed
+shipped):*` sub-block with the count + cursor + `ap2 audit` nudge;
+also omit-on-empty so quiet windows stay byte-identical to the
+pre-TB-258 baseline. Pure read-layer composition over the existing
+`audit.list_unreviewed` + `audit.parse_audit_cursor` helpers — no
+new state file, no daemon-side changes, no new env knobs. Mirrors
+the wrap-helper-into-status-extras pattern shipped across prior
+axis-parity tasks (TB-241 / TB-242 / TB-244). The count is window-
+independent (cursor-based, not 24h-rolling) so a multi-day audit
+pile surfaces on every report until cleared.
 
 ## Classify verdicts
 

@@ -981,6 +981,72 @@ def collect_window_validator_judge(
     }
 
 
+# ---------------------------------------------------------------------------
+# TB-258: retrospective-audit unreviewed-count surface for the CLI status
+# + cron status-report digest. Pure read-layer wrapper around the
+# existing-in-HEAD `ap2/audit.py` helpers (`list_unreviewed` +
+# `parse_audit_cursor`); no new state file, no daemon-side changes, no
+# new env knobs. Mirrors the wrap-helper-into-status-extras pattern
+# TB-245's `collect_window_validator_judge` uses for axis 1.
+#
+# Push-vs-pull surface-parity gap: TB-248's `ap2 audit` ships the PULL
+# surface (the operator runs the verb to see the unreviewed pile). The
+# walk-away operator returning after a quiet day must KNOW to run it
+# explicitly — `ap2 status` and the cron status-report (the two
+# natural-cadence return surfaces) stayed silent on a count the system
+# already knew. TB-258 closes that gap by composing the existing
+# helpers onto both surfaces in one collector, kept here next to its
+# axis-1/2/3/4 siblings so the operator-facing-aggregator module is one
+# import to reach for any return-surface enrichment.
+
+
+def collect_audit_state(cfg: "Config") -> dict:
+    """Aggregate the retrospective-audit unreviewed-count + cursor state
+    into a single structured dict for TB-258's CLI status + cron
+    status-report surfaces.
+
+    Pure read-layer wrapper around `ap2.audit.list_unreviewed(cfg)` +
+    `ap2.audit.parse_audit_cursor(cfg)` — both are already in HEAD and
+    do the operator_log.md grep + TASKS.md scan that derives the
+    unreviewed set. This helper consolidates the two calls so the CLI
+    + cron surfaces can read one shape rather than each composing the
+    underlying helpers independently.
+
+    Returned dict (always present, machine-stable shape — mirrors the
+    `auto_approve` / `validator_judge` parser-stability promises so
+    JSON consumers see the keys regardless of activity):
+
+      - `unreviewed_count` (int) — number of unreviewed Complete +
+        Frozen tasks since the last `ran audit (...)` cursor in
+        operator_log.md. 0 on fresh / no-audit-history projects with
+        no shipped tasks, OR on projects where every shipped task has
+        been classified / audit-skipped / rejected.
+      - `cursor_ts` (str | None) — timestamp of the most recent
+        `<ts> — ran audit (...)` line in operator_log.md, or `None`
+        when no such line exists (first-ever audit; cursor defaults
+        to epoch). Rendered by the CLI text branch as `(epoch)` when
+        None so the operator sees a stable two-token shape regardless
+        of audit history.
+
+    Pure / no I/O beyond reading operator_log.md + TASKS.md + the
+    events tail (via `audit.list_unreviewed`); safe to call from
+    request handlers without taking the board lock.
+    """
+    # Lazy import to avoid the audit ↔ automation_status cycle (audit
+    # imports board / events / config; automation_status already does
+    # the same, but keeping audit out of the import graph at module
+    # load time preserves the "CLI imports audit only when needed"
+    # property the audit module's docstring documents).
+    from . import audit as _audit
+
+    rows = _audit.list_unreviewed(cfg)
+    cursor = _audit.parse_audit_cursor(cfg)
+    return {
+        "unreviewed_count": len(rows),
+        "cursor_ts": cursor,
+    }
+
+
 def find_previous_status_report_idx(tail: list[dict]) -> int:
     """Return the positional index of the most recent
     `cron_complete job=status-report` event in `tail`, or `-1` if none

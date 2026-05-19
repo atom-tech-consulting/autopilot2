@@ -200,6 +200,19 @@ _STATUS_REPORT_CONTRACT = """\
   stale-text regression class. When the sub-block is absent the
   TB-235 dep-coherence judge has been healthy in the last 24h
   (0/0 fail-open counts) — omit.
+- TB-258: if the `## Current state` block carries a
+  `*Retrospective audit (unreviewed shipped):*` sub-block
+  (italicized header + one bullet naming the "audit" unreviewed-
+  shipped count + the operator_log.md `ran audit (...)` cursor
+  timestamp + `ap2 audit` nudge — the on-demand pull surface
+  `ap2 status --json` mirrors the same shape under its top-level
+  `"audit"` block for parser-stable machine consumers), copy that
+  entire sub-block VERBATIM into your Mattermost post —
+  italicized header and the per-bullet count line. Same daemon-
+  owned deterministic-rendering contract as TB-228 / TB-244 /
+  TB-245; recomputing or paraphrasing risks the same stale-text
+  regression class. When the sub-block is absent the audit pile is
+  empty (fully-reviewed / fresh project) — omit.
 - Always call `log_event(type="status_report", summary=...)` before
   finishing — posted or skipped.
 """

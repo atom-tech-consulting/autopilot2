@@ -473,6 +473,72 @@ def render_validator_judge_activity_section(
     ]
 
 
+# ---------------------------------------------------------------------------
+# TB-258: Retrospective-audit unreviewed-count sub-section for the cron
+# status-report digest. Parallels `render_validator_judge_activity_section`
+# above — same omit-on-empty rule, same `state_extras` wiring shape — but
+# scopes the count to the operator_log.md-derived "unreviewed since last
+# `ran audit (...)` cursor" pile (no rolling-window math; the cursor IS
+# the boundary).
+#
+# Closes TB-248's push-surface gap: the operator's primary walk-away
+# channel (the 2h status-report Mattermost post) carried no audit-pile
+# digest. Under `AP2_AUTO_APPROVE=1` the auto-approved tasks ship
+# without operator-in-the-loop review at dispatch time; retrospective
+# review is the operator's only judgment surface. Without this digest,
+# the walk-away operator's first sighting of an unreviewed-task pile
+# was one manual `ap2 audit` invocation later than the system already
+# knew it was true — weakening the goal.md L28-30 done-when bullet
+# "walk away for a week without intervention".
+
+_AUDIT_STATE_HEADING = "*Retrospective audit (unreviewed shipped):*"
+
+
+def render_audit_state_section(
+    state: dict,
+) -> list[str]:
+    """Return the Markdown lines for the `*Retrospective audit
+    (unreviewed shipped):*` sub-section the cron agent forwards
+    verbatim into the Mattermost post, or `[]` when the sub-section
+    should be omitted entirely (zero unreviewed tasks).
+
+    `state` is the dict returned by
+    `automation_status.collect_audit_state` — pre-computed by the
+    caller so the renderer stays pure / no I/O and tests can drive it
+    with fabricated state dicts without spinning up a real operator
+    log (parallel to TB-245's validator-judge sub-block pattern).
+
+    Shape (when rendered):
+
+        *Retrospective audit (unreviewed shipped):*
+        - <N> unreviewed since <cursor-ts> — run `ap2 audit` to walk
+
+    Omit-on-empty: returns `[]` when `state["unreviewed_count"] == 0`.
+    This is the load-bearing default-off byte-identical regression pin
+    — operators today get zero audit output on quiet/fully-reviewed
+    windows and that should continue (a fresh project with no shipped
+    tasks OR a project where every shipped task has been classified /
+    audit-skipped / rejected has zero pending audit). Returns
+    `list[str]` (not `str`) so the caller can extend its own
+    `state_extras` list directly; the wiring in `run_status_report`
+    joins and appends as one block so the section reads as a unit.
+
+    Cursor-ts rendering: when `cursor_ts` is None (no prior
+    `ran audit (...)` line ever written — first-ever audit) the label
+    renders as `(epoch)` so the operator sees a stable two-token shape
+    regardless of audit history; mirrors the CLI text branch.
+    """
+    if state.get("unreviewed_count", 0) <= 0:
+        return []
+
+    cursor_display = state.get("cursor_ts") or "(epoch)"
+    return [
+        _AUDIT_STATE_HEADING,
+        f"- {state['unreviewed_count']} unreviewed since "
+        f"{cursor_display} — run `ap2 audit` to walk",
+    ]
+
+
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
 # field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
 # the daemon's `run_cron` short-circuits status-report jobs to
@@ -600,6 +666,20 @@ Body shape (when posting):
   mirrors TB-243's web home placement of the validator-judge row
   at the bottom of the automation card. Absent ⇒ 0/0 fail-open
   counts in the last 24h ⇒ omit.
+- TB-258: if the snapshot's `## Current state` block carries a
+  `*Retrospective audit (unreviewed shipped):*` sub-block
+  (italicized header + one bullet naming the unreviewed-shipped
+  count + cursor timestamp + `ap2 audit` nudge), copy that entire
+  sub-block VERBATIM into your post (preserve the header and the
+  bullet). Same verbatim-forwarding contract as TB-228 / TB-244 /
+  TB-245 — the daemon owns the rendering; do NOT recompute,
+  paraphrase, or drop bullets. Position the sub-block AFTER the
+  validator-judge sub-block (or AFTER whichever digest section
+  ends the body when validator-judge is absent) so the explicit
+  "you have N to review" operator-decision nudge lands at the
+  bottom of the digest — the natural call-to-action position.
+  Absent ⇒ 0 unreviewed shipped tasks (fully-reviewed / fresh
+  project) ⇒ omit.
 
 After posting (or skipping), call
 `log_event(type="status_report", summary="<one sentence>")` so the
@@ -1020,6 +1100,26 @@ async def run_status_report(
     )
     if validator_judge_lines:
         state_extras.append("\n".join(validator_judge_lines))
+    # TB-258: render the retrospective-audit unreviewed-count sub-block
+    # (parallel to the TB-245 validator-judge digest above). Pure
+    # read-layer composition over `audit.list_unreviewed` +
+    # `audit.parse_audit_cursor` via `collect_audit_state`. The
+    # underlying boundary is the operator_log.md `ran audit (...)`
+    # cursor — count is window-INDEPENDENT (always the full unreviewed
+    # pile, not just since-last-report) so an audit pile that
+    # accumulated over a multi-day silence still surfaces on every
+    # report until the operator clears it. Placed AFTER the
+    # validator-judge sub-block so the digest reads top-down as
+    # "automation activity → focus rotation → validator-judge fail-open
+    # → retrospective audit" (operator-decision queue rendered last so
+    # the eye lands on it — the explicit "you have N to review" nudge
+    # is the digest's natural call-to-action). Renderer returns []
+    # when the unreviewed-count is zero — fully-reviewed / fresh
+    # projects stay byte-identical to the pre-TB-258 baseline.
+    audit_state = automation_status.collect_audit_state(cfg)
+    audit_lines = render_audit_state_section(audit_state)
+    if audit_lines:
+        state_extras.append("\n".join(audit_lines))
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
         state_extras=state_extras,

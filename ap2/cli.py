@@ -193,6 +193,14 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     from . import automation_status
 
     auto_approve_state = automation_status.collect_auto_approve_state(cfg)
+    # TB-258: retrospective-audit unreviewed-count + cursor state.
+    # Pure read-layer wrapper over `audit.list_unreviewed` +
+    # `audit.parse_audit_cursor` (both already in HEAD); the text
+    # branch surfaces an `audit: N unreviewed since <ts>` line in the
+    # operator-attention cluster ONLY when N > 0 (omit-on-empty), and
+    # the JSON branch ALWAYS carries the `audit` block (parser
+    # stability mirror of the `auto_approve` contract).
+    audit_state = automation_status.collect_audit_state(cfg)
     # TB-242: axis-4 focus-rotation surface — read the focus list +
     # active focus + halt state once so both the text and JSON branches
     # can render them. Pure read-layer composition over TB-226's
@@ -316,6 +324,18 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
                     "roadmap_complete": _focus_roadmap_complete,
                 }
             ),
+            # TB-258: retrospective-audit unreviewed-count + cursor
+            # state. ALWAYS present (zero-state included) for parser
+            # stability — mirrors the `auto_approve` parser-stability
+            # promise so machine consumers see a stable shape
+            # regardless of audit history. `cursor_ts` renders as
+            # `null` when no prior audit cursor exists (first-ever
+            # audit; cursor defaults to epoch in the underlying
+            # helper).
+            "audit": {
+                "unreviewed_count": audit_state["unreviewed_count"],
+                "cursor_ts": audit_state["cursor_ts"],
+            },
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -449,6 +469,24 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(
             f"decisions needed ({len(operator_decisions)}): "
             + "; ".join(rendered)
+        )
+    # TB-258: surface the retrospective-audit unreviewed-count line in
+    # the operator-attention cluster (after queue / review / janitor /
+    # classifications / decisions-needed) so the walk-away operator
+    # returning after a quiet day sees the unreviewed-shipped count
+    # without running `ap2 audit` explicitly first. Pure read-layer
+    # composition over `audit.list_unreviewed` + `audit.parse_audit_cursor`
+    # (both already in HEAD — see `automation_status.collect_audit_state`).
+    # Omit-on-empty (zero-state stays silent) so fresh / fully-reviewed
+    # projects don't grow a zero-noise line; the JSON branch above
+    # always carries the `audit` block for parser stability. Cursor-ts
+    # renders as `(epoch)` when None so the operator sees a stable
+    # two-token shape regardless of audit history.
+    if audit_state["unreviewed_count"] > 0:
+        _cursor_display = audit_state["cursor_ts"] or "(epoch)"
+        print(
+            f"audit:    {audit_state['unreviewed_count']} unreviewed "
+            f"since {_cursor_display} — `ap2 audit`"
         )
     # TB-227: surface the auto-approve / auto-unfreeze loop state. Two
     # rendering shapes — healthy (knob on, no halt) vs. paused (halt
