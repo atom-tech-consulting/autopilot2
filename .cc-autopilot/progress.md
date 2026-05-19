@@ -791,3 +791,9 @@
 - **Summary:** TB-260: captured env file mtime at daemon start into daemon_state.json, wired collect_env_staleness through ap2 status text/JSON, status-report cron digest sub-block, and watchdog diagnose summary; 22-test regression-pin module covers the three briefing scenarios + renderer/wiring/contract pins. Full suite passes 1851/1851.
 - **Files:** ap2/automation_status.py, ap2/cli.py, ap2/config.py, ap2/daemon.py, ap2/diagnose.py, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_doctor_verify_timeout.py, ap2/tests/test_tb260_env_mtime_stale_surface.py
 - **Tests:** pass
+
+## [2026-05-19] TB-261: Centralize LLM-JSON extraction in stdlib `raw_decode` util; replace 4 brittle `find("{")/rfind("}")` sites
+- **Commit:** `a7641c4`
+- **Summary:** TB-261: added `ap2/json_extract.py` with `extract_rightmost_json_object` (stdlib `raw_decode`, rightmost-balanced JSON object selection), wired it into all four hand-rolled `find("{")/rfind("}")` sites — `verify.py:_categorize_parse_error`, `verify.py:_parse_judge_response`, `janitor.py:_parse_judge_response`, `tools.py:_parse_dep_judge_response` — preserving TB-236/TB-247 parse_error taxonomy + debug-dump hooks at every site; added regression-pin `ap2/tests/test_json_extract_util.py` covering the six scope-mandated cases (TB-89 shadowing, multi-shadow, internal/escape chars, None, rightmost) plus integration check on the literal post-train TB-89 captured response; full `uv run pytest -q` passes (1865 tests), briefing's TB-89 integration probe parses as `status=pass parse_error=None`, and the verification grep returns 0 matches in non-test code.
+- **Files:** ap2/json_extract.py, ap2/verify.py, ap2/janitor.py, ap2/tools.py, ap2/tests/test_json_extract_util.py
+- **Tests:** pass
