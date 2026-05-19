@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-261** **Centralize LLM-JSON extraction in stdlib `raw_decode` util; replace 4 brittle `find("{")/rfind("}")` sites** `#autopilot` `#verify` `#judge` `#parser` `#refactor` `#reuse` `#regression-pin` [→ brief](.cc-autopilot/tasks/centralize-llm-json-extraction-in-stdlib.md)
 
 ## Pipeline Pending
 
