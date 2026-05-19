@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-260** **Surface stale `.cc-autopilot/env` (mtime > daemon-start) in `ap2 status` + cron status-report digest + watchdog** `#autopilot` `#observability` `#env` `#operator-surface` `#regression-pin` [→ brief](.cc-autopilot/tasks/surface-stale-cc-autopilot-env-mtime-dae.md)
 
 ## Pipeline Pending
 
