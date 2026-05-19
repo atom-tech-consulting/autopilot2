@@ -779,3 +779,9 @@
 - **Summary:** TB-258: wrapped `audit.list_unreviewed` + `audit.parse_audit_cursor` into a new `collect_audit_state` helper and wired the unreviewed-count onto both natural-cadence return surfaces — `ap2 status` text (`audit: N unreviewed since <ts>` line, omit-on-empty) + `--json` (always-present `audit` block, parser-stable) + the 2h cron status-report Mattermost digest (`*Retrospective audit (unreviewed shipped):*` sub-block, omit-on-empty); pure read-layer composition mirroring TB-241/242/244/245's push-vs-pull parity pattern. 19 new pin tests in `test_tb258_audit_count_surface.py`; full suite 1817 passing.
 - **Files:** ap2/automation_status.py, ap2/cli.py, ap2/howto.md, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_tb258_audit_count_surface.py
 - **Tests:** pass
+
+## [2026-05-19] TB-259: Surface `/stats` window aggregates (task / bullet / ideation top-line) in cron status-report digest (push-surface parity closure)
+- **Commit:** `825fe51`
+- **Summary:** TB-259: added `render_stats_window_section` + state_extras wiring + `_STATUS_REPORT_CONTRACT` `"stats_window"` field + howto cross-ref, closing TB-255's push-vs-pull surface-parity gap; new pin module + full suite (1829 passed) green.
+- **Files:** ap2/status_report.py, ap2/prompts.py, ap2/howto.md, ap2/tests/test_tb259_status_report_stats_window.py, ap2/tests/test_status_report_skip.py
+- **Tests:** pass
