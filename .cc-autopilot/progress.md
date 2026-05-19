@@ -815,3 +815,9 @@
 - **Summary:** TB-264 retry: prior commit b8ed01a already shipped the per-surface cli.py split (118KB → 30KB across cli_daemon/cli_board/cli_review/cli_diagnostic siblings, 1865 tests passing); only the briefing's 5th bullet (`ap2 --project /tmp/nonexistent status` must error) was flunking because pre-existing `cmd_status` silently printed a synthetic-empty board for nonexistent project roots. Follow-up commit 6e0a409 adds a single `cfg.project_root.is_dir()` guard at the top of `cmd_status` in `ap2/cli_daemon.py` that prints "error: project not found: <path>" to stderr and returns 1 — all six verification bullets now pass (1865 tests, cli.py 30148 bytes < 40KB, both siblings present, 25 verbs in --help, status errors on missing project, every `set_defaults(func=…)` in cli.py binds an imported sibling handler).
 - **Files:** ap2/cli_daemon.py
 - **Tests:** pass
+
+## [2026-05-19] TB-265: Split `ap2/web.py` (179KB) by route group: home / events / task-run / stats / insights siblings
+- **Commit:** `84db3ad`
+- **Summary:** TB-265 retry: closed the prose-verification gap from the prior 48b3934 split attempt by adding `_render_env_stale_warning(cfg)` to `web_home.py` (calls `automation_status.collect_env_staleness`, emits red-tinted WARN card with both timestamps + `ap2 stop && ap2 start` remediation when stale, default-off byte-identical when fresh), wired into `_render_home` under the daemon-status header, re-exported through `web.py`, with 3 regression tests in `test_web.py` pinning the surface; full suite 1868 passed, web.py stays 23599 B (< 60000 gate), 3 sibling modules present, `make_app()` composes 14 routes including `/`, `/events`, `/stats`.
+- **Files:** ap2/web.py, ap2/web_home.py, ap2/tests/test_web.py
+- **Tests:** pass
