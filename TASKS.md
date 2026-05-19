@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-262** **Split `ap2/tools.py` (224KB / ~5000 LOC) by surface area into focused sibling modules** `#autopilot` `#refactor` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-tools-py-224kb-5000-loc-by-sur.md)
 
 ## Pipeline Pending
 
@@ -148,6 +147,7 @@
 - [x] **TB-259** **Surface `/stats` window aggregates (task / bullet / ideation top-line) in cron status-report digest (push-surface parity closure)** `#autopilot` `#observability` `#status-report` `#cron` `#stats` `#axis-1` `#regression-pin` — The /stats dashboard ships task / bullet / ideation timing + turn + attempt aggregates over events.jsonl (pull surface; helper `collect_stats(cfg, window_s=...)` already in HEAD at ap2/automation_stats.py). But the cron status-report digest (the Mattermost push channel for walk-away monitoring) carries no top-line aggregates summary. Mirrors push-vs-pull surface-parity shape closed on prior axes by TB-241 / TB-242 / TB-244 / TB-245. Pure read-layer composition. [→ brief](.cc-autopilot/tasks/surface-stats-window-aggregates-task-bul.md)
 - [x] **TB-260** **Surface stale `.cc-autopilot/env` (mtime > daemon-start) in `ap2 status` + cron status-report digest + watchdog** `#autopilot` `#observability` `#env` `#operator-surface` `#regression-pin` [→ brief](.cc-autopilot/tasks/surface-stale-cc-autopilot-env-mtime-dae.md)
 - [x] **TB-261** **Centralize LLM-JSON extraction in stdlib `raw_decode` util; replace 4 brittle `find("{")/rfind("}")` sites** `#autopilot` `#verify` `#judge` `#parser` `#refactor` `#reuse` `#regression-pin` [→ brief](.cc-autopilot/tasks/centralize-llm-json-extraction-in-stdlib.md)
+- [x] **TB-262** **Split `ap2/tools.py` (224KB / ~5000 LOC) by surface area into focused sibling modules** `#autopilot` `#refactor` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-tools-py-224kb-5000-loc-by-sur.md)
 
 ## Frozen
 

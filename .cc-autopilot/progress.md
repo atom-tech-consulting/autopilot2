@@ -797,3 +797,9 @@
 - **Summary:** TB-261: added `ap2/json_extract.py` with `extract_rightmost_json_object` (stdlib `raw_decode`, rightmost-balanced JSON object selection), wired it into all four hand-rolled `find("{")/rfind("}")` sites — `verify.py:_categorize_parse_error`, `verify.py:_parse_judge_response`, `janitor.py:_parse_judge_response`, `tools.py:_parse_dep_judge_response` — preserving TB-236/TB-247 parse_error taxonomy + debug-dump hooks at every site; added regression-pin `ap2/tests/test_json_extract_util.py` covering the six scope-mandated cases (TB-89 shadowing, multi-shadow, internal/escape chars, None, rightmost) plus integration check on the literal post-train TB-89 captured response; full `uv run pytest -q` passes (1865 tests), briefing's TB-89 integration probe parses as `status=pass parse_error=None`, and the verification grep returns 0 matches in non-test code.
 - **Files:** ap2/json_extract.py, ap2/verify.py, ap2/janitor.py, ap2/tools.py, ap2/tests/test_json_extract_util.py
 - **Tests:** pass
+
+## [2026-05-19] TB-262: Split `ap2/tools.py` (224KB / ~5000 LOC) by surface area into focused sibling modules
+- **Commit:** `f46b050`
+- **Summary:** TB-262: split ap2/tools.py (224KB → 57KB) into four flat sibling modules — briefing_validators.py (44KB), validator_judge.py (34KB), operator_queue.py (85KB), board_edits.py (17KB); tools.py keeps MCP dispatch + `_ok`/`_err`/`slugify` shared plumb + agent toolsets + re-exports for backward compat. Mechanical move (no symbol/signature/behavior changes), all 14 MCP @tool registrations stay in build_mcp_server; full suite 1865 passed.
+- **Files:** ap2/tools.py, ap2/briefing_validators.py, ap2/validator_judge.py, ap2/operator_queue.py, ap2/board_edits.py
+- **Tests:** pass
