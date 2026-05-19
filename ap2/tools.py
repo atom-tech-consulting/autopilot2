@@ -32,6 +32,7 @@ from .init import (
     GOAL_ANCHOR_HEADINGS,
     WHY_NOW_MIN_CHARS,
 )
+from .json_extract import extract_rightmost_json_object
 from .verify import parse_verification_section
 
 
@@ -829,6 +830,14 @@ def _parse_dep_judge_response(
         # the substring extraction so preamble/trailing-prose
         # responses (the operator-named TB-228 shape that motivated
         # TB-236) still get extracted cleanly.
+        #
+        # TB-261: the substring extraction is now centralized in
+        # ``ap2.json_extract.extract_rightmost_json_object`` — the
+        # rightmost-balanced-object semantics close the preamble-
+        # brace-shadowing bug (TB-89 in post-train) that the pre-
+        # TB-261 first-``{`` / last-``}`` boundary-finding had at all
+        # four call sites in this codebase. The TB-247 enum stays
+        # intact; only the boundary-finding moved to the shared util.
         stripped = text.strip()
         try:
             whole = json.loads(stripped)
@@ -842,25 +851,29 @@ def _parse_dep_judge_response(
                 parse_error = "non_dict"
 
         if not whole_parsed:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start == -1 or end <= start:
-                parse_error = "no_braces"
-            else:
-                try:
-                    parsed = json.loads(text[start:end + 1])
-                except json.JSONDecodeError:
-                    parse_error = "json_decode"
+            extracted = extract_rightmost_json_object(text)
+            if extracted is None:
+                # No parseable JSON OBJECT anywhere. Could be no
+                # braces at all OR braces present but every candidate
+                # `{` position fails `raw_decode`. Distinguish the
+                # two so the TB-247 enum keeps separating structural
+                # noise (`no_braces`) from malformed-JSON shape
+                # (`json_decode`) — operators pattern-match on this
+                # split per the original taxonomy.
+                if "{" not in text:
+                    parse_error = "no_braces"
                 else:
-                    if not isinstance(parsed, dict):
-                        # Defensive: the substring `text[start:end+1]`
-                        # starts with `{` and ends with `}`, so JSON
-                        # semantics make this branch nearly impossible
-                        # in practice — but the category exists for
-                        # closure across the enum.
-                        parse_error = "non_dict"
-                    else:
-                        data = parsed
+                    parse_error = "json_decode"
+            else:
+                parsed, _, _ = extracted
+                # The util only returns dict-typed values per its
+                # contract; this isinstance check is redundant but
+                # kept for closure across the enum (matches the pre-
+                # TB-261 defensive branch).
+                if not isinstance(parsed, dict):
+                    parse_error = "non_dict"
+                else:
+                    data = parsed
 
     dump_path: "Path | None" = None
     if parse_error is not None and events_file is not None:

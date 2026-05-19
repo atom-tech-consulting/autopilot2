@@ -117,6 +117,7 @@ from pathlib import Path
 
 from . import events
 from .config import Config
+from .json_extract import extract_rightmost_json_object
 
 
 # --------------------------------------------------------------------------
@@ -785,21 +786,22 @@ async def _judge_finding(
 def _parse_judge_response(response: str) -> tuple[str, str]:
     """Extract `(verdict, reasoning)` from the judge's reply.
 
-    Tolerant: extracts the first balanced ``{...}`` substring; any parse
-    failure or unknown verdict falls back to ``("ambiguous", "<note>")``.
+    TB-261: extracts the **rightmost top-level** balanced ``{...}``
+    substring via ``ap2.json_extract.extract_rightmost_json_object``;
+    any parse failure or unknown verdict falls back to
+    ``("ambiguous", "<note>")``. Pre-TB-261 the boundary was first-
+    ``{`` to last-``}``, which an LLM preamble containing literal
+    braces (e.g. set notation, code blocks) could shadow.
     """
     if not response:
         return VERDICT_AMBIGUOUS, "empty judge response"
-    start = response.find("{")
-    end = response.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    extracted = extract_rightmost_json_object(response)
+    if extracted is None:
+        # No parseable JSON object at all — could be no braces, could
+        # be malformed JSON. Surface the response prefix so an
+        # operator scanning the events file can eyeball the shape.
         return VERDICT_AMBIGUOUS, f"no JSON in response: {response[:120]!r}"
-    try:
-        data = json.loads(response[start:end + 1])
-    except json.JSONDecodeError:
-        return VERDICT_AMBIGUOUS, (
-            f"malformed JSON: {response[start:end + 1][:120]!r}"
-        )
+    data, _, _ = extracted
     verdict = str(data.get("verdict", "")).strip().lower()
     reasoning = str(data.get("reasoning", "")).strip()
     if verdict not in KNOWN_VERDICTS:

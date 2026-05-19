@@ -41,6 +41,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .json_extract import extract_rightmost_json_object
+
 
 # Mistune AST parser — used for `## Verification` section detection and bullet
 # classification (TB-102). Replaces the regex tower (`_VERIFICATION_HEADER_RE`,
@@ -715,55 +717,69 @@ def _categorize_parse_error(response: str) -> str:
     can answer "is this a prompt-tightening bug or a parser bug?" at a
     glance. The full raw response is dumped separately by the caller for
     cases where the category alone isn't enough.
+
+    TB-261: extraction boundary-finding is centralized in
+    ``ap2.json_extract.extract_rightmost_json_object``. This function
+    inherits the rightmost-balanced-object semantics, then probes
+    failure modes with ``json.JSONDecoder().raw_decode`` from each
+    ``{`` position to reach the operator-actionable category
+    (truncation vs. unescaped-string vs. bare-no-JSON-at-all).
     """
     if not response:
         return "no_json_object"
-    start = response.find("{")
-    if start == -1:
+    # Fast path: did the centralized extractor find a clean JSON object?
+    # If yes, the only remaining failure mode the categorizer needs to
+    # name is "trailing prose after the verdict" (the JSON parsed
+    # fine, but the judge appended commentary the call site flags as
+    # a prompt-contract drift). Other "success" landings here are
+    # unexpected — the catch-all parse_error_other carries them.
+    extracted = extract_rightmost_json_object(response)
+    if extracted is not None:
+        _, _, end_offset = extracted
+        if response[end_offset:].strip():
+            return "trailing_prose_after_json"
+        return "parse_error_other"
+    # No parseable JSON object. Fall back to per-`{` probing to
+    # categorize WHY each candidate failed — pick the most specific
+    # surfaced JSONDecodeError message across all candidates.
+    if "{" not in response:
         return "no_json_object"
-    end = response.rfind("}")
-    if end == -1 or end <= start:
-        # Opening brace present but no closing brace at all. Probe the
-        # suffix from the opener: if `json.loads` reports "Unterminated
-        # string", the response was cut off mid-rationale (the observed
-        # TB-228 shape). Other JSONDecodeError messages here (e.g.
-        # "Expecting property name" / "Expecting value") also point at
-        # truncation since the JSON is structurally incomplete. Only
-        # collapse to `no_json_object` if there's so little content that
-        # truncation isn't a plausible explanation.
+    decoder = json.JSONDecoder()
+    msgs: list[str] = []
+    # Walk every `{` position in `response`. Using enumerate (not
+    # `str.find` / `str.rfind`) keeps the categorizer free of the
+    # pre-TB-261 boundary-finding pattern that the verification grep
+    # forbids — the extractor centralizes that, and the categorizer
+    # only needs candidate positions to probe error messages.
+    for pos, ch in enumerate(response):
+        if ch != "{":
+            continue
         try:
-            json.loads(response[start:])
+            decoder.raw_decode(response, pos)
         except json.JSONDecodeError as e:
-            msg = (e.msg or "").lower()
-            if "unterminated string" in msg or "expecting" in msg:
-                return "json_truncated"
-            return "no_json_object"
-        # If a closing-brace-less suffix somehow parsed, the response is
-        # too degenerate to classify; fall through to the catch-all.
-        return "parse_error_other"
-    candidate = response[start:end + 1]
-    try:
-        json.loads(candidate)
-    except json.JSONDecodeError as e:
-        msg = (e.msg or "").lower()
-        # `json` raises "Unterminated string starting at" when a `"`-
-        # opened string value has no matching close inside the candidate.
-        # This is the truncation signature: model ran out of budget mid-
-        # rationale.
-        if "unterminated string" in msg:
+            msgs.append((e.msg or "").lower())
+    # `json` raises "Unterminated string starting at" when a `"`-
+    # opened string value has no matching close inside the candidate.
+    # This is the truncation signature: model ran out of budget mid-
+    # rationale.
+    if any("unterminated string" in m for m in msgs):
+        return "json_truncated"
+    if "}" not in response:
+        # Opening brace(s) present but no closing brace anywhere.
+        # `raw_decode` failures with "Expecting" (property name / value /
+        # delimiter) on a closing-brace-less response also point at
+        # truncation since the JSON is structurally incomplete. Only
+        # collapse to `no_json_object` if probes returned nothing
+        # informative.
+        if any("expecting" in m for m in msgs):
             return "json_truncated"
-        # Most other failures inside a string value surface as
-        # "Expecting ',' delimiter" or "Expecting value" or
-        # "Invalid \\escape" — all consistent with an unescaped quote /
-        # backslash inside the rationale.
-        if "expecting" in msg or "invalid" in msg:
-            return "unescaped_in_string"
-        return "parse_error_other"
-    # Candidate parsed cleanly. If non-whitespace follows the closing
-    # brace, the judge appended commentary — separable from a content bug.
-    trailing = response[end + 1:].strip()
-    if trailing:
-        return "trailing_prose_after_json"
+        return "no_json_object"
+    # Both braces present, but no candidate `{` parses cleanly. Most
+    # other failures surface as "Expecting ',' delimiter" or
+    # "Expecting value" or "Invalid \\escape" — all consistent with
+    # an unescaped quote / backslash inside the rationale.
+    if any("expecting" in m or "invalid" in m for m in msgs):
+        return "unescaped_in_string"
     return "parse_error_other"
 
 
@@ -785,7 +801,14 @@ def _parse_judge_response(bullet_text: str, response: str) -> _ParseOutcome:
     """Extract the JSON verdict from the judge's reply.
 
     The response should be `{"status": ..., "rationale": ...}` on one line.
-    Tolerates extra text by extracting the first balanced `{...}` substring.
+    Tolerates prose preamble by extracting the **rightmost top-level**
+    balanced ``{...}`` substring via
+    ``ap2.json_extract.extract_rightmost_json_object`` (TB-261). The
+    judge's prompt pins the verdict to the end of the response, so
+    rightmost-wins matches the prompt contract even when the preamble
+    holds literal braces (set notation, code examples) that would have
+    shadowed the verdict under the pre-TB-261 first-``{`` / last-``}``
+    boundary-finding.
 
     TB-236: returns a ``_ParseOutcome`` carrying the verdict plus
     diagnostic fields. ``parse_error`` is set on every failure path
@@ -806,10 +829,10 @@ def _parse_judge_response(bullet_text: str, response: str) -> _ParseOutcome:
             ),
             parse_error=_categorize_parse_error(response),
         )
-    # Find the first JSON object in the response.
-    start = response.find("{")
-    end = response.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    # TB-261: rightmost-balanced extraction. Tolerates preamble braces
+    # (the TB-89 trigger) and trailing prose (the TB-236 distinction).
+    extracted = extract_rightmost_json_object(response)
+    if extracted is None:
         return _ParseOutcome(
             verdict=CriterionResult(
                 bullet=bullet_text, kind="prose", status="unverified",
@@ -817,16 +840,7 @@ def _parse_judge_response(bullet_text: str, response: str) -> _ParseOutcome:
             ),
             parse_error=_categorize_parse_error(response),
         )
-    try:
-        data = json.loads(response[start:end + 1])
-    except json.JSONDecodeError:
-        return _ParseOutcome(
-            verdict=CriterionResult(
-                bullet=bullet_text, kind="prose", status="unverified",
-                notes=f"malformed JSON: {response[start:end + 1][:200]!r}",
-            ),
-            parse_error=_categorize_parse_error(response),
-        )
+    data, json_start, json_end = extracted
     status = str(data.get("status", "")).lower().strip()
     rationale = str(data.get("rationale", "")).strip()
     if status not in ("pass", "fail"):
@@ -848,7 +862,7 @@ def _parse_judge_response(bullet_text: str, response: str) -> _ParseOutcome:
     # so the operator can see prompt-drift creeping in without flipping
     # the verdict to unverified.
     trailing_parse_error: str | None = None
-    if response[end + 1:].strip():
+    if response[json_end:].strip():
         trailing_parse_error = "trailing_prose_after_json"
     return _ParseOutcome(
         verdict=CriterionResult(
