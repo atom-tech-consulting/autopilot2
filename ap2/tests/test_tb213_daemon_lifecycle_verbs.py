@@ -304,7 +304,7 @@ def test_cmd_stop_happy_path(tmp_path: Path, capsys):
         # we let that succeed silently. The "real" stop call sends SIGTERM.
         calls.append((pid, sig))
 
-    with patch("ap2.cli.os.kill", side_effect=fake_kill):
+    with patch("ap2.cli_daemon.os.kill", side_effect=fake_kill):
         rc = cmd_stop(cfg, Namespace(force=False))
 
     assert rc == 0
@@ -331,7 +331,7 @@ def test_cmd_stop_force_sends_sigkill(tmp_path: Path, capsys):
     def fake_kill(pid: int, sig: int) -> None:
         calls.append((pid, sig))
 
-    with patch("ap2.cli.os.kill", side_effect=fake_kill):
+    with patch("ap2.cli_daemon.os.kill", side_effect=fake_kill):
         rc = cmd_stop(cfg, Namespace(force=True))
 
     assert rc == 0
@@ -355,7 +355,7 @@ def test_cmd_stop_daemon_not_running_no_pid_file(tmp_path: Path, capsys):
     def fake_kill(pid: int, sig: int) -> None:
         calls.append((pid, sig))
 
-    with patch("ap2.cli.os.kill", side_effect=fake_kill):
+    with patch("ap2.cli_daemon.os.kill", side_effect=fake_kill):
         rc = cmd_stop(cfg, Namespace(force=False))
 
     assert rc == 0
@@ -387,7 +387,7 @@ def test_cmd_stop_stale_pid_file_is_cleaned_up(tmp_path: Path, capsys):
             "— handler should short-circuit before signal delivery"
         )
 
-    with patch("ap2.cli.os.kill", side_effect=fake_kill):
+    with patch("ap2.cli_daemon.os.kill", side_effect=fake_kill):
         rc = cmd_stop(cfg, Namespace(force=False))
 
     assert rc == 0

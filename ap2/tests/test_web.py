@@ -1716,13 +1716,15 @@ def test_task_run_page_summary_uses_latest_verification_failed_event(
 
 def test_summarize_verification_failed_shared_helper_is_grep_visible():
     """TB-158 verification gate: `summarize_verification_failed` is
-    referenced by name in events.py, cli.py, AND web.py — the briefing's
-    `grep -qE` bullet pins this. A refactor that drops the call from
-    either surface would silently break the consistent rendering."""
+    referenced by name in events.py, cli_diagnostic.py (was cli.py
+    pre-TB-264 — the `ap2 logs` rendering moved with `cmd_logs` to
+    the diagnostic sibling), AND web.py. The briefing's `grep -qE`
+    bullet pins this so a refactor that drops the call from either
+    surface would silently break the consistent rendering."""
     from pathlib import Path as _P
 
     root = _P(web.__file__).resolve().parent
-    for fname in ("events.py", "cli.py", "web.py"):
+    for fname in ("events.py", "cli_diagnostic.py", "web.py"):
         text = (root / fname).read_text()
         assert "summarize_verification_failed" in text, fname
 
@@ -2023,13 +2025,15 @@ def test_compact_usage_event_types_referenced_in_web_module():
 def test_summarize_usage_event_helper_consumed_by_web_module():
     """TB-180 verification gate: the shared compact formatter
     `summarize_usage_event` lives in `ap2/events.py` AND is consumed by
-    `ap2/web.py` (and `ap2/cli.py`). Pinning by name in all three files
-    catches a refactor that drops one surface and silently de-syncs
-    the rendering between `ap2 logs` and `/events`."""
+    `ap2/web.py` (and `ap2/cli_diagnostic.py` — was `ap2/cli.py`
+    pre-TB-264; `cmd_logs` moved with the diagnostic sibling). Pinning
+    by name in all three files catches a refactor that drops one
+    surface and silently de-syncs the rendering between `ap2 logs`
+    and `/events`."""
     from pathlib import Path as _P
 
     root = _P(web.__file__).resolve().parent
-    for fname in ("events.py", "cli.py", "web.py"):
+    for fname in ("events.py", "cli_diagnostic.py", "web.py"):
         text = (root / fname).read_text()
         assert "summarize_usage_event" in text, fname
 

@@ -509,23 +509,32 @@ def test_run_status_report_omits_audit_section_when_zero(
 
 
 def test_cli_status_calls_audit_list_unreviewed():
-    """`grep -q "list_unreviewed" ap2/cli.py` (briefing verifier)
+    """`grep -q "list_unreviewed" ap2/cli*.py` (briefing verifier)
     must match: `cmd_status` reaches the audit helper directly OR
     through the `collect_audit_state` wrapper which itself imports
     `audit.list_unreviewed`. We pin both paths by asserting the
-    literal token lives in either file the verifier-grep walks."""
+    literal token lives in either file the verifier-grep walks.
+
+    TB-264: `cmd_status` lived in `ap2/cli.py` until the cli
+    surface split; it now lives in `ap2/cli_daemon.py` (the
+    daemon-lifecycle sibling). The grep walks both files so the
+    pin survives the split without weakening — either source
+    text carrying the token satisfies the structural promise."""
     from ap2 import automation_status as _mod_as
     from ap2 import cli as _mod_cli
+    from ap2 import cli_daemon as _mod_cli_daemon
     src_cli = Path(_mod_cli.__file__).read_text()
+    src_cli_daemon = Path(_mod_cli_daemon.__file__).read_text()
     src_as = Path(_mod_as.__file__).read_text()
-    # Briefing verifier is `grep -q "list_unreviewed" ap2/cli.py`.
-    # We require the literal token to appear in cli.py so the verifier
-    # matches; the call may be direct or via comment/docstring
-    # cross-reference, as long as `cmd_status` ends up reaching the
-    # helper through `collect_audit_state`.
-    assert "list_unreviewed" in src_cli, (
-        "ap2/cli.py must reference list_unreviewed (directly or via "
-        "comment/docstring) for the briefing verifier grep to match"
+    # Briefing verifier is `grep -q "list_unreviewed" ap2/cli*.py`.
+    # We require the literal token to appear in one of the CLI source
+    # files so the verifier matches; the call may be direct or via
+    # comment/docstring cross-reference, as long as `cmd_status` ends
+    # up reaching the helper through `collect_audit_state`.
+    assert "list_unreviewed" in src_cli or "list_unreviewed" in src_cli_daemon, (
+        "ap2/cli.py or ap2/cli_daemon.py must reference list_unreviewed "
+        "(directly or via comment/docstring) for the briefing verifier "
+        "grep to match"
     )
     # And the helper itself must call list_unreviewed (the wrapper
     # path) so the count actually surfaces.
@@ -535,11 +544,16 @@ def test_cli_status_calls_audit_list_unreviewed():
 
 
 def test_cli_status_references_audit_label():
-    """`grep -q 'audit:' ap2/cli.py` (briefing verifier) must match:
-    `cmd_status` carries the new `audit:` text-line label."""
+    """`grep -q 'audit:' ap2/cli*.py` (briefing verifier) must match:
+    `cmd_status` carries the new `audit:` text-line label.
+
+    TB-264: `cmd_status` moved to `ap2/cli_daemon.py` in the cli
+    surface split; the assertion now walks both files."""
     from ap2 import cli as _mod_cli
+    from ap2 import cli_daemon as _mod_cli_daemon
     src = Path(_mod_cli.__file__).read_text()
-    assert "audit:" in src
+    src_daemon = Path(_mod_cli_daemon.__file__).read_text()
+    assert "audit:" in src or "audit:" in src_daemon
 
 
 def test_automation_status_declares_collect_audit_state():
