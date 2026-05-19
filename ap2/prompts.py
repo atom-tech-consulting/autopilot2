@@ -227,6 +227,20 @@ _STATUS_REPORT_CONTRACT = """\
   same stale-text regression class. When the sub-block is absent
   the window had zero task completions (quiet window / fresh
   project) — omit.
+- TB-260: if the `## Current state` block carries a
+  `*Daemon env file stale (restart required):*` sub-block
+  (italicized header + one bullet naming the env file mtime and
+  the daemon-start mtime plus the `ap2 stop && ap2 start` restart
+  nudge — the on-demand pull surface `ap2 status --json` mirrors
+  the same fact under top-level `"env_stale"` / `"env_file_mtime"`
+  / `"env_file_mtime_at_start"` fields for parser-stable machine
+  consumers), copy that entire sub-block VERBATIM into your
+  Mattermost post — italicized header and the per-bullet restart
+  line. Same daemon-owned deterministic-rendering contract as
+  TB-228 / TB-244 / TB-245 / TB-258 / TB-259; recomputing or
+  paraphrasing risks the same stale-text regression class. When
+  the sub-block is absent the env file is fresh (operator hasn't
+  edited it since the daemon last loaded it) — omit.
 - Always call `log_event(type="status_report", summary=...)` before
   finishing — posted or skipped.
 """

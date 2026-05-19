@@ -91,6 +91,16 @@ class DiagnoseReport:
     recent_failures: list[dict]
     cron_status: list[dict]
     board_health: dict[str, Any]
+    # TB-260: stale-env state surfaced into the watchdog summary so the
+    # `auto_diagnose_fired` event's `report_summary` carries the "restart
+    # required" reminder when an operator's knob bump silently
+    # outdated the running daemon's `Config`. Same dict shape as
+    # `automation_status.collect_env_staleness` returns (env_stale +
+    # env_file_mtime + env_file_mtime_at_start); rendered as a single
+    # `env-stale: yes (modified <ts>)` line in `render_markdown`. Default
+    # `None` so tests / call sites that build their own DiagnoseReport
+    # without env-stale state don't have to opt in.
+    env_staleness: dict | None = None
 
 
 def is_wholly_pending_review(report: "DiagnoseReport") -> bool:
@@ -141,6 +151,17 @@ def build_report(
 
     board = Board.load(cfg.tasks_file) if cfg.tasks_file.exists() else None
 
+    # TB-260: collect stale-env state once and thread into the report so
+    # `render_markdown` can emit a one-line `env-stale: yes (modified
+    # <ts>)` reminder when applicable. Lazy import to avoid the
+    # automation_status ↔ diagnose cycle (automation_status pulls in
+    # events, which the diagnose module also imports — keeping the
+    # import inside `build_report` localizes the dependency to the one
+    # call site that needs it).
+    from . import automation_status as _automation_status
+
+    env_staleness = _automation_status.collect_env_staleness(cfg)
+
     return DiagnoseReport(
         project_root=cfg.project_root,
         timestamp=_iso(now),
@@ -150,6 +171,7 @@ def build_report(
         recent_failures=_recent_failures(events_tail, recent_failure_limit),
         cron_status=_cron_status(cfg, now),
         board_health=_board_health(board, events_tail),
+        env_staleness=env_staleness,
     )
 
 
@@ -209,6 +231,24 @@ def render_markdown(report: DiagnoseReport) -> str:
     if overdue:
         lines.append("")
         lines.append("**Overdue crons:** " + ", ".join(c["name"] for c in overdue))
+
+    # TB-260: stale-env one-line reminder. Emitted when an operator's
+    # `.cc-autopilot/env` edit hasn't been picked up by the running
+    # daemon yet (mtime > daemon-start mtime). Shape matches the
+    # operator-facing `env-stale: yes (modified <ts>)` block the
+    # briefing pins; omitted entirely on a healthy daemon so the
+    # pre-TB-260 watchdog summary stays byte-identical for the steady
+    # state. The fixed `**Env:**` label section keeps the watchdog
+    # summary parseable — operators grepping the `auto_diagnose_fired`
+    # event's `report_summary` for "env-stale: yes" find it here.
+    env_staleness = report.env_staleness or {}
+    if env_staleness.get("env_stale"):
+        lines.append("")
+        lines.append("**Env:**")
+        lines.append(
+            f"- env-stale: yes (modified {env_staleness['env_file_mtime']}) "
+            f"— restart with `ap2 stop && ap2 start`"
+        )
 
     if report.recent_failures:
         lines.append("")

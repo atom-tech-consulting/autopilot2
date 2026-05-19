@@ -201,6 +201,16 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # the JSON branch ALWAYS carries the `audit` block (parser
     # stability mirror of the `auto_approve` contract).
     audit_state = automation_status.collect_audit_state(cfg)
+    # TB-260: stale-env surface — read the daemon-start mtime stash
+    # from `daemon_state.json` and compare against the live env file
+    # mtime. The text branch emits a WARN line ONLY when the live
+    # mtime is later than the daemon-start mtime (i.e. the operator
+    # bumped a knob and hasn't restarted yet — the silent window that
+    # bit TB-255). JSON ALWAYS carries the `env_stale` + `env_file_mtime`
+    # keys for parser stability (mirrors the `auto_approve` / `audit`
+    # parser-stability promise). Pure read-layer: no I/O beyond two
+    # small stat / json reads via `collect_env_staleness`.
+    env_staleness = automation_status.collect_env_staleness(cfg)
     # TB-242: axis-4 focus-rotation surface — read the focus list +
     # active focus + halt state once so both the text and JSON branches
     # can render them. Pure read-layer composition over TB-226's
@@ -336,6 +346,23 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
                 "unreviewed_count": audit_state["unreviewed_count"],
                 "cursor_ts": audit_state["cursor_ts"],
             },
+            # TB-260: stale-env surface. `env_stale` flips true when the
+            # `.cc-autopilot/env` file's mtime is later than the
+            # daemon-start mtime — operator bumped a knob and hasn't
+            # restarted (the silent window that bit TB-255 against
+            # `AP2_VERIFY_TIMEOUT_S`). `env_file_mtime` is the live
+            # mtime in iso form; both keys are ALWAYS present (zero-
+            # state included) for parser stability so machine consumers
+            # can pluck `.env_stale` directly. `env_file_mtime_at_start`
+            # is the daemon-side baseline iso the comparison ran
+            # against; renderers and operator post-mortems can read
+            # both timestamps from this block without going through
+            # the daemon's PID.
+            "env_stale": env_staleness["env_stale"],
+            "env_file_mtime": env_staleness["env_file_mtime"],
+            "env_file_mtime_at_start": env_staleness[
+                "env_file_mtime_at_start"
+            ],
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -487,6 +514,20 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(
             f"audit:    {audit_state['unreviewed_count']} unreviewed "
             f"since {_cursor_display} — `ap2 audit`"
+        )
+    # TB-260: stale-env WARN line. Emitted when the live
+    # `.cc-autopilot/env` mtime is later than the daemon-start mtime
+    # (i.e. operator bumped a knob and hasn't restarted yet). The
+    # remediation command lives in the message so the operator doesn't
+    # need to look it up — same one-liner-with-fix shape as TB-258's
+    # `audit:` line. Omitted entirely when not stale (default-off
+    # byte-identical to pre-TB-260 output on a healthy daemon).
+    if env_staleness["env_stale"]:
+        print(
+            f"WARN:     .cc-autopilot/env modified at "
+            f"{env_staleness['env_file_mtime']} (after daemon start at "
+            f"{env_staleness['env_file_mtime_at_start']}) — "
+            f"restart with `ap2 stop && ap2 start` to apply changes"
         )
     # TB-227: surface the auto-approve / auto-unfreeze loop state. Two
     # rendering shapes — healthy (knob on, no halt) vs. paused (halt

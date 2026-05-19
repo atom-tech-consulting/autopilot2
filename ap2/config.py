@@ -24,6 +24,14 @@ CRON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/cron_state.json"
 MM_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/mm_state.json"
 RETRY_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/retry_state.json"
 AUTO_DIAGNOSE_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/auto_diagnose_state.json"
+# TB-260: per-daemon-lifetime runtime-introspection facts (currently
+# `env_file_mtime_at_start` for the `.cc-autopilot/env` stale-detection
+# surface). Separate from `auto_diagnose_state.json` because that file
+# is dedicated to watchdog-cooldown bookkeeping; this one captures
+# "facts pinned at daemon start, valid until daemon stop" so the CLI's
+# `cmd_status` (a separate process) can compare current env mtime to
+# the daemon's start-mtime without going through the daemon's PID.
+DAEMON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/daemon_state.json"
 ENV_FILE = f"{AUTOPILOT_DIR_NAME}/env"
 
 DEFAULT_TICK_INTERVAL_S = 30
@@ -57,6 +65,18 @@ class Config:
     mm_state_file: Path
     retry_state_file: Path
     auto_diagnose_state_file: Path
+    # TB-260: stash for `env_file_mtime_at_start` (and any future
+    # daemon-lifetime introspection facts) so the CLI's `cmd_status`
+    # can compare the live env file mtime against the value captured
+    # at daemon start without going through the daemon's PID.
+    daemon_state_file: Path
+    # TB-260: the `.cc-autopilot/env` source-of-truth path. Surfaced as
+    # a Config attribute (not just the `ENV_FILE` module constant) so
+    # both startup-capture (in `daemon._emit_daemon_start`) and the
+    # cmd_status / status_report / diagnose stale-detection paths read
+    # one canonical attribute — a refactor that moves the env file
+    # ripples through the dataclass instead of every call site.
+    env_file: Path
     next_task_id: int
     tick_interval_s: int
     mm_tick_interval_s: int
@@ -94,6 +114,9 @@ class Config:
             mm_state_file=root / MM_STATE_FILE,
             retry_state_file=root / RETRY_STATE_FILE,
             auto_diagnose_state_file=root / AUTO_DIAGNOSE_STATE_FILE,
+            # TB-260: daemon-lifetime state stash (env_file_mtime_at_start).
+            daemon_state_file=root / DAEMON_STATE_FILE,
+            env_file=root / ENV_FILE,
             next_task_id=autopilot_section.get("next_task_id", 1),
             tick_interval_s=int(os.environ.get("AP2_TICK_S", DEFAULT_TICK_INTERVAL_S)),
             mm_tick_interval_s=int(

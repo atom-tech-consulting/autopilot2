@@ -26,6 +26,7 @@ decide whether to display zero / disabled rows.
 from __future__ import annotations
 
 import datetime as _dt
+import json as _json
 import os
 from typing import TYPE_CHECKING
 
@@ -1044,6 +1045,128 @@ def collect_audit_state(cfg: "Config") -> dict:
     return {
         "unreviewed_count": len(rows),
         "cursor_ts": cursor,
+    }
+
+
+# ---------------------------------------------------------------------------
+# TB-260: stale-env detection for the CLI status + cron status-report digest
+# + watchdog auto-diagnose summary. Pure read-layer wrapper around the
+# `daemon_state.json` mtime stash daemon writes at `_emit_daemon_start`;
+# no new state file, no new env knobs.
+#
+# TB-255 hit a `verification_failed` at `duration_s=600.01s` on
+# 2026-05-18T17:38Z against the old 600s default, ~26h after
+# `AP2_VERIFY_TIMEOUT_S` had been bumped to 1800s in the env file. The
+# daemon hadn't restarted in between, so the in-memory `Config` still held
+# the old 600s ceiling — the operator's bump silently had no effect.
+# `retry_exhausted` → Frozen → operator manually unfroze → re-ran cleanly.
+#
+# This helper closes that operator-surface gap: the CLI `cmd_status` text
+# emits a WARN line when the env file's current mtime is later than the
+# daemon-start mtime; `--json` exposes the same fact as `env_stale: bool`
+# + `env_file_mtime: iso-ts`; the cron status-report digest carries the
+# warning via `state_extras`; the watchdog `auto_diagnose_fired` summary
+# includes a one-line `env-stale: yes (modified <ts>)` block.
+#
+# Design: explicit "needs restart" contract — NOT auto-reload. The `Config`
+# dataclass is built once at daemon start and threaded everywhere; making
+# env values effectively-live silently would surprise the operator. The
+# warn-and-restart shape keeps the operator's mental model intact while
+# making the silent-window from TB-255 loudly visible.
+
+
+def _iso_from_mtime(mtime: float | None) -> str | None:
+    """Format an epoch-mtime float to the project's standard
+    `YYYY-MM-DDTHH:MM:SSZ` iso shape, or `None` when `mtime` is None.
+
+    Mirrors the `_iso` helper in `diagnose.py` (same format string) so
+    the CLI / digest / watchdog all surface the same shape for
+    `env_file_mtime`. Pulled into this module rather than imported from
+    diagnose so the status-aggregator graph doesn't depend on the
+    diagnose graph (which pulls in Board + cron).
+    """
+    if mtime is None:
+        return None
+    return (
+        _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc)
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+
+
+def collect_env_staleness(cfg: "Config") -> dict:
+    """Aggregate the `.cc-autopilot/env` staleness state (TB-260).
+
+    Pure read-layer wrapper: reads `daemon_state.json` (the daemon's
+    `env_file_mtime_at_start` stash from `_capture_env_mtime_at_start`)
+    + the live env file's current mtime. No I/O beyond two small reads;
+    safe to call from CLI / cron / watchdog without taking any lock.
+
+    Returned dict (always present, machine-stable shape — mirrors the
+    `auto_approve` / `audit` parser-stability promise so JSON consumers
+    see a stable shape regardless of daemon state):
+
+      - `env_stale` (bool) — True iff the env file has been modified
+        since the daemon's startup. False when (a) the live and
+        at-start mtimes match, (b) the daemon never captured a baseline
+        (fresh project / daemon down — nothing to compare against), or
+        (c) the env file doesn't exist on either side. The CLI / cron
+        / watchdog gate their WARN lines on this single bool.
+      - `env_file_mtime` (str | None) — iso-formatted current mtime of
+        the env file, or `None` when the file doesn't exist. The
+        rendered iso shape matches the project's `%Y-%m-%dT%H:%M:%SZ`
+        convention so renderers can carry the value into operator-
+        facing text without reformatting.
+      - `env_file_mtime_at_start` (str | None) — iso-formatted mtime
+        the daemon captured at last `daemon_start`, or `None` when the
+        daemon hasn't captured (fresh project, daemon never started)
+        OR when the env file didn't exist at start time. Renderers use
+        this to compose the "modified at X (after daemon start at Y)"
+        explanatory phrase.
+
+    Stale-condition: `env_stale` is True iff BOTH mtimes parse to a
+    float AND `current > at_start`. Equal mtimes (same file unchanged)
+    are NOT stale; a missing live file with a captured baseline is NOT
+    stale (operator probably deleted the env file — different surface,
+    out of scope here).
+    """
+    # Lazy import to avoid the daemon ↔ automation_status cycle (the
+    # daemon imports this module via its tools graph; importing back
+    # would form a cycle. The helper only needs the JSON-loader shape
+    # the daemon writes, not the daemon module itself).
+    state_file = cfg.daemon_state_file
+    at_start_mtime: float | None = None
+    if state_file.exists():
+        try:
+            data = _json.loads(state_file.read_text())
+            if isinstance(data, dict):
+                raw = data.get("env_file_mtime_at_start")
+                if isinstance(raw, (int, float)):
+                    at_start_mtime = float(raw)
+        except (ValueError, OSError):
+            at_start_mtime = None
+
+    current_mtime: float | None = None
+    if cfg.env_file.exists():
+        try:
+            current_mtime = cfg.env_file.stat().st_mtime
+        except OSError:
+            current_mtime = None
+
+    # Stale only when we have BOTH mtimes AND current is strictly later.
+    # Equal mtimes (same file, no edit) are not stale; an absent at-start
+    # baseline means the daemon hasn't captured yet (fresh project or
+    # daemon down) — surfaces stay silent so the operator doesn't see a
+    # spurious warn on a clean cold start.
+    env_stale = (
+        at_start_mtime is not None
+        and current_mtime is not None
+        and current_mtime > at_start_mtime
+    )
+
+    return {
+        "env_stale": env_stale,
+        "env_file_mtime": _iso_from_mtime(current_mtime),
+        "env_file_mtime_at_start": _iso_from_mtime(at_start_mtime),
     }
 
 

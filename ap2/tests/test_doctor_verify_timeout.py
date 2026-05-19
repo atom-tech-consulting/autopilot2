@@ -60,6 +60,10 @@ def _make_cfg(project_root: Path, verify_timeout_s: int) -> Config:
         mm_state_file=project_root / ".cc-autopilot" / "mm_state.json",
         retry_state_file=project_root / ".cc-autopilot" / "retry_state.json",
         auto_diagnose_state_file=project_root / ".cc-autopilot" / "auto_diagnose_state.json",
+        # TB-260: per-daemon-lifetime state stash (env_file_mtime_at_start)
+        # + canonical `.cc-autopilot/env` path for stale-detection.
+        daemon_state_file=project_root / ".cc-autopilot" / "daemon_state.json",
+        env_file=project_root / ".cc-autopilot" / "env",
         next_task_id=1,
         tick_interval_s=30,
         mm_tick_interval_s=10,

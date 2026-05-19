@@ -645,6 +645,57 @@ def render_stats_window_section(stats: dict) -> list[str]:
     return [header, tasks_line, ideation_line, bullet_line]
 
 
+# ---------------------------------------------------------------------------
+# TB-260: stale-env sub-section for the cron status-report digest. Parallels
+# `render_audit_state_section` above — same omit-on-empty rule, same
+# `state_extras` wiring shape, same verbatim-forwarding contract.
+#
+# Closes the operator-surface gap that bit TB-255: an `AP2_VERIFY_TIMEOUT_S`
+# bump in `.cc-autopilot/env` is silently ignored until daemon restart;
+# without this digest line, the operator who walked away after editing
+# the file has no push-channel reminder that a restart is needed before
+# the bump takes effect. The cron digest's once-per-cycle surface
+# matches the briefing's debounce-by-design intent (per-detection
+# direct-mention notifications are explicitly out of scope).
+
+_ENV_STALENESS_HEADING = "*Daemon env file stale (restart required):*"
+
+
+def render_env_staleness_section(state: dict) -> list[str]:
+    """Return the Markdown lines for the `*Daemon env file stale
+    (restart required):*` sub-section the cron agent forwards verbatim
+    into the Mattermost post, or `[]` when the env file isn't stale.
+
+    `state` is the dict returned by
+    `automation_status.collect_env_staleness` — pre-computed by the
+    caller so the renderer stays pure / no I/O and tests can drive it
+    with fabricated state dicts without spinning up a real daemon
+    state file (parallel to TB-245's validator-judge / TB-258's
+    audit-state sub-block patterns).
+
+    Shape (when rendered):
+
+        *Daemon env file stale (restart required):*
+        - .cc-autopilot/env modified at <iso-ts> (after daemon start at <iso-ts>) — run `ap2 stop && ap2 start` to apply changes
+
+    Omit-on-empty: returns `[]` when `state["env_stale"]` is False
+    (default-off byte-identical regression pin — pre-TB-260 digests
+    carry zero env-staleness output and that stays the steady-state
+    happy path). Returns `list[str]` (not `str`) so the caller can
+    extend its own `state_extras` list directly; the wiring in
+    `run_status_report` joins and appends as one block so the section
+    reads as a unit.
+    """
+    if not state.get("env_stale"):
+        return []
+    return [
+        _ENV_STALENESS_HEADING,
+        f"- .cc-autopilot/env modified at {state['env_file_mtime']} "
+        f"(after daemon start at {state['env_file_mtime_at_start']}) — "
+        f"run `ap2 stop && ap2 start` to apply changes",
+    ]
+
+
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
 # field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
 # the daemon's `run_cron` short-circuits status-report jobs to
@@ -1282,6 +1333,22 @@ async def run_status_report(
     stats_lines = render_stats_window_section(stats)
     if stats_lines:
         state_extras.append("\n".join(stats_lines))
+    # TB-260: render the stale-env sub-block (parallel to the TB-259
+    # stats-window sub-block above). Reads `daemon_state.json`'s
+    # `env_file_mtime_at_start` stash via `collect_env_staleness` and
+    # compares against the live `.cc-autopilot/env` mtime. Placed
+    # AFTER the stats sub-block so the digest reads top-down as
+    # "automation activity → focus rotation → validator-judge fail-open
+    # → retrospective audit → stats window → daemon env staleness"
+    # (operator-restart nudge rendered last so the eye lands on it —
+    # the digest's natural call-to-action when active; mirrors
+    # TB-258's audit sub-block placement rationale). Renderer returns
+    # [] when not stale — healthy daemons stay byte-identical to the
+    # pre-TB-260 baseline.
+    env_staleness = automation_status.collect_env_staleness(cfg)
+    env_staleness_lines = render_env_staleness_section(env_staleness)
+    if env_staleness_lines:
+        state_extras.append("\n".join(env_staleness_lines))
     prompt = _prompts.build_control_prompt(
         cfg, "status-report", STATUS_REPORT_PROMPT,
         state_extras=state_extras,
