@@ -99,6 +99,7 @@ from .web_home import (
     _ideation_gate_state,
     _load_pending_queue_entries,
     _render_automation_card,
+    _render_env_stale_warning,
     _render_focus_card,
     _render_home,
     _render_ideation_status_block,

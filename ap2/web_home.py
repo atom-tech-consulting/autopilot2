@@ -14,10 +14,15 @@ Cards owned by this module:
   - `_render_ideation_status_block` (TB-197 — ideation gate-state card).
   - `_render_focus_card`            (TB-242 — axis-4 focus rotation card).
   - `_render_automation_card`       (TB-227 — auto-approve/auto-unfreeze card).
+  - `_render_env_stale_warning`     (TB-260 — env-staleness WARN line).
 
-TB-260's env-staleness WARN line rendering stays paired with the home
-page through `_render_automation_card` / the `cmd_status`-mirroring
-surface (env-stale shows up in the daemon-status header here).
+TB-260's env-staleness WARN line rendering lives in
+`_render_env_stale_warning`, which calls
+`automation_status.collect_env_staleness(cfg)` so the web surface
+stays in lock-step with `ap2 status` / cron digest / watchdog
+auto_diagnose. Sits directly under the daemon-status header in
+`_render_home` — the operator reads them as one cluster ("daemon
+running BUT env file changed → restart needed").
 """
 from __future__ import annotations
 
@@ -845,6 +850,53 @@ def _render_automation_card(cfg: Config) -> str:
     )
 
 
+# ------------- TB-260 env-stale WARN line -------------
+
+
+def _render_env_stale_warning(cfg: Config) -> str:
+    """Render the TB-260 env-staleness WARN line for the home page.
+
+    Mirrors the `ap2 status` text-mode WARN line emitted from
+    `cli_daemon.cmd_status` when `.cc-autopilot/env`'s live mtime is
+    later than the daemon-start mtime (i.e. the operator bumped a knob
+    and hasn't restarted yet). Calls
+    `automation_status.collect_env_staleness(cfg)` for the same
+    `{env_stale, env_file_mtime, env_file_mtime_at_start}` shape the
+    CLI consumes, so the surface stays in lock-step with `ap2 status`
+    / the cron digest / the watchdog auto_diagnose summary — TB-260's
+    single source of truth for env-staleness.
+
+    Default-off byte-identical contract (mirrors TB-260's
+    `render_env_staleness_section` shape): returns `""` when
+    `env_stale` is False so healthy / pre-opt-in daemons render the
+    home page byte-identical to the pre-TB-265 surface. Only the
+    stale-env code path adds output, and the remediation command
+    (`ap2 stop && ap2 start`) is inlined so the operator doesn't have
+    to look it up — same one-liner-with-fix shape as `cmd_status`.
+
+    Pinned by TB-265's prose-verification bullet ("TB-260's env-stale
+    WARN rendering on the web home is preserved end-to-end") so a
+    future web-touching refactor can't silently drop this surface.
+    """
+    from . import automation_status
+
+    state = automation_status.collect_env_staleness(cfg)
+    if not state.get("env_stale"):
+        return ""
+    return (
+        '<div class="automation-status is-paused">'
+        '<span class="as-header">env-stale:</span>'
+        '<span class="as-body">'
+        f'WARN .cc-autopilot/env modified at '
+        f'{html.escape(str(state["env_file_mtime"]))} (after daemon '
+        f'start at {html.escape(str(state["env_file_mtime_at_start"]))}) '
+        f'— restart with <code>ap2 stop &amp;&amp; ap2 start</code> '
+        f'to apply changes'
+        '</span>'
+        '</div>'
+    )
+
+
 # ------------- top-level home page composer -------------
 
 
@@ -904,11 +956,19 @@ def _render_home(cfg: Config) -> str:
     # Omitted entirely on pre-opt-in projects (knob off + no 24h
     # activity); see `_render_automation_card` for the contract.
     automation_html = _render_automation_card(cfg)
+    # TB-260: env-staleness WARN line. Sits directly under the daemon
+    # status header — the operator reads them as one cluster ("daemon
+    # running BUT env file changed → restart needed"). Default-off
+    # byte-identical on a healthy daemon; only the stale-env code path
+    # adds output. Pinned by TB-265's prose-verification bullet so a
+    # future web refactor can't silently drop this surface.
+    env_stale_html = _render_env_stale_warning(cfg)
 
     body = (
         f"<h1>ap2 — {html.escape(cfg.project_root.name)}</h1>"
         f'<div class="meta">{html.escape(str(cfg.project_root))}</div>'
         f"<h2>daemon</h2><p>{status}</p>"
+        f"{env_stale_html}"
         f"<h2>board</h2>"
         f'<div class="stats">'
         + "".join(

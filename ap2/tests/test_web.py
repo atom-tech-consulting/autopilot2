@@ -3187,3 +3187,77 @@ def test_ideation_status_card_escapes_html(
     # the card body uses normal HTML tags only.
     assert "<script>" not in html_block
     assert "</script>" not in html_block
+
+
+# --------- TB-265 / TB-260: env-stale WARN rendering on the web home ---------
+
+
+def test_env_stale_warning_omitted_when_fresh(project: Config):
+    """Default-off byte-identical contract: `_render_env_stale_warning`
+    returns `""` when `.cc-autopilot/env`'s mtime is not stale relative
+    to the daemon-start baseline (the steady-state happy path)."""
+    # The `project` fixture writes no `.cc-autopilot/env` and no
+    # baseline-mtime stash, so `collect_env_staleness` reports
+    # `env_stale: False`.
+    assert web._render_env_stale_warning(project) == ""
+    # And the full home page renders without the WARN line either.
+    home = web._render_home(project)
+    assert "env-stale" not in home
+
+
+def test_env_stale_warning_emits_warn_line_when_stale(
+    project: Config, monkeypatch: pytest.MonkeyPatch,
+):
+    """When `collect_env_staleness` reports `env_stale: True`, the home
+    page surfaces a WARN-tinted card with both timestamps and the
+    `ap2 stop && ap2 start` remediation command (mirrors the
+    `cmd_status` text-mode WARN line). Pins the TB-265 prose
+    verification bullet: TB-260's env-stale rendering on the web home
+    is preserved end-to-end."""
+    from ap2 import automation_status
+
+    fake_state = {
+        "env_stale": True,
+        "env_file_mtime": "2026-05-19T20:00:00Z",
+        "env_file_mtime_at_start": "2026-05-19T18:00:00Z",
+    }
+    monkeypatch.setattr(
+        automation_status, "collect_env_staleness",
+        lambda cfg: fake_state,
+    )
+
+    block = web._render_env_stale_warning(project)
+    assert "env-stale" in block
+    assert "WARN" in block
+    assert "2026-05-19T20:00:00Z" in block  # live mtime
+    assert "2026-05-19T18:00:00Z" in block  # baseline mtime
+    assert "ap2 stop" in block and "ap2 start" in block
+
+    # And the full home page includes the WARN card.
+    home = web._render_home(project)
+    assert "env-stale" in home
+    assert "WARN" in home
+    assert "ap2 stop" in home
+
+
+def test_env_stale_warning_escapes_timestamps(
+    project: Config, monkeypatch: pytest.MonkeyPatch,
+):
+    """Defense-in-depth: the rendered card's timestamp fields flow
+    through `html.escape`, so a malformed mtime string can't inject
+    raw markup into the page."""
+    from ap2 import automation_status
+
+    monkeypatch.setattr(
+        automation_status, "collect_env_staleness",
+        lambda cfg: {
+            "env_stale": True,
+            "env_file_mtime": "<script>alert(1)</script>",
+            "env_file_mtime_at_start": "<b>baseline</b>",
+        },
+    )
+
+    block = web._render_env_stale_warning(project)
+    assert "<script>" not in block
+    assert "&lt;script&gt;" in block
+    assert "&lt;b&gt;baseline&lt;/b&gt;" in block
