@@ -53,3 +53,10 @@ Why now: web.py is the largest of the four splits in this batch by absolute size
 - Splitting `tools.py` / `daemon.py` / `cli.py` — separate TBs in this batch.
 - Refactoring stream-event protocol (TB-129's seq-based polling) — stays as-is.
 - Changing the `AP2_WEB_PORT` / `AP2_WEB_DISABLED` / port-auto-enumerate behavior (TB-130, TB-155) — pure refactor.
+## Attempts
+
+### 2026-05-19 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] prose: TB-260's env-stale WARN rendering on the web home is preserved end-to-end. The judge can verify by reading the ho
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260519T221428Z-TB-265.prompt.md`, `stream: .cc-autopilot/debug/20260519T221428Z-TB-265.stream.jsonl`, `messages: .cc-autopilot/debug/20260519T221428Z-TB-265.messages.jsonl`
