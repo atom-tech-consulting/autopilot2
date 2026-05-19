@@ -809,3 +809,9 @@
 - **Summary:** Split ap2/daemon.py 187KB → 87KB by lifting nine cohesive axes to flat siblings: the four briefing-named (state_commit, auto_approve, auto_unfreeze, watchdog) plus focus_advance, message_dump, pipeline_sweep, daemon_state, verify_harness to clear the <90KB target. Every public-ish symbol re-exported from daemon.py; late-binding through `from . import daemon` preserves the `monkeypatch.setattr(daemon, ...)` test seam for `_judge_done_when` and the verify-harness helpers. Pure mechanical move — full pytest suite passes (1865/1865).
 - **Files:** ap2/daemon.py, ap2/state_commit.py, ap2/auto_approve.py, ap2/auto_unfreeze.py, ap2/watchdog.py, ap2/focus_advance.py, ap2/message_dump.py, ap2/pipeline_sweep.py, ap2/daemon_state.py, ap2/verify_harness.py
 - **Tests:** pass
+
+## [2026-05-19] TB-264: Split `ap2/cli.py` (118KB) by command surface: lifecycle / board / review / diagnostic groups
+- **Commit:** `6e0a409`
+- **Summary:** TB-264 retry: prior commit b8ed01a already shipped the per-surface cli.py split (118KB → 30KB across cli_daemon/cli_board/cli_review/cli_diagnostic siblings, 1865 tests passing); only the briefing's 5th bullet (`ap2 --project /tmp/nonexistent status` must error) was flunking because pre-existing `cmd_status` silently printed a synthetic-empty board for nonexistent project roots. Follow-up commit 6e0a409 adds a single `cfg.project_root.is_dir()` guard at the top of `cmd_status` in `ap2/cli_daemon.py` that prints "error: project not found: <path>" to stderr and returns 1 — all six verification bullets now pass (1865 tests, cli.py 30148 bytes < 40KB, both siblings present, 25 verbs in --help, status errors on missing project, every `set_defaults(func=…)` in cli.py binds an imported sibling handler).
+- **Files:** ap2/cli_daemon.py
+- **Tests:** pass
