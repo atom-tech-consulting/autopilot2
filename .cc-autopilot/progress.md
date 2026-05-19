@@ -785,3 +785,9 @@
 - **Summary:** TB-259: added `render_stats_window_section` + state_extras wiring + `_STATUS_REPORT_CONTRACT` `"stats_window"` field + howto cross-ref, closing TB-255's push-vs-pull surface-parity gap; new pin module + full suite (1829 passed) green.
 - **Files:** ap2/status_report.py, ap2/prompts.py, ap2/howto.md, ap2/tests/test_tb259_status_report_stats_window.py, ap2/tests/test_status_report_skip.py
 - **Tests:** pass
+
+## [2026-05-19] TB-260: Surface stale `.cc-autopilot/env` (mtime > daemon-start) in `ap2 status` + cron status-report digest + watchdog
+- **Commit:** `b63a7b5`
+- **Summary:** TB-260: captured env file mtime at daemon start into daemon_state.json, wired collect_env_staleness through ap2 status text/JSON, status-report cron digest sub-block, and watchdog diagnose summary; 22-test regression-pin module covers the three briefing scenarios + renderer/wiring/contract pins. Full suite passes 1851/1851.
+- **Files:** ap2/automation_status.py, ap2/cli.py, ap2/config.py, ap2/daemon.py, ap2/diagnose.py, ap2/prompts.py, ap2/status_report.py, ap2/tests/test_doctor_verify_timeout.py, ap2/tests/test_tb260_env_mtime_stale_surface.py
+- **Tests:** pass
