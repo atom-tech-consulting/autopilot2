@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/slim-validator-judge-user-payload-to-goa.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-20T04:22:50Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-20T01:51:12Z",
   "tb_id": "TB-270",
   "why_now": "TB-269 bumps the deadline so the gate stops timing out,\nbut the underlying call still spends ~30s+ per queue-append on\ncontent the judge doesn't use. Slimming the payload is the\nstructural fix that lowers operator-perceived latency on every\n`ap2 add` / `ap2 update_goal` and reduces token spend on a\nhigh-frequency call site. Both axes 1 and 3 (cost guards) of the\nend-to-end-automation focus benefit. The TB-257 artifact's\nsecondary-factor designation makes this the principled next move\nonce calibration lands."
