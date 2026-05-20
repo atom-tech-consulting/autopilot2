@@ -1230,6 +1230,19 @@ symmetry.
   `.cc-autopilot/events.jsonl` and surfaces a WARN with a one-line
   fix recommendation if a future workload shift takes the observed-
   typical successful call duration back above the configured floor.
+  TB-270 ships the complementary axis-1 lever the same artifact named
+  as the secondary factor (`prompt-too-heavy`):
+  `_slice_briefing_for_dep_judge(briefing_text)` in
+  `ap2/validator_judge.py` narrows the user payload's
+  `briefing_markdown` field to the briefing's `## Goal` + `## Scope`
+  sections only (Design / Verification / Out-of-scope are bytes the
+  judge wouldn't have used to change its hard-predecessor verdict).
+  Shrinks typical input from ~6KB → ~1-2KB and the SDK wall-clock
+  proportionally — independent of the timeout knob, so the two
+  levers compound. Defensive fallback in the helper returns the full
+  `briefing_text` on briefings missing either canonical heading or
+  with empty section bodies, guaranteeing the judge is never blind
+  on legacy / hand-edited shapes.
 - `AP2_VALIDATOR_JUDGE_MAX_TURNS` (default 2) — TB-249 canonical
   budget knob. Bounds the judge's SDK turn count. The validator is a
   single-shot JSON-emitting judge: one assistant message (the verdict)

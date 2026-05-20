@@ -86,13 +86,15 @@ def test_artifact_yaml_front_matter_parses() -> None:
     # tag naming the most recent TB that touched it (originally
     # `TB-256`, the TB-257 deliverable's author; bumped to `TB-269`
     # when the calibration follow-up appended its
-    # `## Calibration applied (TB-269)` section per TB-269 §Scope 4).
+    # `## Calibration applied (TB-269)` section per TB-269 §Scope 4;
+    # then bumped to `TB-270` when the prompt-shaping follow-up
+    # appended `## Re-measurement after TB-270` per TB-270 §Scope 3).
     # Pin the LATEST attribution token so a future-TB rewrite that
     # forgets to refresh the field trips here rather than silently
     # diverging from the file's actual provenance.
-    assert "updated_by: TB-269" in front_matter, (
-        "Front-matter must carry `updated_by: TB-269` (the latest "
-        "attribution after TB-269's calibration-applied append). A "
+    assert "updated_by: TB-270" in front_matter, (
+        "Front-matter must carry `updated_by: TB-270` (the latest "
+        "attribution after TB-270's prompt-shaping append). A "
         "future TB touching this artifact should bump this pin to its "
         "own TB-N in the same edit that updates `updated_by:`."
     )

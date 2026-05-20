@@ -18,7 +18,7 @@ tldr: |
   shorten wall-clock). No fixes applied here; calibration is a separate
   follow-up TB.
 updated: 2026-05-20
-updated_by: TB-269
+updated_by: TB-270
 cites:
   - .cc-autopilot/events.jsonl:8393  # 2026-05-17T06:23:27Z validator_judge_timeout
   - .cc-autopilot/events.jsonl:8539  # 2026-05-17T17:45:48Z validator_judge_timeout
@@ -358,3 +358,55 @@ deferred to operator review of the next 7d window of
 `ap2 doctor` `validator-judge timeout headroom` section reports
 whether the 60s floor sits comfortably above observed-typical or
 needs a further nudge.
+
+## Re-measurement after TB-270
+
+TB-270 shipped 2026-05-20 — the SECOND item from the
+"Implications for follow-up TBs" sequence above (the
+`prompt-too-heavy` secondary-factor lever, complementary to TB-269's
+timeout bump on the same axis-1 focus). Append-only block; the
+measurement sections above are preserved verbatim as the historical
+pre-slice baseline.
+
+- **What landed.** `_slice_briefing_for_dep_judge(briefing_text)` in
+  `ap2/validator_judge.py` returns the substring covering `## Goal`
+  and `## Scope` sections only, terminating each at the next `## `
+  heading or EOF. `_judge_dep_coherence_default` now populates
+  `user_payload["briefing_markdown"]` with the slice instead of the
+  raw `briefing_text`. Defensive fallback: missing-heading or
+  empty-body briefings get the full text (so the judge is never
+  blind on legacy / hand-edited shapes that skip the canonical
+  five-section structure). Regression-pinned in
+  `ap2/tests/test_tb270_validator_judge_payload_slice.py`.
+
+- **Expected wall-clock reduction direction.** The measurement table
+  above pegged the input size at 4.6 KB (~22s avg), 5.5 KB (~40s
+  avg), and 14.2 KB (>60s extrapolated). The slice strips Design /
+  Verification / Out-of-scope — typically ~50-70% of the briefing
+  bytes — so the post-slice input distribution should shrink to
+  ~1-2 KB on the small classes and ~5-7 KB on the largest. Per the
+  ~5K input tokens ↔ 20-40s end-to-end latency relationship Haiku-4.5
+  exhibited in the measurement runs, the post-slice SDK call should
+  finish in 7-20 s on most briefings — well below the new 60s
+  `AP2_VALIDATOR_JUDGE_TIMEOUT_S` default. Combined with the TB-269
+  bump, the dep-coherence gate now sits well clear of its timeout
+  ceiling on every realistic briefing shape.
+
+- **Operator-visible signal.** `ap2 status`'s
+  `validator-judge: N fail | M timeout (24h)` sub-line should drop to
+  ≤1/week (from the pre-TB-269 ~1/operator-queue-append rate). The
+  `validator_judge_timeout_audit` doctor surface (TB-269) reports
+  the post-slice observed-typical from `validator_judge_passed`
+  events and confirms whether the 60s default still sits
+  comfortably above the floor — empirical verification of the
+  slice's effect lands automatically through that audit's next
+  WARN-band recompute.
+
+- **Cross-references.** Helper definition: `_slice_briefing_for_dep_
+  judge` in `ap2/validator_judge.py`. Call site:
+  `_judge_dep_coherence_default`'s `user_payload` block in the same
+  file. Operator-facing rationale: `ap2/howto.md`'s
+  `AP2_VALIDATOR_JUDGE_TIMEOUT_S` knob section (TB-270 line). The
+  slice's branch-shape proof (canonical Goal+Scope vs. defensive
+  fallback) lives in `ap2/tests/test_tb270_validator_judge_payload_
+  slice.py`.

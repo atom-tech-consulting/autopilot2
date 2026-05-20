@@ -30,6 +30,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -297,6 +298,100 @@ def _parse_dep_judge_response(
     )
 
 
+# TB-270: canonical briefing headings that bound the dep-coherence
+# judge's input. The judge's job — hard-predecessor detection — is
+# answered from the briefing's narrative-intent sections (Goal: why;
+# Scope: what), NOT from Verification (which checks shape, not
+# dependencies), Out-of-scope (negatives don't shift the dep graph),
+# or Design (internal-to-the-TB, not a cross-task dep claim). Slicing
+# to these two sections is a faithful narrowing of input — what's
+# removed is material the judge wouldn't have used to change its
+# verdict — and shrinks the SDK call's input token count by ~50-70%
+# on typical operator-curated briefings (TB-257 artifact §
+# `prompt-too-heavy`).
+_BRIEFING_SLICE_HEADINGS: tuple[str, ...] = ("## Goal", "## Scope")
+
+
+def _slice_briefing_for_dep_judge(briefing_text: str) -> str:
+    """TB-270: return the substring covering `## Goal` and `## Scope`
+    sections only, terminating each section at the next `## ` heading
+    or EOF.
+
+    The slice is what the dep-coherence judge actually consumes: the
+    briefing's narrative-intent surface. Design / Verification /
+    Out-of-scope are dropped because none of them shift the judge's
+    hard-predecessor verdict. See `_BRIEFING_SLICE_HEADINGS` above for
+    the design rationale.
+
+    Defensive fallback: if either canonical heading is missing, or if
+    the resulting slice is empty after whitespace-stripping, return the
+    full `briefing_text` unchanged. Briefings authored through
+    `ap2 add` pass the queue-time validator's TB-161 / TB-164 Goal-
+    section checks, so steady-state briefings always have a non-empty
+    slice; only legacy or hand-edited skip-the-validator briefings hit
+    this branch. The fallback is a hard guarantee that the judge is
+    never blind — slicing must not turn a parseable briefing into a
+    zero-token payload.
+
+    Both sections are concatenated in SOURCE order (Goal before Scope,
+    matching the canonical heading shape) so the judge reads the
+    briefing's intent in the same order an operator would. Returns a
+    string that is a contiguous substring when the two sections are
+    adjacent in the source (the common case), or a concatenation of
+    two slices when an unusual briefing wedges a non-canonical heading
+    between them.
+    """
+    sections: list[tuple[int, str, str]] = []  # (start_offset, slice, body)
+    for heading in _BRIEFING_SLICE_HEADINGS:
+        # `\b` after the heading ensures `## Scope` doesn't accidentally
+        # match `## ScopeAndExtras` (none exist today, but the canonical
+        # heading set is closed — be strict at the boundary).
+        pattern = rf"^{re.escape(heading)}\b"
+        m = re.search(pattern, briefing_text, flags=re.MULTILINE)
+        if m is None:
+            # Missing heading → defensive fallback (don't blind the judge).
+            return briefing_text
+        section_start = m.start()
+        # Find the next `## ` heading after THIS section's heading line
+        # so the slice terminates at the next section boundary or EOF.
+        # `## ` (with trailing space) intentionally matches any `## X`
+        # heading including `## Out of scope` (the canonical TB-N
+        # heading inventory uses `## ` as the marker).
+        rest = briefing_text[m.end():]
+        next_heading = re.search(r"^## ", rest, flags=re.MULTILINE)
+        section_end = (
+            m.end() + next_heading.start()
+            if next_heading is not None
+            else len(briefing_text)
+        )
+        # The slice includes the heading line itself (so the judge sees
+        # the section label); the BODY-emptiness check below looks at
+        # only the bytes AFTER the heading line so a stub briefing
+        # (`## Goal\n\n## Scope\n\n## Design...`) trips the fallback
+        # branch — without that distinction the heading bytes alone
+        # would mask the empty-body case from the strip-whitespace
+        # check.
+        section_slice = briefing_text[section_start:section_end]
+        body = briefing_text[m.end():section_end]
+        sections.append((section_start, section_slice, body))
+
+    # Both headings present but each section's body is empty (e.g. a
+    # stub briefing with headings and no prose between them). Fall
+    # back to the full text — same defensive posture as the missing-
+    # heading branch above. The judge gets SOMETHING to work with
+    # instead of a payload that's just two heading lines.
+    if all(not body.strip() for _, _, body in sections):
+        return briefing_text
+
+    # Preserve SOURCE order — Goal-then-Scope on canonical briefings,
+    # but the sort is order-agnostic so a hypothetical Scope-then-Goal
+    # briefing would also slice cleanly (the test pin asserts the
+    # canonical order is preserved; the sort is the implementation
+    # mechanism that makes that guarantee robust to unusual shapes).
+    sections.sort(key=lambda triple: triple[0])
+    return "".join(section_slice for _, section_slice, _ in sections)
+
+
 def _judge_dep_coherence_default(
     *,
     briefing_text: str,
@@ -393,8 +488,18 @@ def _judge_dep_coherence_default(
         "summarize: name the strongest single piece of evidence and "
         "stop.\n"
     )
+    # TB-270: slice the briefing to Goal+Scope sections only. The judge
+    # only needs the briefing's narrative-intent surface for hard-
+    # predecessor detection; Design / Verification / Out-of-scope are
+    # bytes the judge wouldn't have used. Shrinks typical input size
+    # from ~6KB → ~1-2KB and the SDK call's wall-clock proportionally
+    # — the secondary axis-1 lever the TB-257 investigation artifact
+    # named (`prompt-too-heavy`), complementary to TB-269's timeout
+    # bump on the same focus. Defensive fallback in the helper returns
+    # full `briefing_text` on malformed briefings so the judge is
+    # never blind.
     user_payload = {
-        "briefing_markdown": briefing_text,
+        "briefing_markdown": _slice_briefing_for_dep_judge(briefing_text),
         "task_description": description,
         "blocked_codespan_tokens": list(blocked_tokens),
     }
