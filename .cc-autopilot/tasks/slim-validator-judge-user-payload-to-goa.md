@@ -125,3 +125,10 @@ current ~1/operator-queue-append.
 - Caching parsed slices across queue-append batches — operator
   queue is low-volume; caching adds complexity without measured
   payoff.
+## Attempts
+
+### 2026-05-20 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -nE "briefing_markdown\"[[:space:]]*:[[:space:]]*briefing_text" ap2/validator_judge.py` — exits NON-ZERO (the raw 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260520T044106Z-TB-270.prompt.md`, `stream: .cc-autopilot/debug/20260520T044106Z-TB-270.stream.jsonl`, `messages: .cc-autopilot/debug/20260520T044106Z-TB-270.messages.jsonl`
