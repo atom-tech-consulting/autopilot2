@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-267** **Split `ap2/tests/test_web.py` (131KB / 118 tests) to mirror the TB-265 web-prefixed route-group source split** `#autopilot` `#refactor` `#tests` `#modularity` `#agent-friendliness` `#regression-pin` `@blocked:TB-265` [→ brief](.cc-autopilot/tasks/split-ap2-tests-test-web-py-131kb-118-te.md)
+- [ ] **TB-268** **Split `ap2/tests/test_tools.py` (118KB / 148 tests) to mirror the TB-262 source split into validator/judge/queue/board modules** `#autopilot` `#refactor` `#tests` `#modularity` `#agent-friendliness` `#regression-pin` `@blocked:TB-262` [→ brief](.cc-autopilot/tasks/split-ap2-tests-test-tools-py-118kb-148.md)
 
 ## Pipeline Pending
 
