@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/sync-ap2-ideation-default-md-s-shell-bul.md",
   "focus_anchor": "an operator can point ap2 at",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-20T18:57:12Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-20T06:07:53Z",
   "tb_id": "TB-273",
   "why_now": "TB-270 retry-storm on 2026-05-20T04:54\u219205:59Z was caused\nby an ideation-authored bullet missing the `!` exit-inversion\nprefix on an absence-check (`grep \"<absent string>\" ...` exits 1\nwhen absent, which the verifier reads as FAIL); 3 retries\nexhausted, operator-manual unfreeze required. The howto already\ndocuments the fix (pitfall #2 at L479-484); the ideation prompt\nthat authored the briefing did not. Closing the prompt-vs-howto\ndivergence is a one-file edit that compounds against every future\nideation-authored briefing \u2014 exactly the kind of preventive,\nupstream-of-validator move the axis-1 trust upgrade depends on."
