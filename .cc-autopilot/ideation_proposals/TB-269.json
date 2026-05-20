@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/calibrate-ap2-validator-judge-timeout-s.md",
+  "focus_anchor": "current focus end to end automation",
+  "proposed_at": "2026-05-20T01:50:04Z",
+  "tb_id": "TB-269",
+  "why_now": "15 `validator_judge_timeout` events in the last 500 events\n(8 in the trailing 24h alone per `ap2 status`); TB-243 fail-open\nhides the cost from the user-facing path but the gate contributes\nzero gating verdicts on the queue-append set. Without this\ncalibration, the load-bearing \"upstream gates already make this\nsafe in practice\" claim on goal.md L82-85 is documentation fiction\n\u2014 the Current focus: end-to-end automation roadmap cannot honestly\nflip auto-approve on while the safety floor is empty."
+}

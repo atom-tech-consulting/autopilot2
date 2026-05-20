@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-269** **Calibrate `AP2_VALIDATOR_JUDGE_TIMEOUT_S` default (15→60) + emit `validator_judge_passed` event + add `validator_judge_timeout_audit` to doctor (TB-252-shape preventive surface for axis-1 dep-coherence gate)** `#autopilot` `#validator-judge` `#doctor` `#calibration` `#axis-1` `#dep-coherence` `#regression-pin` `@blocked:review` — TB-257 artifact (`.cc-autopilot/insights/validator-judge-timeout-2026-05-18.md`) measured the SDK call at 17.6-46.8s wall-clock against a 15s+5s=20s ceiling, categorized `timeout-too-tight` as dominant. 15/15 recent operator queue-appends timed out; axis-1 dep-coherence gate silently empty. [→ brief](.cc-autopilot/tasks/calibrate-ap2-validator-judge-timeout-s.md)
+- [ ] **TB-270** **Slim validator-judge user payload to Goal+Scope sections only (TB-257 secondary `prompt-too-heavy` factor — structural wall-clock reduction independent of TB-269 timeout bump)** `#autopilot` `#validator-judge` `#dep-coherence` `#axis-1` `#prompt-shaping` `#regression-pin` `@blocked:review` — TB-257 artifact named `prompt-too-heavy` as the secondary factor: smallest briefing (4621B) still took ~22s avg. Slice briefing markdown to Goal+Scope sections (which is what hard-predecessor judgment actually needs) before passing to `_judge_dep_coherence_default` user payload. [→ brief](.cc-autopilot/tasks/slim-validator-judge-user-payload-to-goa.md)
 
 ## Pipeline Pending
 
