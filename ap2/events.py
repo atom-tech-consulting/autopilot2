@@ -164,6 +164,27 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     observed-typical successful run duration — anchors the doctor
     WARN that goal.md axis-2 calls for on env-knob-vs-workload
     drift (TB-245/246/247/249/250 cascade).
+  - `validator_judge_passed` (TB-269) — TB-235 dep-coherence judge
+    SDK call completed without timeout / SDK exception (the
+    successful sibling of `validator_judge_timeout` /
+    `validator_judge_fail`). Emitted from
+    `ap2.validator_judge._judge_dep_coherence_default` just after
+    the worker thread returns successfully, BEFORE the JSON parse —
+    a parse-failure call still spent the same wall-clock against the
+    SDK and that cost matters for sizing
+    `AP2_VALIDATOR_JUDGE_TIMEOUT_S`. Payload: `duration_s`
+    (wall-clock seconds), `briefing_bytes` (UTF-8 byte length of the
+    briefing payload — feeds future prompt-shape investigations),
+    `max_turns` (the resolved SDK turn budget at call time),
+    `timeout_s` (the resolved timeout knob at call time). Consumed
+    by `validator_judge_timeout_audit` in `ap2/doctor.py` (axis-1
+    mirror of `verify_timeout_audit`) to size
+    `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 60s per TB-269; bumped
+    from 15s after the TB-257 artifact measured the real SDK call at
+    17.6-46.8s wall-clock) against the observed-typical successful
+    call duration — completes the happy-path/fail-open/timeout
+    triangle on a single namespace so an operator can see the gate's
+    true firing rate, not just the failure subset TB-243 surfaces.
 
 The full canonical list lives in `ap2/howto.md`'s `## Event schema`
 section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)

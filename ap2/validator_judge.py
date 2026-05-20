@@ -30,6 +30,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -41,7 +42,25 @@ from .json_extract import extract_rightmost_json_object
 # (validator check #7). Module-level so `test_env_knobs.py`-style probes
 # can read the defaults without instantiating the validator, and so the
 # docs-drift gate's source-walk finds the canonical knob names here.
-_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT = 15.0
+#
+# TB-269: bumped 15.0 → 60.0. The TB-257 investigation artifact
+# (`.cc-autopilot/insights/validator-judge-timeout-2026-05-18.md`)
+# measured `_judge_dep_coherence_default` at 17.6-46.8s wall-clock
+# against the pre-TB-269 15s default + 5s outer-thread grace
+# (`worker.join(timeout=timeout_s + 5)` below) — a 20s ceiling that sat
+# BELOW the median completion of even the smallest measured briefing
+# (4621 B → ~22s avg). 15/15 recent operator queue-appends timed out;
+# the axis-1 dep-coherence gate (load-bearing per goal.md L82-85's
+# "upstream gates already make this safe in practice" floor) was
+# silently fail-open on essentially every call for 7+ days. 60s sits
+# 1.5× the artifact's worst-case ~47s (rounded up to the smallest
+# round number) — same `_VERIFY_TIMEOUT_AUDIT_FIX_MULT=1.5` ratio the
+# TB-252 doctor audit recommends. Operators tighten via the env knob;
+# default now sits above the real-world ceiling instead of below the
+# median. `validator_judge_timeout_audit` (TB-269) in `ap2/doctor.py`
+# surfaces drift if a future workload shift takes the SDK call back
+# above this floor.
+_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT = 60.0
 # TB-249: the SDK budget primitive is `max_turns` (the Claude Agent SDK
 # does NOT accept the pre-TB-249 output-token extra-arg — every other
 # ap2 SDK call site uses `max_turns`; see verify.py:571, janitor.py:724,
@@ -432,6 +451,15 @@ def _judge_dep_coherence_default(
             result["exc"] = exc
 
     worker = threading.Thread(target=_worker, daemon=True)
+    # TB-269: stopwatch around the worker join so the
+    # `validator_judge_passed` event below carries an honest wall-clock
+    # duration. Starting just before `worker.start()` (rather than at
+    # `_judge_dep_coherence_default` entry) intentionally excludes the
+    # `claude_agent_sdk` import + prompt assembly — same convention
+    # TB-252's `verify_passed` uses (subprocess wall-clock, not Python
+    # interpreter startup). The figure feeds
+    # `validator_judge_timeout_audit` (TB-269) in `ap2/doctor.py`.
+    _t0 = time.monotonic()
     worker.start()
     # The worker has its own `asyncio.wait_for` enforcing the timeout;
     # the outer `.join` waits a small grace window past that so a
@@ -457,6 +485,34 @@ def _judge_dep_coherence_default(
             data=None, parse_error=None, dump_path=None,
         )
     text = result["text"] or ""
+    duration_s = time.monotonic() - _t0
+
+    # TB-269: emit `validator_judge_passed` for every successful
+    # worker return (i.e. the SDK call completed without timeout / SDK
+    # exception). Fires BEFORE the JSON parse so the
+    # `validator_judge_timeout_audit` doctor surface (TB-269) sees
+    # every real-world wall-clock duration the judge actually paid,
+    # not just the subset that parsed cleanly — a parse-failure call
+    # still spent the same number of seconds against the SDK and that
+    # cost matters for sizing `AP2_VALIDATOR_JUDGE_TIMEOUT_S`. Mirrors
+    # TB-252's `verify_passed` payload shape verbatim (substituting
+    # the validator-judge knob names). Best-effort write: an OSError
+    # on the events.jsonl append must NEVER take down the judge —
+    # same `try / except OSError: pass` swallow the
+    # `validator_judge_{timeout,fail}` emitters use elsewhere in this
+    # file.
+    if events_file is not None:
+        try:
+            events.append(
+                events_file,
+                "validator_judge_passed",
+                duration_s=round(duration_s, 3),
+                briefing_bytes=len(briefing_text.encode("utf-8")),
+                max_turns=max_turns,
+                timeout_s=timeout_s,
+            )
+        except OSError:
+            pass
 
     # TB-247: delegate parse + dump to the testable helper so the
     # four parse-failure branches (empty / no braces / json_decode /

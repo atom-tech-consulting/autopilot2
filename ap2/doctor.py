@@ -333,19 +333,45 @@ _VERIFY_TIMEOUT_AUDIT_INFO_RATIO = 1.5
 _VERIFY_TIMEOUT_AUDIT_FIX_MULT = 1.5
 
 
-def _iter_verify_passed_durations(
+# TB-269: window + band constants for `validator_judge_timeout_audit`.
+# Mirror TB-252's `_VERIFY_TIMEOUT_AUDIT_*` values verbatim — same
+# observability shape (7d window OR last 20 samples, ≥3 floor, 1.0 /
+# 1.5 / 1.5 ratios) so the operator's mental model is uniform across
+# the doctor's two timeout-audit surfaces. Both audits intentionally
+# stay knobs-free (no env tunable for the audit's window / band
+# thresholds) because the audit's job is to surface knob
+# misconfiguration, not introduce another knob the operator can
+# misconfigure.
+_VALIDATOR_JUDGE_TIMEOUT_AUDIT_WINDOW_DAYS = 7
+_VALIDATOR_JUDGE_TIMEOUT_AUDIT_MAX_SAMPLES = 20
+_VALIDATOR_JUDGE_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES = 3
+_VALIDATOR_JUDGE_TIMEOUT_AUDIT_WARN_RATIO = 1.0
+_VALIDATOR_JUDGE_TIMEOUT_AUDIT_INFO_RATIO = 1.5
+_VALIDATOR_JUDGE_TIMEOUT_AUDIT_FIX_MULT = 1.5
+
+
+def _iter_passed_durations(
     events_file: Path,
     *,
+    event_type: str,
     window_days: int,
     max_samples: int,
     now: _dt.datetime | None = None,
 ) -> tuple[list[float], int]:
-    """Return (durations, sample_days) for recent successful project-wide
-    verify runs (`verify_passed` events emitted at daemon.py's
-    post-`_run_verify` branch, TB-252).
+    """Return (durations, sample_days) for recent successful runs of a
+    `<event_type>` event (one of `verify_passed` (TB-252) or
+    `validator_judge_passed` (TB-269)).
 
-    Window selection: take the tail of events.jsonl, filter to
-    `verify_passed` rows with a numeric `duration_s` field, then choose
+    Generalized from TB-252's `_iter_verify_passed_durations` per
+    TB-269 — the shared helper is the minimum-viable refactor (a second
+    caller arrived; the third lift to a fully-generic utility waits for
+    a future audit). `_iter_verify_passed_durations` and
+    `_iter_validator_judge_passed_durations` are thin wrappers that
+    pin the event-type string so existing tests / call sites pinning
+    the public function names stay green.
+
+    Window selection: take the tail of events.jsonl, filter to rows of
+    type `event_type` with a numeric `duration_s` field, then choose
     whichever of (last `max_samples` samples) and (samples within the
     last `window_days` days) yields the LARGER set — the briefing's
     "whichever covers more" rule. `sample_days` returned is the actual
@@ -389,7 +415,7 @@ def _iter_verify_passed_durations(
                     continue
                 if not isinstance(evt, dict):
                     continue
-                if evt.get("type") != "verify_passed":
+                if evt.get("type") != event_type:
                     continue
                 dur = evt.get("duration_s")
                 if not isinstance(dur, (int, float)):
@@ -432,6 +458,50 @@ def _iter_verify_passed_durations(
     else:
         span = window_days
     return durations, span
+
+
+def _iter_verify_passed_durations(
+    events_file: Path,
+    *,
+    window_days: int,
+    max_samples: int,
+    now: _dt.datetime | None = None,
+) -> tuple[list[float], int]:
+    """TB-252 thin wrapper around `_iter_passed_durations` pinning the
+    `verify_passed` event-type. Kept as a public function so any existing
+    tests pinning the name stay green (per TB-269's "keep the public
+    function names" rule for the helper refactor).
+    """
+    return _iter_passed_durations(
+        events_file,
+        event_type="verify_passed",
+        window_days=window_days,
+        max_samples=max_samples,
+        now=now,
+    )
+
+
+def _iter_validator_judge_passed_durations(
+    events_file: Path,
+    *,
+    window_days: int,
+    max_samples: int,
+    now: _dt.datetime | None = None,
+) -> tuple[list[float], int]:
+    """TB-269 thin wrapper around `_iter_passed_durations` pinning the
+    `validator_judge_passed` event-type. Sibling of
+    `_iter_verify_passed_durations`; same shape so the doctor's two
+    timeout-audit surfaces (axis-2 `verify_timeout_audit`, axis-1
+    `validator_judge_timeout_audit`) compose against a uniform sample-
+    iteration contract.
+    """
+    return _iter_passed_durations(
+        events_file,
+        event_type="validator_judge_passed",
+        window_days=window_days,
+        max_samples=max_samples,
+        now=now,
+    )
 
 
 def verify_timeout_audit(state_dir: Path, cfg: Config) -> AuditResult:
@@ -529,6 +599,128 @@ def verify_timeout_audit(state_dir: Path, cfg: Config) -> AuditResult:
     return res
 
 
+def validator_judge_timeout_audit(
+    state_dir: Path, cfg: Config,
+) -> AuditResult:
+    """Pre-flight check on `AP2_VALIDATOR_JUDGE_TIMEOUT_S` vs
+    observed-typical successful dep-coherence judge call duration
+    (TB-269, axis-1 mirror of TB-252's `verify_timeout_audit`).
+
+    Anchored to the 2026-05-18 TB-257 investigation artifact
+    (`.cc-autopilot/insights/validator-judge-timeout-2026-05-18.md`)
+    which measured `_judge_dep_coherence_default` at 17.6-46.8s
+    wall-clock against the pre-TB-269 15s default + 5s outer-thread
+    grace (a 20s ceiling that sat below the median completion of even
+    the smallest measured briefing). 15/15 recent operator queue-
+    appends timed out; the load-bearing axis-1 dep-coherence gate
+    (goal.md L82-85's "upstream gates already make this safe in
+    practice" floor) was silently fail-open on essentially every call
+    for 7+ days. TB-269 bumped the default to 60s; this audit closes
+    the calibration-drift loop so the same class can't silently
+    re-degrade after a future workload shift (heavier briefings, model
+    swap, prompt growth).
+
+    Reads `.cc-autopilot/events.jsonl` for `validator_judge_passed`
+    events (TB-269; emitted by `ap2.validator_judge.
+    _judge_dep_coherence_default` after the SDK worker returns
+    successfully) within the last
+    `_VALIDATOR_JUDGE_TIMEOUT_AUDIT_WINDOW_DAYS` OR up to
+    `_VALIDATOR_JUDGE_TIMEOUT_AUDIT_MAX_SAMPLES` recent samples,
+    whichever yields more. Uses `max()` over durations (NOT `mean()` —
+    the worst-case successful call is the realistic ceiling for sizing
+    the timeout; a 47s P100 matters more than a 30s mean when the
+    timeout sits at 20s).
+
+    Verdict bands (mirror `verify_timeout_audit` verbatim):
+      - <3 samples → INFO "insufficient data" (avoids false-positives
+        on fresh installs).
+      - timeout < typical * 1.0 → WARN with one-line fix
+        recommending `ceil(typical * 1.5)`.
+      - typical * 1.0 ≤ timeout < typical * 1.5 → INFO "tight
+        headroom".
+      - timeout ≥ typical * 1.5 → INFO "comfortable headroom".
+
+    WARN (not FAIL) per goal.md L184-186: operator authority
+    preserved; doctor warns, doesn't refuse to run.
+
+    `cfg` is accepted for shape-parity with `verify_timeout_audit` but
+    the validator-judge timeout doesn't live on the Config dataclass
+    (it's read directly from `os.environ` inside
+    `_check_dependency_coherence`). The audit reads the env knob (or
+    the module-level `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` when unset)
+    so the value the audit compares against is byte-identical to what
+    the validator will actually use at runtime.
+    """
+    # Local import to dodge the validator_judge → events → ... cycle
+    # if this module ever sits in the wrong import order. The judge
+    # module is cheap to import (no SDK at module scope; lazy import
+    # inside `_judge_dep_coherence_default`).
+    from . import validator_judge as _vj
+
+    res = AuditResult()
+    events_file = state_dir / EVENTS_FILE
+    raw = os.environ.get("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "").strip()
+    try:
+        timeout = float(raw) if raw else _vj._VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+    except ValueError:
+        timeout = _vj._VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+    durations, sample_days = _iter_validator_judge_passed_durations(
+        events_file,
+        window_days=_VALIDATOR_JUDGE_TIMEOUT_AUDIT_WINDOW_DAYS,
+        max_samples=_VALIDATOR_JUDGE_TIMEOUT_AUDIT_MAX_SAMPLES,
+    )
+    n = len(durations)
+    if n < _VALIDATOR_JUDGE_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES:
+        res.add(
+            "INFO",
+            f"insufficient data to assess "
+            f"`AP2_VALIDATOR_JUDGE_TIMEOUT_S` headroom (n={n} "
+            f"successful validator-judge samples; need "
+            f">={_VALIDATOR_JUDGE_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES})",
+        )
+        return res
+
+    # Worst-case successful call is what blows up the timeout. Don't
+    # use mean/median — the P100 matters here, not central tendency.
+    typical = max(durations)
+    if timeout < typical * _VALIDATOR_JUDGE_TIMEOUT_AUDIT_WARN_RATIO:
+        recommended = int(
+            math.ceil(typical * _VALIDATOR_JUDGE_TIMEOUT_AUDIT_FIX_MULT)
+        )
+        res.add(
+            "WARN",
+            f"AP2_VALIDATOR_JUDGE_TIMEOUT_S={timeout:.0f}s is below "
+            f"observed-typical successful validator-judge duration "
+            f"({typical:.0f}s, n={n} samples over {sample_days} days);"
+            f" recommend `export "
+            f"AP2_VALIDATOR_JUDGE_TIMEOUT_S={recommended}`.",
+        )
+        return res
+
+    if timeout < typical * _VALIDATOR_JUDGE_TIMEOUT_AUDIT_INFO_RATIO:
+        # "Tight" band — operator survived the worst case but margin
+        # is below the recommended 1.5× safety buffer. INFO, not WARN:
+        # no active failure to surface, just a nudge.
+        headroom_pct = (timeout / typical - 1.0) * 100.0
+        res.add(
+            "INFO",
+            f"AP2_VALIDATOR_JUDGE_TIMEOUT_S={timeout:.0f}s has "
+            f"{headroom_pct:.0f}% headroom over recent "
+            f"validator-judge calls (observed-typical {typical:.0f}s,"
+            f" n={n} samples over {sample_days} days) — consider "
+            f"bumping for safety margin.",
+        )
+        return res
+
+    res.add(
+        "INFO",
+        f"AP2_VALIDATOR_JUDGE_TIMEOUT_S={timeout:.0f}s has comfortable"
+        f" headroom over observed-typical {typical:.0f}s (n={n} "
+        f"samples over {sample_days} days).",
+    )
+    return res
+
+
 def diagnose(
     project_root: Path,
     user: str = DEFAULT_USER,
@@ -552,6 +744,16 @@ def diagnose(
     report.sections.append((
         "verify timeout headroom",
         verify_timeout_audit(project_root, cfg_for_audit),
+    ))
+    # TB-269: axis-1 mirror of the verify-timeout audit above. Sits
+    # immediately after the verify-timeout section so the operator
+    # sees both workload-relative timeout audits as a block — same
+    # observability shape (window / band / WARN-with-fix-line), one
+    # for the project-wide regression gate (axis 2) and one for the
+    # dep-coherence LLM judge (axis 1).
+    report.sections.append((
+        "validator-judge timeout headroom",
+        validator_judge_timeout_audit(project_root, cfg_for_audit),
     ))
     report.sections.append(("auto-approve safety floor", auto_approve_audit()))
     report.sections.append(("auto-unfreeze safety floor", auto_unfreeze_audit()))

@@ -17,8 +17,8 @@ tldr: |
   token count). `max_turns-too-tight` ruled out (bumping 2→4 did not
   shorten wall-clock). No fixes applied here; calibration is a separate
   follow-up TB.
-updated: 2026-05-18
-updated_by: TB-256
+updated: 2026-05-20
+updated_by: TB-269
 cites:
   - .cc-autopilot/events.jsonl:8393  # 2026-05-17T06:23:27Z validator_judge_timeout
   - .cc-autopilot/events.jsonl:8539  # 2026-05-17T17:45:48Z validator_judge_timeout
@@ -311,3 +311,50 @@ something the operator overwrites. If timeout events keep firing
 AFTER the calibration TB lands, the operator runs another TB-253-shape
 investigation against the post-fix dataset to confirm the cause is
 different, not the same.
+
+## Calibration applied (TB-269)
+
+Calibration follow-up shipped 2026-05-20 — the first item from the
+"Implications for follow-up TBs" sequence above. Append-only block;
+the measurement sections above are preserved verbatim as the
+historical baseline.
+
+- **Default bump.** `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` raised from
+  `15.0` to `60.0` at `ap2/validator_judge.py` (post-TB-262 home; the
+  pre-TB-262 cite at `ap2/tools.py:670` above resolves to the same
+  constant after the source split). 60s sits 1.5× the artifact's
+  measured worst case of ~47s, rounded up to the smallest round
+  number — same `_VERIFY_TIMEOUT_AUDIT_FIX_MULT=1.5` ratio the TB-252
+  doctor audit recommends for the verify-timeout knob. Operators
+  still tighten via `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (the env knob is
+  unchanged); the default now sits above the real-world ceiling
+  instead of below the median.
+
+- **`validator_judge_passed` event.** Emitted on every successful
+  `_judge_dep_coherence_default` SDK call (before the JSON parse —
+  a parse-failure call still paid the same wall-clock and that cost
+  matters for timeout sizing). Payload: `{ts, type, duration_s,
+  briefing_bytes, max_turns, timeout_s}`. Mirrors TB-252's
+  `verify_passed` shape verbatim. Completes the
+  happy-path / fail-open / timeout triangle on a single namespace so
+  the operator now sees the gate's true firing rate, not just the
+  failure subset TB-243's count surface exposes.
+
+- **`validator_judge_timeout_audit` doctor surface.** New audit in
+  `ap2/doctor.py` mirroring `verify_timeout_audit` verbatim (with
+  `verify_passed` → `validator_judge_passed` and
+  `AP2_VERIFY_TIMEOUT_S` → `AP2_VALIDATOR_JUDGE_TIMEOUT_S`). Wired
+  into `diagnose()` immediately after the `verify_timeout_audit`
+  section so the two timeout-fit surfaces sit as a paired block in
+  `ap2 doctor` output. Closes the calibration-drift loop: if a future
+  workload shift (heavier briefings, model swap, prompt growth) takes
+  the SDK call back above the 60s floor, the audit's WARN band
+  surfaces it at pre-flight time instead of waiting for the next
+  TB-257-shape investigation.
+
+Verification of the bump (post-landing manual measurement) is
+deferred to operator review of the next 7d window of
+`validator_judge_passed` events — once enough samples accumulate, the
+`ap2 doctor` `validator-judge timeout headroom` section reports
+whether the 60s floor sits comfortably above observed-typical or
+needs a further nudge.

@@ -82,16 +82,19 @@ def test_artifact_yaml_front_matter_parses() -> None:
             "the operator can grep across insights without opening "
             "each file."
         )
-    # TB-256 string anchor — the briefing's Verification block runs
-    # `grep -q 'TB-256' …` against the file, and the front-matter is
-    # the canonical home for the `updated_by:` tag. Pinning the literal
-    # `updated_by: TB-256` line here surfaces a regression at the
-    # in-suite verification rather than only at the project-level
-    # shell-bullet gate.
-    assert "updated_by: TB-256" in front_matter, (
-        "Front-matter must carry `updated_by: TB-256` so the briefing's "
-        "Verification `grep -q 'TB-256'` bullet passes against the "
-        "canonical attribution field."
+    # Latest-attribution pin — the artifact carries an `updated_by:`
+    # tag naming the most recent TB that touched it (originally
+    # `TB-256`, the TB-257 deliverable's author; bumped to `TB-269`
+    # when the calibration follow-up appended its
+    # `## Calibration applied (TB-269)` section per TB-269 §Scope 4).
+    # Pin the LATEST attribution token so a future-TB rewrite that
+    # forgets to refresh the field trips here rather than silently
+    # diverging from the file's actual provenance.
+    assert "updated_by: TB-269" in front_matter, (
+        "Front-matter must carry `updated_by: TB-269` (the latest "
+        "attribution after TB-269's calibration-applied append). A "
+        "future TB touching this artifact should bump this pin to its "
+        "own TB-N in the same edit that updates `updated_by:`."
     )
 
 

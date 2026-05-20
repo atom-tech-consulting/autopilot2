@@ -941,16 +941,26 @@ mutated and no operator-queue ops are appended).
 and `validator_judge_fail` are fail-open audit events from check #7
 in `tools._validate_briefing_structure` (LLM-driven dependency-
 coherence judge). They fire when the Haiku-4.5 judge call exceeds
-`AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 15s) or fails for any other
-reason (network, parse error, model unavailable). The validator's
-policy on judge failure is fail-open — refusing to gate `ap2 add` /
-`ap2 update` on a transient Anthropic API hiccup is the load-
-bearing trade-off — so each skipped call lands as an event for
-operator visibility. Payload: `validator_judge_timeout` carries
-`timeout_s` + `error`; `validator_judge_fail` carries `error` (the
-exception repr or `"non-dict judge response"`). When
-`AP2_VALIDATOR_JUDGE_DISABLED=1` is set, the check is skipped
-entirely and neither event fires (clean bypass, not a fail-open).
+`AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 60s; TB-269 calibration)
+or fails for any other reason (network, parse error, model
+unavailable). The validator's policy on judge failure is fail-open
+— refusing to gate `ap2 add` / `ap2 update` on a transient Anthropic
+API hiccup is the load-bearing trade-off — so each skipped call
+lands as an event for operator visibility. Payload:
+`validator_judge_timeout` carries `timeout_s` + `error`;
+`validator_judge_fail` carries `error` (the exception repr or
+`"non-dict judge response"`). When `AP2_VALIDATOR_JUDGE_DISABLED=1`
+is set, the check is skipped entirely and neither event fires
+(clean bypass, not a fail-open).
+
+`validator_judge_passed` (TB-269) is the successful sibling: emitted
+when the SDK worker returns without timeout / SDK exception, BEFORE
+the JSON parse, so the wall-clock distribution feeds the doctor's
+`validator_judge_timeout_audit` surface (axis-1 mirror of TB-252's
+`verify_timeout_audit`) regardless of whether the response parsed
+cleanly. Payload: `duration_s`, `briefing_bytes`, `max_turns`,
+`timeout_s`. Completes the happy-path / fail-open / timeout
+triangle on a single event namespace.
 
 TB-243 surfaces the rolling 24h counts of both event types on
 `ap2 status` (text: a `validator-judge: N fail | M timeout (24h)`
@@ -1204,9 +1214,22 @@ symmetry.
   checks. Operator escape hatch if the judge is causing false-
   positives during a specific workflow; the deterministic gates
   still fire so the briefing-shape contract is preserved.
-- `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 15) — wall-clock timeout
+- `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 60) — wall-clock timeout
   for the per-briefing judge call. Exceeded → log
-  `validator_judge_timeout` event + skip the check.
+  `validator_judge_timeout` event + skip the check. TB-269 bumped the
+  default from 15 → 60 after the TB-257 investigation artifact
+  (`.cc-autopilot/insights/validator-judge-timeout-2026-05-18.md`)
+  measured the real SDK call at 17.6-46.8s wall-clock — the previous
+  20s ceiling (15s default + 5s outer-thread grace) sat below the
+  median completion of even the smallest measured briefing, so the
+  axis-1 dep-coherence gate was silently fail-open on essentially
+  every operator queue-append. The doctor surface
+  `validator_judge_timeout_audit` in `ap2/doctor.py` (TB-269; axis-1
+  mirror of TB-252's `verify_timeout_audit`) closes the calibration-
+  drift loop — it reads `validator_judge_passed` events from
+  `.cc-autopilot/events.jsonl` and surfaces a WARN with a one-line
+  fix recommendation if a future workload shift takes the observed-
+  typical successful call duration back above the configured floor.
 - `AP2_VALIDATOR_JUDGE_MAX_TURNS` (default 2) — TB-249 canonical
   budget knob. Bounds the judge's SDK turn count. The validator is a
   single-shot JSON-emitting judge: one assistant message (the verdict)
