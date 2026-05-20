@@ -857,3 +857,9 @@
 - **Summary:** Previously committed in 58a562e (slice helper + call-site rewire + 9/9-passing regression-pin module + artifact `## Re-measurement after TB-270` append + howto cross-ref). Briefing bullet 5 has been corrected with the `!` prefix, so all auto-verifiable criteria now pass: pytest module green (9 passed), full suite green (1901 passed in 97.75s), helper-defined grep exits 0, helper-called grep prints 2 lines (315 def + 502 call), `! grep "briefing_markdown\":[[:space:]]*briefing_text"` exits 0 (raw assignment absent), artifact + howto greps exit 0; helper body confirmed to return Goal+Scope substring with defensive full-text fallback on missing-heading or empty-body briefings.
 - **Files:** ap2/validator_judge.py, ap2/tests/test_tb270_validator_judge_payload_slice.py, ap2/tests/test_tb256_validator_judge_timeout_artifact.py, .cc-autopilot/insights/validator-judge-timeout-2026-05-18.md, ap2/howto.md
 - **Tests:** pass
+
+## [2026-05-20] TB-272: Add `validator_judge_noisy` discriminator to auto-approve `pause_reason` chain (axis-1+3 cross-cut safety-floor closure for load-bearing dep-coherence judge fail-open hazard)
+- **Commit:** `8c80438`
+- **Summary:** TB-272 shipped at 8c80438; 1908 tests pass.
+- **Files:** ap2/auto_approve.py, ap2/automation_status.py, ap2/daemon.py, ap2/env_reload.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb272_validator_judge_noisy_pause.py
+- **Tests:** pass
