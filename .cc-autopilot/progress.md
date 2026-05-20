@@ -821,3 +821,9 @@
 - **Summary:** TB-265 retry: closed the prose-verification gap from the prior 48b3934 split attempt by adding `_render_env_stale_warning(cfg)` to `web_home.py` (calls `automation_status.collect_env_staleness`, emits red-tinted WARN card with both timestamps + `ap2 stop && ap2 start` remediation when stale, default-off byte-identical when fresh), wired into `_render_home` under the daemon-status header, re-exported through `web.py`, with 3 regression tests in `test_web.py` pinning the surface; full suite 1868 passed, web.py stays 23599 B (< 60000 gate), 3 sibling modules present, `make_app()` composes 14 routes including `/`, `/events`, `/stats`.
 - **Files:** ap2/web.py, ap2/web_home.py, ap2/tests/test_web.py
 - **Tests:** pass
+
+## [2026-05-20] TB-266: Split `ap2/tests/test_cli.py` (133KB / 132 tests) to mirror the TB-264 cli-prefixed source split
+- **Commit:** `ce24c21`
+- **Summary:** Split ap2/tests/test_cli.py (133KB / 132 tests) into four cli-prefixed sibling modules mirroring TB-264's source split: test_cli_daemon.py (26 tests / 30KB), test_cli_board.py (73 tests / 62KB), test_cli_review.py (19 tests / 22KB), test_cli_diagnostic.py (10 tests / 20KB); remainder test_cli.py (4 tests / 4.3KB) holds TB-139 version helpers not tied to a verb. Shared `_project`/`_drain` helpers moved to conftest.py as plain functions to preserve identical test bodies. Full suite passes at 1868 tests collected (unchanged baseline).
+- **Files:** ap2/tests/conftest.py, ap2/tests/test_cli.py, ap2/tests/test_cli_daemon.py, ap2/tests/test_cli_board.py, ap2/tests/test_cli_review.py, ap2/tests/test_cli_diagnostic.py
+- **Tests:** pass

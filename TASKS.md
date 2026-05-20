@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-266** **Split `ap2/tests/test_cli.py` (133KB / 132 tests) to mirror the TB-264 cli-prefixed source split** `#autopilot` `#refactor` `#tests` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-tests-test-cli-py-133kb-132-te.md)
 
 ## Pipeline Pending
 
@@ -152,6 +151,7 @@
 - [x] **TB-263** **Split `ap2/daemon.py` (187KB) by responsibility: orchestrator stays, lift auto-unfreeze / auto-approve / state-commit / watchdog to siblings** `#autopilot` `#refactor` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-daemon-py-187kb-by-responsibil.md)
 - [x] **TB-264** **Split `ap2/cli.py` (118KB) by command surface: lifecycle / board / review / diagnostic groups** `#autopilot` `#refactor` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-cli-py-118kb-by-command-surfac.md)
 - [x] **TB-265** **Split `ap2/web.py` (179KB) by route group: home / events / task-run / stats / insights siblings** `#autopilot` `#refactor` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-web-py-179kb-by-route-group-ho.md)
+- [x] **TB-266** **Split `ap2/tests/test_cli.py` (133KB / 132 tests) to mirror the TB-264 cli-prefixed source split** `#autopilot` `#refactor` `#tests` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-tests-test-cli-py-133kb-132-te.md)
 
 ## Frozen
 
