@@ -1679,6 +1679,7 @@ from .auto_approve import (
     _event_combined_tokens,
     _parse_event_ts,
     _per_task_token_cap,
+    _validator_judge_noisy_paused,
     _was_auto_approved,
     _window_token_cap,
     evaluate_auto_approve_decision,
@@ -1912,6 +1913,37 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             # auto_approved row was added but before the promote
             # tick).
             #
+            # TB-272: axis-1+3 cross-cut safety-floor closure — pause
+            # auto-promote when the TB-235 dep-coherence validator-judge
+            # has been silently fail-open'ing at a noisy rate. Checked
+            # FIRST so the safety-floor failure takes priority over the
+            # TB-223 / TB-224 post-hoc halts that follow: the cumulative-
+            # regression / cost guards only fire AFTER bad work landed,
+            # while the noisy gate names the upstream check that should
+            # have prevented bad work from being queued. Reuses the
+            # existing `ap2 ack auto_approve_unfreeze` resume verb (no
+            # new ack token); operator escape hatch is
+            # `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED=1`. Mirrors the
+            # `auto_approve_skipped reason=<token>` event shape used by
+            # the TB-224 cost-cap halts so a future "consolidate all
+            # halt events into one parametric type" refactor is obvious.
+            if (
+                backlog is not None
+                and _was_auto_approved(cfg, backlog.id)
+            ):
+                noisy = _validator_judge_noisy_paused(cfg)
+                if noisy is not None:
+                    fail_count, timeout_count, threshold = noisy
+                    events.append(
+                        cfg.events_file,
+                        "auto_approve_skipped",
+                        task=backlog.id,
+                        reason="validator_judge_noisy",
+                        fail_count_24h=fail_count,
+                        timeout_count_24h=timeout_count,
+                        threshold=threshold,
+                    )
+                    backlog = None
             # TB-223: AP2_AUTO_APPROVE cumulative-regression circuit
             # breaker — when `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`
             # consecutive task failures land in `retry_exhausted`, halt

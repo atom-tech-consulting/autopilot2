@@ -35,7 +35,20 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     but a cap intervened" event, fired once per preempted promotion
     attempt while a halt is active. Payload: `task` (the would-have-
     promoted TB-N), `reason` (matches the active `auto_approve_halted`
-    event's reason).
+    event's reason). TB-272 added a new payload variant fired by the
+    axis-1+3 cross-cut safety-floor pause when the rolling-24h
+    `validator_judge_fail` + `validator_judge_timeout` sum crosses
+    `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5; TB-243
+    calibration): `reason="validator_judge_noisy"` plus
+    `fail_count_24h` (int), `timeout_count_24h` (int), `threshold`
+    (int — the resolved knob value at emit time). No counterpart
+    `auto_approve_halted` event for this variant — the noisy state is
+    count-derived (not event-driven), self-clears as old events age
+    out of the 24h window, and reuses the existing
+    `auto_approve_unfreeze` ack verb. Opt-out:
+    `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED=1` restores the pre-TB-272
+    cosmetic-only TB-243 behavior (status surface still surfaces the
+    `[noisy]` badge but dispatch is not gated).
   - `would_auto_approve` (TB-232) — monitor-only dry-run sibling of
     `auto_approved`. Fires at proposal-emission time when both
     `AP2_AUTO_APPROVE=1` AND `AP2_AUTO_APPROVE_DRY_RUN=1` are set and

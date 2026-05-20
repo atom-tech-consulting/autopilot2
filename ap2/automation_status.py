@@ -65,11 +65,20 @@ _HALT_REASON_RENAME: dict[str, str] = {
 # TB-228: ack-verb mapping used by the status-report digest. Same
 # vocabulary as TB-227's CLI/web rendering — operators see one verb
 # regardless of which surface flagged the halt.
+#
+# TB-272: `validator_judge_noisy` reuses the `auto_approve_unfreeze` verb
+# (same operator muscle-memory as `consecutive_freezes`) — no new ack
+# token, no new CLI verb. Operator workflow: ack signals "I've seen the
+# noisy state, the upstream judge is healthy again, resume auto-promote";
+# the count check itself is rolling-24h so it self-clears as old events
+# age out (or the operator sets `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED=1`
+# for the cosmetic-only TB-243 behavior).
 _PAUSE_REASON_ACK_VERB: dict[str, str] = {
     "consecutive_freezes": "auto_approve_unfreeze",
     "per_task_token_cap_exceeded": "auto_approve_window_resume",
     "window_token_cap_exceeded": "auto_approve_window_resume",
     "task_error": "auto_approve_window_resume",
+    "validator_judge_noisy": "auto_approve_unfreeze",
 }
 
 
@@ -107,6 +116,31 @@ def _is_auto_approve_dry_run() -> bool:
     the gate chain doesn't fire at all in that case).
     """
     return _is_truthy(os.environ.get("AP2_AUTO_APPROVE_DRY_RUN"))
+
+
+def _is_validator_judge_noisy_pause_disabled() -> bool:
+    """TB-272: True iff `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED` is set
+    to a truthy value.
+
+    Opt-out knob for the auto-approve pause that fires when the
+    rolling 24h sum
+    `(validator_judge_fail_count_24h + validator_judge_timeout_count_24h)
+    >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5; TB-243).
+    Default unset → False → pause is ACTIVE (the safety-floor closure
+    the briefing commits as the axis-1+3 cross-cut). When set to a
+    truthy value, the `_pause_reason` check returns the pre-TB-272
+    cosmetic-only behavior — `ap2 status` still surfaces the
+    `[noisy]` badge but the auto-approve dispatch path is NOT gated
+    on the noisy state.
+
+    Same permissive truthy-set (`1` / `true` / `yes`) as the sibling
+    auto-approve / auto-unfreeze knobs so operators tuning the env
+    file see one consistent boolean convention. Provided for the
+    operator who explicitly trusts the upstream judge degradation
+    surface and wants to keep auto-promote firing through a noisy
+    window.
+    """
+    return _is_truthy(os.environ.get("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED"))
 
 
 def _is_auto_unfreeze_dry_run() -> bool:
@@ -327,17 +361,57 @@ def _pause_reason(
     *,
     unfreeze_idx: int,
     resume_idx: int,
+    validator_judge_fail_count: int = 0,
+    validator_judge_timeout_count: int = 0,
+    validator_judge_threshold: int | None = None,
 ) -> str | None:
     """Discriminate the most recent halt-class event since its
     respective ack idx.
 
-    Two halt-class events share the auto-promote-paused state but ack
-    via distinct tokens (TB-223 → `auto_approve_unfreeze`; TB-224 →
-    `auto_approve_window_resume`). The pause reason is the most recent
-    event of either kind that is past its ack idx. Returns `None` when
-    no halt-class event is in-effect (i.e. the daemon's auto-promote
-    isn't currently paused on either axis).
+    Three halt-class signals share the auto-promote-paused state:
+      - TB-223 `auto_approve_paused` (consecutive_freezes) → ack
+        via `auto_approve_unfreeze`.
+      - TB-224 `auto_approve_halted` (per_task_cap / window_cap /
+        task_error) → ack via `auto_approve_window_resume`.
+      - TB-272 validator-judge noisy state (count-based, not
+        event-driven) — fires when the rolling-24h sum
+        `(fail + timeout) >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`
+        (default 5). Ack via `auto_approve_unfreeze` (same verb as
+        consecutive_freezes — no new ack token).
+
+    Priority ordering when multiple fire: validator_judge_noisy >
+    consecutive_freezes / cost halts. The safety-floor failure
+    (upstream dep-coherence judge silently fail-open'ing) is the
+    strictest single-line diagnosis for the operator: the cumulative-
+    regression / cost guards only fire AFTER bad work landed; the
+    noisy gate names the upstream check that should have prevented
+    bad work from being queued.
+
+    Returns `None` when no halt-class signal is in-effect.
+
+    `validator_judge_fail_count` / `validator_judge_timeout_count` /
+    `validator_judge_threshold` (TB-272) are passed in by
+    `collect_auto_approve_state` so the helper doesn't re-walk the
+    tail to recompute the counts the caller already has. Defaults are
+    zero / `None` so the existing test paths that call `_pause_reason`
+    without the kwargs (and don't care about the noisy state)
+    continue to work without modification — the noisy branch
+    short-circuits on a `None` / zero threshold.
     """
+    # TB-272: validator-judge noisy state is the highest-priority pause
+    # reason (safety-floor failure overrides post-hoc TB-223/TB-224
+    # halts). Gated by the `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED`
+    # opt-out so an operator who explicitly trusts the upstream judge
+    # degradation surface keeps the pre-TB-272 cosmetic-only behavior.
+    if (
+        validator_judge_threshold is not None
+        and validator_judge_threshold > 0
+        and not _is_validator_judge_noisy_pause_disabled()
+        and (validator_judge_fail_count + validator_judge_timeout_count)
+        >= validator_judge_threshold
+    ):
+        return "validator_judge_noisy"
+
     latest_idx = -1
     latest_reason: str | None = None
     for i, e in enumerate(tail):
@@ -389,8 +463,16 @@ def collect_auto_approve_state(
       - `auto_unfreeze_skipped_count_24h` (int)
       - `pause_reason` (str|None) — one of `"consecutive_freezes"`,
         `"per_task_token_cap_exceeded"`,
-        `"window_token_cap_exceeded"`, `"task_error"`, or `None` when
-        not currently paused.
+        `"window_token_cap_exceeded"`, `"task_error"`,
+        `"validator_judge_noisy"` (TB-272 — fires when the rolling
+        24h sum
+        `(validator_judge_fail_count_24h +
+        validator_judge_timeout_count_24h) >=
+        AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` and
+        `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED` is NOT set; takes
+        priority over the consecutive-freezes / cost halts when both
+        fire, on the operator's signal-clarity choice), or `None`
+        when not currently paused.
       - `dry_run_enabled` (bool) — TB-232 `AP2_AUTO_APPROVE_DRY_RUN`
         truthy. Operator on-ramp: when on, the gate chain still runs
         but the WRITE step emits `would_auto_approve` instead of
@@ -512,8 +594,19 @@ def collect_auto_approve_state(
         now_s=now_s, window_s=window_s,
     )
 
+    # TB-272: pass the validator-judge 24h counts + the noisy-threshold
+    # so `_pause_reason` can fold the safety-floor failure into the
+    # discriminator without re-walking the tail. `validator_judge_
+    # noisy_threshold()` reads `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`
+    # (default 5; TB-243's calibration choice — TB-272 inherits the
+    # threshold verbatim).
     pause_reason = _pause_reason(
-        tail, unfreeze_idx=unfreeze_idx, resume_idx=resume_idx,
+        tail,
+        unfreeze_idx=unfreeze_idx,
+        resume_idx=resume_idx,
+        validator_judge_fail_count=validator_judge_fail_24h,
+        validator_judge_timeout_count=validator_judge_timeout_24h,
+        validator_judge_threshold=validator_judge_noisy_threshold(),
     )
     paused = pause_reason is not None
 

@@ -465,6 +465,79 @@ def _auto_approve_check_violations(
     return None
 
 
+def _validator_judge_noisy_paused(cfg: Config) -> tuple[int, int, int] | None:
+    """TB-272: validator-judge fail-open noisy-state pause gate.
+
+    Closes the axis-1+3 cross-cut safety-floor hazard from goal.md
+    L82-88 — the TB-235 dep-coherence validator-judge that the auto-
+    approve safety claim depends on can silently fail-open at high
+    rate while `AP2_AUTO_APPROVE=1` continues stripping
+    `@blocked:review` and dispatching ideation proposals. TB-243
+    surfaced the rolling-24h fail/timeout counters but did NOT gate
+    the auto-approve dispatch path on them; this helper provides the
+    gate.
+
+    Counts `validator_judge_fail` + `validator_judge_timeout` events
+    within the trailing 24h window (`_AUTO_APPROVE_WINDOW_S`). When
+    the sum is `>= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5
+    per TB-243; TB-272 inherits the threshold verbatim) AND
+    `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED` is NOT set, returns the
+    `(fail_count, timeout_count, threshold)` triple for the caller
+    to pack into the `auto_approve_skipped` payload. Returns `None`
+    otherwise (no halt → dispatch proceeds).
+
+    Pure / events.jsonl tail-read only — safe to call from `_tick`
+    without taking the board lock. Mirrors the shape of
+    `_auto_approve_check_violations` (count-derived inspection over a
+    24h tail slice; same `_parse_event_ts` filter for malformed lines).
+    Same `_AUTO_APPROVE_WINDOW_S` window as TB-224's window-cap so
+    the operator's mental model on rolling-24h-pause stays consistent
+    across the three axes.
+
+    Resume semantics: count is naturally bounded by the rolling 24h
+    window — as old events age out, the count drops below the
+    threshold and the helper starts returning `None` on its own. The
+    operator can also ack via `ap2 ack auto_approve_unfreeze` (the
+    shared verb the `_PAUSE_REASON_ACK_VERB` mapping pins) to signal
+    the noisy state has been acknowledged; the ack lands an
+    `operator_ack` event that surfaces in the operator log without
+    affecting the count itself. The explicit operator escape hatch
+    for an immediate clear is `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED=1`
+    (cosmetic-only TB-243 behavior).
+    """
+    from . import automation_status as _astatus
+
+    if _astatus._is_validator_judge_noisy_pause_disabled():
+        return None
+    if not cfg.events_file.exists():
+        return None
+    threshold = _astatus.validator_judge_noisy_threshold()
+    if threshold <= 0:
+        return None
+    tail = events.tail(cfg.events_file, 2000)
+    if not tail:
+        return None
+    now_s = time.time()
+    fail_count = 0
+    timeout_count = 0
+    for e in tail:
+        typ = e.get("type")
+        if typ not in ("validator_judge_fail", "validator_judge_timeout"):
+            continue
+        ts = _parse_event_ts(e.get("ts"))
+        if ts is None:
+            continue
+        if now_s - ts > _AUTO_APPROVE_WINDOW_S:
+            continue
+        if typ == "validator_judge_fail":
+            fail_count += 1
+        else:
+            timeout_count += 1
+    if (fail_count + timeout_count) < threshold:
+        return None
+    return (fail_count, timeout_count, threshold)
+
+
 def _auto_approve_already_halted(cfg: Config) -> bool:
     """True iff an `auto_approve_halted` event has already fired since
     the most recent `auto_approve_window_resume` operator ack.

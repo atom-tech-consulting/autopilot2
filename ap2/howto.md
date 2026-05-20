@@ -1273,7 +1273,39 @@ symmetry.
   operator with `AP2_AUTO_APPROVE=1` whose judge has been quietly
   timing out for the last N briefings sees the warn-tint before the
   next audit. Unset / empty / non-int / non-positive → default
-  (matches the TB-224 / TB-234 token-cap parse semantics).
+  (matches the TB-224 / TB-234 token-cap parse semantics). TB-272
+  promotes the same threshold to a load-bearing safety floor: the
+  auto-approve dispatch path now pauses (emits
+  `auto_approve_skipped reason=validator_judge_noisy`) when the
+  rolling-24h sum crosses this threshold — see
+  `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED` below for the opt-out.
+- `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED` — TB-272 opt-out for the
+  validator-judge noisy-state auto-approve pause. **Unset by default
+  → pause ACTIVE** (the safety-floor closure for the axis-1+3
+  cross-cut hazard goal.md L82-88 names: the TB-235 dep-coherence
+  judge that the auto-approve safety claim depends on can silently
+  fail-open at high rate while `AP2_AUTO_APPROVE=1` continues
+  stripping `@blocked:review` and dispatching ideation proposals).
+  When the rolling 24h sum
+  `validator_judge_fail_count_24h + validator_judge_timeout_count_24h`
+  crosses `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5; TB-243),
+  the daemon refuses to auto-promote `auto_approved` Backlog tasks
+  and emits `auto_approve_skipped reason=validator_judge_noisy
+  fail_count_24h=<N> timeout_count_24h=<M> threshold=<T>` per
+  preempted promotion attempt. The pause-reason discriminator
+  surfaces as `validator_judge_noisy` on the existing TB-227 `ap2
+  status` text/JSON + web home Automation card + TB-228 cron
+  status-report digest renderers (no new operator-facing surfaces).
+  Resume: the rolling-24h window self-clears as old events age out,
+  OR the operator runs `ap2 ack auto_approve_unfreeze` (same verb
+  `consecutive_freezes` uses — no new ack token), OR they set this
+  knob to a truthy value (`1` / `true` / `yes`, matching the
+  sibling auto-approve knobs' parse). Set the knob when you
+  explicitly trust the upstream judge degradation surface and want
+  the pre-TB-272 cosmetic-only TB-243 behavior — the `[noisy]`
+  badge stays on `ap2 status` / web home but the dispatch path
+  isn't gated on it. Hot-reloadable (TB-271) so the operator can
+  flip it without a daemon restart.
 
 **Ideation.**
 - `AP2_IDEATION_DISABLED` — set to `1`/`true` to opt out of empty-board
