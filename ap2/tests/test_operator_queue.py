@@ -2364,3 +2364,520 @@ def test_operator_log_md_not_in_violation_check_excluded_paths():
     list minimal."""
     from ap2.rollback import _VIOLATION_CHECK_EXCLUDED_PATHS
     assert ".cc-autopilot/operator_log.md" not in _VIOLATION_CHECK_EXCLUDED_PATHS
+
+
+# ===========================================================================
+# TB-268: tests below were relocated verbatim from `ap2/tests/test_tools.py`
+# as part of the test-file split mirroring the TB-262 source split. Every
+# test exercises a surface owned by `ap2/operator_queue.py` — either the
+# write-side handlers (`do_operator_queue_append`, `enqueue_operator_ack`)
+# or the drain-side helpers (`drain_operator_queue`, `_apply_operator_ack`,
+# `_allocate_id`). Bodies are identical to their pre-TB-268 originals.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# TB-201: operator_log.md write path — `enqueue_operator_ack` (the public
+# ack surface, queues an `ack` op) and `_apply_operator_ack` (the drain-only
+# internal helper, writes operator_log.md). Tests assert the queue-then-drain
+# semantics match the historical synchronous write that
+# `do_operator_log_append` used to do.
+
+
+def test_operator_log_append_creates_file_on_first_call(cfg):
+    """TB-201: the public surface (`enqueue_operator_ack`) queues an
+    `ack` op rather than writing operator_log.md synchronously. Drain
+    the queue and assert the post-drain state matches the historical
+    write semantics — file created with header, bullet line appended."""
+    res = tools.enqueue_operator_ack(cfg, {"note": "abandoned TB-91"})
+    body = _unwrap(res)
+    # Pre-drain: queue carries one ack record; operator_log.md is
+    # untouched.
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    assert not log.exists()
+    assert body["op"] == "ack"
+    # Drain → applies _apply_operator_ack under the daemon's lock.
+    tools.drain_operator_queue(cfg)
+    assert log.exists()
+    text = log.read_text()
+    assert "# Operator log" in text
+    assert "abandoned TB-91" in text
+    # The ack bullet (operator's note) is among the appended lines —
+    # the drain ALSO emits the standard `applied operator-queued ack`
+    # audit line, so we don't pin "ends with the note", just "the note
+    # is in the file."
+    assert "— abandoned TB-91" in text
+
+
+def test_operator_log_append_includes_task_id_when_given(cfg):
+    res = tools.enqueue_operator_ack(
+        cfg, {"note": "LaunchAgent loaded", "task_id": "TB-139"}
+    )
+    body = _unwrap(res)
+    assert body["op"] == "ack"
+    tools.drain_operator_queue(cfg)
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    text = log.read_text()
+    assert "[TB-139]" in text
+    assert "LaunchAgent loaded" in text
+
+
+def test_operator_log_append_omits_tag_when_no_task_id(cfg):
+    tools.enqueue_operator_ack(cfg, {"note": "no task ref"})
+    tools.drain_operator_queue(cfg)
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    text = log.read_text()
+    # The operator's bullet line has no "[TB-...]" tag. The standard
+    # `applied operator-queued ack` audit line also has no arrow when
+    # task_id is absent — so the file as a whole carries no `[TB-` /
+    # `→ TB-` substring either.
+    assert "[TB-" not in text
+    assert "→ TB-" not in text
+
+
+def test_operator_log_append_appends_subsequent_calls(cfg):
+    tools.enqueue_operator_ack(cfg, {"note": "first decision"})
+    tools.enqueue_operator_ack(cfg, {"note": "second decision"})
+    tools.drain_operator_queue(cfg)
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    text = log.read_text()
+    assert "first decision" in text
+    assert "second decision" in text
+    # Header written exactly once across both drained acks.
+    assert text.count("# Operator log") == 1
+
+
+def test_operator_log_append_requires_note(cfg):
+    res = tools.enqueue_operator_ack(cfg, {"note": "  "})
+    assert res.get("isError"), res
+    assert "note is required" in res["content"][0]["text"]
+
+
+def test_operator_log_append_emits_operator_ack_event(cfg):
+    from ap2 import events
+    tools.enqueue_operator_ack(
+        cfg, {"note": "ate the frog", "task_id": "TB-9"}
+    )
+    tools.drain_operator_queue(cfg)
+    evts = events.tail(cfg.events_file, 10)
+    ack = next(e for e in evts if e["type"] == "operator_ack")
+    assert ack["note"] == "ate the frog"
+    assert ack["task"] == "TB-9"
+
+
+def test_operator_log_append_queues_not_writes(cfg):
+    """TB-201 regression pin: the public ack surface must NOT write
+    operator_log.md synchronously. Pre-drain the file is unmodified;
+    only after `drain_operator_queue` does the write land. The whole
+    point of the TB-201 retrofit — and the regression bar going
+    forward."""
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    pre = log.exists()
+    res = tools.enqueue_operator_ack(
+        cfg, {"note": "must defer", "task_id": "TB-200"}
+    )
+    assert not res.get("isError"), res
+    # Pre-drain: operator_log.md unchanged.
+    assert log.exists() == pre
+    if pre:
+        # No new bullet matching this note.
+        assert "must defer" not in log.read_text()
+    # Queue carries the ack record.
+    queue_path = tools.operator_queue_path(cfg)
+    assert queue_path.exists()
+    recs = [
+        json.loads(ln)
+        for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    ack_recs = [r for r in recs if r.get("op") == "ack"]
+    assert len(ack_recs) == 1
+    assert ack_recs[0]["args"]["note"] == "must defer"
+    assert ack_recs[0]["args"]["task_id"] == "TB-200"
+
+
+def test_apply_operator_ack_is_internal_drain_helper(cfg):
+    """TB-201: `_apply_operator_ack` is the drain-only internal helper
+    invoked by `_apply_operator_op`'s `ack` branch. Call it directly
+    (simulating what the drain would do under the lock) and assert the
+    synchronous append semantics + event emission match what the old
+    public `do_operator_log_append` used to do."""
+    from ap2 import events as _events
+    res = tools._apply_operator_ack(
+        cfg, {"note": "drain-applied", "task_id": "TB-201"}
+    )
+    body = _unwrap(res)
+    assert "appended to operator_log.md" in body["message"]
+    log = cfg.project_root / ".cc-autopilot" / "operator_log.md"
+    text = log.read_text()
+    assert "[TB-201] — drain-applied" in text
+    evt = next(
+        e for e in _events.tail(cfg.events_file, 5)
+        if e["type"] == "operator_ack"
+    )
+    assert evt["note"] == "drain-applied"
+
+
+def test_ack_in_operator_queue_ops(cfg):
+    """TB-201 pin: `ack` is registered in the queue-op enum so the
+    queue-append handler accepts it and the drain-side dispatcher
+    knows how to route it."""
+    assert "ack" in tools.OPERATOR_QUEUE_OPS
+
+
+# ---------------------------------------------------------------------------
+# TB-134: do_operator_queue_append rejects multi-line input in description.
+# The CLI `ap2 add` path now routes through here (TB-131); the gate
+# protects MM-handler + CLI alike.
+
+
+def test_operator_queue_append_rejects_newline_in_description(cfg, tmp_path):
+    """The CLI `ap2 add` path now routes through do_operator_queue_append
+    (TB-131); this is the gate that protects MM-handler + CLI alike."""
+    before = (tmp_path / "TASKS.md").read_text()
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    before_queue = queue_path.read_text() if queue_path.exists() else ""
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "valid", "description": "a\nb"},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "single line" in msg
+    assert "briefing" in msg
+    # Board untouched, nothing queued.
+    assert (tmp_path / "TASKS.md").read_text() == before
+    after_queue = queue_path.read_text() if queue_path.exists() else ""
+    assert after_queue == before_queue
+
+
+# ---------------------------------------------------------------------------
+# TB-216: do_operator_queue_append rejects titles containing `*`. The
+# MCP+CLI bridge path rejects up-front so the operator queue doesn't
+# accept a payload that would later collapse on drain.
+
+
+def test_operator_queue_append_rejects_asterisk_in_title(cfg, tmp_path):
+    """The MCP+CLI bridge path also rejects `*` in titles up-front so the
+    operator queue doesn't accept a payload that would later collapse on
+    drain. Reproduces the TB-214 dead-letter shape at queue-append time."""
+    before = (tmp_path / "TASKS.md").read_text()
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    before_queue = queue_path.read_text() if queue_path.exists() else ""
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "has * asterisk"},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "*" in msg
+    assert "TASK_LINE_RE" in msg or "bold-fence" in msg
+    # Board untouched, nothing queued.
+    assert (tmp_path / "TASKS.md").read_text() == before
+    after_queue = queue_path.read_text() if queue_path.exists() else ""
+    assert after_queue == before_queue
+
+
+# ---------------------------------------------------------------------------
+# TB-135: do_operator_queue_append requires an explicit briefing payload
+# for every add_* op. The skeleton-template auto-fill that used to land
+# for add_backlog is gone — a briefing whose `## Verification` was just a
+# placeholder bypassed the per-task verifier.
+
+
+def test_operator_queue_append_non_empty_briefing_payload_succeeds(cfg, tmp_path):
+    """TB-135 happy-path companion at the operator-queue layer (the path
+    `ap2 add` and `@claude-bot add ...` both route through). Daemon
+    callers (MM handler, future ideation operator-queue use) pass a
+    real briefing payload; the queue accepts every add_* op and
+    materializes the briefing under .cc-autopilot/tasks/."""
+    body = canonical_briefing("TB-203", title="MM-style briefing")
+    for action in ("add_ready", "add_backlog", "add_frozen"):
+        res = tools.do_operator_queue_append(
+            cfg,
+            {
+                "op": action,
+                "title": f"queued {action}",
+                "briefing": body,
+            },
+        )
+        out = _unwrap(res)
+        assert out["task_id"].startswith("TB-"), (action, out)
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    assert queue_path.exists()
+    # Three records queued — one per add_* action.
+    lines = [
+        ln for ln in queue_path.read_text().splitlines() if ln.strip()
+    ]
+    assert len(lines) == 3
+
+
+def test_operator_queue_append_add_backlog_requires_briefing(cfg, tmp_path):
+    """The CLI `ap2 add` and MM-handler `operator_queue_append` paths both
+    route through here; the gate must fire BEFORE TB-N pre-allocation so
+    a rejected add doesn't leak a hole in the TB-N sequence (the bump of
+    CLAUDE.md's `Next task ID` happens inside `_allocate_id` and is not
+    reversible)."""
+    before_claude = (tmp_path / "CLAUDE.md").read_text()
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    before_queue = queue_path.read_text() if queue_path.exists() else ""
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "needs briefing"},
+    )
+
+    assert res.get("isError")
+    msg = res["content"][0]["text"]
+    assert "briefing is required" in msg
+    # CLAUDE.md untouched (no TB-N allocated for the rejected add).
+    assert (tmp_path / "CLAUDE.md").read_text() == before_claude
+    # Nothing queued.
+    after_queue = queue_path.read_text() if queue_path.exists() else ""
+    assert after_queue == before_queue
+
+
+def test_operator_queue_append_add_ready_requires_briefing(cfg):
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "add_ready", "title": "no briefing"},
+    )
+    assert res.get("isError")
+    assert "briefing is required" in res["content"][0]["text"]
+
+
+def test_operator_queue_append_add_frozen_requires_briefing(cfg):
+    res = tools.do_operator_queue_append(
+        cfg, {"op": "add_frozen", "title": "no briefing"},
+    )
+    assert res.get("isError")
+    assert "briefing is required" in res["content"][0]["text"]
+
+
+def test_operator_queue_append_add_with_briefing_text_succeeds(cfg, tmp_path):
+    """MM-handler / ideation pass the briefing as a payload field. Pin
+    the happy path: the queue gets one record, the briefing bytes land
+    on disk under .cc-autopilot/tasks/."""
+    body = canonical_briefing("TB-204", title="MM-handler briefing")
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "mm-style", "briefing": body},
+    )
+    out = _unwrap(res)
+    assert out["task_id"].startswith("TB-")
+    queue_path = tmp_path / ".cc-autopilot" / "operator_queue.jsonl"
+    assert queue_path.exists()
+    # Briefing bytes round-trip into .cc-autopilot/tasks/<slug>.md.
+    slug_files = sorted(
+        p for p in (tmp_path / ".cc-autopilot" / "tasks").iterdir()
+        if p.suffix == ".md"
+    )
+    assert any(p.read_text() == body for p in slug_files)
+
+
+# ---------------------------------------------------------------------------
+# TB-141: _allocate_id is now pure — no CLAUDE.md write. The bump is
+# deferred to drain_operator_queue (for the queue path) or done by the
+# caller (for the do_board_edit path).
+
+
+def test_allocate_id_does_not_write_claude_md(cfg, tmp_path):
+    """TB-141: `_allocate_id` is pure. Pre-TB-141 it bumped CLAUDE.md
+    in-place; that synchronous mutation triggered TB-110 fenced-file
+    violations on whichever task was in flight when an operator ran
+    `ap2 add`. Now the bump is deferred to drain (queue path) or done
+    explicitly by the caller (do_board_edit path).
+    """
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+    pre_mtime = claude_md.stat().st_mtime_ns
+
+    from ap2.board import Board as _Board
+    board = _Board.load(cfg.tasks_file)
+    new_id = tools._allocate_id(board, cfg)
+
+    # ID looks right.
+    assert new_id.startswith("TB-")
+    # CLAUDE.md is byte-identical and the mtime didn't budge.
+    assert claude_md.read_text() == pre_text
+    assert claude_md.stat().st_mtime_ns == pre_mtime
+
+
+def test_operator_queue_append_does_not_write_claude_md(cfg, tmp_path):
+    """TB-141 regression pin at the public API layer. The whole point
+    of moving the bump to drain is that an `ap2 add` issued during a
+    task run no longer mutates a fenced file. CLAUDE.md must be
+    byte-identical after a successful append."""
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+    pre_mtime = claude_md.stat().st_mtime_ns
+
+    body = canonical_briefing("TB-205", title="briefing")
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "deferred", "briefing": body},
+    )
+    out = _unwrap(res)
+    # ID was allocated and the queue gained a record …
+    assert out["task_id"].startswith("TB-")
+    # … but CLAUDE.md is untouched.
+    assert claude_md.read_text() == pre_text
+    assert claude_md.stat().st_mtime_ns == pre_mtime
+
+
+def test_two_back_to_back_queue_appends_allocate_sequential_ids(cfg, tmp_path):
+    """TB-141: with `_allocate_id` pure, sequential allocations rely on
+    the queue file as the cross-call source of truth (CLAUDE.md is no
+    longer bumped synchronously to disambiguate). The second append
+    must read the first's `preallocated_task_id` from the queue and
+    return id + 1 — without touching CLAUDE.md.
+    """
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+
+    body = canonical_briefing("TB-206", title="briefing")
+    r1 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "first", "briefing": body},
+    ))
+    r2 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "second", "briefing": body},
+    ))
+    n1 = int(r1["task_id"][3:])
+    n2 = int(r2["task_id"][3:])
+    assert n2 == n1 + 1, (r1, r2)
+    # Neither call wrote CLAUDE.md (deferred to drain).
+    assert claude_md.read_text() == pre_text
+
+
+def test_drain_bumps_claude_md_once_to_highest_allocated_plus_one(cfg, tmp_path):
+    """TB-141: drain writes CLAUDE.md exactly once at end-of-pass,
+    setting `Next task ID` to highest_allocated + 1. Pre-TB-141 the
+    bump happened per-add inside `_allocate_id`; the consolidated
+    drain-time write is the corollary that keeps CLAUDE.md in sync
+    without the in-flight fence collision.
+    """
+    body = canonical_briefing("TB-207", title="briefing")
+    r1 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "drain-1", "briefing": body},
+    ))
+    r2 = _unwrap(tools.do_operator_queue_append(
+        cfg, {"op": "add_backlog", "title": "drain-2", "briefing": body},
+    ))
+    highest = max(int(r1["task_id"][3:]), int(r2["task_id"][3:]))
+
+    # Before drain, CLAUDE.md still has the pre-add value.
+    pre_drain = (tmp_path / "CLAUDE.md").read_text()
+    assert f"TB-{highest}" not in pre_drain  # not yet bumped past it
+
+    summary = tools.drain_operator_queue(cfg)
+    assert summary["applied"] == 2
+
+    # After drain, CLAUDE.md's Next task ID is highest + 1 — single
+    # write covering all add ops applied this drain pass.
+    post_drain = (tmp_path / "CLAUDE.md").read_text()
+    assert f"- Next task ID: TB-{highest + 1}" in post_drain
+
+
+def test_drain_with_no_add_ops_leaves_claude_md_untouched(cfg, tmp_path):
+    """The end-of-drain CLAUDE.md write only fires when the drain
+    actually preallocated a TB-N. A drain that only applied
+    move/unfreeze/delete ops shouldn't touch CLAUDE.md."""
+    from ap2.board import Board
+    board = Board.load(cfg.tasks_file)
+    board.add("Frozen", task_id="TB-77", title="frozen one")
+    board.save()
+
+    claude_md = tmp_path / "CLAUDE.md"
+    pre_text = claude_md.read_text()
+    pre_mtime = claude_md.stat().st_mtime_ns
+
+    tools.do_operator_queue_append(
+        cfg, {"op": "unfreeze", "task_id": "TB-77"},
+    )
+    summary = tools.drain_operator_queue(cfg)
+    assert summary["applied"] == 1
+
+    assert claude_md.read_text() == pre_text
+    assert claude_md.stat().st_mtime_ns == pre_mtime
+
+
+# ---------------------------------------------------------------------------
+# TB-193: the MCP-wrapper `operator_queue_append` refuses `update_goal`
+# so the verb is operator-CLI-only by design — no agent (MM handler,
+# control agent, ideation) can mutate goal.md via the queue. The
+# `do_operator_queue_append` direct-call path the CLI uses is unaffected.
+
+
+def test_mcp_operator_queue_append_refuses_update_goal(tmp_path):
+    """The MCP wrapper layered on top of `do_operator_queue_append`
+    refuses `op="update_goal"` with a CLI-pointing error message.
+    Pinned at the wrapper boundary so a future edit that drops the
+    refusal trips this test (rather than silently widening the surface
+    to MM-handler chat ops). The CLI path through
+    `do_operator_queue_append` is unaffected — that's the
+    operator-CLI-only entry point."""
+    import asyncio
+    from ap2.config import Config
+    from ap2.init import init_project
+
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+
+    srv = tools.build_mcp_server(cfg)
+    instance = srv["instance"]
+    from mcp import types as mcp_types
+    handler = instance.request_handlers[mcp_types.CallToolRequest]
+    # The MCP schema requires every listed field — pad the unused
+    # ones with empty strings (the wrapper's update_goal short-circuit
+    # fires before any field-content validation).
+    req = mcp_types.CallToolRequest(
+        method="tools/call",
+        params=mcp_types.CallToolRequestParams(
+            name="operator_queue_append",
+            arguments={
+                "op": "update_goal",
+                "task_id": "",
+                "title": "",
+                "tags": "",
+                "description": "",
+                "briefing": "",
+                "blocked_on": "",
+                "blocked": "",
+                "clear_tags": "",
+                "clear_blocked": "",
+                "force": "",
+                "goal_content": "# new goal\n\n## Mission\nx\n",
+            },
+        ),
+    )
+    result = asyncio.run(handler(req))
+    # The wrapper returns an error result; the message points at the CLI.
+    text = result.root.content[0].text
+    assert "operator-CLI-only" in text or "ap2 update-goal" in text, text
+    # And no queue line was written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
+
+
+def test_do_operator_queue_append_direct_call_accepts_update_goal(tmp_path):
+    """The CLI path calls `do_operator_queue_append` directly — the
+    function itself does NOT refuse `update_goal` (the MCP wrapper
+    does). Pinned so the asymmetry stays explicit."""
+    from ap2.config import Config
+    from ap2.init import init_project
+
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+
+    res = tools.do_operator_queue_append(
+        cfg,
+        {
+            "op": "update_goal",
+            "goal_content": "# Project Goals\n\n## Mission\nx\n",
+        },
+    )
+    assert not res.get("isError"), res
