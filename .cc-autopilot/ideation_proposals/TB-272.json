@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/add-validator-judge-noisy-discriminator.md",
   "focus_anchor": "current focus end to end automation",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-20T06:08:43Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-20T03:58:30Z",
   "tb_id": "TB-272",
   "why_now": "current `ap2 status` line prints \"auto-approve: disabled\n(validator-judge 24h: 0 fail, 11 timeout [noisy])\" \u2014 the noisy\nthreshold IS already crossed in the trailing 24h on production\ndata, but flipping `AP2_AUTO_APPROVE=1` today would give 11/11\nfail-open against the load-bearing axis-1 dep-coherence gate\ngoal.md L82-85 commits as the safety floor. TB-269 / TB-270 attack\nthe timeout root cause and ship the median-case fix; this TB ships\nthe belt-and-suspenders safety floor that holds even if\ncalibration regresses or a future SDK update reopens the timeout\nwindow. Without the pause, the operator can never honestly flip\nauto-approve on while keeping goal.md's walk-away promise \u2014 the\ngate is documentation fiction whenever the noisy threshold is\ncrossed."
