@@ -827,3 +827,9 @@
 - **Summary:** Split ap2/tests/test_cli.py (133KB / 132 tests) into four cli-prefixed sibling modules mirroring TB-264's source split: test_cli_daemon.py (26 tests / 30KB), test_cli_board.py (73 tests / 62KB), test_cli_review.py (19 tests / 22KB), test_cli_diagnostic.py (10 tests / 20KB); remainder test_cli.py (4 tests / 4.3KB) holds TB-139 version helpers not tied to a verb. Shared `_project`/`_drain` helpers moved to conftest.py as plain functions to preserve identical test bodies. Full suite passes at 1868 tests collected (unchanged baseline).
 - **Files:** ap2/tests/conftest.py, ap2/tests/test_cli.py, ap2/tests/test_cli_daemon.py, ap2/tests/test_cli_board.py, ap2/tests/test_cli_review.py, ap2/tests/test_cli_diagnostic.py
 - **Tests:** pass
+
+## [2026-05-20] TB-267: Split `ap2/tests/test_web.py` (131KB / 118 tests) to mirror the TB-265 web-prefixed route-group source split
+- **Commit:** `9d2e1f8`
+- **Summary:** Split ap2/tests/test_web.py (131KB → 18KB, 86% reduction) into 7 web-prefixed sibling modules mirroring the TB-265 source split: test_web_home.py (27 tests), test_web_events.py (28), test_web_tasks.py (16), test_web_chrome.py (22), test_web_insights.py (5), test_web_usage.py (10), test_web_stats.py (placeholder). All 118 tests moved with byte-identical bodies; shared `project` fixture + `_seed_run` / `_seed_vf_event` helpers lifted into ap2/tests/conftest.py. Collected count holds at 1868; full suite passes in 129s.
+- **Files:** ap2/tests/conftest.py, ap2/tests/test_web.py, ap2/tests/test_web_chrome.py, ap2/tests/test_web_events.py, ap2/tests/test_web_home.py, ap2/tests/test_web_insights.py, ap2/tests/test_web_stats.py, ap2/tests/test_web_tasks.py, ap2/tests/test_web_usage.py
+- **Tests:** pass
