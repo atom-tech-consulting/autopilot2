@@ -33,3 +33,8 @@ TASKS.md.lock
 
 # Local utility scripts — workspace-only, never committed.
 adhoc/
+
+# Operator working notebook — draft focus pivots before promotion into
+# goal.md. Nothing in the codebase reads it; the daemon reads goal.md only.
+# Local scratch, never committed.
+goal-draft.md
