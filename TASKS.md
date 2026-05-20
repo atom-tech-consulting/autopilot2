@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-266** **Split `ap2/tests/test_cli.py` (133KB / 132 tests) to mirror the TB-264 cli-prefixed source split** `#autopilot` `#refactor` `#tests` `#modularity` `#agent-friendliness` `#regression-pin` [→ brief](.cc-autopilot/tasks/split-ap2-tests-test-cli-py-133kb-132-te.md)
 
 ## Pipeline Pending
 
