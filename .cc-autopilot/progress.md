@@ -863,3 +863,9 @@
 - **Summary:** TB-272 shipped at 8c80438; 1908 tests pass.
 - **Files:** ap2/auto_approve.py, ap2/automation_status.py, ap2/daemon.py, ap2/env_reload.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb272_validator_judge_noisy_pause.py
 - **Tests:** pass
+
+## [2026-05-20] TB-273: Sync `ap2/ideation.default.md`'s `## Shell-bullet pitfalls to AVOID` with `ap2/howto.md`'s authoritative four-pitfall list (TB-270 retry-storm preventive closure on axis-1 manual-approval bottleneck)
+- **Commit:** `b130e80`
+- **Summary:** Synced ap2/ideation.default.md's Shell-bullet pitfalls section to ap2/howto.md's authoritative four-pitfall list (literal-backtick / `! grep` absence-check / `grep -r` directory-walk / `Prose:` prefix), added a cross-reference to howto L462-505 (worked example stays single-sourced), added regression-pin ap2/tests/test_tb273_ideation_pitfalls_sync.py (7 assertions covering scope §3a/b/c plus a howto-side sanity pin), and updated test_ideation_defaults.py::test_ideation_prompt_warns_off_bare_python_and_path_pitfalls to drop the now-stale `python3` substring assertion (the bare-`python` pitfall is intentionally retired by TB-273); full suite 1915 passed, all five briefing grep verification bullets hit.
+- **Files:** ap2/ideation.default.md, ap2/tests/test_tb273_ideation_pitfalls_sync.py, ap2/tests/test_ideation_defaults.py
+- **Tests:** pass
