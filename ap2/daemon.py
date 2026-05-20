@@ -23,7 +23,19 @@ import sys
 import time
 from pathlib import Path
 
-from . import diagnose, events, goal, ideation, prompts, retry, rollback, tools, verify, web
+from . import (
+    diagnose,
+    env_reload,
+    events,
+    goal,
+    ideation,
+    prompts,
+    retry,
+    rollback,
+    tools,
+    verify,
+    web,
+)
 from .board import Board, board_file_lock
 from .config import Config
 from .cron import (
@@ -1711,6 +1723,33 @@ from .focus_advance import (
 )
 
 async def _tick(cfg: Config, sdk, mcp_server) -> None:
+    # 0a. Hot-reload `.cc-autopilot/env` (TB-271). Runs at the VERY TOP
+    # of the tick — before operator-queue drain, auto-unfreeze, focus
+    # advance, cron, pipeline sweep, ideation, task dispatch — so every
+    # downstream stage on THIS tick reads the refreshed tunable values
+    # (timeouts, max-turns, model/effort, auto-approve thresholds,
+    # verify gate, tick intervals). mtime-gated: cheap no-op when the
+    # env file is unchanged, so the 30s tick rhythm doesn't burn cycles
+    # re-parsing a static file. The reload mutates cfg in-place for the
+    # tunable Config fields and overwrites os.environ for file-sourced
+    # keys (preserving "shell export wins" for keys the file never set).
+    # Fixed knobs (web binding, MM channels) still need a restart and
+    # are documented in `env_reload.FIXED_KNOBS` — TB-260's
+    # stale-warning persists for them so the operator sees the nudge
+    # for the changes that hot-reload can't apply.
+    try:
+        env_reload.maybe_reload_env(cfg)
+    except Exception as e:  # noqa: BLE001
+        # Defensive: a parse / state-file hiccup must not take the
+        # daemon down. Surface as an event so a regression in the
+        # reload helper is observable; the rest of the tick continues
+        # on whatever cfg state survived the partial reload.
+        events.append(
+            cfg.events_file,
+            "env_reload_error",
+            error=f"{type(e).__name__}: {e}",
+        )
+
     # 0. Drain the operator queue (TB-131). Runs BEFORE every other
     # stage so cron / pipeline-pending sweep / task dispatch / ideation
     # all read an up-to-date board snapshot. Operator-side `ap2 add`,

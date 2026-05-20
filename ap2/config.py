@@ -92,7 +92,16 @@ class Config:
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
         root = Path(project_root or os.getcwd()).resolve()
-        load_project_env(root)
+        applied = load_project_env(root)
+        # TB-271: seed the env-reload tracker with the set of keys the
+        # startup pass actually wrote into os.environ. The reload helper
+        # uses this set to honor "shell export wins" on later ticks —
+        # keys never file-sourced at startup keep shell-export precedence
+        # even if the operator later adds them to the env file. Lazy
+        # import to avoid the config↔env_reload module cycle (env_reload
+        # imports Config for type signatures + defaults).
+        from .env_reload import note_initial_applied
+        note_initial_applied(root, applied)
         autopilot_section = _read_autopilot_section(root / "CLAUDE.md")
 
         tasks_file = _resolve(root, autopilot_section.get("task_list"), DEFAULT_TASKS_FILE)

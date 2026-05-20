@@ -860,7 +860,16 @@ nothing new to summarize, TB-153), `cron_bootstrap` (first-run
 seeding of `cron.yaml` from `cron.default.yaml`), `ideation_empty_board`
 (skip — no slots OR cooldown), `ideation_forced` (operator forced via
 `ap2 ideate --force`), `ideation_skipped` / `ideation_skipped_no_slots`,
-`ideation_complete`, `ideation_state_updated`, `web_start`, `web_stop`.
+`ideation_complete`, `ideation_state_updated`, `web_start`, `web_stop`,
+`env_reloaded` (TB-271 — daemon `_tick` re-sourced `.cc-autopilot/env`
+at tick-top and detected at least one knob whose value changed; payload
+`changed` / `hot` / `fixed` / `other` knob lists; mutates the tunable
+`Config` dataclass fields in-place AND overwrites `os.environ` for
+file-sourced keys while preserving "shell export wins" for keys never
+set by the file; removes the restart-to-apply-a-knob friction TB-260
+only warned about; mtime-gated so a static env file is a cheap no-op
+each tick — see `## Configuration knobs` for the hot-reloadable vs
+fixed split).
 Per-run cost/usage: `task_run_usage` (per task agent run, TB-180),
 `control_run_usage` (per cron / ideation / MM-handler run, TB-179),
 `judge_call` (per per-task-verifier prose-bullet judge invocation,
@@ -877,6 +886,9 @@ rollback to pre-task state), `verification_failed` (per-task or
 project-wide), `verification_partial`, `retry_exhausted`,
 `cron_error`, `cron_timeout`, `ideation_error`, `ideation_timeout`,
 `mattermost_error`, `mattermost_timeout`, `mm_poll_error`,
+`env_reload_error` (TB-271 — `env_reload.maybe_reload_env` raised at
+tick-top; swallowed defensively so the rest of the tick continues on
+whatever cfg state survived; payload `error=<ExceptionType>: <message>`),
 `state_commit_error`, `rollback_error`, `web_error`,
 `pipeline_pending_sweep_error`, `operator_queue_error` /
 `operator_queue_drain_error`, `auto_diagnose_error` /
@@ -1105,6 +1117,28 @@ Set in shell, in `<project>/.cc-autopilot/env`, or in
 (`grep -nE 'AP2_[A-Z_]+' ap2/*.py` is the source-of-truth — the
 `test_every_env_knob_documented` gate in `ap2/tests/test_docs_drift.py`
 fails CI if a new knob is added and not listed here):
+
+**Hot-reload vs restart (TB-271).** Most tunable knobs (timeouts,
+max-turns, model/effort, auto-approve / auto-unfreeze thresholds,
+verify gate, tick intervals, ideation knobs, watchdog thresholds)
+hot-reload — the daemon re-sources `.cc-autopilot/env` at the top of
+every `_tick`, refreshes the tunable `Config` fields in-place, and
+overwrites `os.environ` for file-sourced keys. A bumped knob takes
+effect on the next tick (≤30s) without `ap2 stop && ap2 start`. The
+canonical set is `env_reload.HOT_RELOADABLE_KNOBS`; the reload emits
+an `env_reloaded` event with the changed keys for the audit trail.
+A small fixed-knob set (`env_reload.FIXED_KNOBS` — `AP2_WEB_PORT`,
+`AP2_WEB_DISABLED`, `AP2_MM_CHANNELS`) still requires a restart:
+each configures a stateful resource (a bound HTTP socket, a
+subscribed MM channel set) wired up once at daemon-start and not
+re-applied by the reload. TB-260's `WARN: .cc-autopilot/env modified
+... ap2 stop && ap2 start` line persists for the fixed-knob set and
+clears automatically after a hot-reload that only touched
+hot-reloadable knobs. "Shell export wins" still holds for keys
+never sourced from the file: a `export AP2_FOO=bar` in the
+operator's shell takes precedence over a `AP2_FOO=baz` later added
+to the file, even on reload (you'd need to either un-export and
+restart, or set the value via the file before daemon-start).
 
 **Loop cadence + per-run timeouts.**
 - `AP2_TICK_S` (30) — main-loop tick interval.

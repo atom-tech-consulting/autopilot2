@@ -124,6 +124,31 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     suppresses re-emission via the pointer's
     `roadmap_complete_emitted` flag, which resets on the next
     advance after the operator extends the roadmap.
+  - `env_reloaded` (TB-271) — daemon `_tick` re-sourced
+    `.cc-autopilot/env` at tick-top and detected at least one knob
+    whose value changed since the last reload. Mutates the tunable
+    `Config` dataclass fields in-place (timeouts, max-turns,
+    `verify_cmd`, tick intervals) and overwrites `os.environ` for
+    file-sourced keys, preserving the "shell export wins" contract
+    for keys never set by the file. Payload: `changed` (sorted list
+    of all knob names whose value differs from the prior value),
+    `hot` (subset in `env_reload.HOT_RELOADABLE_KNOBS` — take effect
+    on this tick), `fixed` (subset in `env_reload.FIXED_KNOBS` —
+    require `ap2 stop && ap2 start` to apply, e.g. `AP2_WEB_PORT`,
+    `AP2_MM_CHANNELS`), `other` (anything not in either set;
+    treated conservatively — TB-260 stale-warning stays live).
+    Removes the restart-to-apply-a-knob friction TB-260 only warned
+    about (TB-255 ran ~26h against the old 600s verify ceiling because
+    `AP2_VERIFY_TIMEOUT_S` had been bumped but the daemon hadn't
+    restarted). Mtime-gated: a touch that doesn't change any value
+    is silent — event is only emitted when at least one key's value
+    actually differs.
+  - `env_reload_error` (TB-271) — `env_reload.maybe_reload_env` raised
+    an exception at tick-top (parse failure / state-file write error
+    / OS error on the env file). The daemon swallows the exception
+    so the tick continues on whatever cfg state survived; the event
+    surfaces the failure shape for operator triage. Payload: `error`
+    (`<ExceptionType>: <message>`).
   - `verify_passed` (TB-252) — project-wide `AP2_VERIFY_CMD` ran to
     completion AND exited zero (the successful sibling of
     `verification_failed`). Emitted from daemon.py's
