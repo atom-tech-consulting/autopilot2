@@ -470,17 +470,37 @@ once the work has finished.
 
 ## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)
 The verifier runs each shell bullet via `/bin/sh -c <bullet>` in the
-project root. Common mistakes that fail with exit 127 / 126 even when
-the underlying work is correct:
-  - **Bare `python`** — the daemon's environment has `uv run python`,
-    `python3`, `.venv/bin/python` — but typically NOT bare `python`
-    on PATH. Use `\`uv run python ...\`` (preferred for repos using uv)
-    or `\`python3 ...\``, never bare `\`python ...\``.
-  - **Bare path as command** — `\`reports/foo/README.md\`` makes shell
-    try to *execute* the markdown file (exit 126). For existence
-    checks use `\`test -f reports/foo/README.md\``; for line-count
-    bounds use `\`[ "$(wc -l < reports/foo/README.md)" -le 30 ]\``.
-  - **Multi-line shell bullets** — keep the bullet's command on one
-    line. Wrap multiple steps in `\`bash -c '...'\`` or `&&`-chain.
+project root. The four authoritative pitfalls — kept verbatim-aligned
+with `ap2/howto.md`'s "Shell bullets — four authoring pitfalls"
+section so the ideation prompt and the howto can't drift:
+  - **No literal backticks in the command body** (TB-207). Markdown's
+    single-backtick codespan cannot represent a literal backtick —
+    mistune truncates the codespan at the inner backtick and the rest
+    of the command leaks into the bullet's prose body. If the literal
+    backtick is part of a regex pattern, replace it with the regex
+    any-char `.` (e.g. `'^\| .pat'` instead of `'^\| ` + backtick +
+    `pat'`). If it's genuinely required, wrap the codespan with double
+    backticks. The TB-219 classifier surfaces the broken
+    single-backtick shape as `kind="malformed"` rather than silently
+    exec'ing a truncated half-command.
+  - **Absence-check shell bullets must use the `!` exit-inversion
+    prefix** (TB-270). `grep "absent string" file` exits 1 when the
+    string is absent, which the verifier reads as a FAIL. The intent
+    is the inverse: pass iff absent. Use bash's exit-status negation:
+    `! grep "absent string" file` passes when `grep` exits non-zero
+    (string not found) and fails when `grep` exits 0 (string found —
+    the absence claim is violated).
+  - **Directory-walking grep must use `-r`** (TB-204). `grep -lE 'pat'
+    dir/` exits 2 with "Is a directory" because plain `grep` is a
+    file-only matcher. The bullet looks correct but always fails at
+    runtime. Use `grep -rlE 'pat' dir/` (or pre-list files via
+    `find dir/ -type f`).
+  - **`Prose:` prefix for judge bullets** (TB-219 classifier
+    complement). If a bullet's grammatical subject is a
+    backtick-fenced filename / symbol and the rest is a claim to
+    judge against the diff, lead the suffix with `Prose:` so the
+    verifier routes the bullet to the judge instead of trying to
+    `exec` the filename.
+See `ap2/howto.md` L462-505 for a worked example combining all four.
 Prefer running concrete project commands (e.g. `uv run pytest -q`,
 `uv run python -m stoch ...`) over inventing new ones.
