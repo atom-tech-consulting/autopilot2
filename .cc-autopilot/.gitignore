@@ -15,6 +15,7 @@ mm_state.json
 auto_diagnose_state.json
 operator_queue.jsonl
 operator_queue_state.json
+focus_pointer.json
 
 # Per-run prompt + stream dumps for failure diagnosis (kept only on failure)
 debug/
