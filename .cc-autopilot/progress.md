@@ -833,3 +833,9 @@
 - **Summary:** Split ap2/tests/test_web.py (131KB → 18KB, 86% reduction) into 7 web-prefixed sibling modules mirroring the TB-265 source split: test_web_home.py (27 tests), test_web_events.py (28), test_web_tasks.py (16), test_web_chrome.py (22), test_web_insights.py (5), test_web_usage.py (10), test_web_stats.py (placeholder). All 118 tests moved with byte-identical bodies; shared `project` fixture + `_seed_run` / `_seed_vf_event` helpers lifted into ap2/tests/conftest.py. Collected count holds at 1868; full suite passes in 129s.
 - **Files:** ap2/tests/conftest.py, ap2/tests/test_web.py, ap2/tests/test_web_chrome.py, ap2/tests/test_web_events.py, ap2/tests/test_web_home.py, ap2/tests/test_web_insights.py, ap2/tests/test_web_stats.py, ap2/tests/test_web_tasks.py, ap2/tests/test_web_usage.py
 - **Tests:** pass
+
+## [2026-05-20] TB-268: Split `ap2/tests/test_tools.py` (118KB / 148 tests) to mirror the TB-262 source split into validator/judge/queue/board modules
+- **Commit:** `bdf1262`
+- **Summary:** TB-268: split ap2/tests/test_tools.py (118KB → 37KB, 70% reduction) into sibling test modules mirroring the TB-262 source split — test_briefing_validators.py (50KB, validator gates), test_board_edits.py (19KB, do_board_edit surface), test_validator_judge.py (placeholder for the mirror module), with operator-queue tests merged into the existing test_operator_queue.py. Pure mechanical relocation, identical test bodies; 1868 tests pass (baseline unchanged).
+- **Files:** ap2/tests/test_tools.py, ap2/tests/test_briefing_validators.py, ap2/tests/test_validator_judge.py, ap2/tests/test_board_edits.py, ap2/tests/test_operator_queue.py
+- **Tests:** pass
