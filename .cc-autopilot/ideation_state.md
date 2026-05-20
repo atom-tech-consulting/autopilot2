@@ -1,23 +1,25 @@
 # Ideation State
 
-_Last updated: 2026-05-20T10:13Z by ideation cron_
+_Last updated: 2026-05-20T12:16Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 1B / 0P / 144C / 3F — identical to the
-prior cycle's exit state (08:08Z). No new Completes, no new operator
-actions, no new in-flight retries between cycles. TB-273 (preventive
-ideation-prompt shell-pitfall sync, proposed 2026-05-20T06:07Z) still
-awaiting operator review (~4h pending). The four-axis end-to-end-
-automation focus remains "pre-deployment ready": every gate landed
-(TB-223 → TB-272 series) but the operator has not yet enabled
-`AP2_AUTO_APPROVE` / `AP2_AUTO_UNFREEZE`, so no operational signal
-exists to surface new gaps from. Slot count = 4; proposals = 0.
+Cycle entry: board 0A / 0R / 1B / 0P / 144C / 3F — byte-identical to
+the prior cycle's exit (10:13Z) and the cycle before that (08:08Z).
+Three consecutive cycles with no new Completes, no new operator
+queue activity, no new retries. TB-273 (preventive ideation-prompt
+shell-pitfall sync, proposed 06:07Z) still awaiting operator review
+(~6h pending). The four-axis end-to-end-automation focus remains
+"pre-deployment ready" — every gate landed (TB-223 → TB-272 series)
+but the operator has not yet enabled `AP2_AUTO_APPROVE` /
+`AP2_AUTO_UNFREEZE` (status confirms `auto-approve: disabled`), so
+no operational signal exists from which to surface new gaps. Slot
+count = 4; proposals = 0.
 
-Recent Completes considered (last ~8h, unchanged from prior cycle):
+Recent Completes considered (last ~12h, unchanged from prior cycle):
 
 - TB-272 (`8c80438`, 2026-05-20T06:29Z) — validator_judge_noisy
-  discriminator added to auto-approve pause_reason chain.
+  discriminator wired into auto-approve pause_reason chain.
 - TB-270 (`58a562e`, 2026-05-20T05:59Z) — validator-judge payload
   Goal+Scope slice; operator-unfreeze after `!`-miss retry storm.
 - TB-269 (`e4f6f43`, 2026-05-20T04:40Z) — validator-judge timeout
@@ -48,20 +50,20 @@ Recent Completes considered (last ~8h, unchanged from prior cycle):
     - Cross-axis observability: TB-248/255/257/258/259/260.
   - Gaps:
     (1) **TB-273 (ideation-prompt shell-pitfall sync) awaiting
-        operator review** — Backlog since 2026-05-20T06:08Z (~4h).
+        operator review** — Backlog since 2026-05-20T06:08Z (~6h).
         Operator-decided cadence; no further proposal in this lane
         until approved/rejected.
     (2) **No operational data yet on `AP2_AUTO_APPROVE` /
         `AP2_AUTO_UNFREEZE`** — `ap2 status` confirms `auto-approve:
-        disabled` (knob unset). Every gate is wired; ideation has no
-        signal to follow up on until the operator turns one on and
-        the loop runs through real cases. Load-bearing for this
-        cycle's proposals-count.
+        disabled`. Every gate is wired (TB-223 → TB-272); ideation
+        has no signal to follow up on until the operator turns one
+        on and the loop runs through real cases. Load-bearing for
+        this cycle's proposals-count.
     (3) **TB-269/270 post-deployment re-measurement** — time-locked
         (≥7d wall-clock for the validator-judge 60s + sliced-payload
         window to accumulate). Current 24h figure (`0 fail, 13
         timeout`) still dominated by pre-fix events. TB-257 artifact
-        will receive its final calibration verdict when post-fix
+        will receive its final calibration verdict when the post-fix
         window has real data.
     (4) **Doctor warn for `AP2_AUTO_APPROVE=1` AND validator-judge
         noisy** — TB-272 in-HEAD sub-condition unlocked but pre-flight
@@ -82,7 +84,7 @@ Recent Completes considered (last ~8h, unchanged from prior cycle):
         patterns (TB-172, TB-240) still name the whack-a-mole risk.
   - Status: `in-progress`
   - Reasoning: All four axes pre-deployment ready; next gap-surfacing
-    depends on operational signal that doesn't exist yet. Two
+    depends on operational signal that doesn't exist yet. Three
     consecutive 0-proposal cycles is now the steady state pending
     operator engagement with the auto-approve knob — explicitly the
     "quality-over-quantity" discipline goal.md L34-36 calls out, not
@@ -100,8 +102,8 @@ in / operator-curated trust-upgrade pattern goal.md constrains.
   noisy** — see gap (4). Re-rank only on operator enable +
   surprise-report OR explicit request.
 - **Cron-digest pause-reason surface for `validator_judge_noisy`** —
-  the status-report digest already covers `auto_approve_paused`
-  events via TB-228/TB-238 wiring TB-272 emits into; surface-parity
+  status-report digest already covers `auto_approve_paused` events
+  via TB-228/TB-238 wiring that TB-272 emits into; surface-parity
   gap closed mechanically.
 - **`AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` recalibration** — premature;
   wait for post-TB-269/270 baseline (≥7d).
@@ -129,11 +131,11 @@ in / operator-curated trust-upgrade pattern goal.md constrains.
 ## Cycle observations
 
 - "All four axes pre-deployment ready" still load-bearing this cycle
-  (carried, re-justified): two consecutive 0-proposal cycles since
+  (carried, re-justified): n=3 consecutive 0-proposal cycles since
   TB-272 landed make explicit that the bottleneck is operator knob-
-  flipping, not more pre-deployment wiring — manufacturing more
-  wiring here is exactly the pro-forma compliance goal.md's `Done
-  when` L34-36 calls out.
+  flipping, not more pre-deployment wiring — manufacturing wiring
+  here is exactly the pro-forma compliance goal.md `Done when`
+  L34-36 calls out.
 - Operator rejection patterns recap (carried, re-justified): TB-172
   + TB-240 reject briefing-validator expansion and agent self-fix
   that whacks moles instead of addressing root cause; TB-185 + TB-184
@@ -142,11 +144,12 @@ in / operator-curated trust-upgrade pattern goal.md constrains.
   howto into the prompt that authors); the `negate_grep_for_absent_
   assert` candidate stays deferred on n=1 to avoid the whack-a-mole
   anti-pattern.
-- TB-273 has been pending ~4h with no operator decision yet. Not
-  abnormal (operator cadence is irregular), but if it stretches
-  beyond a full day this becomes the load-bearing single-point-of-
-  blockage for any future preventive ideation-prompt edits — worth
-  re-checking next cycle but not actionable now.
+- TB-273 pending ~6h with no operator decision yet. Not abnormal
+  (operator cadence is irregular); if it stretches beyond a full day
+  (next cycle's check-in: ~24h from 06:08Z proposal = 06:08Z
+  tomorrow) this becomes the load-bearing single-point-of-blockage
+  for any future preventive ideation-prompt edits — re-check next
+  cycle but not actionable now.
 
 ## Decisions needed from operator
 
@@ -161,4 +164,8 @@ No new proposals this cycle. Backlog carries TB-273 pending review;
 every other candidate above is deferred with a concrete unblock-
 condition (operational signal / ≥7d wall-clock / n=2 recurrence /
 operator request). Proposing hypothetical fillers to use the
-remaining 3 slots would replay the TB-172 / TB-185 rejection pattern.
+remaining 4 slots would replay the TB-172 / TB-184 / TB-185 / TB-240
+rejection pattern (whack-a-mole expansion, ap2-meta-polish unconnected
+to current operational signal). Three consecutive 0-proposal cycles
+is the deliberate steady state pending operator engagement with
+`AP2_AUTO_APPROVE`, not a stall.
