@@ -839,3 +839,9 @@
 - **Summary:** TB-268: split ap2/tests/test_tools.py (118KB → 37KB, 70% reduction) into sibling test modules mirroring the TB-262 source split — test_briefing_validators.py (50KB, validator gates), test_board_edits.py (19KB, do_board_edit surface), test_validator_judge.py (placeholder for the mirror module), with operator-queue tests merged into the existing test_operator_queue.py. Pure mechanical relocation, identical test bodies; 1868 tests pass (baseline unchanged).
 - **Files:** ap2/tests/test_tools.py, ap2/tests/test_briefing_validators.py, ap2/tests/test_validator_judge.py, ap2/tests/test_board_edits.py, ap2/tests/test_operator_queue.py
 - **Tests:** pass
+
+## [2026-05-20] TB-271: Hot-reload tunable env knobs at each daemon tick (re-source .cc-autopilot/env), removing the restart requirement TB-260 only warns about
+- **Commit:** `59148ca`
+- **Summary:** New ap2/env_reload.py re-sources .cc-autopilot/env at the top of every _tick (mtime-gated, honors shell-export-wins via the file_keys set seeded by Config.load), mutates tunable Config fields in-place, emits env_reloaded with changed/hot/fixed/other key lists, and advances TB-260's baseline only on hot-only reloads so the WARN line auto-clears for hot knobs but stays live for fixed knobs (AP2_WEB_PORT, AP2_WEB_DISABLED, AP2_MM_CHANNELS); 17 new TB-271 regression-pin tests including the TB-255 verify-timeout shape and the shell-wins case, full ap2 suite 1885 passes.
+- **Files:** ap2/env_reload.py, ap2/config.py, ap2/daemon.py, ap2/events.py, ap2/howto.md, ap2/tests/test_tb271_env_hot_reload.py
+- **Tests:** pass
