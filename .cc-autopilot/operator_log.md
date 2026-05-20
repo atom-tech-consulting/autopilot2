@@ -219,3 +219,6 @@ ideation won't re-propose decisions logged here._
 - 2026-05-20T06:03:09Z — applied operator-queued approve → TB-272
 - 2026-05-20T16:38:29Z — applied operator-queued add_backlog → TB-274
 - 2026-05-20T18:57:10Z — applied operator-queued approve → TB-273
+- 2026-05-20T23:38:26Z — applied operator-queued add_backlog → TB-275
+- 2026-05-20T23:38:50Z — roadmap_complete — drain the queued operator tasks (TB-273 shell-bullet sync, TB-274 doc reconciliation, TB-275 dispatch-halt fix); ideation stays parked until the roadmap is extended
+- 2026-05-20T23:38:39Z — applied operator-queued ack
