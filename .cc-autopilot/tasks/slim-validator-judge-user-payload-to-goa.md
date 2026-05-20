@@ -103,7 +103,7 @@ current ~1/operator-queue-append.
 - `uv run pytest -q ap2/tests/` — full suite passes (no regressions in existing validator-judge / dep-coherence tests).
 - `grep -nE "def _slice_briefing_for_dep_judge" ap2/validator_judge.py` — exits 0 (helper present).
 - `grep -nE "_slice_briefing_for_dep_judge\(" ap2/validator_judge.py` — prints ≥2 lines (definition + call site in `_judge_dep_coherence_default`).
-- `grep -nE "briefing_markdown\"[[:space:]]*:[[:space:]]*briefing_text" ap2/validator_judge.py` — exits NON-ZERO (the raw full-briefing assignment has been replaced; if the grep finds the literal pattern, the slice wasn't wired).
+- `! grep -nE "briefing_markdown\"[[:space:]]*:[[:space:]]*briefing_text" ap2/validator_judge.py` — exits 0 when the pattern is absent (the `!` inverts grep so the removed raw full-briefing assignment passes; if the literal pattern is still present the slice wasn't wired and this fails).
 - `grep -nE "Re-measurement after TB-270" .cc-autopilot/insights/validator-judge-timeout-2026-05-18.md` — exits 0 (artifact append-only update present).
 - `grep -nE "TB-270" ap2/howto.md` — exits 0 (howto cross-reference present).
 - Prose: the new `_slice_briefing_for_dep_judge` in `ap2/validator_judge.py` returns Goal+Scope substring on canonical briefings and falls back to the full `briefing_text` when either heading is missing — judge confirms by Read of the helper body and the canonical-vs-fallback branch shape.
