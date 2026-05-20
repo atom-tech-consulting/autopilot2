@@ -1,4 +1,20 @@
-"""Top-level pytest conftest for `ap2/tests/` — judge-shield default.
+"""Top-level pytest conftest for `ap2/tests/` — judge-shield default
+plus cross-module CLI test helpers (TB-266).
+
+TB-266 (the second responsibility): centralize the `_project(tmp_path)`
++ `_drain(cfg)` helpers that every cli-prefixed test module uses
+(`test_cli_daemon.py`, `test_cli_board.py`, `test_cli_review.py`,
+`test_cli_diagnostic.py`, `test_cli.py`). The pre-TB-266 layout
+defined them once at the top of the monolithic `test_cli.py` and
+relied on file-local scope; once the file split into siblings, each
+new module needed access to them. Co-locating here (sibling to the
+new modules) lets every module do a simple
+`from ap2.tests.conftest import _project, _drain` without sibling-
+to-sibling imports. The helpers are intentionally plain functions
+(not pytest fixtures) so the relocated test bodies remain
+literally identical to their pre-TB-266 originals — fixture
+parameters would force a signature edit in ~120 tests, which the
+TB-266 briefing's "identical body" rule explicitly forbids.
 
 TB-254 (surgical mirror of `ap2/tests/e2e/conftest.py`'s shield, line 66):
 set `AP2_VALIDATOR_JUDGE_DISABLED=1` by default for the entire unit-test
@@ -41,6 +57,7 @@ modules that test the judge itself.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 # Surgical mirror of `ap2/tests/e2e/conftest.py:66`. Set as the
 # session default so every unit test under `ap2/tests/` inherits the
@@ -64,3 +81,34 @@ if not os.environ.get("AP2_VALIDATOR_JUDGE_DISABLED", "").strip():
 # (`AP2_VALIDATOR_JUDGE_DISABLED=0 uv run pytest -q ap2/tests/`) so a
 # local "did the judge actually fire?" check is one knob away.
 os.environ.setdefault("AP2_VALIDATOR_JUDGE_DISABLED", "1")
+
+
+# --- TB-266: cross-module CLI test helpers --------------------------------
+#
+# Used by every cli-prefixed test sibling (`test_cli_daemon.py`,
+# `test_cli_board.py`, `test_cli_review.py`, `test_cli_diagnostic.py`)
+# plus the slimmed `test_cli.py`. See module docstring above for the
+# rationale on "plain functions, not pytest fixtures".
+
+
+def _project(tmp_path: Path):
+    """Initialize a fresh ap2 project under `tmp_path` and return its
+    `Config`. Most CLI tests open with `cfg = _project(tmp_path)`."""
+    from ap2.config import Config
+    from ap2.init import init_project
+
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+    return cfg
+
+
+def _drain(cfg) -> dict:
+    """Apply pending operator-queue ops as the daemon's `_tick` would.
+
+    Tests that exercise cmd_backlog / cmd_unfreeze / cmd_delete / cmd_add
+    use this to advance from "queued" to "applied" state — the CLI
+    commands themselves are deferred (TB-131).
+    """
+    from ap2 import tools
+    return tools.drain_operator_queue(cfg)
