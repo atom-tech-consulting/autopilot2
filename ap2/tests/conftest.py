@@ -112,3 +112,107 @@ def _drain(cfg) -> dict:
     """
     from ap2 import tools
     return tools.drain_operator_queue(cfg)
+
+
+# --- TB-267: cross-module web test helpers --------------------------------
+#
+# Used by the web-prefixed test siblings (`test_web_home.py`,
+# `test_web_events.py`, `test_web_tasks.py`, `test_web_chrome.py`,
+# `test_web_insights.py`, `test_web_usage.py`, and the slimmed
+# `test_web.py`). Same rationale as the TB-266 CLI helpers above:
+# co-locating the fixture and shared synthesizers here lets every
+# new web test module use them via pytest auto-discovery without
+# sibling-to-sibling imports. The `project` fixture's body and the
+# `_seed_run` / `_seed_vf_event` helpers are byte-identical to the
+# pre-TB-267 originals from `test_web.py` so the relocated test
+# bodies remain unchanged.
+
+import pytest
+
+
+@pytest.fixture
+def project(tmp_path: Path):
+    """Synthesize a fresh ap2 project with a seeded board + events.
+
+    Mirrors the original `project` fixture from `ap2/tests/test_web.py`
+    pre-TB-267; relocated here so every web-prefixed test sibling can
+    pull it in via auto-discovery.
+    """
+    from ap2 import events as ev_mod
+    from ap2.config import Config
+
+    (tmp_path / "TASKS.md").write_text(
+        "# Tasks\n\n"
+        "## Active\n\n- [ ] **TB-1** **Active task**\n"
+        "## Ready\n\n"
+        "## Backlog\n\n- [ ] **TB-2** **Backlog task** `#tag`\n"
+        "## Complete\n\n- [x] **TB-3** **Done thing** — summary text\n"
+        "## Frozen\n\n"
+    )
+    cfg = Config.load(tmp_path)
+    cfg.ensure_dirs()
+    ev_mod.append(cfg.events_file, "daemon_start")
+    ev_mod.append(cfg.events_file, "task_complete", task="TB-3", status="complete",
+                  commit="abc12345", summary="finished it")
+    ev_mod.append(cfg.events_file, "task_error", task="TB-2", error="ValueError: x")
+    ev_mod.append(cfg.events_file, "ideation_empty_board", cooldown_s=7200)
+    return cfg
+
+
+def _seed_run(
+    project,
+    *,
+    run_id: str,
+    rows: list,
+    full_rows: list | None = None,
+    prompt: str = "system prompt body…\n\nUser: do the thing.",
+):
+    """Synthesize a debug-dump triple on disk — mirror of `_prep_debug_dumps`."""
+    import json as _json
+
+    d = project.project_root / ".cc-autopilot" / "debug"
+    d.mkdir(parents=True, exist_ok=True)
+    prompt_p = d / f"{run_id}.prompt.md"
+    stream_p = d / f"{run_id}.stream.jsonl"
+    messages_p = d / f"{run_id}.messages.jsonl"
+    prompt_p.write_text(prompt)
+    stream_p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    messages_p.write_text(
+        "\n".join(_json.dumps(r) for r in (full_rows or rows)) + "\n"
+    )
+    return prompt_p, stream_p, messages_p
+
+
+def _seed_vf_event(
+    project,
+    *,
+    task: str = "TB-VF",
+    pass_n: int = 5,
+    fail_bullets: list | None = None,
+    unverified_n: int = 1,
+) -> None:
+    """Append a synthetic `verification_failed` event whose criteria list
+    matches the briefing's expected shape (kind, status, bullet, notes)."""
+    from ap2 import events as ev_mod
+
+    fails = fail_bullets or []
+    criteria = (
+        [
+            {"kind": "shell", "status": "pass", "bullet": f"shell pass #{i}",
+             "notes": ""}
+            for i in range(pass_n)
+        ]
+        + [
+            {"kind": k, "status": "fail", "bullet": b, "notes": n}
+            for (k, b, n) in fails
+        ]
+        + [
+            {"kind": "prose", "status": "unverified",
+             "bullet": f"prose unv #{i}", "notes": "skip"}
+            for i in range(unverified_n)
+        ]
+    )
+    ev_mod.append(
+        project.events_file, "verification_failed",
+        task=task, kind="per_task", overall="fail", criteria=criteria,
+    )
