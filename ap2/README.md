@@ -13,23 +13,10 @@ External Python daemon that drives a Claude Code project through a list of tasks
 
 ## Quickstart
 
-```bash
-# 1. Initialize a project (idempotent — safe to re-run)
-cd /path/to/your/repo
-ap2 init
-
-# 2. Add a task
-ap2 add "Refactor the foo helper" -s Backlog -d "Pull out the inline string parsing"
-
-# 3. Start the daemon (backgrounded)
-ap2 start
-
-# 4. Watch it work
-ap2 status
-ap2 logs -n 20
-```
-
-Stop / pause / resume:
+The landing-page quickstart lives in the [root `README.md`](../README.md#quickstart)
+(install → `ap2 init` → `ap2 add --briefing-file` → `ap2 start` → `ap2 status`)
+— single-sourced there so the two READMEs can't drift apart. Pause / resume /
+stop:
 
 ```bash
 ap2 pause --reason "AFK"
@@ -106,7 +93,8 @@ The daemon is designed to run as a separate OS user (`claude-agent` by default) 
 | `ap2 sandbox project-setup <source>` | Clone the source repo into `~user/repos/`. `--mm-channel <name>` resolves+wires in one shot. |
 | `ap2 sandbox project-audit <path>` | Verify a sandbox clone is correctly isolated. |
 
-`plan/sandboxed-user-setup.md` is the runbook.
+[`sandboxed-user-setup.md`](../sandboxed-user-setup.md) (at the repo root) is
+the runbook.
 
 ## Configuration
 
@@ -180,10 +168,10 @@ Task agents otherwise have `Read`, `Glob`, `Grep`, `Bash`, `Edit`, `Write` (proj
 
 ## Tests
 
-Three tiers, run independently:
+Two tiers, run independently:
 
 ```bash
-# Default: ~349 tests, fast, no API cost. Run on every change.
+# Default suite: fast, no API cost. Run on every change.
 uv run pytest -q ap2/tests/
 
 # Real-SDK smokes: opt-in via env var. ~30s + a few cents per run.
@@ -206,5 +194,5 @@ Read the version from `pyproject.toml` via `ap2 --version`. Single source of tru
 
 - [`ap2/architecture.md`](architecture.md) — design rationale, daemon loop, agent kinds, two-tier verification, sandbox model.
 - [`plan/autopilot-v2.md`](../plan/autopilot-v2.md) — original design doc (predates TB-46..TB-98; treat as history).
-- [`plan/sandboxed-user-setup.md`](../plan/sandboxed-user-setup.md) — runbook for the `claude-agent` sandbox user.
+- [`sandboxed-user-setup.md`](../sandboxed-user-setup.md) — runbook for the `claude-agent` sandbox user.
 - [`ap2/ideation.default.md`](ideation.default.md) — the load-bearing ideation prompt body.

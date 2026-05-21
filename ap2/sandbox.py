@@ -3,8 +3,8 @@
 Exposed via `python -m ap2 sandbox <user-audit|user-setup|project-setup|project-audit>`.
 
 Destructive commands (dscl / useradd / git clone via sudo) are shown to the
-user for approval before running. See plan/sandboxed-user-setup.md for the
-runbook rationale.
+user for approval before running. See sandboxed-user-setup.md (at the repo
+root) for the runbook rationale.
 """
 from __future__ import annotations
 

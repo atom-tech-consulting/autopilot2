@@ -1,7 +1,10 @@
 # Sandboxed OS user for Claude autopilot daemons
 
-**Status:** draft runbook. Sections marked *needs human execution* require
-`sudo` and should be run interactively by the repo owner, not by autopilot.
+**Status:** maintained deployment runbook — this is how ap2 daemons are
+provisioned in production (the daemon backing this repo runs as the
+`claude-agent` user per the phases below). Sections marked *needs human
+execution* require `sudo` and should be run interactively by the repo
+owner, not by autopilot.
 
 ## Goal
 
@@ -41,18 +44,26 @@ cc-perms hook does not apply to daemon sessions. No code change needed here.
 
 ## Helper CLI
 
-Exposed as an ap2 subcommand so it lives with the daemon code:
+Exposed as an `ap2 sandbox` subcommand group so the provisioning logic
+lives with the daemon code. `ap2/README.md`'s "Sandbox subcommands" table
+is the authoritative reference; the quick map:
 
 ```
-python -m ap2 sandbox user-audit [user]                        # credential deny check
-python -m ap2 sandbox user-setup [user] [-y]                   # create user (prompts before sudo)
-python -m ap2 sandbox project-setup <source-repo> [--user u] [-y]
-python -m ap2 sandbox project-audit <project-path> [--user u]
+ap2 sandbox user-audit [user]                        # credential deny-list check
+ap2 sandbox user-setup [user] [-y]                   # create the OS user (prompts before sudo)
+ap2 sandbox install-token [user]                     # write CLAUDE_CODE_OAUTH_TOKEN → ~user/.zshenv
+ap2 sandbox install-statusline [user]                # install the statusline + wire ~user/.claude/settings.json
+ap2 sandbox install-mm [user]                        # write MATTERMOST_URL + MATTERMOST_TOKEN → ~user/.zshenv
+ap2 sandbox install-channel <project> <channel>      # resolve #channel → ID, write to <project>/.cc-autopilot/env
+ap2 sandbox sync-assets [user] [--sbuser] [--apply]  # deploy <repo>/skills/* AND ap2/howto.md into ~/.claude/
+ap2 sandbox project-setup <source-repo> [--user u]   # clone the source repo into ~user/repos/
+ap2 sandbox project-audit <project-path> [--user u]  # verify a sandbox clone is correctly isolated
 ```
 
-`[user]` defaults to `claude-agent`. `user-setup` and `project-setup` print the
-exact `sudo` commands they will run and prompt for approval before executing;
-`-y` skips the prompt for scripted use.
+`[user]` defaults to `claude-agent`. `user-setup`, `project-setup`, and the
+`install-*` verbs print the exact `sudo` commands they will run and prompt
+for approval before executing; `-y` (where supported) skips the prompt for
+scripted use. `sync-assets` is dry-run by default — pass `--apply` to copy.
 
 ## Credential deny list (shared, verified by `user-audit`)
 
@@ -212,19 +223,21 @@ python -m ap2 stop
 ls -la /Users/lzhang/.ssh 2>&1 | head -3   # expect: Permission denied
 ```
 
-## Open questions / decisions still owed
+## Resolved design decisions
 
-1. Should the daemon hold a Mattermost or Anthropic token? If yes, scope to
-   the shared user's keychain/shell env — not per-project.
-2. Target OS for production: macOS dev box or Linux server? Runbook covers
-   both; the helper implements macOS paths first.
-3. Per-project clone under `~claude-agent/repos/` assumes project names are
-   unique. Add a namespace prefix if that assumption breaks.
-
-## Related tasks
-
-- TB-47 scaffolded the ap2 daemon with `bypassPermissions` in mind.
-- TB-48 added retry/timeout bounds — important here because a poisoned task
-  can't spin forever burning the shared user's CPU.
-- TB-54/55/56 are in-process e2e tests with a fake SDK; they do NOT validate
-  the OS sandbox (by design). This runbook covers that gap for deployment.
+- **Daemon credentials live in `~claude-agent/.zshenv`, not per-project.**
+  The shared user holds `CLAUDE_CODE_OAUTH_TOKEN` (via `install-token`) and,
+  for projects that use the Mattermost integration, `MATTERMOST_URL` +
+  `MATTERMOST_TOKEN` (via `install-mm`). Per-project secrets that should
+  NOT be visible across projects (e.g. a project-scoped Mattermost bot
+  token) get a dedicated sandbox user via this same runbook with a
+  different name.
+- **macOS and Linux are both supported first-class.** `user-setup` /
+  `project-setup` detect the platform and emit `dscl`/`createhomedir` on
+  macOS and `useradd`/`passwd -l` on Linux. The Phase 1 daemon-launch
+  wiring is platform-specific (launchd plist vs. systemd unit); pick the
+  one matching your target.
+- **Per-project clones live under `~claude-agent/repos/<project>/`.**
+  Project names must be unique within that directory; if you run two repos
+  with the same basename, rename the clone or provision a dedicated
+  sandbox user. The daemon does not auto-namespace.

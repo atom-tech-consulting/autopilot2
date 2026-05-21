@@ -31,14 +31,26 @@ This installs the `ap2` console script.
 
 ```bash
 cd /path/to/your/repo
-ap2 init                                    # scaffold TASKS.md + .cc-autopilot/
-ap2 add "Refactor the foo helper" -s Backlog -d "Pull out the inline string parsing"
+ap2 init                                              # scaffold TASKS.md + .cc-autopilot/
 
-export CLAUDE_CODE_OAUTH_TOKEN=...          # required
-ap2 start                                   # daemon runs in the background
-ap2 status                                  # board state + daemon liveness
-ap2 logs -n 20                              # tail recent events
-open http://127.0.0.1:8729/                 # bundled read-only web UI (TB-130)
+# Add a task. `--briefing-file` is required (TB-135): the file holds the
+# task's Goal/Scope/Verification — the auto-verifier reads it back later.
+cat > /tmp/refactor-foo.md <<'EOF'
+# Refactor the foo helper
+
+## Goal
+Pull out the inline string parsing.
+
+## Verification
+- `uv run pytest -q` — full suite passes.
+EOF
+ap2 add "Refactor the foo helper" -s Backlog --briefing-file /tmp/refactor-foo.md
+
+export CLAUDE_CODE_OAUTH_TOKEN=...                    # required
+ap2 start                                             # daemon runs in the background
+ap2 status                                            # board state + daemon liveness
+ap2 logs -n 20                                        # tail recent events
+open http://127.0.0.1:8729/                           # bundled read-only web UI (TB-130)
 ```
 
 Stop with `ap2 stop`. Pause without stopping with `ap2 pause` / `ap2 resume`.
@@ -50,7 +62,7 @@ command stays available for browsing past events when the daemon is not
 running.
 
 For long-running work (>5 min) and OS-level isolation, see the
-[sandbox runbook](plan/sandboxed-user-setup.md) — the daemon is designed to
+[sandbox runbook](sandboxed-user-setup.md) — the daemon is designed to
 run as a separate OS user (`claude-agent`) so its tools can't reach your
 home, keychain, or other repos.
 
@@ -62,7 +74,7 @@ ap2/                          # the package — daemon, CLI, MCP tools, tests
 ├── architecture.md           # design rationale, agent kinds, verification model
 └── howto.md                  # in-sandbox quick reference (deployed via
                               #   `ap2 sandbox sync-assets`)
-plan/sandboxed-user-setup.md  # OS-level sandbox-user runbook
+sandboxed-user-setup.md       # OS-level sandbox-user runbook (repo root)
 skills/                       # optional Claude Code slash commands
 ├── ap2/                      # /ap2 <project> — daemon snapshot
 ├── ap2-task/                 # /ap2-task <project> "<title>" — add to backlog
@@ -75,20 +87,15 @@ skills/                       # optional Claude Code slash commands
   configuration knobs, event schema.
 - **[ap2/architecture.md](ap2/architecture.md)** — design rationale, the
   daemon loop, agent kinds, two-tier verification, sandbox model.
-- **[plan/sandboxed-user-setup.md](plan/sandboxed-user-setup.md)** — runbook
-  for setting up the `claude-agent` sandbox user.
+- **[sandboxed-user-setup.md](sandboxed-user-setup.md)** — runbook for
+  setting up the `claude-agent` sandbox user.
 - **[ap2/howto.md](ap2/howto.md)** — what the daemon-spawned agent sees when
   it runs inside an ap2-managed project.
 
 ## Tests
 
-```bash
-# Default: ~349 tests, fast, no API cost.
-uv run pytest -q ap2/tests/
-
-# Real-SDK smokes: opt-in. ~30s + a few cents per run.
-AP2_REAL_SDK=1 uv run pytest ap2/tests/smoke/ -v -s
-```
+See [`ap2/README.md#tests`](ap2/README.md#tests) for the canonical test-suite
+guide (default suite + real-SDK smokes).
 
 ## License
 
