@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-277** **Add daemon_state.json to the ap2 init gitignore template + drift-gate test pinning every daemon-written .cc-autopilot file is committed-or-ignored** `#autopilot` `#init` `#gitignore` `#drift-gate` `#regression-pin` [→ brief](.cc-autopilot/tasks/add-daemon-state-json-to-the-ap2-init-gi.md)
 
 ## Pipeline Pending
 
@@ -163,6 +162,7 @@
 - [x] **TB-274** **Reconcile post-split doc/skill references: refresh architecture.md module map + fix moved-symbol citations in howto.md and skills/ap2-task/SKILL.md** `#autopilot` `#docs` `#refactor` `#post-split` `#regression-pin` `@blocked:TB-261,TB-262,TB-263,TB-264,TB-265` [→ brief](.cc-autopilot/tasks/reconcile-post-split-doc-skill-reference.md)
 - [x] **TB-275** **roadmap_complete must gate the ideation trigger only — remove the daemon Backlog-dispatch halt so the queue always drains** `#autopilot` `#daemon` `#ideation` `#roadmap` `#dispatch` `#regression-pin` [→ brief](.cc-autopilot/tasks/roadmap-complete-must-gate-the-ideation.md)
 - [x] **TB-276** **Unify sandbox asset deploy into one command that syncs BOTH skills and howto, sudo-by-default with a --sbuser non-sudo mode** `#autopilot` `#sandbox` `#deploy` `#cli` `#refactor` `#regression-pin` [→ brief](.cc-autopilot/tasks/unify-sandbox-asset-deploy-into-one-comm.md)
+- [x] **TB-277** **Add daemon_state.json to the ap2 init gitignore template + drift-gate test pinning every daemon-written .cc-autopilot file is committed-or-ignored** `#autopilot` `#init` `#gitignore` `#drift-gate` `#regression-pin` [→ brief](.cc-autopilot/tasks/add-daemon-state-json-to-the-ap2-init-gi.md)
 
 ## Frozen
 

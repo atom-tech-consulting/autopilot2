@@ -887,3 +887,9 @@
 - **Summary:** Unified `ap2 sandbox sync-skills` + `install-howto` into one verb `ap2 sandbox sync-assets` that deploys BOTH `<repo>/skills/*` AND `ap2/howto.md` in one invocation. Default mode writes to `~user/.claude/` via `sudo -u <user>`; `--sbuser` writes to current user's `$HOME/.claude/` without sudo (the path a sandbox-user Claude session takes to refresh its own assets). `scripts/deploy-skills.sh` and the `sync_skills`/`install_howto` Python helpers are removed; `user_setup` now calls `sync_assets(user)` instead of `install_howto(user)`. New `test_sync_assets.py` regression-pins both modes against a `--dest`/tmp target — `--sbuser` end-to-end with real subprocess, default mode with subprocess.run stubs asserting the `sudo -u <user>` prefix on every call. `uv run pytest -q ap2/tests/` passes (1914 tests).
 - **Files:** ap2/sandbox.py, ap2/cli.py, ap2/howto.md, ap2/README.md, README.md, ap2/tests/test_sync_assets.py, ap2/tests/test_tb214_sandbox_install_verbs.py, ap2/tests/test_tb215_sandbox_audit_setup_verbs.py, ap2/tests/test_deploy_skills.py, scripts/deploy-skills.sh
 - **Tests:** pass
+
+## [2026-05-21] TB-277: Add daemon_state.json to the ap2 init gitignore template + drift-gate test pinning every daemon-written .cc-autopilot file is committed-or-ignored
+- **Commit:** `905371e`
+- **Summary:** Added daemon_state.json to ap2/init.py's NESTED_GITIGNORE_BLOCKS (TB-260 runtime mtime stash, sibling to focus_pointer.json) and a new drift-gate test ap2/tests/test_state_file_gitignore_drift.py pinning every daemon-written .cc-autopilot/ file is in exactly one of _STATE_FILE_NAMES (committed) or NESTED_GITIGNORE_BLOCKS (ignored), with an actionable failure message naming both remedy buckets; verified the gate would have FAILED before this patch by simulating the pre-TB-277 template; all 1917 ap2 tests pass.
+- **Files:** ap2/init.py, ap2/tests/test_state_file_gitignore_drift.py
+- **Tests:** pass
