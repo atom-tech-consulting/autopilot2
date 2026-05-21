@@ -869,3 +869,9 @@
 - **Summary:** Synced ap2/ideation.default.md's Shell-bullet pitfalls section to ap2/howto.md's authoritative four-pitfall list (literal-backtick / `! grep` absence-check / `grep -r` directory-walk / `Prose:` prefix), added a cross-reference to howto L462-505 (worked example stays single-sourced), added regression-pin ap2/tests/test_tb273_ideation_pitfalls_sync.py (7 assertions covering scope §3a/b/c plus a howto-side sanity pin), and updated test_ideation_defaults.py::test_ideation_prompt_warns_off_bare_python_and_path_pitfalls to drop the now-stale `python3` substring assertion (the bare-`python` pitfall is intentionally retired by TB-273); full suite 1915 passed, all five briefing grep verification bullets hit.
 - **Files:** ap2/ideation.default.md, ap2/tests/test_tb273_ideation_pitfalls_sync.py, ap2/tests/test_ideation_defaults.py
 - **Tests:** pass
+
+## [2026-05-21] TB-274: Reconcile post-split doc/skill references: refresh architecture.md module map + fix moved-symbol citations in howto.md and skills/ap2-task/SKILL.md
+- **Commit:** `18744f5`
+- **Summary:** Regenerated ap2/architecture.md module map to mirror the actual flat post-split ap2/*.py layout (TB-262/263/264/265 split siblings + json_extract.py all listed; do_board_edit/_commit_state_files/do_operator_queue_append/_validate_briefing_structure re-attributed to board_edits.py/state_commit.py/operator_queue.py/briefing_validators.py); fixed howto.md citations for _validate_briefing_structure, IMPACT_VERDICTS, the auto-approve gate, and the briefing-validator LLM-judge subsection; fixed SKILL.md's _validate_briefing_structure citation to briefing_validators.py. Full suite 1915 passed in 100.78s.
+- **Files:** ap2/architecture.md, ap2/howto.md, skills/ap2-task/SKILL.md
+- **Tests:** pass
