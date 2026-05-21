@@ -418,12 +418,14 @@ def user_setup(
         print(f"\nSkipped statusline install (--skip-statusline). Run later with:")
         print(f"  ap2 sandbox install-statusline {user}")
 
-    # ap2 howto reference (TB-105) — copy the operator quick-reference into
-    # the sandbox user's ~/.claude/ so an in-project Claude session can read
-    # it for context without reaching into the human's source tree. Cheap;
-    # always installed (no skip flag — it's just a markdown file).
+    # ap2 assets (TB-276) — deploy both `<repo>/skills/*` and `ap2/howto.md`
+    # into the sandbox user's ~/.claude/ via the unified `sync-assets` path.
+    # Replaces the TB-105 `install_howto`-only call so a fresh sandbox user
+    # gets BOTH operator slash-commands AND the howto quick-reference in one
+    # shot — they're the same kind of Claude-Code wiring asset and were
+    # inconsistently split (sync-skills + install-howto) before TB-276.
     print()
-    install_howto(user)
+    sync_assets(user, sbuser=False, apply=True)
 
     # Mattermost credentials — only install if both supplied; otherwise print
     # the follow-up command. No interactive prompt: the `MATTERMOST_URL`/
@@ -583,87 +585,198 @@ def _skills_source() -> Path:
     """Path to `<repo>/skills/` — the canonical copies of `/ap2`,
     `/ap2-task`, and `/migrate-to-ap2` (TB-140). Live slash commands
     read the deployed copies under `~<user>/.claude/skills/`; this is
-    the source of truth that `sync_skills` mirrors there."""
+    the source of truth that `sync_assets` mirrors there."""
     return Path(__file__).resolve().parent.parent / "skills"
 
 
-def _deploy_script_source() -> Path:
-    """Path to `<repo>/scripts/deploy-skills.sh` (TB-140). The CLI
-    subcommand `ap2 sandbox sync-skills` is a thin wrapper around this
-    bash script — single source of truth so contributors can run the
-    same script directly without going through the CLI."""
-    return Path(__file__).resolve().parent.parent / "scripts" / "deploy-skills.sh"
+def sync_assets(
+    user: str | None = None,
+    *,
+    sbuser: bool = False,
+    apply: bool = False,
+    dest: Path | None = None,
+) -> int:
+    """Deploy both `<repo>/skills/*` and `ap2/howto.md` into a target
+    `~/.claude/` directory in one invocation (TB-276).
 
+    Replaces the two pre-TB-276 verbs (`sync_skills` writing to the
+    operator's home with no sudo, `install_howto` writing to a target
+    user's home via sudo) with one unified path that handles both
+    assets and both write models.
 
-def sync_skills(apply: bool = False, dest: Path | None = None) -> int:
-    """Sync `<repo>/skills/*` into `~/.claude/skills/` (TB-140).
+    Two modes:
+      - `sbuser=True` (with `user=None`): write to the CURRENT user's
+        `$HOME/.claude/` directly, NO sudo. Use when a Claude session
+        already running AS the sandbox user (which lacks sudoer
+        privileges) wants to refresh its own assets.
+      - `sbuser=False` (with `user=<sandbox-user>`): write to
+        `~<user>/.claude/` via `sudo -u <user>`. The default operator
+        path — the operator user has sudo, the sandbox user owns the
+        target home.
 
-    Thin wrapper around `scripts/deploy-skills.sh` that resolves the
-    script's path from the package and invokes it with the right flags.
-    Default is dry-run (no mutations); pass `apply=True` to copy.
+    `--sbuser` and a positional `user` are mutually exclusive — sbuser
+    means "current user is the target, skip sudo," so naming a
+    different user there is a contradiction.
 
-    `dest` overrides the destination root — the script otherwise targets
-    `$HOME/.claude/skills`. This is intentionally the *current* user's
-    HOME, not the sandbox user's: operators run `/ap2`, `/ap2-task`,
-    `/migrate-to-ap2` from their own Claude Code session, so the
-    deployed copy lives under the operator's home, not the daemon's.
+    `dest` overrides the .claude root entirely (used by tests to write
+    into a tmp dir bypassing the real home-dir lookup).
 
-    Returns the script's exit code.
+    Default is dry-run with a per-asset drift summary; pass
+    `apply=True` to actually mutate. Skills use per-skill `rsync
+    --delete` so renames/deletions propagate; the howto is a single
+    overwrite via `tee`.
     """
-    script = _deploy_script_source()
-    if not script.exists():
-        print(f"sync-skills: script missing: {script}", file=sys.stderr)
+    if sbuser and user:
+        print(
+            "sync-assets: --sbuser and a positional user arg are mutually "
+            "exclusive (sbuser → current user is the target, no sudo)",
+            file=sys.stderr,
+        )
+        return 2
+    if not sbuser and not user:
+        print(
+            "sync-assets: either --sbuser or a positional user arg is required",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Resolve the .claude/ root + the sudo prefix.
+    if sbuser:
+        sudo_prefix: list[str] = []
+        if dest is not None:
+            claude_dir = dest
+        else:
+            claude_dir = Path.home() / ".claude"
+        target_label = "current user"
+    else:
+        if not _user_exists(user):
+            print(f"sync-assets: user {user!r} does not exist", file=sys.stderr)
+            return 1
+        home = _user_home(user)
+        if home is None:
+            print(f"sync-assets: cannot resolve home for {user!r}", file=sys.stderr)
+            return 1
+        sudo_prefix = ["sudo", "-u", user]
+        claude_dir = dest if dest is not None else home / ".claude"
+        target_label = f"~{user}"
+
+    skills_src = _skills_source()
+    howto_src = _howto_source()
+    if not skills_src.is_dir():
+        print(f"sync-assets: skills source missing: {skills_src}", file=sys.stderr)
         return 1
-    if not os.access(script, os.X_OK):
-        print(f"sync-skills: script not executable: {script}", file=sys.stderr)
+    if not howto_src.is_file():
+        print(f"sync-assets: howto source missing: {howto_src}", file=sys.stderr)
         return 1
-    cmd = [str(script)]
+
+    mode_label = "apply" if apply else "dry-run"
+    print(f"sync-assets: {mode_label} → {target_label}")
+    print(f"  skills source: {skills_src}")
+    print(f"  howto source:  {howto_src}")
+    print(f"  dest:          {claude_dir}")
+    print()
+
+    skills_dest_root = claude_dir / "skills"
+    howto_dest = claude_dir / "ap2-howto.md"
+
+    # On apply, ensure parent dirs exist (owned by the target user).
     if apply:
-        cmd.append("--apply")
-    if dest is not None:
-        cmd.extend(["--dest", str(dest)])
-    return subprocess.call(cmd)
+        rc = subprocess.run(
+            sudo_prefix + ["mkdir", "-p", str(skills_dest_root)],
+        ).returncode
+        if rc != 0:
+            print(
+                f"sync-assets: failed to mkdir {skills_dest_root}",
+                file=sys.stderr,
+            )
+            return 1
 
+    overall_drift = 0
 
-def install_howto(user: str) -> int:
-    """Copy `ap2/howto.md` to `~<user>/.claude/ap2-howto.md`.
+    # ----- skills (per-skill rsync --delete) -----
+    skill_subdirs = sorted(d for d in skills_src.iterdir() if d.is_dir())
+    if not skill_subdirs:
+        print("  skills/         (none under source — nothing to sync)")
+    for src in skill_subdirs:
+        name = src.name
+        dst = skills_dest_root / name
+        # Per-skill drift summary via rsync --dry-run --itemize-changes.
+        diff = subprocess.run(
+            sudo_prefix + [
+                "rsync", "-an", "--delete", "--itemize-changes",
+                str(src) + "/", str(dst) + "/",
+            ],
+            capture_output=True, text=True,
+        )
+        # Itemize lines: ">f.....", "<f...", "cd+++++", or "*deleting".
+        lines = [
+            line for line in diff.stdout.splitlines()
+            if line and (line[0] in "<>c" or line.startswith("*deleting"))
+        ]
+        sent = sum(1 for line in lines if line[0] in "<>c")
+        deleted = sum(1 for line in lines if line.startswith("*deleting"))
+        drift = sent + deleted
+        label = f"skills/{name}"
+        if drift == 0:
+            print(f"  {label:<24} in sync")
+            continue
+        overall_drift += drift
+        if apply:
+            r = subprocess.run(
+                sudo_prefix + [
+                    "rsync", "-a", "--delete",
+                    str(src) + "/", str(dst) + "/",
+                ],
+            )
+            if r.returncode != 0:
+                print(f"sync-assets: rsync failed for {name}", file=sys.stderr)
+                return 1
+            print(f"  {label:<24} synced ({sent} updated, {deleted} deleted)")
+        else:
+            print(
+                f"  {label:<24} drift ({sent} would update, "
+                f"{deleted} would delete)"
+            )
 
-    Lets a Claude Code session running as the sandbox user load the
-    ap2 operator quick-reference (~300 lines: contracts, on-disk
-    layout, MCP tools, event schema, operator-question playbook) on
-    demand without reaching into the human user's source tree.
+    # ----- howto (single overwrite via tee, with drift detection) -----
+    howto_body = howto_src.read_text()
+    existing = subprocess.run(
+        sudo_prefix + [
+            "sh", "-c",
+            f"test -f {howto_dest} && cat {howto_dest} || true",
+        ],
+        capture_output=True, text=True,
+    ).stdout
+    label = "ap2-howto.md"
+    if existing == howto_body:
+        print(f"  {label:<24} in sync")
+    else:
+        overall_drift += 1
+        if apply:
+            w = subprocess.run(
+                sudo_prefix + ["tee", str(howto_dest)],
+                input=howto_body, text=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            if w.returncode != 0:
+                print(
+                    f"sync-assets: failed to write {howto_dest}: {w.stderr}",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"  {label:<24} synced ({len(howto_body):,} chars)")
+        else:
+            print(
+                f"  {label:<24} drift ({len(howto_body):,} chars would write)"
+            )
 
-    Idempotent — overwrites in place, owned by `user`. Re-run after
-    any `ap2/howto.md` edit to refresh.
-    """
-    if not _user_exists(user):
-        print(f"user {user!r} does not exist", file=sys.stderr)
-        return 1
-    home = _user_home(user)
-    if home is None:
-        print(f"cannot resolve home for {user!r}", file=sys.stderr)
-        return 1
-
-    src = _howto_source()
-    if not src.exists():
-        print(f"howto source missing: {src}", file=sys.stderr)
-        return 1
-    body = src.read_text()
-
-    claude_dir = home / ".claude"
-    target = claude_dir / "ap2-howto.md"
-    subprocess.run(
-        ["sudo", "-u", user, "mkdir", "-p", str(claude_dir)], check=False,
-    )
-    w = subprocess.run(
-        ["sudo", "-u", user, "tee", str(target)],
-        input=body, text=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-    )
-    if w.returncode != 0:
-        print(f"failed to write {target}: {w.stderr}", file=sys.stderr)
-        return 1
-    print(f"installed ap2 howto: {target} ({len(body):,} chars)")
+    print()
+    if apply:
+        print("sync-assets: apply complete.")
+    elif overall_drift == 0:
+        print("sync-assets: dry-run — all assets in sync.")
+    else:
+        print("sync-assets: dry-run — drift detected. Re-run with --apply to sync.")
     return 0
 
 
@@ -984,10 +1097,6 @@ def cmd_install_statusline(cfg, args) -> int:  # noqa: ARG001
     return install_statusline(args.user)
 
 
-def cmd_install_howto(cfg, args) -> int:  # noqa: ARG001
-    return install_howto(args.user)
-
-
 def cmd_project_setup(cfg, args) -> int:     # noqa: ARG001
     return project_setup(
         Path(args.source),
@@ -1049,15 +1158,29 @@ def cmd_install_token(cfg, args) -> int:     # noqa: ARG001
     return install_oauth_token(args.user, token)
 
 
-def cmd_sync_skills(cfg, args) -> int:        # noqa: ARG001
-    """`ap2 sandbox sync-skills [--apply] [--dest DIR]` (TB-140).
+def cmd_sync_assets(cfg, args) -> int:        # noqa: ARG001
+    """`ap2 sandbox sync-assets [USER] [--sbuser] [--apply] [--dest DIR]` (TB-276).
 
-    Mirrors `<repo>/skills/*` into the operator's `~/.claude/skills/`.
-    Thin wrapper around `scripts/deploy-skills.sh` so operators don't
-    need to remember the script's path.
+    Deploys BOTH `<repo>/skills/*` and `ap2/howto.md` into a target
+    `~/.claude/` in one invocation — the unified replacement for the
+    old `sync-skills` + `install-howto` verbs.
+
+    Modes:
+      - default: positional `USER` selects the sandbox user; writes
+        via `sudo -u <user>` into `~user/.claude/`.
+      - `--sbuser`: writes into the CURRENT user's `$HOME/.claude/`
+        directly, no sudo (for sandbox-user Claude sessions that lack
+        sudoer privileges).
     """
     dest = Path(args.dest) if getattr(args, "dest", None) else None
-    return sync_skills(apply=bool(args.apply), dest=dest)
+    sbuser = bool(getattr(args, "sbuser", False))
+    # When --sbuser is set, ignore any positional `user` (argparse leaves
+    # it as the DEFAULT_USER default); sync_assets() enforces the
+    # mutual-exclusion at the function boundary.
+    user = None if sbuser else getattr(args, "user", DEFAULT_USER)
+    return sync_assets(
+        user, sbuser=sbuser, apply=bool(args.apply), dest=dest,
+    )
 
 
 def _resolve_token_arg(args) -> str | None:

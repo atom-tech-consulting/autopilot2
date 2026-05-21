@@ -60,8 +60,8 @@ home, keychain, or other repos.
 ap2/                          # the package — daemon, CLI, MCP tools, tests
 ├── README.md                 # operator reference + full CLI / event schema
 ├── architecture.md           # design rationale, agent kinds, verification model
-└── howto.md                  # in-sandbox quick reference (installed via
-                              #   `ap2 sandbox install-howto`)
+└── howto.md                  # in-sandbox quick reference (deployed via
+                              #   `ap2 sandbox sync-assets`)
 plan/sandboxed-user-setup.md  # OS-level sandbox-user runbook
 skills/                       # optional Claude Code slash commands
 ├── ap2/                      # /ap2 <project> — daemon snapshot

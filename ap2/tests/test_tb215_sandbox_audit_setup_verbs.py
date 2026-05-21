@@ -228,10 +228,14 @@ def test_cmd_sandbox_user_setup_happy_path(monkeypatch, capsys):
     `getattr(args, "skip_*", False)` defaults — the helper-level
     `test_user_setup_already_exists` doesn't exercise these adapter bits."""
     monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
-    # Statusline + howto are run unconditionally on the already-exists path;
-    # stub them so we don't shell out.
+    # Statusline + sync-assets (skills + howto, TB-276) are run
+    # unconditionally on the already-exists path; stub them so we don't
+    # shell out.
     monkeypatch.setattr(sandbox, "install_statusline", lambda u: 0)
-    monkeypatch.setattr(sandbox, "install_howto", lambda u: 0)
+    monkeypatch.setattr(
+        sandbox, "sync_assets",
+        lambda u=None, *, sbuser=False, apply=False, dest=None: 0,
+    )
 
     args = Namespace(
         user="claude-agent",
@@ -268,7 +272,10 @@ def test_cmd_sandbox_user_setup_threads_mm_creds(monkeypatch, capsys):
     args.mm_url/args.mm_token directly) drops the env-fallback path."""
     monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
     monkeypatch.setattr(sandbox, "install_statusline", lambda u: 0)
-    monkeypatch.setattr(sandbox, "install_howto", lambda u: 0)
+    monkeypatch.setattr(
+        sandbox, "sync_assets",
+        lambda u=None, *, sbuser=False, apply=False, dest=None: 0,
+    )
     monkeypatch.setattr(sandbox, "install_mm_credentials", lambda u, url, tok: 0)
 
     captured: dict[str, object] = {}

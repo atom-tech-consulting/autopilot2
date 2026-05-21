@@ -1,21 +1,25 @@
-"""TB-214: happy + error path coverage for the four sandbox install-* CLI
+"""TB-214: happy + error path coverage for the sandbox install-* CLI
 verbs that TB-209's `test_coverage_drift.py` docstring (prior to this
 change, L415-418 of the comment-block shim) tags as TB-205-shape coverage
 debt.
 
-The four verbs — `ap2 sandbox install-channel`, `ap2 sandbox install-howto`,
+The three remaining verbs — `ap2 sandbox install-channel`,
 `ap2 sandbox install-mm`, `ap2 sandbox install-statusline` — are the
 operator's first-touch wiring surface on a fresh project (statusline +
-howto + MM creds + MM channel). Each is the only path to wire one of
-those subsystems, and prior to TB-214 none of the four CLI handlers
-(`sandbox.cmd_install_channel`, `sandbox.cmd_install_howto`,
-`sandbox.cmd_install_mm`, `sandbox.cmd_install_statusline`) had a single
-test reference under `ap2/tests/` — only the substring drift gate's
-comment-block enumeration kept the gate green. A future refactor of the
-`cmd_install_*` handlers (e.g. swapping the `_resolve_mm_url_token`
-precedence, dropping the `_user_exists` precheck, changing the
-project-root validation) could silently break operator onboarding while
-the drift gate stays green via the shim.
+MM creds + MM channel). The fourth original verb, `ap2 sandbox
+install-howto`, was retired in TB-276 — it folded into the unified
+`ap2 sandbox sync-assets` verb (skills + howto deploy in one shot, with
+a `--sbuser` non-sudo mode); its replacement coverage lives in
+`test_sync_assets.py`. Each remaining verb is the only path to wire one
+of those subsystems, and prior to TB-214 none of the CLI handlers
+(`sandbox.cmd_install_channel`, `sandbox.cmd_install_mm`,
+`sandbox.cmd_install_statusline`) had a single test reference under
+`ap2/tests/` — only the substring drift gate's comment-block
+enumeration kept the gate green. A future refactor of the `cmd_install_*`
+handlers (e.g. swapping the `_resolve_mm_url_token` precedence, dropping
+the `_user_exists` precheck, changing the project-root validation) could
+silently break operator onboarding while the drift gate stays green via
+the shim.
 
 This module mirrors TB-205's `test_env_knobs.py` / TB-210's
 `test_tb210_env_knobs.py` / TB-213's `test_tb213_daemon_lifecycle_verbs.py`
@@ -43,12 +47,7 @@ the helper-level tests can't cover).
       ID into `<project>/.cc-autopilot/env`. Error paths: not-an-ap2-root
       → rc 1, missing MM creds in caller env → rc 1.
 
-  2. `ap2 sandbox install-howto` — `sandbox.cmd_install_howto`:
-      thin wrapper over `install_howto(args.user)`. Copies `ap2/howto.md`
-      into `~<user>/.claude/ap2-howto.md` via `sudo -u <user> tee`.
-      Error paths: user missing → rc 1, howto-source missing → rc 1.
-
-  3. `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`:
+  2. `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`:
       runs `_resolve_mm_url_token(args)` (precedence: `--mm-url`/`--mm-token`
       → `--mm-url-env`/`--mm-token-env` → caller's MATTERMOST_URL /
       MATTERMOST_TOKEN env), then `install_mm_credentials(args.user, url,
@@ -57,7 +56,7 @@ the helper-level tests can't cover).
       already-tests-clean if you hand it both creds directly. Error path:
       missing creds → rc 1 with stderr nudge.
 
-  4. `ap2 sandbox install-statusline` — `sandbox.cmd_install_statusline`:
+  3. `ap2 sandbox install-statusline` — `sandbox.cmd_install_statusline`:
       thin wrapper over `install_statusline(args.user)`. Copies
       `hooks/statusline-command.sh` into `~<user>/.claude/` and merges
       `statusLine: {type: command, command: "bash <abspath>"}` into
@@ -67,25 +66,24 @@ the helper-level tests can't cover).
 Test-function names follow the convention `test_cmd_sandbox_install_<verb>_<aspect>`
 (e.g. `test_cmd_sandbox_install_channel_happy_path`,
 `test_cmd_sandbox_install_mm_missing_creds`). The auto-verifier bullets
-in the briefing grep for `def test_cmd_sandbox_install_(channel|howto|mm|statusline)`
+in the briefing grep for `def test_cmd_sandbox_install_(channel|mm|statusline)`
 across this file + `test_sandbox.py` + `test_cli.py`; the minimum is
-≥4 test functions matching that pattern (one happy-path per verb), which
+≥3 test functions matching that pattern (one happy-path per verb), which
 this module satisfies on its own.
 
-Removing the four matching rows from `test_coverage_drift.py`'s
+Removing the matching rows from `test_coverage_drift.py`'s
 discovered-at-landing comment block (`#   - ap2 sandbox install-channel`
-/ `install-howto` / `install-mm` / `install-statusline`) is paired with
-this file landing — the comment-block shim was a "test mention waiting
-to happen" entry, redundant once a real test references the verb name.
-The 4 sandbox audit/setup rows (project-audit/-setup, user-audit/-setup)
-stay in the shim until a sibling TB closes them.
+/ `install-mm` / `install-statusline`) is paired with this file landing
+— the comment-block shim was a "test mention waiting to happen" entry,
+redundant once a real test references the verb name. The 4 sandbox
+audit/setup rows (project-audit/-setup, user-audit/-setup) stay in the
+shim until a sibling TB closes them.
 
 CLI-verb substring pins (one per verb, kept here so the drift gate's
 `name in blob` resolves against THIS module rather than the deleted
 comment-block shim):
 
     "ap2 sandbox install-channel"
-    "ap2 sandbox install-howto"
     "ap2 sandbox install-mm"
     "ap2 sandbox install-statusline"
 """
@@ -229,80 +227,7 @@ def test_cmd_sandbox_install_statusline_missing_source(monkeypatch, tmp_path, ca
 
 
 # ===========================================================================
-# (2) `ap2 sandbox install-howto` — `sandbox.cmd_install_howto`
-#
-# Handler at `ap2/sandbox.py`:
-#     def cmd_install_howto(cfg, args) -> int:  # noqa: ARG001
-#         return install_howto(args.user)
-#
-# Thin wrapper over `install_howto`. Same shape as `install-statusline`
-# (user precheck + source-file probe + tee write). We pin all three:
-# happy path (write to ~user/.claude/ap2-howto.md with the source body),
-# unknown-user error (rc=1 before any sudo write), missing-source error
-# (rc=1 before any sudo write).
-# ===========================================================================
-
-
-def test_cmd_sandbox_install_howto_happy_path(monkeypatch, tmp_path, capsys):
-    """`cmd_install_howto(cfg, Namespace(user=...))` reads
-    `_howto_source()`, copies its body into `~<user>/.claude/ap2-howto.md`
-    via `sudo -u <user> tee`, and returns 0. Pin tee target path +
-    body + return code."""
-    home = _wire_user_home(monkeypatch, tmp_path)
-    src = tmp_path / "howto.md"
-    body = "# operator howto\nlines and lines of contracts...\n"
-    src.write_text(body)
-    monkeypatch.setattr(sandbox, "_howto_source", lambda: src)
-    captures = _capture_run(monkeypatch)
-
-    rc = sandbox.cmd_install_howto(None, Namespace(user="claude-agent"))
-
-    assert rc == 0
-    tee_writes = [(argv, b) for argv, b in captures if "tee" in argv]
-    assert len(tee_writes) == 1, f"expected exactly one tee write: {tee_writes}"
-    argv, written = tee_writes[0]
-    assert argv[argv.index("tee") + 1] == str(home / ".claude" / "ap2-howto.md")
-    assert written == body  # Full howto body forwarded to tee stdin.
-    assert "installed ap2 howto" in capsys.readouterr().out
-
-
-def test_cmd_sandbox_install_howto_missing_user(monkeypatch, capsys):
-    """Error path: unknown sandbox user → rc 1, "does not exist" stderr.
-    Pin so a refactor that drops the `_user_exists` gate surfaces."""
-    monkeypatch.setattr(sandbox, "_user_exists", lambda u: False)
-
-    rc = sandbox.cmd_install_howto(None, Namespace(user="ghost"))
-
-    assert rc == 1
-    assert "does not exist" in capsys.readouterr().err
-
-
-def test_cmd_sandbox_install_howto_missing_source(monkeypatch, tmp_path, capsys):
-    """Error path: `_howto_source()` returns a non-existent path → rc 1
-    BEFORE any sudo write. Catches a regression where `ap2/howto.md` is
-    moved/renamed without `_howto_source` being updated."""
-    _wire_user_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        sandbox, "_howto_source", lambda: tmp_path / "nonexistent.md",
-    )
-    called: list[list[str]] = []
-
-    def fake_run(argv, *a, **kw):
-        called.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    rc = sandbox.cmd_install_howto(None, Namespace(user="claude-agent"))
-
-    assert rc == 1
-    assert "howto source missing" in capsys.readouterr().err
-    assert not any("tee" in argv for argv in called), (
-        "handler must short-circuit before any sudo write"
-    )
-
-
-# ===========================================================================
-# (3) `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`
+# (2) `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`
 #
 # Handler at `ap2/sandbox.py`:
 #     def cmd_install_mm(cfg, args) -> int:        # noqa: ARG001
@@ -414,7 +339,7 @@ def test_cmd_sandbox_install_mm_missing_creds(monkeypatch, capsys):
 
 
 # ===========================================================================
-# (4) `ap2 sandbox install-channel` — `sandbox.cmd_install_channel`
+# (3) `ap2 sandbox install-channel` — `sandbox.cmd_install_channel`
 #
 # Handler at `ap2/sandbox.py`:
 #     def cmd_install_channel(cfg, args) -> int:   # noqa: ARG001

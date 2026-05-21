@@ -629,14 +629,6 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=sandbox.cmd_install_statusline)
 
     sc = sub_sbx.add_parser(
-        "install-howto",
-        help="copy ap2/howto.md to ~<user>/.claude/ap2-howto.md so a Claude "
-             "session running as the sandbox user can read it for context",
-    )
-    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER)
-    sc.set_defaults(func=sandbox.cmd_install_howto)
-
-    sc = sub_sbx.add_parser(
         "install-mm",
         help="install MATTERMOST_URL + MATTERMOST_TOKEN into ~<user>/.zshenv",
     )
@@ -673,17 +665,26 @@ def build_parser() -> argparse.ArgumentParser:
     sc.set_defaults(func=sandbox.cmd_project_audit)
 
     sc = sub_sbx.add_parser(
-        "sync-skills",
-        help="sync <repo>/skills/* into $HOME/.claude/skills/ "
-             "(TB-140; default dry-run, --apply to copy)",
+        "sync-assets",
+        help="deploy BOTH <repo>/skills/* AND ap2/howto.md into a target "
+             "~/.claude/ in one invocation (TB-276; default dry-run, "
+             "--apply to copy). Default: sudo into <user>'s home; "
+             "--sbuser: write to current user's $HOME, no sudo",
     )
+    sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER,
+                    help="target sandbox user (ignored when --sbuser is "
+                         "passed; mutually exclusive with --sbuser)")
+    sc.add_argument("--sbuser", action="store_true",
+                    help="write to the CURRENT user's $HOME/.claude/ "
+                         "without sudo (for a sandbox-user Claude session "
+                         "that lacks sudoer privileges)")
     sc.add_argument("--apply", action="store_true",
-                    help="copy each skill onto its deployed copy "
+                    help="copy assets onto their deployed targets "
                          "(default: dry-run drift summary)")
     sc.add_argument("--dest", metavar="DIR",
-                    help="override destination root "
-                         "(default: $HOME/.claude/skills)")
-    sc.set_defaults(func=sandbox.cmd_sync_skills)
+                    help="override the .claude/ root entirely "
+                         "(default: target user's ~/.claude)")
+    sc.set_defaults(func=sandbox.cmd_sync_assets)
 
     return p
 
