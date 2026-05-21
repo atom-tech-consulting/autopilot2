@@ -9,6 +9,7 @@
 ## Backlog
 
 - [ ] **TB-275** **roadmap_complete must gate the ideation trigger only — remove the daemon Backlog-dispatch halt so the queue always drains** `#autopilot` `#daemon` `#ideation` `#roadmap` `#dispatch` `#regression-pin` [→ brief](.cc-autopilot/tasks/roadmap-complete-must-gate-the-ideation.md)
+- [ ] **TB-276** **Unify sandbox asset deploy into one command that syncs BOTH skills and howto, sudo-by-default with a --sbuser non-sudo mode** `#autopilot` `#sandbox` `#deploy` `#cli` `#refactor` `#regression-pin` [→ brief](.cc-autopilot/tasks/unify-sandbox-asset-deploy-into-one-comm.md)
 
 ## Pipeline Pending
 
