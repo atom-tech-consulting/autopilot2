@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-279** **Operator-doc reconciliation: de-dup the two READMEs, fix stale quickstart/test-count, refresh + relink the sandbox runbook** `#autopilot` `#docs` `#readme` `#runbook` `#onboarding` `#regression-pin` `@blocked:TB-135,TB-276` [→ brief](.cc-autopilot/tasks/operator-doc-reconciliation-de-dup-the-t.md)
 
 ## Pipeline Pending
 
@@ -165,6 +164,7 @@
 - [x] **TB-276** **Unify sandbox asset deploy into one command that syncs BOTH skills and howto, sudo-by-default with a --sbuser non-sudo mode** `#autopilot` `#sandbox` `#deploy` `#cli` `#refactor` `#regression-pin` [→ brief](.cc-autopilot/tasks/unify-sandbox-asset-deploy-into-one-comm.md)
 - [x] **TB-277** **Add daemon_state.json to the ap2 init gitignore template + drift-gate test pinning every daemon-written .cc-autopilot file is committed-or-ignored** `#autopilot` `#init` `#gitignore` `#drift-gate` `#regression-pin` [→ brief](.cc-autopilot/tasks/add-daemon-state-json-to-the-ap2-init-gi.md)
 - [x] **TB-278** **Raise daemon defaults to battle-tested values + scaffold a documented .cc-autopilot/env template on init** `#autopilot` `#config` `#init` `#defaults` `#onboarding` `#regression-pin` [→ brief](.cc-autopilot/tasks/raise-daemon-defaults-to-battle-tested-v.md)
+- [x] **TB-279** **Operator-doc reconciliation: de-dup the two READMEs, fix stale quickstart/test-count, refresh + relink the sandbox runbook** `#autopilot` `#docs` `#readme` `#runbook` `#onboarding` `#regression-pin` `@blocked:TB-135,TB-276` [→ brief](.cc-autopilot/tasks/operator-doc-reconciliation-de-dup-the-t.md)
 
 ## Frozen
 
