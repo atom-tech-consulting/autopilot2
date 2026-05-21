@@ -893,3 +893,9 @@
 - **Summary:** Added daemon_state.json to ap2/init.py's NESTED_GITIGNORE_BLOCKS (TB-260 runtime mtime stash, sibling to focus_pointer.json) and a new drift-gate test ap2/tests/test_state_file_gitignore_drift.py pinning every daemon-written .cc-autopilot/ file is in exactly one of _STATE_FILE_NAMES (committed) or NESTED_GITIGNORE_BLOCKS (ignored), with an actionable failure message naming both remedy buckets; verified the gate would have FAILED before this patch by simulating the pre-TB-277 template; all 1917 ap2 tests pass.
 - **Files:** ap2/init.py, ap2/tests/test_state_file_gitignore_drift.py
 - **Tests:** pass
+
+## [2026-05-21] TB-278: Raise daemon defaults to battle-tested values + scaffold a documented .cc-autopilot/env template on init
+- **Commit:** `4799081`
+- **Summary:** Bumped `DEFAULT_CONTROL_TIMEOUT_S` 300→1200, added `DEFAULT_TASK_MAX_TURNS=200`/`DEFAULT_IDEATION_MAX_TURNS=100`/`DEFAULT_CONTROL_MAX_TURNS=15` named constants in `ap2/config.py`; re-pointed `daemon.py:217` task dispatch + `ideation.py`'s `IDEATION_MAX_TURNS_DEFAULT` at the new constants; corrected `prompts.py`'s stale `AP2_TASK_TIMEOUT_S` "default 1h" prose to "default 1200s / 20 min"; grew `ap2/init.py` with a documented commented `ENV_TEMPLATE` constant `init_project` writes idempotently to `.cc-autopilot/env` (only when absent — never clobbers operator env); updated `howto.md`/`README.md`/`architecture.md` for the new defaults; pinned the changes with bumped test_tb210/test_env_knobs assertions + 4 new init tests + `test_tb260` fixture cleanup; full suite passes (1921 tests, 111s).
+- **Files:** ap2/config.py, ap2/daemon.py, ap2/ideation.py, ap2/prompts.py, ap2/init.py, ap2/README.md, ap2/howto.md, ap2/architecture.md, ap2/tests/test_env_knobs.py, ap2/tests/test_init.py, ap2/tests/test_tb210_env_knobs.py, ap2/tests/test_tb260_env_mtime_stale_surface.py
+- **Tests:** pass
