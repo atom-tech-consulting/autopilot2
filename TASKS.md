@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-279** **Operator-doc reconciliation: de-dup the two READMEs, fix stale quickstart/test-count, refresh + relink the sandbox runbook** `#autopilot` `#docs` `#readme` `#runbook` `#onboarding` `#regression-pin` `@blocked:TB-135,TB-276` [→ brief](.cc-autopilot/tasks/operator-doc-reconciliation-de-dup-the-t.md)
 
 ## Pipeline Pending
 
