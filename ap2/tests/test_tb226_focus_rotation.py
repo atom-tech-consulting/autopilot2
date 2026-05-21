@@ -41,13 +41,20 @@ Behavioral cases pinned here:
       needed bullet + `goal.roadmap_exhausted()` True
     - operator_ack with `roadmap_complete` token in note clears
       the halt → `goal.roadmap_exhausted()` False
-    - dispatch path's roadmap-complete check blocks Backlog
-      auto-promote when halted (and resumes after ack)
+
+  Dispatch under roadmap_complete (TB-275):
+    - the dispatch-path roadmap-exhaustion halt is REMOVED — a
+      dispatchable Backlog task auto-promotes/dispatches even when
+      `goal.roadmap_exhausted` is True (regression pin against the
+      2026-05-20 TB-273/TB-274 freeze)
+    - the ideation-trigger gate in `_maybe_ideate` is unchanged —
+      `roadmap_complete` still parks ideation, just not dispatch
 
 Mirrors the shape of `test_tb223_auto_approve.py` /
 `test_tb224_token_caps.py` / `test_tb225_auto_unfreeze.py` —
 direct unit pins on parser + env knobs + pointer + halt scan,
-plus a board-level walk that exercises the dispatch halt.
+plus a board-level walk that exercises the TB-275 un-gated
+dispatch.
 """
 from __future__ import annotations
 
@@ -665,71 +672,160 @@ def test_ack_without_token_does_not_clear(cfg, monkeypatch):
 
 
 # ===========================================================================
-# Dispatch-path halt (board-level walk)
+# Dispatch-path: roadmap_complete is NOT a dispatch gate (TB-275)
 # ===========================================================================
 
 
-def test_dispatch_halt_when_roadmap_exhausted_blocks_backlog_promote(
-    cfg, monkeypatch
-):
-    """When `goal.roadmap_exhausted` is True, the dispatch path's
-    Backlog auto-promote check refuses to promote.
+def test_dispatch_path_no_roadmap_halt_in_source():
+    """TB-275 regression pin (source-level): the dispatch path no
+    longer carries a `goal.roadmap_exhausted(cfg)` conjunction.
 
-    This pins the GATE — the dispatch path consults
-    `goal.roadmap_exhausted(cfg)` (see `_tick`'s auto-promote
-    branch) before queuing a `move_to_ready`. The halt is
-    targeted at the auto-promote path; operator-Ready tasks
-    still dispatch via `board.next_ready()`.
+    The TB-226 dispatch halt that used to live next to
+    `board.next_dispatchable("Backlog")` froze operator-added
+    (`ap2 add`) and operator-approved (`ap2 approve`) Backlog tasks
+    behind a roadmap-state gate that has nothing to do with whether
+    the task is dispatchable — manufacturing an intervention for
+    work the operator had already greenlit. The halt is removed; the
+    only roadmap-state gate that remains is the ideation-trigger gate
+    in `_maybe_ideate`. Pinning the literal conjunction's absence in
+    `daemon.py` ensures a re-introduction surfaces immediately.
+    """
+    daemon_src = Path(daemon.__file__).read_text()
+    assert "and goal.roadmap_exhausted(cfg)" not in daemon_src, (
+        "TB-275: the dispatch-path roadmap-exhaustion halt conjunction "
+        "is back in daemon.py. roadmap_complete must gate the ideation "
+        "trigger only (see `ap2/ideation.py`), never task dispatch."
+    )
+
+
+def test_dispatch_promotes_when_roadmap_exhausted(cfg, monkeypatch):
+    """TB-275 regression pin (behavioral): when the roadmap is
+    exhausted AND a dispatchable Backlog task is present, the daemon
+    auto-promotes/dispatches it (no halt).
+
+    The TB-226 dispatch halt that previously short-circuited
+    `backlog = None` whenever `goal.roadmap_exhausted` returned True
+    is gone. This test would have failed pre-fix: with the gate live,
+    `move_to_ready` never fired and the seeded Backlog task stayed in
+    Backlog. Post-fix the task auto-promotes to Ready (then onward to
+    Active via `run_task`) on the same tick, regardless of
+    roadmap-complete state. This exact freeze hit production on
+    2026-05-20 with TB-273 (operator-approved) and TB-274
+    (operator-added) sitting frozen in Backlog for hours behind a
+    roadmap_complete that fired at 12:20.
     """
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
     _write_goal_with_foci(cfg, "alpha")
     pointer = goal.load_pointer(cfg)
     pointer["active_index"] = 1
     goal.save_pointer(cfg, pointer)
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
-    # Gate active.
+    # Pre-condition: roadmap is exhausted (ideation trigger gate
+    # would skip on the next ideation cycle — but THIS test exercises
+    # the dispatch path, which must remain un-gated).
     assert goal.roadmap_exhausted(cfg) is True
 
-    # Verify the daemon's dispatch path consults the gate by
-    # substring-checking the source: `goal.roadmap_exhausted` appears
-    # in `daemon._tick`'s auto-promote branch. A future refactor that
-    # removes the gate surfaces here.
-    daemon_src = Path(daemon.__file__).read_text()
-    assert "goal.roadmap_exhausted(cfg)" in daemon_src
-    # And specifically in the dispatch path (around the `backlog =
-    # board.next_dispatchable("Backlog")` block).
-    idx_dispatch = daemon_src.find('next_dispatchable("Backlog")')
-    idx_halt = daemon_src.find("goal.roadmap_exhausted(cfg)")
-    assert idx_dispatch != -1 and idx_halt != -1
-    # The halt check must be in the same `_tick` function body as
-    # the dispatch — i.e. NOT thousands of lines apart. 4 KB is a
-    # generous window covering the auto-promote block plus its
-    # comments.
-    assert abs(idx_halt - idx_dispatch) < 4096, (
-        "dispatch-path roadmap halt detached from the auto-promote "
-        "block — verify the gate still fires before `move_to_ready`."
+    # Seed a dispatchable Backlog task — same shape `ap2 add` /
+    # operator-approved `ap2 approve` produces (no `@blocked:review`,
+    # no auto_approved provenance — pure operator-originated work).
+    from ap2.board import Board
+    board = Board.load(cfg.tasks_file)
+    board.add(
+        "Backlog",
+        task_id="TB-999",
+        title="dispatchable Backlog task under roadmap_complete",
+    )
+    board.save()
+
+    # Stub _tick internals: bypass operator-queue drain, pipeline
+    # sweep, focus-advance (already exercised above), ideation, cron,
+    # and `run_task` itself. We're pinning the auto-promote step
+    # only — that `move_to_ready` fires under a halted roadmap.
+    monkeypatch.setattr(
+        tools, "drain_operator_queue",
+        lambda cfg: {"applied": 0, "touched_paths": [], "force_ideate": False},
+    )
+
+    async def _noop_async(*a, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(daemon, "_sweep_pipeline_pending", _noop_async)
+    monkeypatch.setattr(daemon, "_maybe_auto_diagnose", lambda cfg: None)
+    monkeypatch.setattr(daemon, "_maybe_advance_focus", _noop_async)
+    from ap2 import ideation as _ideation
+    monkeypatch.setattr(_ideation, "_maybe_ideate", _noop_async)
+    monkeypatch.setattr(_ideation, "force_ideate", _noop_async)
+    monkeypatch.setattr(daemon, "load_jobs", lambda path: [])
+    monkeypatch.setattr(daemon, "run_task", _noop_async)
+
+    class _NoopSDK:
+        class ClaudeAgentOptions:
+            def __init__(self, **kw):
+                self.kw = kw
+
+    asyncio.run(daemon._tick(cfg, _NoopSDK(), mcp_server=None))
+
+    # Post-condition: TB-999 was auto-promoted to Ready (or already
+    # moved onward — the assertion accepts both since `run_task` is
+    # stubbed and won't move it back).
+    from ap2.board import Board as _Board
+    board = _Board.load(cfg.tasks_file)
+    loc = board.find("TB-999")
+    assert loc is not None, "TB-999 vanished from the board"
+    assert loc[0] in ("Ready", "Active"), (
+        f"TB-275 regression: a dispatchable Backlog task must auto-"
+        f"promote even when `goal.roadmap_exhausted` is True; "
+        f"TB-999 is still in section={loc[0]!r}"
+    )
+
+    # And the `backlog_auto_promoted` audit event landed.
+    tail = events.tail(cfg.events_file, 200)
+    promoted = [
+        e for e in tail
+        if e.get("type") == "backlog_auto_promoted"
+        and e.get("task") == "TB-999"
+    ]
+    assert len(promoted) == 1, (
+        f"TB-275 regression: `backlog_auto_promoted` must fire for "
+        f"TB-999 under a roadmap_complete halt; events: "
+        f"{[e['type'] for e in tail]}"
     )
 
 
-def test_dispatch_resume_after_ack(cfg, monkeypatch):
-    """Once the operator emits an ack carrying the
-    `roadmap_complete` token, `goal.roadmap_exhausted` returns False
-    again and the dispatch path resumes auto-promotion."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    _write_goal_with_foci(cfg, "alpha")
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 1
-    goal.save_pointer(cfg, pointer)
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
-    assert goal.roadmap_exhausted(cfg) is True
+def test_ideation_trigger_gate_still_intact(cfg, monkeypatch):
+    """TB-275 sibling pin: removing the dispatch halt must NOT
+    accidentally remove the ideation-trigger gate. `_maybe_ideate`
+    still emits `ideation_skipped reason=roadmap_complete` when
+    `goal.roadmap_exhausted` is True.
 
-    events.append(
-        cfg.events_file,
-        "operator_ack",
-        note="ack: roadmap_complete — extended via update-goal",
+    This is a structural cross-check: the fix removes ONE gate
+    (dispatch) and KEEPS the other (ideation). The TB-246 test
+    module (`test_tb246_ideation_roadmap_complete_gate.py`)
+    exercises the gate end-to-end; here we just pin that the
+    canonical predicate still appears in `_maybe_ideate` so a future
+    refactor doesn't silently strip both gates.
+    """
+    from ap2 import ideation as _ideation
+    ideation_src = Path(_ideation.__file__).read_text()
+    assert "_goal.roadmap_exhausted(cfg)" in ideation_src or \
+        "goal.roadmap_exhausted(cfg)" in ideation_src, (
+        "TB-275: the ideation-trigger roadmap-complete gate has been "
+        "removed from `_maybe_ideate`. The fix removes ONLY the "
+        "dispatch halt; the ideation gate is the correct (sole) "
+        "mechanism for `stop proposing when the roadmap is exhausted`."
     )
-    assert goal.roadmap_exhausted(cfg) is False
+    # And the skip event's reason string is still `roadmap_complete`
+    # — a refactor that renames the reason would break operator
+    # tooling that greps `events.jsonl`.
+    assert 'reason="roadmap_complete"' in ideation_src or \
+        "reason='roadmap_complete'" in ideation_src, (
+        "TB-275: the `ideation_skipped reason=roadmap_complete` "
+        "event shape changed in `_maybe_ideate`."
+    )
 
 
 # ===========================================================================

@@ -127,16 +127,19 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `new_index` (the pointer's new `active_index`), `total_foci`
     (current foci-list length).
   - `roadmap_complete` (TB-226) — focus pointer has advanced past
-    the last `## Current focus:` heading in goal.md. Auto-promote
-    of Backlog tasks halts on subsequent ticks until the operator
-    extends the roadmap (adding new `## Current focus:` headings
-    via `ap2 update-goal`) AND emits `ap2 ack roadmap_complete`
-    to clear the halt. Payload: `exhausted_count` (the foci-list
-    length at exhaustion), `trigger` (`pointer_past_last`). Fired
-    once per exhaustion episode; the `_maybe_advance_focus` pass
-    suppresses re-emission via the pointer's
-    `roadmap_complete_emitted` flag, which resets on the next
-    advance after the operator extends the roadmap.
+    the last `## Current focus:` heading in goal.md. TB-275:
+    ideation parks on subsequent ticks (`_maybe_ideate` skips with
+    `reason=roadmap_complete`) until the operator extends the
+    roadmap (adding new `## Current focus:` headings via
+    `ap2 update-goal`) OR emits `ap2 ack roadmap_complete` to
+    dismiss the notice. Task dispatch is NOT affected; already-
+    queued Backlog tasks continue to drain. `ap2 pause` remains
+    the explicit full-stop verb. Payload: `exhausted_count`
+    (the foci-list length at exhaustion), `trigger`
+    (`pointer_past_last`). Fired once per exhaustion episode; the
+    `_maybe_advance_focus` pass suppresses re-emission via the
+    pointer's `roadmap_complete_emitted` flag, which resets on
+    the next advance after the operator extends the roadmap.
   - `env_reloaded` (TB-271) — daemon `_tick` re-sourced
     `.cc-autopilot/env` at tick-top and detected at least one knob
     whose value changed since the last reload. Mutates the tunable

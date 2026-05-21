@@ -590,14 +590,16 @@ def test_auto_unfreeze_briefingfix_repairs_frozen_task(
 #   - Tick 4: advance pass sees `active_idx >= len(foci)` → emits
 #     `roadmap_complete`; ideation runs.
 #
-# After tick 4: assert `focus_advanced` precedes `roadmap_complete`, the
-# halt is active (`goal.roadmap_exhausted(cfg) is True`), no `task_start`
-# events fired (the halt blocks auto-promote — vacuously true here since
-# no Backlog task was seeded; the unit-level pin
-# `test_dispatch_halt_when_roadmap_exhausted_blocks_backlog_promote` in
-# `test_tb226_focus_rotation.py` already exercises the gate against a
-# real dispatchable Backlog row), and an `operator_ack` with the
-# `roadmap_complete` token clears the halt.
+# After tick 4: assert `focus_advanced` precedes `roadmap_complete`,
+# the ideation gate is active (`goal.roadmap_exhausted(cfg) is True`),
+# no `task_start` events fired (vacuously true here since no Backlog
+# task was seeded; TB-275 made dispatch UN-gated by roadmap state, so
+# the only thing roadmap_complete now blocks is the ideation trigger),
+# and an `operator_ack` with the `roadmap_complete` token clears the
+# gate. The TB-275 regression-pin
+# `test_dispatch_promotes_when_roadmap_exhausted` in
+# `test_tb226_focus_rotation.py` asserts the inverse — that a
+# dispatchable Backlog task DOES auto-promote under roadmap_complete.
 # ===========================================================================
 
 
@@ -767,28 +769,29 @@ def test_focus_advance_and_roadmap_complete_across_ticks(
         f"focus-b→\"\" at {idx_fa_b}, roadmap_complete at {idx_rc}"
     )
 
-    # ----- Halt active: pointer past last + no clearing ack yet. -----
+    # ----- Ideation gate active: pointer past last + no clearing ack yet. -----
     assert goal.roadmap_exhausted(cfg) is True, (
         "roadmap_complete event fired but `goal.roadmap_exhausted` returns "
-        "False — the halt scan is detached from the event emit"
+        "False — the gate scan is detached from the event emit"
     )
 
-    # ----- Halt blocks auto-promote: no `task_start` events appear after
-    # `roadmap_complete`. Vacuously true here since no Backlog tasks are
-    # seeded (FakeSDK ideation returns 0 proposals), but the assertion is
-    # the gate-level pin — if a regression somehow caused the daemon's
-    # dispatch path to fire under a halted roadmap (e.g. a refactor
-    # removed the `goal.roadmap_exhausted(cfg)` check from the auto-
-    # promote branch), this assertion still catches it.
-    # `test_dispatch_halt_when_roadmap_exhausted_blocks_backlog_promote`
-    # in `test_tb226_focus_rotation.py` exercises the gate against a
-    # real dispatchable Backlog row at the unit level. -----
+    # ----- No `task_start` events appear after `roadmap_complete`.
+    # Vacuously true here since no Backlog tasks are seeded (FakeSDK
+    # ideation returns 0 proposals). TB-275 NOTE: post-fix this is a
+    # weak invariant — dispatch is no longer gated by roadmap state, so
+    # under a seeded Backlog row we WOULD expect `task_start` to fire
+    # after `roadmap_complete` (that's the entire point of the fix).
+    # The TB-275 regression-pin
+    # `test_dispatch_promotes_when_roadmap_exhausted` in
+    # `test_tb226_focus_rotation.py` exercises the un-gated dispatch
+    # against a real dispatchable Backlog row. -----
     task_starts_after_halt = [
         e for e in evts[idx_rc + 1:]
         if e.get("type") == "task_start"
     ]
     assert task_starts_after_halt == [], (
-        f"no `task_start` events should fire after `roadmap_complete`; "
+        f"no `task_start` events should fire after `roadmap_complete` "
+        f"in THIS fixture (no Backlog tasks seeded); "
         f"got: {task_starts_after_halt}"
     )
 

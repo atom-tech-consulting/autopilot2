@@ -27,9 +27,13 @@ pointer (`focus_pointer.json`). Advances the in-memory pointer when:
     the active focus (the empty-board signal).
 When all foci exhaust, emit `roadmap_complete` (once) + a
 `## Decisions needed from operator` bullet so `ap2 status` and the web
-home page surface the halt; the dispatch path's roadmap-complete check
-blocks Backlog auto-promote until the operator extends the roadmap
-and acks via `ap2 ack roadmap_complete`.
+home page surface the parked-ideation state. TB-275: this is an
+ideation-trigger gate only — `_maybe_ideate` skips with
+`reason=roadmap_complete` until the operator extends the roadmap
+(`ap2 update-goal`) or dismisses the notice (`ap2 ack
+roadmap_complete`). Task dispatch is NOT affected; already-queued
+Backlog tasks continue to drain. Use `ap2 pause` for an explicit
+full-stop.
 
 Goal.md itself is NEVER mutated (goal.md L187-191 Non-goal). The
 pointer file lives at `.cc-autopilot/focus_pointer.json`; it's both
@@ -98,8 +102,9 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
     Reads goal.md's focus list + the pointer state file. If the active
     focus is exhausted, advance to the next; if all foci are exhausted,
     emit `roadmap_complete` + a decisions-needed bullet (once) so the
-    dispatch path's halt check fires on subsequent ticks until the
-    operator extends the roadmap + acks.
+    ideation-trigger gate (`_maybe_ideate` in `ap2/ideation.py`) parks
+    on subsequent ticks until the operator extends the roadmap + acks.
+    TB-275: task dispatch is NOT affected — only the ideation trigger.
 
     Pure / side-effect-bounded: writes events + the pointer file +
     (rarely) one decisions-needed bullet. Does NOT mutate goal.md
@@ -127,8 +132,13 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
         if not pointer.get("roadmap_complete_emitted"):
             # First detection of exhaustion → emit the audit event +
             # decisions-needed bullet. Subsequent ticks short-circuit
-            # here (the dispatch path's `roadmap_exhausted` check
-            # continues to gate Backlog promotion).
+            # here. TB-275: the bullet is purely informational — the
+            # ideation trigger is parked (`_maybe_ideate` skips with
+            # `reason=roadmap_complete`) but task dispatch is NOT
+            # affected. Already-queued Backlog tasks (operator-added
+            # via `ap2 add`, operator-approved via `ap2 approve`, or
+            # previously auto-approved by ideation) continue to
+            # auto-promote and dispatch normally.
             events.append(
                 cfg.events_file,
                 "roadmap_complete",
@@ -141,11 +151,14 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
                     (
                         f"Roadmap complete: all {len(foci)} `## Current "
                         f"focus:` heading(s) in `goal.md` are exhausted. "
-                        f"Auto-promote of Backlog tasks is halted until "
-                        f"the operator extends the roadmap (add new "
-                        f"`## Current focus:` headings via `ap2 "
-                        f"update-goal`) AND emits `ap2 ack "
-                        f"roadmap_complete` to clear the halt."
+                        f"Ideation is parked (no active focus); extend "
+                        f"the roadmap (add new `## Current focus:` "
+                        f"headings via `ap2 update-goal`) to resume "
+                        f"ideation, or `ap2 ack roadmap_complete` to "
+                        f"dismiss this notice. Task dispatch is NOT "
+                        f"affected — already-queued Backlog tasks "
+                        f"continue to drain. Use `ap2 pause` for a "
+                        f"full stop."
                     ),
                 )
             except OSError:

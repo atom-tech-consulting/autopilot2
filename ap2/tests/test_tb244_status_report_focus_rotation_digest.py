@@ -228,11 +228,15 @@ def test_renderer_emits_roadmap_complete_line_with_ack_hint(
     cfg: Config,
 ):
     """A `roadmap_complete` event in the window → the rendered
-    section carries the halt-state line `roadmap_complete: all foci
-    exhausted — `ap2 ack roadmap_complete` to resume`. The ack
-    verb is rendered verbatim so the operator can copy-paste it
+    section carries the parked-ideation line `roadmap_complete:
+    all foci exhausted — ideation parked; `ap2 update-goal` to
+    resume or `ap2 ack roadmap_complete` to dismiss`. Both verbs
+    are rendered verbatim so the operator can copy-paste them
     from the Mattermost post (parallel to TB-228's
-    `ap2 ack auto_approve_window_resume` line)."""
+    `ap2 ack auto_approve_window_resume` line). TB-275: post-fix
+    the line names BOTH `ap2 update-goal` (resume ideation) and
+    `ap2 ack roadmap_complete` (dismiss notice) — `roadmap_complete`
+    is an ideation-trigger park, not a dispatch halt."""
     events.append(
         cfg.events_file, "roadmap_complete",
         exhausted_count=2, trigger="pointer_past_last",
@@ -243,7 +247,8 @@ def test_renderer_emits_roadmap_complete_line_with_ack_hint(
     assert section.startswith("## Focus rotation activity"), section
     assert (
         "- roadmap_complete: all foci exhausted — "
-        "`ap2 ack roadmap_complete` to resume"
+        "ideation parked; `ap2 update-goal` to resume or "
+        "`ap2 ack roadmap_complete` to dismiss"
     ) in section, section
 
 

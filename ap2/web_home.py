@@ -609,11 +609,16 @@ def _render_focus_card(cfg: Config) -> str:
         return ""
     focus_pointer = _goal.load_pointer(cfg)
     if _goal.roadmap_exhausted(cfg, foci):
+        # TB-275: roadmap_complete parks the ideation trigger only —
+        # task dispatch continues normally. Wording reflects that:
+        # extend the roadmap to resume IDEATION, or ack to dismiss
+        # the notice. `ap2 pause` is the explicit full-stop verb.
         klass = "automation-status is-paused"
         header = "Focus — ROADMAP_COMPLETE"
         body = (
-            "all foci exhausted — "
-            "<code>ap2 ack roadmap_complete</code> to resume"
+            "ideation parked — "
+            "<code>ap2 update-goal</code> to resume or "
+            "<code>ap2 ack roadmap_complete</code> to dismiss"
         )
     else:
         klass = "automation-status is-healthy"

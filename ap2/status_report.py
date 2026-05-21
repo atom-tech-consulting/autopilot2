@@ -334,7 +334,7 @@ def render_focus_rotation_activity_section(
         ## Focus rotation activity
 
         - focus_advanced: <from-title> → <to-title> (N of M)
-        - roadmap_complete: all foci exhausted — `ap2 ack roadmap_complete` to resume
+        - roadmap_complete: all foci exhausted — ideation parked; `ap2 update-goal` to resume or `ap2 ack roadmap_complete` to dismiss
 
     Each line is rendered once per event in the window (so a window
     with 2 advances + 1 halt yields 3 lines). The lines preserve
@@ -384,13 +384,17 @@ def render_focus_rotation_activity_section(
         lines.append(
             f"- focus_advanced: {from_title} → {to_title}{position}"
         )
-    # `roadmap_complete` rendering: the ack hint is verbatim so the
-    # operator can copy-paste it from the Mattermost post — same
-    # shape TB-228 uses for the auto-approve `ap2 ack ...` line.
+    # `roadmap_complete` rendering: the resume + dismiss hints are
+    # verbatim so the operator can copy-paste them from the
+    # Mattermost post. TB-275: this is now an ideation-trigger
+    # park, not a dispatch halt — extend the roadmap to resume
+    # IDEATION, or ack to dismiss the notice. Task dispatch is NOT
+    # affected.
     for _ev in activity["roadmap_complete"]:
         lines.append(
             "- roadmap_complete: all foci exhausted — "
-            "`ap2 ack roadmap_complete` to resume"
+            "ideation parked; `ap2 update-goal` to resume or "
+            "`ap2 ack roadmap_complete` to dismiss"
         )
     return "\n".join(lines)
 

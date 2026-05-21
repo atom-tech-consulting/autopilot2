@@ -242,10 +242,10 @@ def _apply_operator_ack(cfg: Config, args: dict) -> dict:
     # bump the focus-pointer's forensic `roadmap_complete_ack_idx` to
     # the current focus-list length so `ap2 status` / web UI render
     # the cleared state without an events-scan side-effect. Best-
-    # effort: `goal.roadmap_exhausted` (the dispatch-path gate) also
-    # consults the events.jsonl token directly, so a pointer-write
-    # failure here doesn't change the cleared verdict — defense in
-    # depth, not the canonical authority.
+    # effort: `goal.roadmap_exhausted` (the ideation-trigger gate
+    # post-TB-275) also consults the events.jsonl token directly, so
+    # a pointer-write failure here doesn't change the cleared verdict
+    # — defense in depth, not the canonical authority.
     from ap2 import goal as _goal
     if _goal.ROADMAP_COMPLETE_ACK_TOKEN in note:
         try:

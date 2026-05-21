@@ -1006,10 +1006,14 @@ against goal.md's `## Current focus:` headings. See
   consecutive 0-proposal cycles tripped the fallback). Payload also
   carries `from` (old title), `to` (new title — empty string when
   the advance crossed the last focus), `new_index`, `total_foci`.
-- `roadmap_complete` (TB-226) — pointer crossed past the last
-  `## Current focus:` heading; auto-promote of Backlog tasks halts
-  until operator extends roadmap + emits `ap2 ack
-  roadmap_complete`. Payload: `exhausted_count`, `trigger`. Fired
+- `roadmap_complete` (TB-226; rescoped TB-275) — pointer crossed
+  past the last `## Current focus:` heading; the ideation TRIGGER
+  parks (`_maybe_ideate` emits `ideation_skipped reason=
+  roadmap_complete`) until the operator extends the roadmap (`ap2
+  update-goal`) or dismisses the notice (`ap2 ack
+  roadmap_complete`). Task dispatch is NOT affected — already-
+  queued Backlog tasks continue to drain. Use `ap2 pause` for an
+  explicit full-stop. Payload: `exhausted_count`, `trigger`. Fired
   once per exhaustion episode (suppression via pointer's
   `roadmap_complete_emitted` flag).
 
@@ -1720,36 +1724,37 @@ from operator` bullet so the operator advances manually via
 `ap2 update-goal`. The pointer doesn't move; the next tick re-emits
 the bullet if criteria still trip — acceptable noise floor.
 
-**Roadmap-complete halt.**
+**Roadmap-complete: ideation parks (TB-275).**
 When the pointer advances past the LAST `## Current focus:`
 heading, the daemon emits `roadmap_complete exhausted_count=<n>
 trigger=pointer_past_last` (once, suppressed via the pointer's
 `roadmap_complete_emitted` flag) AND appends a `## Decisions
-needed from operator` bullet to `ideation_state.md`. The dispatch
-path's `goal.roadmap_exhausted(cfg)` check then blocks Backlog
-auto-promotion (Ready-section tasks still dispatch — the halt is
-targeted at the auto-promote-from-Backlog gate). The auto-approve
-gate (`auto_approve.py`'s `evaluate_auto_approve_decision`, TB-263
-split out of `daemon.py`) honors the same predicate so a halt
-mid-window can't sneak `auto_approved` rows onto the board. Ideation also
-skips for the same predicate (TB-246, `_maybe_ideate`): a skip
-emits `ideation_skipped reason=roadmap_complete` and bumps the
-cooldown, so a walk-away weekend that exhausts the roadmap stops
+needed from operator` bullet to `ideation_state.md`. From then
+on, the IDEATION TRIGGER skips: `_maybe_ideate` emits
+`ideation_skipped reason=roadmap_complete` and bumps the cooldown
+(TB-246), so a walk-away weekend that exhausts the roadmap stops
 piling speculative proposals against an already-exhausted focus
 list (without this gate, a 60-min cooldown × 48h weekend wastes
-up to ~48 ideation SDK calls and the operator returns to a
-clutter of `@blocked:review` rows the dispatch gate refused to
-advance anyway). The skip-gate sibling to TB-174's
-focus-exhausted gate (same `ideation_skipped` event shape with a
-different `reason` field; `force_ideate` bypasses both so
-`ap2 ideate --force` works on the operator's recovery path).
-Operator clears via `ap2 ack roadmap_complete --reason "extended
-roadmap with axis 5"`; the daemon's events-jsonl scan detects an
-`operator_ack` event whose `note` carries the
-`roadmap_complete` token AFTER the most recent `roadmap_complete`
-event and clears the halt. Same shape TB-223's
-`auto_approve_unfreeze` / TB-224's `auto_approve_window_resume`
-use.
+up to ~48 ideation SDK calls). The skip-gate is a sibling to
+TB-174's focus-exhausted gate (same `ideation_skipped` event
+shape with a different `reason` field; `force_ideate` bypasses
+both so `ap2 ideate --force` works on the operator's recovery
+path). TASK DISPATCH IS NOT AFFECTED (TB-275): already-queued
+Backlog tasks — operator-added via `ap2 add`, operator-approved
+via `ap2 approve`, or previously auto-approved by ideation —
+continue to auto-promote and dispatch normally. Once ideation is
+gated, no new speculative work can enter the Backlog anyway, so
+everything in the queue is operator-originated or already-proposed
+and should always drain. A genuine full-stop is `ap2 pause`, a
+separate explicit mechanism. Operator clears the parked-ideation
+notice via `ap2 update-goal` (extending the roadmap re-arms
+ideation by resetting the pointer onto the new focus) OR via
+`ap2 ack roadmap_complete --reason "..."` (dismisses the notice);
+the daemon's events-jsonl scan detects an `operator_ack` event
+whose `note` carries the `roadmap_complete` token AFTER the most
+recent `roadmap_complete` event and clears the predicate. Same
+shape TB-223's `auto_approve_unfreeze` / TB-224's
+`auto_approve_window_resume` use.
 
 **Status-report push surface (TB-244).**
 Axis-4 events (`focus_advanced` / `roadmap_complete`) also

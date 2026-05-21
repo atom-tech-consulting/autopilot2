@@ -27,7 +27,6 @@ from . import (
     diagnose,
     env_reload,
     events,
-    goal,
     ideation,
     prompts,
     retry,
@@ -1868,24 +1867,21 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             # references — backward-compatible: tasks with no declared blockers
             # are always dispatchable.
             backlog = board.next_dispatchable("Backlog")
-            # TB-226 axis 4: roadmap-complete halt. When the focus
-            # pointer has advanced past the last `## Current focus:`
-            # heading in goal.md AND the operator hasn't acked the
-            # `roadmap_complete` halt for the current foci-list length,
-            # block auto-promotion of Backlog tasks. The audit-trail
-            # `roadmap_complete` event + decisions-needed bullet were
-            # emitted on the tick the exhaustion was first detected
-            # (see `_maybe_advance_focus`); the halt persists across
-            # ticks until the operator extends the roadmap (adding new
-            # foci via `ap2 update-goal`) AND emits
-            # `ap2 ack roadmap_complete`. Mirrors TB-223's
-            # `_auto_approve_paused` shape: manually-Ready tasks
-            # (operator `ap2 approve` already moved them past the
-            # Backlog auto-promote gate) still dispatch via
-            # `board.next_ready()` above — the halt is targeted at the
-            # auto-promote-from-Backlog path only.
-            if backlog is not None and goal.roadmap_exhausted(cfg):
-                backlog = None
+            # TB-275: roadmap_complete is an IDEATION-trigger gate
+            # only (see `_maybe_ideate` in `ap2/ideation.py` — when
+            # `goal.roadmap_exhausted(cfg)` is True, ideation parks
+            # itself and emits `ideation_skipped reason=roadmap_complete`).
+            # It is NOT a dispatch gate. The TB-226 dispatch halt that
+            # used to live here froze operator-added (`ap2 add`) and
+            # operator-approved (`ap2 approve`) Backlog tasks that have
+            # nothing to do with the roadmap, manufacturing an
+            # intervention for work the operator had already greenlit
+            # (this bit live on 2026-05-20 with TB-273/TB-274 frozen
+            # for hours behind the halt). Once ideation is gated, no
+            # new speculative work can enter the Backlog anyway — so
+            # everything queued is operator-originated or already-
+            # proposed and must always drain. A genuine full-stop is
+            # `ap2 pause`, a separate explicit mechanism.
             # TB-232: dry-run on-ramp. The auto-approve gate chain
             # (tags / freeze-threshold / per-task-token-cap /
             # window-token-cap) lives behind a single entry point —

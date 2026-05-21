@@ -428,10 +428,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # "what focus am I on, and how many remain?" without grepping
     # events.jsonl or reading `focus_pointer.json` by hand. Three
     # render shapes (mirrors the JSON branch):
-    #   - halt state (pointer past last focus, no operator ack since
-    #     the most recent `roadmap_complete` event) → the halt-state
-    #     line with the `ap2 ack roadmap_complete` resume nudge, same
-    #     shape as TB-227's auto-approve PAUSED line.
+    #   - parked-ideation state (pointer past last focus, no operator
+    #     ack since the most recent `roadmap_complete` event) → the
+    #     `ROADMAP_COMPLETE — ideation parked` line with the
+    #     `ap2 update-goal` resume + `ap2 ack roadmap_complete`
+    #     dismiss nudges (TB-275 reword — dispatch is NOT halted).
     #   - multi-focus → `focus: <title> (<idx+1> of <total>)`.
     #   - single-focus → `focus: <title>` (no `(1 of 1)` suffix —
     #     single-focus projects don't need a position counter).
@@ -440,9 +441,14 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # the default-off output stays byte-identical to pre-TB-242.
     if _foci:
         if _focus_roadmap_complete:
+            # TB-275: roadmap_complete parks the ideation trigger only
+            # — task dispatch continues. Wording reflects that: extend
+            # the roadmap to resume IDEATION, or ack to dismiss the
+            # notice. `ap2 pause` is the explicit full-stop verb.
             print(
-                "focus:    ROADMAP_COMPLETE — "
-                "`ap2 ack roadmap_complete` to resume"
+                "focus:    ROADMAP_COMPLETE — ideation parked; "
+                "`ap2 update-goal` to resume or "
+                "`ap2 ack roadmap_complete` to dismiss"
             )
         elif len(_foci) == 1:
             _title = _focus_item.title if _focus_item else ""
