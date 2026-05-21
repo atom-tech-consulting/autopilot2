@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-277** **Add daemon_state.json to the ap2 init gitignore template + drift-gate test pinning every daemon-written .cc-autopilot file is committed-or-ignored** `#autopilot` `#init` `#gitignore` `#drift-gate` `#regression-pin` [→ brief](.cc-autopilot/tasks/add-daemon-state-json-to-the-ap2-init-gi.md)
 
 ## Pipeline Pending
 
