@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-278** **Raise daemon defaults to battle-tested values + scaffold a documented .cc-autopilot/env template on init** `#autopilot` `#config` `#init` `#defaults` `#onboarding` `#regression-pin` [→ brief](.cc-autopilot/tasks/raise-daemon-defaults-to-battle-tested-v.md)
 
 ## Pipeline Pending
 
