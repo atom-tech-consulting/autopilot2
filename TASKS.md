@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-276** **Unify sandbox asset deploy into one command that syncs BOTH skills and howto, sudo-by-default with a --sbuser non-sudo mode** `#autopilot` `#sandbox` `#deploy` `#cli` `#refactor` `#regression-pin` [→ brief](.cc-autopilot/tasks/unify-sandbox-asset-deploy-into-one-comm.md)
 
 ## Pipeline Pending
 
@@ -162,6 +161,7 @@
 - [x] **TB-273** **Sync `ap2/ideation.default.md`'s `## Shell-bullet pitfalls to AVOID` with `ap2/howto.md`'s authoritative four-pitfall list (TB-270 retry-storm preventive closure on axis-1 manual-approval bottleneck)** `#autopilot` `#ideation` `#briefing-authoring` `#shell-bullet` `#axis-1` `#preventive` `#docs-sync` `#regression-pin` — `ap2/ideation.default.md` L471-486 lists 3 shell-bullet pitfalls (bare `python`, bare-path-as-command, multi-line bullets); `ap2/howto.md` L462-505 lists 4 (literal-backtick / absence-`!` / directory-`-r` / `Prose:` prefix) with a worked example. TB-270 (2026-05-20T04:54-05:59Z) demonstrated the cost: ideation-authored bullet 5 missed `!` → 3-retry storm → operator-manual unfreeze. Pull the howto's four bullets + worked example pointer into the ideation prompt so ideation-authored briefings stop reproducing the class. Pure prompt sync; no new code. [→ brief](.cc-autopilot/tasks/sync-ap2-ideation-default-md-s-shell-bul.md)
 - [x] **TB-274** **Reconcile post-split doc/skill references: refresh architecture.md module map + fix moved-symbol citations in howto.md and skills/ap2-task/SKILL.md** `#autopilot` `#docs` `#refactor` `#post-split` `#regression-pin` `@blocked:TB-261,TB-262,TB-263,TB-264,TB-265` [→ brief](.cc-autopilot/tasks/reconcile-post-split-doc-skill-reference.md)
 - [x] **TB-275** **roadmap_complete must gate the ideation trigger only — remove the daemon Backlog-dispatch halt so the queue always drains** `#autopilot` `#daemon` `#ideation` `#roadmap` `#dispatch` `#regression-pin` [→ brief](.cc-autopilot/tasks/roadmap-complete-must-gate-the-ideation.md)
+- [x] **TB-276** **Unify sandbox asset deploy into one command that syncs BOTH skills and howto, sudo-by-default with a --sbuser non-sudo mode** `#autopilot` `#sandbox` `#deploy` `#cli` `#refactor` `#regression-pin` [→ brief](.cc-autopilot/tasks/unify-sandbox-asset-deploy-into-one-comm.md)
 
 ## Frozen
 
