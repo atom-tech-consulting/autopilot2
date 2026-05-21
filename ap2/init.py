@@ -264,6 +264,16 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
         # also re-fire `focus_advanced` events redundantly, so the
         # pointer (like `cron_state.json`) should restart fresh.
         "focus_pointer.json",
+        # TB-260: per-daemon-lifetime env-file-mtime stash powering the
+        # `.cc-autopilot/env` stale-detection surface. Rewritten at
+        # every daemon start by `_capture_env_mtime_at_start`; the
+        # pinned mtime is only meaningful for the CURRENT daemon
+        # process, so an `ap2 rollback` that restored a prior value
+        # would either resurrect a stale mtime baseline (false-positive
+        # WARN against the live env file) or paper over the next real
+        # bump. Runtime-only, like its `cron_state.json` /
+        # `operator_queue_state.json` neighbors above.
+        "daemon_state.json",
     ]),
     ("Per-run prompt + stream dumps for failure diagnosis (kept only on failure)", [
         "debug/",
