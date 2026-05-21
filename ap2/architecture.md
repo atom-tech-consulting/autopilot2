@@ -99,7 +99,7 @@ Backlog → Ready → Active → Complete  (happy path; auto-promotion at the
    - Per-task verification (`verify.verify_task`) runs the briefing's `## Verification` bullets — shell bullets via subprocess, prose bullets via SDK judge.
    - Project-wide gate (`AP2_VERIFY_CMD`, e.g. `uv run pytest -q`) runs after the per-task verify. `#no-verify` tag opts out.
 6. `move_to_complete` on success, `move_to_backlog` on `blocked` (with a Retry counter increment), `move_to_frozen` after `AP2_MAX_RETRIES`.
-7. `_commit_state_files` stages + commits all daemon-owned files with subject `state: TB-N → <section>`.
+7. `state_commit._commit_state_files` stages + commits all daemon-owned files with subject `state: TB-N → <section>`.
 
 Failure paths (`task_timeout`, `task_error`) try `_infer_result_from_head` first — if the agent committed before the crash, we keep the work and emit `task_implicit_commit` (with `reason=timeout_recovered` / `error_recovered`). This is what unstuck stoch's TB-58/TB-59 retry loops where the agent kept re-doing already-committed work.
 
@@ -130,44 +130,116 @@ State-file commits land with subject `state: TB-N → Complete` (per task) or `s
 
 ## Module map
 
+The layout is intentionally flat — sibling modules instead of subpackages — so a reader can `ls ap2/*.py` and see the full surface in one screen, and each split (TB-262 → `tools.py`; TB-263 → `daemon.py`; TB-264 → `cli.py`; TB-265 → `web.py`) lands as new top-level files rather than nested namespaces. The descriptions below name the load-bearing public symbols each module hosts so a reader can re-attribute a stale `tools.py:684`-style citation to its new home.
+
 ```
 ap2/
-├── cli.py            # argparse → cmd_* handlers; reads pid file
-├── daemon.py         # main_loop, _tick, run_task, run_cron, handle_message,
-│                     # _run_control_agent, _make_stderr_sink, _commit_state_files
-├── config.py         # Config dataclass, env-var resolution, .cc-autopilot/env loader
-├── board.py          # Board (TASKS.md parser), locked_board, malformed_lines,
-│                     # next_ready, next_dispatchable
-├── events.py         # append-only JSONL writer, tail()
-├── cron.py           # CronJob dataclass, load_jobs, due_jobs, mark_run, bootstrap
-├── ideation.py       # _maybe_ideate (empty-board trigger + cooldown)
-├── insights.py       # maybe_regenerate_index (.cc-autopilot/insights/_index.md)
-├── verify.py         # parse_verification_section, verify_task (per-task gate)
-├── diagnose.py       # build_report, render_markdown (watchdog informant — pure)
-├── retry.py          # retry counter (fcntl-locked .json)
-├── tools.py          # MCP server: do_board_edit, do_cron_edit (operator CLI only — TB-146), do_mattermost_reply,
-│                     # do_log_event, do_daemon_control, do_ideation_state_write,
-│                     # do_pipeline_task_start
-├── rollback.py       # linear_rollback_to + helpers (TB-110 + TB-111 + TB-115)
-├── prompts.py        # build_task_prompt, build_control_prompt, build_mattermost_prompt
-├── web.py            # local read-only web UI (TB-99 + TB-93 thaw):
-│                     # /, /events, /tasks, /task/<TB-N>, /pipelines,
-│                     # /insights, /insight/<name>, /ideation_state, /commits.
-│                     # Full event payloads (vs `ap2 logs` which truncates).
-├── mattermost.py     # check_new_messages (one-shot poll), reply
-├── result.py         # parse RESULT block (status/commit/summary/files/cron)
-├── init.py           # init_project (gitignores, dirs, board templates)
-├── doctor.py         # ap2 doctor: user_audit + project_audit + CLI presence
-├── sandbox.py        # claude-agent setup, project-clone, MM creds, statusline
-├── ideation.default.md  # the ideation prompt body (load-bearing)
-├── cron.default.yaml    # bootstrapped cron jobs (status-report)
-├── README.md         # operator quickstart + CLI reference
-└── architecture.md   # this file
+├── _shared.py            # cross-module utilities (locks, parsers) imported by both daemon and tools without cycling
+├── audit.py              # ap2 audit retrospective-walk helpers (TB-248)
+├── auto_approve.py       # evaluate_auto_approve_decision, _auto_approve_paused, _validator_judge_noisy_paused
+│                         # (TB-223 / TB-224 / TB-225 / TB-272 — auto-promote-from-Backlog gate + halt bookkeeping)
+├── auto_unfreeze.py      # _maybe_auto_unfreeze, _auto_unfreeze_allowlist, _apply_auto_unfreeze_patch
+│                         # (TB-225 — sweep that consumes `BriefingFix:` lines from blocked summaries)
+├── automation_stats.py   # /stats aggregation helpers (windows, sparklines, top-N expensive tasks)
+├── automation_status.py  # collect_auto_approve_state, status-line composer for ap2 status / web home
+├── backfill.py           # ap2 backfill-proposals — historical proposal-record reconstruction (TB-195)
+├── board.py              # Board (TASKS.md parser), locked_board, board_file_lock, malformed_lines,
+│                         # next_ready, next_dispatchable
+├── board_edits.py        # do_board_edit (TB-262 split out of tools.py): the MCP write-path handler for
+│                         # TASKS.md mutations — add/move/update/delete rows with the board lock held
+├── briefing_validators.py # _validate_briefing_structure (TB-262 split out of tools.py — the TB-154 / TB-161 /
+│                         # TB-164 / TB-171 deterministic checks plus the TB-235 LLM-judge dispatch),
+│                         # IMPACT_VERDICTS (TB-189 single source of truth), _briefing_section_names,
+│                         # extract_goal_anchor, extract_why_now, write_ideation_proposal_record
+├── check.py              # ap2 check — pre-flight diagnostic on a project tree
+├── cli.py                # build_parser (argparse tree); cmd_* handlers live in the cli_* siblings below
+├── cli_board.py          # cmd_add / cmd_update / cmd_backlog / cmd_unfreeze / cmd_delete / cmd_reject /
+│                         # cmd_classify / cmd_approve (TB-264 split: the board-mutation operator verbs)
+├── cli_daemon.py         # cmd_start / cmd_stop / cmd_status / cmd_pause / cmd_resume / cmd_web
+│                         # (TB-264 split: the daemon-lifecycle operator verbs)
+├── cli_diagnostic.py     # cmd_init / cmd_check / cmd_doctor / cmd_logs / cmd_cron_list / cmd_cron_edit
+│                         # (TB-264 split: the read-only diagnostic + cron operator verbs)
+├── cli_review.py         # cmd_audit / cmd_ideate / cmd_update_goal / cmd_rollback / cmd_backfill_proposals /
+│                         # cmd_ack (TB-264 split: the review / ack operator verbs)
+├── config.py             # Config dataclass, env-var resolution, .cc-autopilot/env loader
+├── cron.py               # CronJob dataclass, load_jobs, due_jobs, mark_run, bootstrap
+├── daemon.py             # main_loop, _tick, _main_tick_loop, _mm_loop, run_task, run_cron, handle_message,
+│                         # _run_control_agent, _make_stderr_sink, _handle_failure, _recover_orphans,
+│                         # _infer_result_from_head (post-TB-263: state-commit / pipeline-sweep /
+│                         # auto-approve / auto-unfreeze / watchdog logic now lives in the sibling modules
+│                         # below)
+├── daemon_state.py       # daemon-side state load/save helpers shared by run_task + run_cron + _tick
+├── diagnose.py           # build_report, render_markdown (watchdog informant — pure)
+├── doctor.py             # ap2 doctor: user_audit + project_audit + auto_approve_audit + auto_unfreeze_audit +
+│                         # CLI presence
+├── env_reload.py         # .cc-autopilot/env hot-reload (TB-258 — re-reads Config without daemon restart)
+├── events.py             # append-only JSONL writer, tail(), MEANINGFUL_EVENT_TYPES
+├── focus_advance.py      # _maybe_advance_focus (TB-226 — focus_pointer.json bookkeeping +
+│                         # roadmap_complete emission)
+├── goal.py               # goal.md parsing + roadmap_exhausted predicate consumed by ideation / dispatch /
+│                         # auto-approve gates
+├── ideation.py           # _maybe_ideate (empty-board trigger + cooldown + TB-246 roadmap_complete skip)
+├── init.py               # init_project (gitignores, dirs, board templates) + BRIEFING_TEMPLATE
+├── insights.py           # maybe_regenerate_index (.cc-autopilot/insights/_index.md)
+├── janitor.py            # ap2 janitor — repo-hygiene findings (TB-217 family)
+├── json_extract.py       # extract_rightmost_json_object — shared JSON tail-parse helper (TB-261)
+│                         # used by the validator-judge parsers and any other LLM-response consumer
+├── mattermost.py         # check_new_messages (one-shot poll), reply
+├── message_dump.py       # .stream.jsonl / .messages.jsonl per-run debug-dump writers (TB-85)
+├── operator_log.py       # operator_log.md append helpers (operator-decision audit trail)
+├── operator_queue.py     # do_operator_queue_append (TB-262 split out of tools.py), drain_operator_queue,
+│                         # _apply_operator_op, enqueue_operator_ack — the TB-131/TB-141 queue-routed
+│                         # board-mutation path used by CLI + MM handler
+├── pipeline_sweep.py     # _sweep_pipeline_pending, _pipeline_alive (TB-263 split out of daemon.py —
+│                         # per-tick Pipeline Pending sweep + post-pipeline verifier re-run)
+├── prompts.py            # build_task_prompt, build_control_prompt, build_mattermost_prompt
+├── result.py             # parse RESULT block (status/commit/summary/files/cron)
+├── retry.py              # retry counter (fcntl-locked .json)
+├── rollback.py           # linear_rollback_to + helpers (TB-110 + TB-111 + TB-115)
+├── sandbox.py            # claude-agent setup, project-clone, MM creds, statusline
+├── state_commit.py       # _commit_state_files (TB-263 split out of daemon.py), _filter_state_paths,
+│                         # _snapshot_state_paths — the "state: TB-N → <section>" commit author
+├── status_report.py      # status-report cron-job body (the 2h Mattermost digest)
+├── tools.py              # MCP server build_mcp_server + the handlers that did NOT move out in TB-262:
+│                         # do_pipeline_task_start, do_cron_edit (operator-CLI only — TB-146),
+│                         # do_task_complete, do_cron_propose, do_git_log_grep, do_ideation_state_write,
+│                         # do_log_event, do_daemon_control, do_mattermost_reply, do_mattermost_thread_read.
+│                         # Also defines CONTROL_AGENT_TOOLS / TASK_AGENT_TOOLS / MM_HANDLER_TOOLS and
+│                         # re-exports the moved symbols (do_board_edit, do_operator_queue_append,
+│                         # IMPACT_VERDICTS, _validate_briefing_structure, …) so pre-TB-262 callers
+│                         # continue to resolve `from ap2.tools import …`.
+├── validator_judge.py    # _judge_dep_coherence_default, _parse_dep_judge_response (TB-235 — the
+│                         # LLM-driven dependency-coherence judge dispatched from
+│                         # briefing_validators._validate_briefing_structure check #7)
+├── verify.py             # parse_verification_section, verify_task (per-task gate), _judge_prose_bullet
+├── verify_harness.py     # _maybe_per_task_verify, _run_verify, VerifyResult (the run_task →
+│                         # per-task verify → project-wide verify orchestration shim)
+├── watchdog.py           # _maybe_auto_diagnose (TB-263 split out of daemon.py — daemon-silent-for-Nh
+│                         # MM-post watchdog)
+├── web.py                # local read-only web UI router (TB-99 + TB-93 thaw): /, /events, /tasks,
+│                         # /task/<TB-N>, /pipelines, /insights, /insight/<name>, /ideation_state,
+│                         # /commits, /stats, /usage. Page renderers live in the web_* siblings below.
+├── web_chrome.py         # _layout / _row_class / _events_table — shared HTML chrome + the events-table
+│                         # renderer the home + events pages compose into (TB-265 split out of web.py)
+├── web_events.py         # /events page + the per-run debug-dump viewers (_render_task_run, run-stream JSON)
+├── web_home.py           # / (home page) renderer — operator decisions panel, focus card,
+│                         # automation/ideation/auto-approve status block (TB-265 split out of web.py)
+├── web_insights.py       # /insights + /insight/<name> page renderers
+├── web_stats.py          # /stats page renderer + JSON shape (TB-259 windows, duration buckets,
+│                         # verifier/ideation/cron sub-sections)
+├── web_tasks.py          # /tasks + /task/<TB-N> + /pipelines + /ideation_state + /commits page renderers
+├── web_usage.py          # /usage page renderer (TB-218 — cost / cache-hit / model-split SVG charts)
+├── ideation.default.md   # the ideation prompt body (load-bearing)
+├── cron.default.yaml     # bootstrapped cron jobs (status-report)
+├── README.md             # operator quickstart + CLI reference
+├── howto.md              # operator + agent reference: CLI verbs, env knobs, event schema, fix-shapes
+└── architecture.md       # this file
 ```
 
 Cycles to watch out for:
-- `daemon` ↔ `ideation`: `daemon` imports `ideation` at top-level (step 4 calls `_maybe_ideate`); `ideation` lazy-imports `daemon` inside `_maybe_ideate` to call `_run_control_agent` + `_commit_state_files`. The lazy import is load-bearing.
-- `daemon` ↔ `tools`: `daemon` imports `tools`; `tools` does NOT import `daemon`. Tool handlers receive a `Config` and read events directly.
+- `daemon` ↔ `ideation`: `daemon` imports `ideation` at top-level (step 4 calls `_maybe_ideate`); `ideation` lazy-imports `daemon` inside `_maybe_ideate` to call `_run_control_agent` + `state_commit._commit_state_files`. The lazy import is load-bearing.
+- `daemon` ↔ `tools` / `board_edits` / `operator_queue`: `daemon` imports `tools` (which now re-exports the TB-262-split sibling handlers) and directly imports `do_board_edit` from `board_edits`; none of those tool modules import `daemon`. Tool handlers receive a `Config` and read events directly.
+- `tools` ↔ `briefing_validators` / `board_edits` / `operator_queue`: `tools.py` lazy-imports the split siblings AFTER its own `_ok`/`_err`/`slugify` definitions so the siblings can resolve `from .tools import _ok, _err, slugify` against `tools`'s partial-load state. The bottom-of-file re-export block (`from .briefing_validators import IMPACT_VERDICTS, _validate_briefing_structure, …`) keeps the pre-TB-262 `ap2.tools` import surface intact for callers (tests + ideation) that haven't been migrated to the new homes.
 
 ## Custom MCP tools
 
@@ -314,7 +386,7 @@ The stoch daemon runs continuously and exercises every code path against real br
 2. This file — why it's shaped this way.
 3. `ap2/daemon.py` — `_tick` is the entry point; everything fans out from there.
 4. `ap2/board.py` — the `Board` model and `locked_board` are the core data structure.
-5. `ap2/tools.py` — the MCP tools are the only mutation surface; reading them tells you the system's full state-change vocabulary.
+5. `ap2/tools.py` (plus the TB-262 siblings `board_edits.py` / `operator_queue.py` / `briefing_validators.py` / `validator_judge.py`) — the MCP tools are the only mutation surface; reading them tells you the system's full state-change vocabulary. `tools.py` registers the server + hosts the remaining handlers and re-exports the siblings, so it's still the entry point.
 6. `ap2/ideation.default.md` — the load-bearing prompt that drives the only path that creates new work.
 
 The `.cc-autopilot/tasks/*.md` briefings are per-task historical records of design decisions; reach for them when you want to understand why a specific feature exists, not how it works today.

@@ -793,7 +793,7 @@ pile surfaces on every report until cleared.
 ## Classify verdicts
 
 `ap2 classify TB-N --impact <verdict>` accepts one of four values from
-`IMPACT_VERDICTS` (single source of truth at `ap2/tools.py`). The four
+`IMPACT_VERDICTS` (single source of truth at `ap2/briefing_validators.py`; still importable via `ap2.tools.IMPACT_VERDICTS` thanks to TB-262's re-export). The four
 buckets form a gradient — substantive-positive → compliance-neutral →
 actively-harmful — with `unclear` as the explicit "can't tell yet"
 bucket. Pick the verdict by running two delete-tests in sequence:
@@ -939,8 +939,8 @@ mutated and no operator-queue ops are appended).
 
 **Briefing-validator LLM judge (TB-235).** `validator_judge_timeout`
 and `validator_judge_fail` are fail-open audit events from check #7
-in `tools._validate_briefing_structure` (LLM-driven dependency-
-coherence judge). They fire when the Haiku-4.5 judge call exceeds
+in `briefing_validators._validate_briefing_structure` (LLM-driven
+dependency-coherence judge; TB-262 split this out of `tools.py`). They fire when the Haiku-4.5 judge call exceeds
 `AP2_VALIDATOR_JUDGE_TIMEOUT_S` (default 60s; TB-269 calibration)
 or fails for any other reason (network, parse error, model
 unavailable). The validator's policy on judge failure is fail-open
@@ -1188,7 +1188,8 @@ restart, or set the value via the file before daemon-start).
   worst-case successful run sizes the recommendation).
 
 **Briefing validator (LLM-judge dependency coherence, TB-235).** Check
-#7 in `ap2/tools.py::_validate_briefing_structure` runs a Haiku-4.5
+#7 in `ap2/briefing_validators.py::_validate_briefing_structure` (TB-262
+split out of `ap2/tools.py`) runs a Haiku-4.5
 judge over a freshly-authored briefing AFTER the six deterministic
 checks (TB-154 canonical sections, TB-91/TB-102 parseable Verification,
 ≥1 bullet, TB-161 goal-anchor, TB-164 Why-now, TB-171 no-Manual)
@@ -1728,8 +1729,9 @@ needed from operator` bullet to `ideation_state.md`. The dispatch
 path's `goal.roadmap_exhausted(cfg)` check then blocks Backlog
 auto-promotion (Ready-section tasks still dispatch — the halt is
 targeted at the auto-promote-from-Backlog gate). The auto-approve
-gate (`tools.py`) honors the same predicate so a halt mid-window
-can't sneak `auto_approved` rows onto the board. Ideation also
+gate (`auto_approve.py`'s `evaluate_auto_approve_decision`, TB-263
+split out of `daemon.py`) honors the same predicate so a halt
+mid-window can't sneak `auto_approved` rows onto the board. Ideation also
 skips for the same predicate (TB-246, `_maybe_ideate`): a skip
 emits `ideation_skipped reason=roadmap_complete` and bumps the
 cooldown, so a walk-away weekend that exhausts the roadmap stops
