@@ -56,7 +56,7 @@ There are four kinds of SDK queries, each with its own prompt builder, tool allo
 | Kind | Trigger | Prompt builder | Tools | Timeout |
 |---|---|---|---|---|
 | **Task** | `run_task` (step 3) | `prompts.build_task_prompt` | `TASK_AGENT_TOOLS` (Read/Edit/Write/Bash + `pipeline_task_start`) | `AP2_TASK_TIMEOUT_S` (1200s) |
-| **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/mm/log_event/daemon_control/ideation_state_write — `cron_edit` dropped TB-146) | `AP2_CONTROL_TIMEOUT_S` (300s) |
+| **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/mm/log_event/daemon_control/ideation_state_write — `cron_edit` dropped TB-146) | `AP2_CONTROL_TIMEOUT_S` (1200s) |
 | **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS` (CONTROL_AGENT_TOOLS minus ideation_state_write/board_edit — TB-145, was TB-122's RESTRICTED; `cron_edit` separately dropped from CONTROL_AGENT_TOOLS in TB-146) | `AP2_CONTROL_TIMEOUT_S` |
 | **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
 

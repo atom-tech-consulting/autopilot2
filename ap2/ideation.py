@@ -27,9 +27,12 @@ Configuration:
   of truth, no hardcoded magic number drifting from the env knob).
   Set to 1 for the legacy "fire only when the working queue is fully
   empty" behavior.
-- Max turns: `AP2_IDEATION_MAX_TURNS` (default 30 — bumped from the legacy
-  cron-default 15 because the assessment + failure-review + proposal flow
-  routinely needs ~10-15 turns and 15 was running close to the wire).
+- Max turns: `AP2_IDEATION_MAX_TURNS` (default 100 — sourced from
+  `config.DEFAULT_IDEATION_MAX_TURNS`; TB-278 bumped from the prior 30
+  after a goal.md rewrite mid-cycle hit `error_max_turns` at 31 turns.
+  Already-validated against this project's own override of 100; the
+  raised default just spares fresh projects from rediscovering that wall.
+  `AP2_CONTROL_TIMEOUT_S` still bounds runaway wall-clock).
 - Disable: `AP2_IDEATION_DISABLED=1` opts out of empty-board ideation
   entirely (used by the test suite by default; useful for projects that
   want to drive ideation manually rather than on the natural gate).
@@ -43,12 +46,17 @@ from pathlib import Path
 
 from . import events
 from .board import Board
-from .config import Config
+from .config import Config, DEFAULT_IDEATION_MAX_TURNS
 from .cron import load_state, mark_run
 
 
 IDEATION_NAME = "ideation"
-IDEATION_MAX_TURNS_DEFAULT = 30
+# TB-278: re-pointed at the new `config.DEFAULT_IDEATION_MAX_TURNS` named
+# constant so the timeouts / max-turns defaults live in one place. The
+# alias survives for backwards compat (tests + code that import
+# `IDEATION_MAX_TURNS_DEFAULT` directly keep working). Value bumped from
+# the prior 30 to 100 as part of the TB-278 battle-tested-defaults pass.
+IDEATION_MAX_TURNS_DEFAULT = DEFAULT_IDEATION_MAX_TURNS
 IDEATION_COOLDOWN_DEFAULT_S = 7200  # 2h between fires when board stays empty
 # Trigger threshold: ideation fires when Ready+Backlog count is BELOW this
 # value (and Active is empty). TB-183: also serves as the per-cycle

@@ -121,8 +121,8 @@ All `AP2_*` variables can be set in shell, in `<project>/.cc-autopilot/env` (KEY
 | `AP2_WEB_PORT` | `8729` | Port for the bundled read-only web UI that `ap2 start` spawns alongside the daemon. Bound to `127.0.0.1` only. Standalone `ap2 web` keeps its own default of `7820`. |
 | `AP2_WEB_DISABLED` | (unset) | Set `1`/`true`/`yes` to skip spawning the bundled web UI when the daemon starts (headless / CI). The standalone `ap2 web` command is unaffected. |
 | `AP2_TASK_TIMEOUT_S` | `1200` | Per-task SDK query timeout (s). |
-| `AP2_TASK_MAX_TURNS` | `50` | Max turns per task agent. |
-| `AP2_CONTROL_TIMEOUT_S` | `300` | Per-control-agent SDK query timeout (s). |
+| `AP2_TASK_MAX_TURNS` | `200` | Max turns per task agent. |
+| `AP2_CONTROL_TIMEOUT_S` | `1200` | Per-control-agent SDK query timeout (s). |
 | `AP2_MAX_RETRIES` | `3` | Failed-task retries before Frozen. |
 | `AP2_VERIFY_CMD` | (unset) | Project-wide regression gate (e.g. `uv run pytest -q`). Runs after every successful task agent commit. |
 | `AP2_VERIFY_TIMEOUT_S` | `600` | `AP2_VERIFY_CMD` timeout (s). |
@@ -131,7 +131,7 @@ All `AP2_*` variables can be set in shell, in `<project>/.cc-autopilot/env` (KEY
 | `AP2_IDEATION_DISABLED` | (unset) | Set `1`/`true`/`yes` to disable empty-board ideation. |
 | `AP2_IDEATION_COOLDOWN_S` | `7200` (2h) | Cooldown between ideation fires. |
 | `AP2_IDEATION_TRIGGER_TASK_COUNT` | `3` | Fire ideation when the Ready+Backlog count is BELOW this threshold (Active is still a hard gate — concurrent task-agent + control-agent SDK runs are not allowed) (TB-160). Set to `1` for the legacy "fire only when the working queue is fully empty" behavior; raise it (e.g. `5`) for projects with very fluid scope. Invalid (non-int, non-positive) values fall back to the default. |
-| `AP2_IDEATION_MAX_TURNS` | `30` | Max turns per ideation run. |
+| `AP2_IDEATION_MAX_TURNS` | `100` | Max turns per ideation run. |
 | `AP2_EVENT_CONTEXT` | `50` | Number of events included in agent prompts. |
 | `AP2_MM_CHANNELS` | (unset) | Comma-separated Mattermost channel IDs to poll. |
 | `AP2_MM_BOT_USER_ID` | (unset) | Bot user ID (for self-message filtering). |

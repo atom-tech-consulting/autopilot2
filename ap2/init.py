@@ -15,7 +15,14 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import AUTOPILOT_DIR_NAME
+from .config import (
+    AUTOPILOT_DIR_NAME,
+    DEFAULT_CONTROL_TIMEOUT_S,
+    DEFAULT_IDEATION_MAX_TURNS,
+    DEFAULT_TASK_MAX_TURNS,
+    DEFAULT_TASK_TIMEOUT_S,
+    DEFAULT_VERIFY_TIMEOUT_S,
+)
 
 
 TASKS_TEMPLATE = (
@@ -225,6 +232,103 @@ IDEATION_STATE_TEMPLATE = (
 )
 
 
+# TB-278: documented `.cc-autopilot/env` scaffolding written by `ap2 init`
+# to fresh projects. Every common knob is listed with its code default
+# shown inline and the `KEY=VALUE` line commented out — the file
+# documents-by-default without overriding anything (the code defaults
+# still apply unless the operator uncomments).
+#
+# Idempotent + non-clobbering: `init_project` only writes this when
+# `.cc-autopilot/env` is ABSENT (operators put secrets / channel IDs in
+# it; an init re-run on an existing project must not stomp the file).
+#
+# The defaults shown here are pulled from `config.DEFAULT_*` constants
+# (DEFAULT_TASK_MAX_TURNS, DEFAULT_IDEATION_MAX_TURNS,
+# DEFAULT_CONTROL_TIMEOUT_S, DEFAULT_TASK_TIMEOUT_S,
+# DEFAULT_VERIFY_TIMEOUT_S) so the template never drifts from the source
+# of truth — a future bump to any constant updates the rendered template
+# the next time a fresh project is init'd. AGENT_MODEL / AGENT_EFFORT /
+# MM_CHANNELS / IDEATION_TRIGGER_TASK_COUNT have non-constant or "(unset)"
+# defaults that are inlined as string literals (matching how `ap2/README.md`
+# and `ap2/howto.md`'s `## Configuration knobs` enumerate them).
+#
+# Note: `.cc-autopilot/env` is gitignored (`NESTED_GITIGNORE_BLOCKS`
+# above), so the generated file is per-project local — the TEMPLATE
+# constant here is the committed source-of-truth; the rendered file is
+# not.
+ENV_TEMPLATE = f"""\
+# .cc-autopilot/env — per-project tunables for the ap2 daemon.
+#
+# Lines are KEY=VALUE. Blank lines and `#` comments are ignored. Quoted
+# values (single or double) are stripped. Shell exports take precedence
+# over this file at daemon-start (TB-271 `note_initial_applied`); a key
+# set ONLY in shell will keep that value even if added here later
+# (un-export + restart, or set here before daemon-start, to fix).
+#
+# Every knob below is commented out — the code default (shown inline)
+# applies unless you uncomment. Edit + save: the daemon hot-reloads
+# tunables at the top of every tick (TB-271 `env_reload`); a restart is
+# only required for the lifecycle knobs (`AP2_WEB_PORT`,
+# `AP2_WEB_DISABLED`, `AP2_MM_CHANNELS`) that wire stateful resources.
+#
+# See `ap2/howto.md` `## Configuration knobs` for the full list with
+# descriptions, and `ap2/config.py` for the in-source DEFAULT_* constants.
+
+# Project-wide regression gate. Runs after every successful task agent
+# commit; failure routes the task through retry like any other crash.
+# Unset (default) = no project-wide gate runs.
+# AP2_VERIFY_CMD=uv run pytest -q
+
+# Timeout (s) for `AP2_VERIFY_CMD`. Bump if your suite outgrows the
+# default; `ap2 doctor` warns when set below observed-typical successful
+# verify duration.
+# AP2_VERIFY_TIMEOUT_S={DEFAULT_VERIFY_TIMEOUT_S}
+
+# Per-task SDK query timeout (s). Bigger refactors blow past the
+# default; this project's own env bumps to 3600 (TB-122 hit
+# `error_max_turns` at 51 turns and the wall-clock cap also bit).
+# AP2_TASK_TIMEOUT_S={DEFAULT_TASK_TIMEOUT_S}
+
+# Max turns per task agent. Default raised from 50 → 200 in TB-278 after
+# TB-122 hit the old wall at 51 turns; bump further (e.g. 500) for
+# heavy-refactor projects.
+# AP2_TASK_MAX_TURNS={DEFAULT_TASK_MAX_TURNS}
+
+# Per-control-agent (mattermost / cron / ideation) SDK query timeout (s).
+# Default raised from 300 → 1200 in TB-278 — `xhigh`-effort ideation
+# routinely blew the old 5-min wall against a populated
+# progress.md / operator_log.md.
+# AP2_CONTROL_TIMEOUT_S={DEFAULT_CONTROL_TIMEOUT_S}
+
+# Max turns for the ideation agent. Default raised from 30 → 100 in
+# TB-278 after a goal.md rewrite mid-cycle hit `error_max_turns` at 31.
+# `AP2_CONTROL_TIMEOUT_S` still bounds runaway wall-clock.
+# AP2_IDEATION_MAX_TURNS={DEFAULT_IDEATION_MAX_TURNS}
+
+# Fire ideation when Ready+Backlog count is BELOW this threshold (and
+# Active is empty). Doubles as the per-cycle proposal-slot budget. Set
+# to 1 for the legacy "fire only when working queue is fully empty"
+# behavior; raise for projects with very fluid scope.
+# AP2_IDEATION_TRIGGER_TASK_COUNT=3
+
+# Model passed to `ClaudeAgentOptions` for task / control / verifier /
+# janitor agents. Empty-string env DOES propagate (only an ABSENT key
+# falls through to the default).
+# AP2_AGENT_MODEL=claude-opus-4-7
+
+# Global reasoning-effort level (low|medium|high|xhigh|max). Per-job
+# sub-knobs (`AP2_STATUS_REPORT_EFFORT`, `AP2_VERIFY_JUDGE_EFFORT`,
+# `AP2_JANITOR_JUDGE_EFFORT`) override this for their respective agents.
+# AP2_AGENT_EFFORT=xhigh
+
+# Comma-separated Mattermost channel IDs the daemon polls for `@bot`
+# mentions. Unset = no Mattermost integration. This is a LIFECYCLE knob
+# (FIXED_KNOBS) — changing it requires `ap2 stop && ap2 start` to
+# re-subscribe.
+# AP2_MM_CHANNELS=
+"""
+
+
 # Lines that go into <project>/.cc-autopilot/.gitignore. Grouped by purpose so
 # diffs against an existing file are minimal and readable.
 NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
@@ -314,6 +418,11 @@ class InitReport:
     goal_md_created: bool = False
     ideation_state_md_created: bool = False
     insights_dir_created: bool = False
+    # TB-278: track whether `.cc-autopilot/env` got the documented template
+    # this run. False on re-init when the operator already has a populated
+    # env file (the template MUST NOT clobber operator secrets / channel
+    # IDs); True only on first init of a fresh project.
+    env_template_created: bool = False
 
     def print(self) -> None:
         if self.nested_gitignore_added:
@@ -334,6 +443,7 @@ class InitReport:
         print(f"  goal.md: {'created (template — fill in)' if self.goal_md_created else 'exists'}")
         print(f"  .cc-autopilot/ideation_state.md: {'created (placeholder)' if self.ideation_state_md_created else 'exists'}")
         print(f"  .cc-autopilot/insights/: {'created (placeholder index)' if self.insights_dir_created else 'exists'}")
+        print(f"  .cc-autopilot/env: {'created (commented template)' if self.env_template_created else 'exists (kept)'}")
         if self.claude_md_created:
             print(f"  CLAUDE.md: created (with ## Autopilot)")
         elif self.claude_md_autopilot_added:
@@ -447,6 +557,12 @@ def init_project(project_root: Path) -> InitReport:
     ideation_state_md_created = _ensure_file(
         autopilot_dir / "ideation_state.md", IDEATION_STATE_TEMPLATE,
     )
+    # TB-278: scaffold the documented `.cc-autopilot/env` template ONLY when
+    # the file is absent. `_ensure_file` returns False without writing when
+    # the path exists, preserving operator secrets / channel IDs / tuned
+    # overrides on every re-init. The path itself is gitignored
+    # (`NESTED_GITIGNORE_BLOCKS`); the TEMPLATE source above is committed.
+    env_template_created = _ensure_file(autopilot_dir / "env", ENV_TEMPLATE)
     claude_md_created, autopilot_added = _ensure_claude_md_autopilot(project_root / "CLAUDE.md")
 
     return InitReport(
@@ -461,4 +577,5 @@ def init_project(project_root: Path) -> InitReport:
         goal_md_created=goal_md_created,
         ideation_state_md_created=ideation_state_md_created,
         insights_dir_created=insights_dir_created,
+        env_template_created=env_template_created,
     )

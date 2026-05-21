@@ -59,10 +59,19 @@ from ap2.status_report import (
 
 @pytest.fixture
 def cfg(tmp_path: Path) -> Config:
-    """Initialized project. The env file is NOT created by `init_project`;
-    individual tests create it explicitly so the missing-file branch
-    can be exercised separately."""
+    """Initialized project with the documented env template removed.
+
+    TB-278 grew `init_project` to scaffold a commented `.cc-autopilot/env`
+    template by default; this module's tests pre-date that change and
+    drive the missing-file / explicit-content branches by creating the
+    file themselves. Strip the scaffolded template here so each test
+    starts from a clean no-env-file state and decides whether to write
+    one via `_write_env_file` (mirrors the pre-TB-278 fixture contract).
+    """
     init_project(tmp_path)
+    env_file = tmp_path / ".cc-autopilot" / "env"
+    if env_file.exists():
+        env_file.unlink()
     c = Config.load(tmp_path)
     c.ensure_dirs()
     return c

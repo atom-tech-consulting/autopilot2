@@ -42,11 +42,30 @@ DEFAULT_TICK_INTERVAL_S = 30
 DEFAULT_MM_TICK_INTERVAL_S = 10
 DEFAULT_EVENT_CONTEXT_SIZE = 50
 DEFAULT_TASK_TIMEOUT_S = 1200  # 20 min per SDK query
-DEFAULT_CONTROL_TIMEOUT_S = 300  # 5 min for mattermost/cron agents
+# TB-278: bumped from 300s (5 min) to 1200s (20 min) — ideation / mattermost /
+# cron agents under `xhigh` effort against a populated progress.md /
+# operator_log.md / ideation_state.md routinely blew the old 5-min wall.
+# This project's own `.cc-autopilot/env` overrides to 1800s; the bumped
+# default just spares fresh projects from rediscovering the same ceiling.
+DEFAULT_CONTROL_TIMEOUT_S = 1200  # 20 min for mattermost/cron agents
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_VERIFY_TIMEOUT_S = 600  # 10 min for the project-wide verify gate
 DEFAULT_AUTO_DIAGNOSE_IDLE_THRESHOLD_S = 10800  # 3h — TB-71 watchdog
 DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S = 21600  # 6h — re-fire spam guard
+
+# TB-278: max-turn caps promoted to named constants alongside the
+# DEFAULT_*_TIMEOUT_S family above so every battle-tested default sits in
+# one discoverable place. Defaults raised from the old inline literals
+# (task 50, ideation 30) to values this project's `.cc-autopilot/env`
+# already validated — TB-122 hit `error_max_turns` at 51 turns on a task,
+# and a 2026-05-12 manual ideate hit 31 turns mid-goal-rewrite. Fresh
+# projects start from those lessons rather than rediscovering the walls.
+# DEFAULT_CONTROL_MAX_TURNS keeps its current value (15) — listed here for
+# consistency so the env-template scaffold can document a single source
+# of truth for every max-turn knob.
+DEFAULT_TASK_MAX_TURNS = 200
+DEFAULT_CONTROL_MAX_TURNS = 15
+DEFAULT_IDEATION_MAX_TURNS = 100
 
 
 @dataclass

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ap2.config import Config
 from ap2.init import (
+    ENV_TEMPLATE,
     GOAL_TEMPLATE,
     NESTED_GITIGNORE_BLOCKS,
     ROOT_GITIGNORE_BLOCKS,
@@ -430,3 +431,150 @@ def test_partial_state_only_appends_missing(tmp_path: Path):
     assert "*.bak" in report.nested_gitignore_added
     # Already-present entries don't show up as added.
     assert "events.jsonl" not in report.nested_gitignore_added
+
+
+# ---------------------------------------------------------------------------
+# TB-278: .cc-autopilot/env documented template scaffolding
+# ---------------------------------------------------------------------------
+
+
+def test_creates_env_template_when_missing(tmp_path: Path):
+    """Fresh project gets a documented `.cc-autopilot/env` template so
+    operators see the available tunables + their defaults instead of
+    discovering them by reading source. The template is commented-out
+    so it documents-by-default without overriding code defaults.
+
+    Pin:
+      - File exists at `.cc-autopilot/env`.
+      - Report flag flipped to True (first-init signal).
+      - Content matches `ENV_TEMPLATE` verbatim.
+      - The common knobs the operator might tune are mentioned (each
+        as a `# AP2_FOO=<default>` commented line), with their default
+        value shown inline (sourced from `config.DEFAULT_*` so the
+        rendered template never drifts from source-of-truth).
+      - The template comment-fences EVERY knob line (no uncommented
+        `KEY=VALUE` would override the code default unexpectedly).
+    """
+    report = init_project(tmp_path)
+    env = tmp_path / ".cc-autopilot" / "env"
+
+    assert env.exists()
+    assert report.env_template_created is True
+    text = env.read_text()
+    assert text == ENV_TEMPLATE, (
+        "init_project must write the canonical ENV_TEMPLATE verbatim "
+        "when `.cc-autopilot/env` is absent"
+    )
+
+    # The operator-tunable knobs the briefing names must each appear
+    # commented-out with their default inline. Pin existence + the
+    # leading `# ` fence so a future refactor that flips one to live
+    # (silently overriding the code default) trips here.
+    for knob in (
+        "AP2_VERIFY_CMD",
+        "AP2_VERIFY_TIMEOUT_S",
+        "AP2_TASK_TIMEOUT_S",
+        "AP2_TASK_MAX_TURNS",
+        "AP2_CONTROL_TIMEOUT_S",
+        "AP2_IDEATION_MAX_TURNS",
+        "AP2_IDEATION_TRIGGER_TASK_COUNT",
+        "AP2_AGENT_MODEL",
+        "AP2_AGENT_EFFORT",
+        "AP2_MM_CHANNELS",
+    ):
+        # Every knob mention must sit behind a `# ` so it's prose, not a
+        # live override. The check is per-line: any uncommented
+        # `KNOB=` line would be a regression.
+        for line in text.splitlines():
+            if knob in line and "=" in line:
+                stripped = line.lstrip()
+                assert stripped.startswith("# "), (
+                    f"env template must keep {knob!r} commented-out so the "
+                    f"file documents without overriding code defaults; "
+                    f"found live line: {line!r}"
+                )
+
+
+def test_env_template_default_values_match_config_constants(tmp_path: Path):
+    """The `ENV_TEMPLATE` source uses `config.DEFAULT_*` constants
+    interpolated into the rendered string, so the template's documented
+    defaults track the code's single source of truth. A bump to any
+    `DEFAULT_*` in `config.py` flows through to the rendered file
+    without a manual edit. Pin the round-trip so a future refactor
+    that hardcodes a literal in the template (silently drifting from
+    the real default) trips here.
+    """
+    from ap2.config import (
+        DEFAULT_CONTROL_TIMEOUT_S,
+        DEFAULT_IDEATION_MAX_TURNS,
+        DEFAULT_TASK_MAX_TURNS,
+        DEFAULT_TASK_TIMEOUT_S,
+        DEFAULT_VERIFY_TIMEOUT_S,
+    )
+
+    init_project(tmp_path)
+    text = (tmp_path / ".cc-autopilot" / "env").read_text()
+
+    # The template renders `# AP2_FOO=<DEFAULT>` for each constant-backed
+    # knob. Pin both directions: the comment-line is present AND the
+    # value matches the live constant.
+    for knob, expected in (
+        ("AP2_TASK_TIMEOUT_S", DEFAULT_TASK_TIMEOUT_S),
+        ("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS),
+        ("AP2_CONTROL_TIMEOUT_S", DEFAULT_CONTROL_TIMEOUT_S),
+        ("AP2_IDEATION_MAX_TURNS", DEFAULT_IDEATION_MAX_TURNS),
+        ("AP2_VERIFY_TIMEOUT_S", DEFAULT_VERIFY_TIMEOUT_S),
+    ):
+        needle = f"# {knob}={expected}"
+        assert needle in text, (
+            f"env template must document {knob}'s default from "
+            f"config.{knob.replace('AP2_', 'DEFAULT_')}; expected to "
+            f"find {needle!r}; template:\n{text!r}"
+        )
+
+
+def test_does_not_clobber_existing_env_file(tmp_path: Path):
+    """A pre-existing `.cc-autopilot/env` with operator secrets / channel
+    IDs / tuned overrides MUST survive `init_project` re-run unchanged.
+    Idempotency contract: init never stomps an operator's env (the file
+    is gitignored, project-scoped, and typically carries
+    AP2_MM_CHANNELS / AP2_VERIFY_CMD / agent-effort overrides).
+    """
+    autopilot = tmp_path / ".cc-autopilot"
+    autopilot.mkdir()
+    env = autopilot / "env"
+    # Realistic operator content — secrets, channel IDs, real overrides.
+    pre = (
+        "# Operator-curated; init must NOT touch this.\n"
+        "AP2_VERIFY_CMD=uv run pytest -q\n"
+        "AP2_VERIFY_TIMEOUT_S=1800\n"
+        "AP2_MM_CHANNELS=u4e41y7gr78zupikzus8huw6kr\n"
+        "AP2_TASK_MAX_TURNS=500\n"
+    )
+    env.write_text(pre)
+
+    report = init_project(tmp_path)
+
+    # File content is byte-identical post-init.
+    assert env.read_text() == pre, (
+        "init_project clobbered an existing .cc-autopilot/env — "
+        "operator overrides / secrets / channel IDs would be lost"
+    )
+    # Report flag flipped to False so the operator-visible print and any
+    # caller-side branching see "kept existing", not "wrote template".
+    assert report.env_template_created is False
+
+
+def test_env_template_scaffold_is_idempotent(tmp_path: Path):
+    """Second `init_project` call is a no-op for the env file (matches the
+    goal.md / ideation_state.md / insights_dir idempotency contract).
+    The first init wrote the template; the second sees the file already
+    present and reports `env_template_created=False`."""
+    init_project(tmp_path)
+    env = tmp_path / ".cc-autopilot" / "env"
+    first = env.read_text()
+
+    report2 = init_project(tmp_path)
+
+    assert report2.env_template_created is False
+    assert env.read_text() == first

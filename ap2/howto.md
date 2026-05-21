@@ -1158,15 +1158,18 @@ restart, or set the value via the file before daemon-start).
 - `AP2_MM_TICK_S` (10) — Mattermost polling tick interval (separate
   loop, TB-122).
 - `AP2_TASK_TIMEOUT_S` (1200) — per-task SDK query timeout.
-- `AP2_TASK_MAX_TURNS` (50) — max turns per task agent.
-- `AP2_CONTROL_TIMEOUT_S` (300) — per-control-agent timeout (cron,
-  ideation, MM handler).
+- `AP2_TASK_MAX_TURNS` (200) — max turns per task agent (raised from
+  50 in TB-278 after TB-122 hit `error_max_turns` at 51 turns; this
+  project's own env bumps further to 500 for heavy refactors).
+- `AP2_CONTROL_TIMEOUT_S` (1200) — per-control-agent timeout (cron,
+  ideation, MM handler). Raised from 300s in TB-278 — `xhigh`-effort
+  ideation routinely blew the old 5-min wall.
 - `AP2_CONTROL_MAX_TURNS` (15) — max turns per control agent (cron
   + MM handler share this default; ideation has its own).
-- `AP2_IDEATION_MAX_TURNS` (30) — max turns for the ideation agent
-  (bumped from the legacy `AP2_CONTROL_MAX_TURNS` default because
-  ideation's Step 0 / 0.5 / 1.5 chain runs deeper than other control
-  jobs).
+- `AP2_IDEATION_MAX_TURNS` (100) — max turns for the ideation agent
+  (raised from 30 in TB-278 after a goal.md rewrite mid-cycle hit
+  `error_max_turns` at 31 turns; ideation's Step 0 / 0.5 / 1.5 chain
+  runs deeper than other control jobs).
 - `AP2_MAX_RETRIES` (3) — failed-task retries before Frozen.
 - `AP2_EVENT_CONTEXT` (50) — count of recent events inlined into agent
   prompts.

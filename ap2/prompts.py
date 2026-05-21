@@ -287,7 +287,7 @@ trusts the commit subject naively; you, as the agent, must do better.
 ## Long-running work — use `pipeline_task_start`
 Before you start, estimate how long your work will take to run end-to-end.
 The daemon dispatches one task at a time inside `await sdk.query(...)` and
-will hard-cap the run at `AP2_TASK_TIMEOUT_S` (default 1h). If your work
+will hard-cap the run at `AP2_TASK_TIMEOUT_S` (default 1200s / 20 min). If your work
 will exceed ~5 minutes of wall-clock time — Polygon-class data fetches,
 full-history backtests, parameter sweeps, ML training, anything against a
 rate-limited external API — you MUST dispatch it via the

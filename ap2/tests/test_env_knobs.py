@@ -233,9 +233,9 @@ def test_control_max_turns_invalid_value_raises(tmp_path, monkeypatch):
 # AP2_CONTROL_MAX_TURNS cap.
 #
 # Read site: `ap2/ideation.py` line 510 (`_run_ideation`). Bare `int(...)`
-# with no fallback; default `IDEATION_MAX_TURNS_DEFAULT = 30` (bumped from
-# the legacy cron-default 15 because the assessment + failure-review flow
-# routinely needs ~10-15 turns).
+# with no fallback; default `IDEATION_MAX_TURNS_DEFAULT` (now aliased to
+# `config.DEFAULT_IDEATION_MAX_TURNS` = 100, raised from the prior 30 in
+# TB-278 after a goal.md rewrite mid-cycle hit `error_max_turns` at 31).
 #
 # Precedence (mirrors the AP2_VERIFY_JUDGE_EFFORT vs AP2_AGENT_EFFORT shape
 # in test_verify_retry_diff.py): the per-site env knob wins on the
@@ -296,15 +296,22 @@ def _drive_force_ideate(tmp_path, monkeypatch, calls):
     return calls[0]
 
 
-def test_ideation_max_turns_default_is_thirty_when_env_unset(tmp_path, monkeypatch):
-    """Happy path: env unset → `_run_ideation` passes `max_turns=30` (the
-    `IDEATION_MAX_TURNS_DEFAULT` constant) to `_run_control_agent`. A
-    regression that drops the env read OR flips the constant trips
-    this test."""
+def test_ideation_max_turns_default_is_one_hundred_when_env_unset(tmp_path, monkeypatch):
+    """Happy path: env unset → `_run_ideation` passes `max_turns=100` (the
+    `IDEATION_MAX_TURNS_DEFAULT` alias of `config.DEFAULT_IDEATION_MAX_TURNS`,
+    raised from 30 in TB-278) to `_run_control_agent`. A regression that
+    drops the env read OR flips the constant trips this test."""
+    from ap2.config import DEFAULT_IDEATION_MAX_TURNS
+
     monkeypatch.delenv("AP2_IDEATION_MAX_TURNS", raising=False)
     calls = _stub_run_control_agent_capturing_max_turns(monkeypatch)
     captured = _drive_force_ideate(tmp_path, monkeypatch, calls)
-    assert captured["max_turns"] == ideation.IDEATION_MAX_TURNS_DEFAULT == 30
+    assert (
+        captured["max_turns"]
+        == ideation.IDEATION_MAX_TURNS_DEFAULT
+        == DEFAULT_IDEATION_MAX_TURNS
+        == 100
+    )
 
 
 def test_ideation_max_turns_env_override_flows_through(tmp_path, monkeypatch):

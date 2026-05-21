@@ -36,7 +36,7 @@ from . import (
     web,
 )
 from .board import Board, board_file_lock
-from .config import Config
+from .config import Config, DEFAULT_TASK_MAX_TURNS
 from .cron import (
     CronJob,
     bootstrap as bootstrap_cron,
@@ -214,7 +214,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 allowed_tools=TASK_AGENT_TOOLS,
                 disallowed_tools=_TASK_DISALLOWED_TOOLS,
                 permission_mode="bypassPermissions",
-                max_turns=int(os.environ.get("AP2_TASK_MAX_TURNS", 50)),
+                max_turns=int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS)),
                 setting_sources=["project"],
                 stderr=_stderr_sink,
                 model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),

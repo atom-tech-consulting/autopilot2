@@ -18,14 +18,17 @@ This module mirrors TB-205's `test_env_knobs.py` 17-test layout shape
 directly so a refactor surfaces here rather than at runtime).
 
   1. AP2_TASK_MAX_TURNS         — `daemon.run_task` task-agent `max_turns` cap.
-                                  Bare `int(os.environ.get(..., 50))` so the
-                                  invalid-value contract raises ValueError
-                                  (caught + wrapped by run_task's outer
-                                  try/except as a `task_error` event).
-                                  Per-call-site source pin proves the literal
-                                  expression and its default; behavior tests
-                                  re-evaluate the same expression against the
-                                  scoped env.
+                                  Bare `int(os.environ.get(..., DEFAULT_TASK_MAX_TURNS))`
+                                  so the invalid-value contract raises
+                                  ValueError (caught + wrapped by
+                                  run_task's outer try/except as a
+                                  `task_error` event). Per-call-site
+                                  source pin proves the literal
+                                  expression and its default;
+                                  behavior tests re-evaluate the same
+                                  expression against the scoped env.
+                                  Default raised from 50 → 200 in TB-278
+                                  (battle-tested defaults pass).
   2. AP2_JANITOR_JUDGE_EFFORT   — `janitor._judge_finding` judge SDK `effort`.
                                   `os.environ.get(..., os.environ.get(
                                   "AP2_AGENT_EFFORT", "high"))` — per-site
@@ -68,6 +71,7 @@ from typing import AsyncIterator
 import pytest
 
 from ap2 import daemon, janitor, sandbox
+from ap2.config import DEFAULT_TASK_MAX_TURNS
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +189,8 @@ def _drive_judge_finding(tmp_path: Path, sdk: _ScriptedJudgeSDK) -> tuple[str, s
 #
 # Read site: `ap2/daemon.py` line 208 (`run_task` → `_consume()` →
 # `sdk.ClaudeAgentOptions(max_turns=int(os.environ.get(...)))`). Bare
-# `int(...)` with no fallback; default 50.
+# `int(...)` with no fallback; default `DEFAULT_TASK_MAX_TURNS` (200 —
+# raised from 50 in TB-278; see `config.py`).
 #
 # Driving `run_task` end-to-end requires git init + Board + MCP server +
 # a heavy fixture. Following the same pattern as
@@ -206,26 +211,40 @@ def _drive_judge_finding(tmp_path: Path, sdk: _ScriptedJudgeSDK) -> tuple[str, s
 # ===========================================================================
 
 
-_TASK_MAX_TURNS_EXPR = 'int(os.environ.get("AP2_TASK_MAX_TURNS", 50))'
+# TB-278: source-grep now anchors on the `DEFAULT_TASK_MAX_TURNS`
+# named constant rather than the inline literal so a future bump to
+# the constant in `config.py` propagates without touching this test.
+# The literal `200` is asserted only via the bare in-env-scoped
+# expression below (which pulls from `config.DEFAULT_TASK_MAX_TURNS`
+# itself for the round-trip).
+_TASK_MAX_TURNS_EXPR = (
+    'int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS))'
+)
 
 
-def test_task_max_turns_default_is_fifty_when_env_unset(monkeypatch):
+def test_task_max_turns_default_is_two_hundred_when_env_unset(monkeypatch):
     """Happy path: `daemon.run_task` reads AP2_TASK_MAX_TURNS via
-    `int(os.environ.get(..., 50))`. With env unset, the call-site
-    expression evaluates to 50 — the in-source default literal. A bump
-    of the default trips this test (source-grep flags the literal
-    drift, behavior assert flags the parsed value drift)."""
+    `int(os.environ.get(..., DEFAULT_TASK_MAX_TURNS))`. With env unset,
+    the call-site expression evaluates to 200 — the
+    `config.DEFAULT_TASK_MAX_TURNS` constant (raised from 50 in
+    TB-278). A bump of the constant trips this test (source-grep
+    flags the expression drift, behavior assert flags the parsed
+    value drift)."""
     src = inspect.getsource(daemon.run_task)
     assert _TASK_MAX_TURNS_EXPR in src, (
         f"regression: `daemon.run_task` no longer reads AP2_TASK_MAX_TURNS "
         f"with the bare `{_TASK_MAX_TURNS_EXPR}` parse — either the env "
-        "key was renamed or the default literal drifted from 50"
+        "key was renamed or the named-constant default drifted"
     )
 
     monkeypatch.delenv("AP2_TASK_MAX_TURNS", raising=False)
     # Re-evaluate the call-site expression against the scoped env. This
     # is the EXACT code path `run_task`'s `_consume()` runs every call.
-    assert int(os.environ.get("AP2_TASK_MAX_TURNS", 50)) == 50
+    assert int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS)) == 200
+    assert DEFAULT_TASK_MAX_TURNS == 200, (
+        "TB-278: DEFAULT_TASK_MAX_TURNS must be 200; bump this assertion "
+        "(and the env template) deliberately if you raise it further"
+    )
 
 
 def test_task_max_turns_env_override_flows_through_to_run_task(monkeypatch):
@@ -237,7 +256,7 @@ def test_task_max_turns_env_override_flows_through_to_run_task(monkeypatch):
     assert _TASK_MAX_TURNS_EXPR in src
 
     monkeypatch.setenv("AP2_TASK_MAX_TURNS", "30")
-    assert int(os.environ.get("AP2_TASK_MAX_TURNS", 50)) == 30
+    assert int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS)) == 30
 
 
 def test_task_max_turns_invalid_value_raises(monkeypatch):
@@ -259,7 +278,7 @@ def test_task_max_turns_invalid_value_raises(monkeypatch):
 
     monkeypatch.setenv("AP2_TASK_MAX_TURNS", "abc")
     with pytest.raises(ValueError):
-        int(os.environ.get("AP2_TASK_MAX_TURNS", 50))
+        int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS))
 
 
 # ===========================================================================
