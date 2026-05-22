@@ -160,6 +160,74 @@ on tag X — pin tag X as auto-approve-gating") belongs in
 log ack, so future auto-approve guard-tuning starts with fresh
 evidence.
 
+## Current focus: operator-legible reporting and monitoring
+
+The end-to-end-automation focus is exhausted — auto-approve, auto-unfreeze,
+cost guards, and multi-focus advance all shipped, so the operator *can* now
+walk away. But "walk away and stay informed" has a second half the loop never
+addressed: when the operator checks back, the reporting surface doesn't
+actually inform them efficiently.
+
+The limiting factor shifts from "can the operator leave?" to "when they glance
+at an update, do they understand it?" Today's status-report cron fires on a
+fixed clock, refers to work by bare `TB-N` and aggregate board counts (`3B`,
+`1A`), and repeats near-identical content tick after tick. An operator running
+several ap2 projects in parallel — who does not hold any one project's
+TB-numbering in their head — has to ask follow-ups or open the project to
+decode a report. It informs poorly and repeats noisily, so it gets tuned out —
+defeating the monitoring half of the walk-away promise as surely as constant
+approvals defeated the automation half.
+
+This focus makes the operator-facing reporting/monitoring surface smart about
+when to speak and rich enough to be understood cold. Framing: every report
+should be reviewable by an operator who hasn't looked at this project since the
+last report and is juggling others — self-contained, project-identified,
+delta-focused, fired only when there's something worth saying.
+
+(1) **Context-poor content**: reports identify work by bare `TB-N` + counts,
+assuming the reader holds the board in their head. Deliver: reports that name
+tasks by title + a one-line "what/why", lead with project identity, and frame
+state so a cold reader understands it without opening the repo. Delete-test: if
+not shipped, the operator must look up every TB-N and re-derive state from
+counts — the report indexes, it doesn't inform.
+
+(2) **Clock-driven repetition**: the cron fires on a fixed interval and
+re-states unchanged content; the existing "skip if no activity" gate is too
+coarse (suppresses only the fully-idle case, not near-duplicate repetition).
+Deliver: significance-gated, delta-based reporting — fires on report-worthy
+events (task completed / failed / frozen, focus advanced, decision needed,
+anomaly, milestone), reports the change since last update rather than
+re-stating the board, with explicit dedup so two consecutive reports never
+repeat unchanged content. Delete-test: if not shipped, clock-driven noise
+trains the operator to ignore the channel, burying the signal.
+
+(3) **Shallow monitoring**: the periodic report is the only push surface;
+attention-needing conditions (a task stuck / looping, repeated verification
+failures, validator-judge noise, cost-cap approach, a pending decision) are
+buried in it or only visible by pulling `ap2 status`. Deliver: proactive,
+legible surfacing of those conditions so a multi-project operator can triage at
+a glance which project needs them and why, in plain terms — not raw event types
+or counts. Delete-test: if not shipped, monitoring stays pull-not-push; the
+operator must poll each project to find problems.
+
+Done when:
+- A status report identifies tasks by title + one-line summary (never bare
+  `TB-N` alone) and leads with the project name — a reader who hasn't seen the
+  project since the last report understands it without a follow-up or opening
+  the repo.
+- Reports are significance-gated and delta-based: no two consecutive reports
+  repeat unchanged content; a report fires on report-worthy change, not purely
+  on the clock.
+- Attention-needing conditions (stuck / failed / frozen tasks, decisions-needed,
+  cost or validator-judge anomalies) are surfaced proactively in
+  operator-legible terms, distinct from routine progress updates.
+
+Scope guard: per-project legibility, NOT cross-project aggregation — each
+daemon's reports stand alone and identify their own project (cross-project
+orchestration stays a non-goal). Refinements change HOW the status /
+decisions surfaces speak, not whether the skip-when-idle and escalation
+behaviors exist.
+
 ## Non-goals
 
 - **Generic task scheduler / project management tool**: ap2 is opinionated

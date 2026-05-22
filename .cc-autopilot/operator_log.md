@@ -226,3 +226,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-21T05:24:08Z — applied operator-queued add_backlog → TB-277
 - 2026-05-21T06:25:56Z — applied operator-queued add_backlog → TB-278
 - 2026-05-21T06:27:25Z — applied operator-queued add_backlog → TB-279
+- 2026-05-22T23:09:20Z — applied operator-queued update_goal
+- 2026-05-22T23:09:20Z — operator updated goal.md (extend roadmap with focus 'operator-legible reporting and monitoring' — smart-cadence + context-rich reports for multi-project monitoring)
