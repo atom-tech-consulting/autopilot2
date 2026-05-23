@@ -100,3 +100,12 @@ fence concerns.
   belongs to the per-section tasks already shipped or planned).
 - Web UI rendering of skip events (events.jsonl already carries
   them for `/events` view; no new UI work).
+## Attempts
+
+### 2026-05-23 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260523T015743Z-TB-281.prompt.md`, `stream: .cc-autopilot/debug/20260523T015743Z-TB-281.stream.jsonl`, `messages: .cc-autopilot/debug/20260523T015743Z-TB-281.messages.jsonl`

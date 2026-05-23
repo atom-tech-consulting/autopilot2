@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/content-fingerprint-dedup-gate-so-consec.md",
   "focus_anchor": "current focus operator legible reporting and monitoring",
+  "outcome": {
+    "commit": "33f946e",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-23T02:20:40Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-23T01:40:35Z",
   "tb_id": "TB-281",
   "why_now": "today's `_status_report_should_skip` (`ap2/status_report.py`\nL927) suppresses only fully-idle windows where zero interesting\nevents landed; a window with a single new `task_complete` followed\nby another single-event window posts two near-identical bodies in a\nrow. `ap2/cron.py` L196-210 is purely interval-driven \u2014 no\ncontent-level significance gate exists, no `cron_skipped\nreason=duplicate_content` event type registered. Three consecutive\nlow-delta posts train the operator to ignore the channel, defeating\nthe monitoring half of the walk-away promise goal.md L201-202 names\nexplicitly."
