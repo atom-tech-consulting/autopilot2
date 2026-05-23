@@ -1,164 +1,143 @@
 # Ideation State
 
-_Last updated: 2026-05-21T00:23Z by ideation cron_
+_Last updated: 2026-05-23T01:32Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 1B / 0P / 147C / 3F. Since prior cycle
-(2026-05-20T12:16Z, board 0A/0R/1B/0P/144C/3F), the operator drove
-substantial activity DIRECTLY (not via ideation): approved TB-273
-at 18:57Z, added TB-274 at 16:38Z (post-split doc reconciliation),
-added TB-275 at 23:38Z + acked `roadmap_complete` with explicit note
-"ideation stays parked until the roadmap is extended", added TB-276
-at 00:02Z (sandbox asset deploy unification). All three queued tasks
-drained and completed: TB-273 (`b130e80`), TB-274 (`18744f5`),
-TB-275 (`9656357`). TB-276 carries `@blocked:review` pending operator
-approve. Mission alignment unchanged — every Complete this window
-served the four-axis end-to-end-automation focus or its
-agent-friendliness adjacent (post-split doc citations). The
-operator's ack-note is the load-bearing operator-channel signal:
-ideation is now explicitly parked pending `ap2 update-goal`, not
-just operationally idle.
+Cycle entry: board 0A / 0R / 0B / 0P / 151C / 3F; focus pointer at
+`operator-legible reporting and monitoring (2 of 2)` (new — operator
+ran `ap2 update-goal` at 2026-05-22T23:09:20Z extending the roadmap
+with this second focus heading, then forced ideation at
+2026-05-23T01:31:56Z). The end-to-end-automation focus from prior
+cycle is now "exhausted" per the operator's pre-pivot ack
+(2026-05-20T23:38:50Z); the focus_advanced pointer is on the new
+heading. Recent Completes (last ~48h) all served pre-pivot work or
+agent-friendliness adjacents — they're not signals against the new
+focus, but they confirm the pre-pivot foundation (auto-approve /
+auto-unfreeze / cost guards / multi-focus advance) shipped before the
+operator extended the roadmap, exactly the sequencing goal.md L40-49
+describes.
 
-Recent Completes considered (last ~6h):
+Recent Completes considered (last ~48h):
 
-- TB-275 (`9656357`, 2026-05-21T00:22Z) — daemon dispatch-halt removed;
-  `roadmap_complete` now parks ideation trigger ONLY; queued operator
-  Backlog tasks always drain (closed regression in TB-226 framing).
-- TB-274 (`18744f5`, 2026-05-21T00:06Z) — post-split (TB-261/262/263/
-  264/265) architecture.md + howto.md + SKILL.md citation refresh.
-- TB-273 (`b130e80`, 2026-05-20T23:53Z) — ideation-prompt shell-pitfall
-  sync to howto's authoritative four-pitfall list + regression-pin.
-- TB-272 (`8c80438`, 2026-05-20T06:29Z) — validator_judge_noisy
-  discriminator wired into auto-approve pause_reason chain.
-- TB-270 (`58a562e`, 2026-05-20T05:59Z) — validator-judge payload
-  Goal+Scope slice.
+- TB-279 (`b1f6642`, 2026-05-21T??Z) — operator-doc reconciliation:
+  README de-dup, sandbox runbook refresh.
+- TB-278 (`4799081`) — daemon-defaults bump + `.cc-autopilot/env`
+  template on init.
+- TB-277 (`905371e`) — daemon_state.json gitignore + drift-gate.
+- TB-276 (`d563dbd`) — sandbox `sync-assets` unification.
+- TB-275 (`9656357`) — `roadmap_complete` halt scope reduced (dispatch
+  always drains, ideation alone parks).
 
 ## Current focus assessment
 
-- **Current focus: end-to-end automation (goal.md L38-151, four axes)**
-  - Progress so far:
-    - Axis 1 (manual-approval bottleneck): TB-223/224/232/234/241/243/
-      245/247/250/256/258/269/270/272 — auto-approve gate, dep-coherence
-      judge, status surfaces, fail-open safety floor, validator_judge_
-      noisy discriminator.
-    - Axis 2 (failure-recovery): TB-225/229/233/239/236/252 — auto-
-      unfreeze gate, `BriefingFix:` prefix teaching, doctor audits.
-    - Axis 3 (cost/blast-radius): TB-224/227/228/234 — per-task + per-
-      window token caps, `task_error` halt + visibility.
-    - Axis 4 (multi-focus): TB-226/237/242/244/246/275 — focus pointer,
-      `roadmap_complete` halt scope reduced (TB-275: dispatch always
-      drains, ideation alone parks), status + cron-digest surfaces,
-      `_maybe_ideate` skip gate.
-    - Agent-friendliness adjacent: TB-253/254/261/262/263/264/265/266/
-      267/268/271/273/274 — test-shield, JSON util, source + test
-      splits, hot-reload env, ideation-prompt pitfall sync, post-split
-      doc reconciliation.
+- **Current focus: operator-legible reporting and monitoring**
+  - Progress so far: zero Completes against this heading — the focus
+    heading was added 2026-05-22T23:09:20Z (operator_log.md L230) and
+    no proposals have landed yet. Pre-pivot Completes that touched
+    the same surfaces are foundational but don't address this focus's
+    deliverables: TB-228 added the automation-loop digest block,
+    TB-244 added focus-rotation digest, TB-245/258/259 added more
+    sub-blocks, TB-243/227 added pull-side surfaces. The push surface
+    grew vertically (more digest blocks) but goal.md L186-211's three
+    failure modes (context-poor TB-N rendering / clock-driven
+    repetition / shallow monitoring) are unaddressed.
   - Gaps:
-    (1) **Roadmap exhausted; operator explicit-parked ideation** —
-        `ap2 status` `decisions needed (1): Roadmap complete: all 1
-        `## Current focus:` heading(s) in `goal.md` are exhausted`.
-        Operator ack 2026-05-20T23:38:50Z: "ideation stays parked
-        until the roadmap is extended". No further ideation lane
-        until the operator runs `ap2 update-goal` to add a new
-        `## Current focus:` heading or formally retires the loop.
-        Load-bearing for this cycle's proposals-count = 0.
-    (2) **TB-276 pending operator review** — Backlog since 00:02Z
-        (sandbox asset deploy unification). Operator-curated cadence;
-        no further proposal in this lane until approved/rejected.
-    (3) **No operational data yet on `AP2_AUTO_APPROVE` /
-        `AP2_AUTO_UNFREEZE`** — `ap2 status` confirms `auto-approve:
-        disabled`. Every gate wired (TB-223 → TB-272); ideation has
-        no signal to follow up on until the operator enables one and
-        the loop runs through real cases.
-    (4) **TB-269/270 post-deployment re-measurement** — time-locked
-        (≥7d wall-clock from 2026-05-20T04:40Z = 2026-05-27Z). Current
-        24h figure (`0 fail, 7 timeout`, status header above) trending
-        down from the 13-timeout pre-fix baseline but still dominated
-        by pre-fix events.
-    (5) **TB-255 `grep -cE` shell-bullet auto-unfreeze coverage** —
-        deferred. No n=2 recurrence (TB-270 `!`-miss was n=1; TB-273
-        preventive sync addressed forward). Operator-rejection
-        patterns (TB-172, TB-240) still name whack-a-mole risk.
-  - Status: `exhausted-needs-operator`
-  - Reasoning: All four axes pre-deployment ready; the operator has
-    explicitly closed the ideation channel for this focus with a
-    one-line operator_log ack ("ideation stays parked until the
-    roadmap is extended"). The unblock-condition is operator-only
-    (`ap2 update-goal` to extend, or `ap2 pause` to formally retire);
-    ideation cannot propose its way out.
+    (1) **Context-poor reports** (goal.md L187-192 / Done-when L214-217):
+        `STATUS_REPORT_PROMPT` (status_report.py L740-744) instructs
+        the agent to write bullets as `TB-N + 1-line outcome + short
+        SHA` — agent-authored prose, not daemon-rendered title-bearing
+        lines. Headline is `**Autopilot Status Report**`, no project
+        identifier — multi-project operators must alt-tab to identify
+        the source. No `Config.project_name` field exists; no
+        `AP2_PROJECT_NAME` env knob (grep returns nothing).
+    (2) **Clock-driven repetition** (goal.md L194-202 / Done-when
+        L218-220): the skip-gate (`_status_report_should_skip`,
+        status_report.py L927) fires only when zero interesting
+        events landed in the window. Two near-identical posts after
+        two single-event windows are not suppressed; no content
+        fingerprint comparison; cron.py L196-210 is purely
+        interval-driven. No `cron_skipped reason=duplicate_content`
+        event type exists.
+    (3) **Shallow monitoring** (goal.md L204-211 / Done-when
+        L221-223): no `ap2/attention.py` module exists; "stuck
+        Active task" / "validator-judge noisy" / "cost-cap approach"
+        conditions are surfaced only as sub-blocks within the 2h
+        periodic post or as `[noisy]` suffix on `ap2 status` text —
+        no proactive, distinct push surface; no debounce; no
+        `attention_raised` event vocabulary.
+  - Status: `in-progress`
+  - Reasoning: brand-new focus heading; three concrete Done-when
+    bullets each map cleanly to a discrete, scope-bounded deliverable;
+    foundational push surface (status_report.py) and pull surface
+    (automation_status.py) already exist to extend. Not exhausted.
 
 ## Non-goal risk check
 
-None. The operator's ack pattern (curating TB-273/274/275/276 directly
-rather than waiting for ideation) is the OPPOSITE of generic-task-
-scheduler drift — it's exactly the operator-curated-trust-upgrade
-pattern goal.md constrains. No drift toward unconditional automation
-or goal.md auto-rotation observed.
+Watch goal.md L225-229 ("per-project legibility, NOT cross-project
+aggregation"): proposal 1's project-name surface must stay
+per-daemon, not introduce any cross-project registry. None of the
+three proposals below cross that line.
 
 ## Considered & deferred this cycle
 
-- **Any greenfield proposal under exhausted roadmap** — explicitly
-  vetoed by operator ack-note ("ideation stays parked until the
-  roadmap is extended"). Filling slots would directly contradict an
-  operator decision logged <2h ago; would replay the TB-184 / TB-185
-  rejection pattern (ap2-meta-polish unconnected to current focus
-  signal).
-- **TB-269/270 post-deployment re-measurement evaluation task** —
-  time-locked; window opens ≥2026-05-27Z. Current 7-timeout figure
-  not yet a clean post-fix baseline.
-- **`AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` recalibration** — premature;
-  same ≥7d window dependency.
-- **TB-175-shape ideation-acceptance-rate aggregator** — operator-
-  acked defer; no positive signal that operator wants it now.
-- **Investigate `test-suite-slowness-2026-05-17.md` stale tldr** —
-  housekeeping; operator's TB-260→TB-268 streak already drove the
-  test-suite work directly.
-- **Doctor warn for `AP2_AUTO_APPROVE=1` AND validator-judge noisy** —
-  TB-272 sub-condition unlocked but pre-flight surface gap still
-  hypothetical (operator hasn't enabled `AP2_AUTO_APPROVE` yet).
-  `ap2 status` already shows `[noisy]` inline (partial coverage).
+- **TB-269/270 post-deployment re-measurement** — still time-locked
+  (≥7d window from 2026-05-20T04:40Z opens 2026-05-27Z). Window not
+  yet open; current `0 fail, 7 timeout` 24h figure still dominated by
+  pre-fix events. Defer until after 2026-05-27Z.
+- **TB-175-shape ideation acceptance-rate aggregator** — operator
+  parked it pending ≥3+ ideation cycles' worth of TB-188 records
+  (operator_log L80). Still gated; do not re-propose.
+- **`AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` recalibration** — same ≥7d
+  window dependency as TB-269/270 re-measurement.
+- **Briefing-validator additional checks** (TB-172 / TB-240 shape) —
+  recurring operator-rejection pattern: whack-a-mole expansions of
+  pre-allocation validators are vetoed. Not in scope for this focus
+  anyway (the focus is about reporting/monitoring legibility, not
+  briefing-shape gates).
+- **Auto-rotation of focus pointer** (would violate goal.md L231-240
+  "Goal.md auto-rotation" Non-goal) — not proposed.
 
 ## Cycle observations
 
-- New shape this cycle: operator drained Backlog directly (TB-273/274/
-  275 in a 6h burst) without waiting for ideation. Signal: operator's
-  attention is on consolidating the focus-exhaustion semantics + post-
-  split doc hygiene before extending goal.md. Proposing new work now
-  competes with the operator's own queue authoring, not with
-  ideation's stall.
-- Operator rejection patterns recap (carried, re-justified): TB-172 +
-  TB-240 reject briefing-validator expansion and agent self-fix that
-  whacks moles instead of addressing root cause; TB-185 + TB-184
-  reject ap2-meta-polish unconnected to current focus signal.
-  Re-justification: the natural "what could ideation propose now"
-  buckets (post-split test-shield, more dep-coherence-judge tightening,
-  status-surface parity for the 7-timeout count) all fall into one of
-  these vetoed shapes under an exhausted roadmap.
-- TB-275 changed the load-bearing semantics of `roadmap_complete`:
-  pre-TB-275, exhaustion halted both dispatch + ideation; post-TB-275,
-  exhaustion parks ideation alone. Operator's ack-note explicitly
-  contemplates this split. Next ideation cycle's mission-alignment
-  should re-evaluate when goal.md gets a new heading (not before).
+- Operator rejection pattern recap (carried, re-justified): TB-172 /
+  TB-240 reject whack-a-mole validator expansions; TB-185 / TB-184
+  reject ap2-meta-polish unconnected to current focus signal. Each of
+  this cycle's three proposals maps to one of the new focus's three
+  Done-when bullets verbatim — none extends a validator nor adds
+  meta-polish, so they should clear the rejection pattern.
+- Sequencing observation: proposal 1 (project_name + pre-rendered
+  task lines) is the lowest-coupled change and unblocks the operator's
+  multi-project workflow even if the other two slip; proposal 2 (dedup
+  fingerprint) layers on top; proposal 3 (attention surface) is the
+  most novel and may slip first if budget is tight. Operator can
+  approve in any order — they're independent on the implementation
+  axis even though they share the focus.
+- New focus's surface concentration: ~80% of the deliverable lives in
+  `ap2/status_report.py` and `ap2/automation_status.py`, with light
+  touches in `cron.py` / `config.py` / `events.py` / new
+  `ap2/attention.py`. Test coverage will accrue under
+  `ap2/tests/test_tb28X_*.py` following the established per-task
+  module convention.
 
 ## Decisions needed from operator
 
-- **Decision needed**: Extend `goal.md` with a new `## Current focus:`
-  heading via `ap2 update-goal`, OR explicitly retire the loop via
-  `ap2 pause` if the project's "## Done when" criteria are
-  substantively met. Until one of these lands, every ideation cycle
-  will skip with `reason=roadmap_complete`. Unblock-condition: a new
-  focus heading (or a documented goal.md retirement note) re-arms
-  ideation; the next cycle's `## Mission alignment` then reasons
-  against the extended roadmap instead of this same parked state.
+(none this cycle — the new focus is fresh and the three proposals
+below cover the three Done-when bullets 1:1. No operator-judgment
+escalation needed until proposals land and outcomes accrue.)
 
 ## Proposals this cycle
 
-No new proposals this cycle (0 of 4 slots used). The operator's
-ack-note logged 2026-05-20T23:38:50Z is the explicit veto on
-ideation activity under the current exhausted roadmap; proposing
-anything against `## Current focus: end-to-end automation` would
-directly contradict that decision. The cycle observation here is
-that the loop is doing exactly what goal.md L33-36 specifies
-("stops proposing when `## Done when` criteria are all met") — and
-the natural next move belongs to the operator, not ideation.
+3 proposals queued behind `@blocked:review`, each mapping 1:1 to a
+goal.md Done-when bullet on the new focus:
+
+- TB-280 — project-identity headline + pre-rendered task-title
+  digest in status-report post (Done-when L214-217 / failure mode #1
+  "context-poor content").
+- TB-281 — content-fingerprint dedup gate so consecutive status
+  reports don't post unchanged content (Done-when L218-220 / failure
+  mode #2 "clock-driven repetition").
+- TB-282 — new `ap2/attention.py` detector + `attention_raised`
+  event + "## Attention needed" section, seeded with one detector
+  (`task_stuck`) (Done-when L221-223 / failure mode #3 "shallow
+  monitoring").
