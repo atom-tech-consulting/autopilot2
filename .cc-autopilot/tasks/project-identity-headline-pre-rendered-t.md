@@ -89,3 +89,12 @@ that wants to prefix the project identity uniformly.
 - Per-bullet language polish beyond title + outcome resolution
   (the agent still composes the 1-line outcome string; the
   daemon supplies title + structural shape only).
+## Attempts
+
+### 2026-05-23 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260523T014229Z-TB-280.prompt.md`, `stream: .cc-autopilot/debug/20260523T014229Z-TB-280.stream.jsonl`, `messages: .cc-autopilot/debug/20260523T014229Z-TB-280.messages.jsonl`

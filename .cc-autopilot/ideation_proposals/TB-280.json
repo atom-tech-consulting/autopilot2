@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/project-identity-headline-pre-rendered-t.md",
   "focus_anchor": "current focus operator legible reporting and monitoring",
+  "outcome": {
+    "commit": "39bdf77",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-23T01:57:07Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-23T01:39:41Z",
   "tb_id": "TB-280",
   "why_now": "the multi-project operator the new focus targets cannot\nidentify a report's source project from the current `**Autopilot\nStatus Report**` headline (no project-name surface exists in\n`Config`, no `AP2_PROJECT_NAME` env knob, no `project_name`\nreference anywhere in `ap2/status_report.py`) and must alt-tab to\nthe repo to translate every TB-N the agent emits as `TB-N +\n1-line outcome + short SHA` (prompt L741-744) into a task title.\nToday's report indexes; with this change it informs."
