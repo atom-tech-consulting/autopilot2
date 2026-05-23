@@ -905,3 +905,9 @@
 - **Summary:** De-duplicated the two READMEs (root owns Quickstart, ap2/ owns Tests, the other links); fixed the Quickstart `ap2 add` example to use `--briefing-file` (TB-135); removed the stale "~349 tests" phrasing in favor of count-free wording (actual suite is 1921); corrected six broken `plan/sandboxed-user-setup.md` → `sandboxed-user-setup.md` links across README.md, ap2/README.md, and ap2/sandbox.py docstring; refreshed sandboxed-user-setup.md (status flipped to "maintained deployment runbook", added 5 missing sandbox verbs install-token/install-statusline/install-mm/install-channel/sync-assets to Helper-CLI, replaced "Open questions" planning residue with a "Resolved design decisions" section, stripped ancient TB-47/48/54/55/56 footer). Full test suite passes (1921 passed in 95s).
 - **Files:** README.md, ap2/README.md, ap2/sandbox.py, sandboxed-user-setup.md
 - **Tests:** pass
+
+## [2026-05-23] TB-280: Project-identity headline + pre-rendered task-title digest for status-report Mattermost posts
+- **Commit:** `1b12c11`
+- **Summary:** TB-280 feature work landed in prior commit 39bdf77 (Config.project_name + AP2_PROJECT_NAME env knob + hot-reload registration + bracketed [<project_name>] headline + render_recent_task_activity_section digest + 21-test regression-pin module). This follow-up commit 1b12c11 scrubs AP2_AUTO_APPROVE / AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP / AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP env leakage in two unrelated pre-existing hermeticity-broken tests (test_tb227_automation_status, test_review_gate) so the daemon's full-suite verification gate passes. All 7 briefing verification bullets green; uv run pytest -q ap2/tests/ → 1986 passed.
+- **Files:** ap2/tests/e2e/test_review_gate.py, ap2/tests/test_tb227_automation_status.py
+- **Tests:** pass
