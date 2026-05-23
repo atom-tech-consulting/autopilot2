@@ -183,6 +183,15 @@ def test_ideation_cron_proposals_are_all_review_gated(e2e_project, monkeypatch):
 
     monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
     monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    # TB-280 hermeticity fix: the operator's shell sets
+    # `AP2_AUTO_APPROVE=1`, which leaks into pytest and triggers
+    # `tools.do_board_edit`'s add_backlog branch to strip the
+    # `@blocked:review` codespan from proposed rows — the exact
+    # gate this test is asserting on. Without scrubbing the env,
+    # the assertion would fail purely on operator-shell pollution
+    # rather than a real regression in the gate. Mirrors the
+    # delenv pattern already used in `test_cli_status_json_*`.
+    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
 
     # No `ideation_prompt=` override → the daemon loads the real
     # `ap2/ideation.default.md`, so this test exercises the same prompt

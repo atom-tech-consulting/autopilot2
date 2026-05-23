@@ -588,6 +588,14 @@ def test_cli_status_json_carries_full_auto_approve_dict(
     from ap2.cli import cmd_status
 
     monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    # TB-280 hermeticity fix: the per-task / window token-cap knobs
+    # leak from the operator's shell into pytest (the operator runs
+    # daemons with `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP=100000000`), so
+    # the `is None` assertions below would otherwise fail purely on
+    # env pollution. Same shape as the existing `AP2_AUTO_APPROVE`
+    # delenv — pins the default-state contract.
+    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
     rc = cmd_status(cfg, Namespace(json=True))
     assert rc == 0
     payload = _json.loads(capsys.readouterr().out)
