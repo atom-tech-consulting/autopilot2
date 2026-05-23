@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/proactive-attention-raised-push-surface.md",
   "focus_anchor": "current focus operator legible reporting and monitoring",
+  "outcome": {
+    "commit": "15e77e90",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-23T02:38:36Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-23T01:41:35Z",
   "tb_id": "TB-282",
   "why_now": "today the periodic 2h status-report post is the ONLY push\nsurface; conditions that warrant immediate operator attention land\nburied inside it (no `ap2/attention.py` module exists; no\n`attention_raised` event type registered in `ap2/events.py`; no\ndistinct \"Attention needed\" section in `STATUS_REPORT_PROMPT`). A\nstuck Active task at minute 5 of a 2h window waits up to 2h to\nsurface, and routine progress bullets visually outweigh the\nembedded attention signal when it does. The shipped surfaces\n(`ap2 status`'s `[noisy]` suffix, web `/automation` card) are\npull-only \u2014 they require the operator to remember to look, which\ncontradicts a walk-away monitoring promise."

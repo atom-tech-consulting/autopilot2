@@ -123,3 +123,12 @@ compute durations.
 - Web `/attention` page (pull-surface evolution belongs in a
   separate task once the event vocabulary lands and accrues
   data).
+## Attempts
+
+### 2026-05-23 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260523T022116Z-TB-282.prompt.md`, `stream: .cc-autopilot/debug/20260523T022116Z-TB-282.stream.jsonl`, `messages: .cc-autopilot/debug/20260523T022116Z-TB-282.messages.jsonl`
