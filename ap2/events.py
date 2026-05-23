@@ -201,6 +201,34 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     call duration — completes the happy-path/fail-open/timeout
     triangle on a single namespace so an operator can see the gate's
     true firing rate, not just the failure subset TB-243 surfaces.
+  - `attention_raised` (TB-282) — `ap2/attention.py`'s
+    `detect_attention_conditions(cfg)` surfaced a condition that
+    warrants immediate operator attention; the daemon's per-tick
+    wire-up (`_maybe_emit_attention_events` in `daemon.py`) debounced
+    against any prior matching fire within `AP2_ATTENTION_DEBOUNCE_S`
+    (default 21600 / 6h) and emitted this event for each fresh
+    condition. Per-(attention_type, key) debounce so a second stuck
+    task doesn't get suppressed because a first one fired recently.
+    Payload: `attention_type` (detector identifier — `task_stuck` is
+    the only one seeded today; future detectors land alongside as
+    `validator_judge_noisy` / `cost_cap_approach` / etc.), `key`
+    (per-condition dedup key — e.g. `task_stuck:TB-N`), `summary`
+    (one-line operator-legible string the status-report renderer
+    surfaces), plus a detector-specific extras blob inlined into the
+    payload (`task_stuck` carries `task`, `title`, `age_s`,
+    `start_ts`, `threshold_s`). The status-report renderer
+    (`render_attention_section` in `ap2/status_report.py`) reads the
+    still-active conditions on each cron tick and emits one bullet
+    per condition under a distinct `## Attention needed` section the
+    agent forwards VERBATIM into the Mattermost post — positioned
+    BEFORE the routine progress bullets so the walk-away operator
+    sees the attention signal first. `attention_raised` is listed in
+    `IDEATION_RELEVANT_EVENT_TYPES` (so ideation sees fresh attention
+    events in its prompt tail and can reason against them next
+    cycle) AND in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` (so a
+    fresh fire un-skips the dedup/idle gate, parallel to the
+    TB-244 / TB-245 pattern). Closes goal.md focus-1's Done-when
+    bullet on shallow monitoring.
   - `cron_skipped` (TB-128 + TB-281) — status-report cron run was
     suppressed pre-flight. Carries `job="status-report"`, `trigger`
     (`cron` or `chat`), and a `reason` field naming which gate

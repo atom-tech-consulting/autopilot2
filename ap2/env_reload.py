@@ -124,6 +124,15 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     # `## Current state` snapshot build picks up the new value via the
     # `_refresh_tunable_config_fields` rewrite below.
     "AP2_PROJECT_NAME",
+    # TB-282: proactive attention-raised detector knobs. Both are
+    # read fresh from `os.environ` at detection-time inside
+    # `ap2/attention.py` (`_task_stuck_threshold_s` /
+    # `_attention_debounce_s`), so a hot-reload propagates without
+    # any Config-dataclass rewrite. They tune detection sensitivity,
+    # not lifecycle — an operator tightening the stuck-task floor
+    # from 4h to 2h should not require a daemon restart.
+    "AP2_TASK_STUCK_THRESHOLD_S",
+    "AP2_ATTENTION_DEBOUNCE_S",
 })
 
 # Lifecycle knobs that CAN'T hot-reload. Each configures a stateful

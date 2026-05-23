@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from . import (
+    attention,
     diagnose,
     env_reload,
     events,
@@ -1722,6 +1723,61 @@ from .focus_advance import (
     _maybe_advance_focus,
 )
 
+
+def _maybe_emit_attention_events(cfg: Config) -> None:
+    """Per-tick attention-detector → `attention_raised` event wire-up
+    (TB-282).
+
+    Runs `attention.detect_attention_conditions(cfg)`, debounces each
+    candidate against the most recent matching `attention_raised`
+    event in the tail (suppress when last fire was within
+    `AP2_ATTENTION_DEBOUNCE_S`), and emits one `attention_raised`
+    event per fresh condition.
+
+    Per-(attention_type, key) debounce so a second stuck task doesn't
+    get suppressed because a different stuck task fired recently —
+    the briefing's load-bearing contract.
+
+    Best-effort by design: a detector / events-emit hiccup must not
+    take the tick down. Caller wraps in try/except too; this helper
+    only swallows the inner detector exceptions so a known-broken
+    detector returns no candidates instead of raising.
+    """
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    try:
+        candidates = attention.detect_attention_conditions(cfg, now=now)
+    except Exception:  # noqa: BLE001 — never break the tick on detector bugs
+        return
+    if not candidates:
+        return
+    # Single tail read shared across all candidates' debounce checks
+    # to keep the per-tick cost bounded (the candidate count for any
+    # one detector is small — Active section length — but a future
+    # extension that registers 5+ detectors would otherwise read the
+    # tail 5+ times per tick).
+    tail = (
+        events.tail(cfg.events_file, 2000)
+        if cfg.events_file.exists() else []
+    )
+    for cond in candidates:
+        if attention.should_suppress(cond, tail=tail, now=now):
+            continue
+        try:
+            events.append(
+                cfg.events_file,
+                "attention_raised",
+                attention_type=cond.type,
+                key=cond.key,
+                summary=cond.summary,
+                **cond.extras,
+            )
+        except Exception:  # noqa: BLE001
+            # An events-emit failure on one candidate must not block
+            # the others — keep iterating.
+            continue
+
+
 async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # 0a. Hot-reload `.cc-autopilot/env` (TB-271). Runs at the VERY TOP
     # of the tick — before operator-queue drain, auto-unfreeze, focus
@@ -1819,6 +1875,33 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
         # the operator should monitor.
         print(
             f"[ap2] _maybe_advance_focus error: {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+
+    # 0.7. Proactive attention-raised detector sweep (TB-282). Runs
+    # AFTER focus-advance (step 0.6) and BEFORE cron (step 1) so a
+    # status-report cron tick firing on this same tick sees freshly-
+    # emitted `attention_raised` events in its prompt tail AND in the
+    # interesting-types skip-gate (the event is listed in
+    # `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a fresh fire
+    # un-skips the dedup/idle gate). Per-(attention_type, key)
+    # debounce against `AP2_ATTENTION_DEBOUNCE_S` (default 6h) so a
+    # still-stuck task re-fires once per operator workday rather than
+    # every 30s tick. Pure-detector design: `ap2/attention.py` returns
+    # structured records; this wire-up owns the debounce + event
+    # emission so the detector module stays trivially testable.
+    try:
+        _maybe_emit_attention_events(cfg)
+    except Exception as e:  # noqa: BLE001
+        # Defensive: the inner helper already swallows detector
+        # failures; this outer guard catches a surprise from the tail
+        # read or events.append plumbing. The rest of the tick must
+        # continue regardless. No dedicated event type — same
+        # rationale as `_maybe_advance_focus`'s stderr-only error
+        # path above.
+        print(
+            f"[ap2] _maybe_emit_attention_events error: "
+            f"{type(e).__name__}: {e}",
             file=sys.stderr,
         )
 

@@ -1008,6 +1008,35 @@ skip-gate from firing — operator never misses a degradation
 signal because the 2h post coincided with an otherwise-quiet
 window.
 
+**Proactive attention surface (TB-282).** `attention_raised` is the
+distinct push-surface event for conditions that warrant immediate
+operator attention (today: a `task_stuck` detector flags an Active
+task whose most recent `task_start` is older than
+`AP2_TASK_STUCK_THRESHOLD_S` — default 14400s / 4h — and has no
+intervening terminal event). The daemon's `_tick` calls
+`ap2.attention.detect_attention_conditions(cfg)`, debounces each
+candidate against any prior matching fire within
+`AP2_ATTENTION_DEBOUNCE_S` (default 21600s / 6h), and emits one
+`attention_raised` event per fresh condition. Per-(attention_type,
+key) debounce so a second stuck task doesn't get suppressed because
+a first one fired recently. Payload: `attention_type` (detector kind
+— `task_stuck` is the only seed today; future detectors land
+alongside as `validator_judge_noisy` / `cost_cap_approach` / etc.),
+`key` (per-condition dedup key — e.g. `task_stuck:TB-N`), `summary`
+(operator-legible one-line string the status-report renderer
+surfaces), plus a detector-specific extras blob (`task_stuck`
+carries `task`, `title`, `age_s`, `start_ts`, `threshold_s`). The
+status-report cron's `render_attention_section` reads the still-
+active conditions per tick and emits one bullet per condition under
+a distinct `## Attention needed` section the agent forwards
+VERBATIM into the Mattermost post — positioned BEFORE the routine
+progress bullets so the walk-away operator sees the attention
+signal first. Listed in both `IDEATION_RELEVANT_EVENT_TYPES`
+(ideation reasons against fresh attention events next cycle) and
+`_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` (a fresh fire un-
+skips the dedup/idle gate, parallel to the TB-244 / TB-245
+extension pattern).
+
 **Focus rotation (TB-226 axis 4).** `focus_advanced` and
 `roadmap_complete` track the daemon's in-memory focus-list pointer
 against goal.md's `## Current focus:` headings. See

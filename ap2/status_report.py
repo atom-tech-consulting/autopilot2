@@ -35,6 +35,7 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
+from . import attention as _attention
 from . import automation_stats, automation_status, events
 from .board import Board
 from .config import Config
@@ -889,6 +890,115 @@ def render_recent_task_activity_section(
 
 
 # ---------------------------------------------------------------------------
+# TB-282: Attention-needing conditions section. Distinct from the routine
+# `## Recent task activity` digest above — that section says "here is
+# what just happened"; this section says "here is what needs you to
+# act NOW". The two play complementary roles in the walk-away operator's
+# triage: routine progress vs. interrupt-worthy condition.
+#
+# The detector layer (`ap2/attention.py`) returns structured records;
+# this renderer pre-renders one bullet per still-active condition so the
+# agent forwards the section verbatim — keeps the daemon authoritative
+# for both detection and presentation (the agent never has to compute
+# durations or look up titles).
+#
+# Position contract: the status-report prompt instructs the agent to
+# forward this section BEFORE the routine body bullets so the
+# attention signal lands FIRST in the post. The position is the
+# load-bearing axis: an attention bullet buried below 8 progress
+# bullets is the very failure mode TB-282 closes.
+
+_ATTENTION_NEEDED_HEADING = "## Attention needed"
+
+
+def render_attention_section(
+    cfg: Config,
+    *,
+    since_event_idx: int,  # noqa: ARG001 — accepted for parity with sibling helpers
+    tail: list[dict] | None = None,
+) -> str:
+    """Return the Markdown `## Attention needed` section the cron
+    agent forwards verbatim into the Mattermost post, or "" when no
+    attention conditions are currently active.
+
+    `since_event_idx` is accepted for parity with the sibling
+    digest helpers (TB-228 / TB-244 / TB-258 / TB-259 / TB-280) but
+    is intentionally NOT used for scoping — attention conditions are
+    point-in-time facts about the current state (Active section +
+    most-recent `task_start`), not window-scoped event counts. A
+    still-stuck task that crossed the threshold BEFORE the previous
+    `cron_complete` is still stuck NOW and the operator still needs
+    to see it.
+
+    Shape (when rendered):
+
+        ## Attention needed
+
+        - ⚠ **TB-N** — <title> Active for <h>h since <ts>
+        - ⚠ **TB-M** — <title> Active for <h>h since <ts>
+
+    One bullet per active condition. Operator-legible phrasing
+    embedded by the detector's `summary` field (rendered verbatim
+    after the warning glyph + bold TB-N + em-dash). The bullet is
+    visually distinct from the routine progress bullets via the
+    leading `⚠` glyph — same visual-distinctness pattern web
+    chrome uses for warn-tinted rows.
+
+    Omit-on-empty: returns "" when zero attention conditions are
+    active. Quiet projects (no stuck tasks, etc.) stay byte-identical
+    to the pre-TB-282 digest baseline so the prior axis-1/2/3/4/audit/
+    stats/env-stale/recent-activity tests continue to pass when nothing
+    needs attention.
+
+    Defensive fallback: a detector exception is swallowed (returns
+    "") so a regression in `detect_attention_conditions` never takes
+    a status-report run down.
+    """
+    try:
+        conditions = _attention.detect_attention_conditions(cfg, tail=tail)
+    except Exception:  # noqa: BLE001 — never break the status-report run
+        return ""
+    if not conditions:
+        return ""
+
+    rendered: list[str] = []
+    for cond in conditions:
+        # The detector's `summary` is the operator-legible phrasing
+        # for the bullet body. We prepend the warning glyph + bold
+        # TB-N (the canonical operator-readable anchor) and an
+        # em-dash so the bullet reads as one cohesive line. The
+        # `task` field in extras carries the TB-N; we look up the
+        # title from extras too (the detector pre-resolved it via
+        # Board.find so the renderer doesn't re-parse TASKS.md).
+        task_id = (cond.extras.get("task") or "").strip()
+        title = (cond.extras.get("title") or "").strip()
+        if cond.type == "task_stuck":
+            # For `task_stuck`, compose the bullet from the structural
+            # extras so the format stays load-bearing across detector
+            # implementations: `⚠ **TB-N** — <title> Active for <h>h
+            # since <ts>`. Fall back to `cond.summary` if the extras
+            # are malformed (defense for future detector variants).
+            age_s = cond.extras.get("age_s")
+            start_ts = cond.extras.get("start_ts") or cond.ts
+            if isinstance(age_s, (int, float)) and start_ts:
+                age_h = float(age_s) / 3600.0
+                title_str = title or "(title unavailable)"
+                rendered.append(
+                    f"- ⚠ **{task_id}** — {title_str} "
+                    f"Active for {age_h:.1f}h since {start_ts}"
+                )
+                continue
+        # Generic fallback (covers future detectors AND `task_stuck`
+        # with malformed extras): render the pre-rendered summary
+        # verbatim. The warning glyph still leads.
+        rendered.append(f"- ⚠ {cond.summary}")
+
+    if not rendered:
+        return ""
+    return _ATTENTION_NEEDED_HEADING + "\n\n" + "\n".join(rendered)
+
+
+# ---------------------------------------------------------------------------
 # TB-281: Content-fingerprint dedup gate so consecutive status-report posts
 # skip when nothing changed.
 #
@@ -1081,6 +1191,20 @@ def _compose_status_report_snapshot(cfg: Config) -> dict:
         digest_sections[_RECENT_TASK_ACTIVITY_HEADING] = (
             recent_task_activity_section
         )
+    # TB-282: attention-needing conditions go LAST in the composition
+    # so the digest_sections insertion order reflects positional
+    # contract documented in the prompt body. Rendering itself is
+    # NOT positional within `state_extras` (the snapshot block lists
+    # all sections in append order) — the prompt's verbatim-forwarding
+    # contract tells the agent to lift this section ABOVE the routine
+    # body bullets when posting to Mattermost. Same omit-on-empty rule
+    # the sibling digest helpers use.
+    attention_section = render_attention_section(
+        cfg, since_event_idx=since_idx, tail=activity_tail,
+    )
+    if attention_section:
+        state_extras.append(attention_section)
+        digest_sections[_ATTENTION_NEEDED_HEADING] = attention_section
 
     # Most-recent auto-approve halt reason. `collect_auto_approve_state`
     # returns the active halt's `pause_reason` (or None when healthy).
@@ -1223,6 +1347,22 @@ Freshness contract (TB-128 — non-negotiable):
   reflects current reality if you do post.
 
 Body shape (when posting):
+- TB-282: if the snapshot's `## Current state` block carries a
+  `## Attention needed` section (heading + one bullet per still-
+  active attention condition the daemon's `detect_attention_conditions`
+  detector surfaced — today this is `task_stuck`; future detectors land
+  alongside as `validator_judge_noisy` / `cost_cap_approach` / etc.),
+  copy that entire section VERBATIM into your post (preserve the
+  heading and every bullet, including the leading ⚠ glyph). Same
+  verbatim-forwarding contract as TB-228 / TB-244 / TB-245 / TB-258 /
+  TB-259 / TB-280 — the daemon owns the rendering; do NOT recompute,
+  paraphrase, or drop bullets. Position this section IMMEDIATELY
+  AFTER the headline and BEFORE your body bullets — the attention
+  signal MUST be visually first, distinct from routine progress, so
+  the walk-away operator sees what needs them to act NOW before
+  scrolling past 8 lines of routine activity. Absent ⇒ no attention
+  conditions are active (healthy / quiet project) ⇒ omit (the daemon
+  renders nothing in that case).
 - Headline: `**[<project_name>] Autopilot Status Report** — <now>`
   (TB-280: the daemon substitutes `<project_name>` at prompt-build
   time from `cfg.project_name` — a multi-project operator monitoring
@@ -1434,6 +1574,14 @@ _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
     # TB-245: axis-1 validator-judge fail-open events.
     "validator_judge_fail",
     "validator_judge_timeout",
+    # TB-282: proactive attention-raised push surface. A fresh
+    # `attention_raised` event (e.g. a `task_stuck` detector fire)
+    # MUST un-skip the dedup/idle gate so the operator's primary
+    # walk-away channel surfaces the new attention condition on the
+    # very next status-report cron tick — same TB-244 / TB-245
+    # pattern of extending this set as new push-surface event
+    # classes ship.
+    "attention_raised",
 })
 
 

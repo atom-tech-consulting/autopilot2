@@ -145,6 +145,20 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
     # invisible to ideation and the next cycle would miss the
     # signal that the allowlist is actually getting exercised.
     "would_auto_unfreeze",
+    # TB-282: proactive attention-raised push surface. Surfacing
+    # fresh `attention_raised` events in the ideation events block
+    # lets the next cycle observe the conditions that warrant
+    # immediate operator attention (today: `task_stuck`; future:
+    # validator-judge noisy / cost-cap approach / decisions-needed-
+    # new / frozen-task recency) — the ideator can then reason about
+    # whether the proposal queue should pivot to address the
+    # surfaced condition (e.g. a recurring `task_stuck` for the same
+    # task identity might justify a follow-up task to investigate
+    # the dispatch hang). Without surfacing here, the only ideation-
+    # cycle visibility into attention conditions would be a fresh
+    # re-run of the detector — which has no access to the prior
+    # tick's debounce state.
+    "attention_raised",
 )
 
 _DEFAULT_PROMPT_PATH = Path(__file__).parent / "ideation.default.md"

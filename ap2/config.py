@@ -53,6 +53,22 @@ DEFAULT_VERIFY_TIMEOUT_S = 600  # 10 min for the project-wide verify gate
 DEFAULT_AUTO_DIAGNOSE_IDLE_THRESHOLD_S = 10800  # 3h — TB-71 watchdog
 DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S = 21600  # 6h — re-fire spam guard
 
+# TB-282: proactive attention-raised detector knobs.
+# `AP2_TASK_STUCK_THRESHOLD_S` defaults to 4h — long enough to skip a
+# long-but-healthy task agent (TB-122/TB-255 pattern: real-world tasks
+# at xhigh effort can sit 30-60 min inside `sdk.query` without being
+# stuck), short enough that an actually-hung dispatch surfaces well
+# before the next 2h status-report cron tick. `AP2_ATTENTION_DEBOUNCE_S`
+# defaults to 6h so a still-stuck task re-fires roughly once per
+# operator workday rather than every tick. Both knobs are read fresh
+# from `os.environ` at detection-time inside `ap2/attention.py`
+# (`_task_stuck_threshold_s` / `_attention_debounce_s`) and listed in
+# `env_reload.HOT_RELOADABLE_KNOBS` so an operator tightening either
+# floor takes effect on the next tick without a daemon restart — they
+# tune detection sensitivity, not lifecycle.
+DEFAULT_TASK_STUCK_THRESHOLD_S = 14400  # 4h
+DEFAULT_ATTENTION_DEBOUNCE_S = 21600  # 6h
+
 # TB-278: max-turn caps promoted to named constants alongside the
 # DEFAULT_*_TIMEOUT_S family above so every battle-tested default sits in
 # one discoverable place. Defaults raised from the old inline literals
