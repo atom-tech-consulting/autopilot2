@@ -201,6 +201,24 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     call duration — completes the happy-path/fail-open/timeout
     triangle on a single namespace so an operator can see the gate's
     true firing rate, not just the failure subset TB-243 surfaces.
+  - `cron_skipped` (TB-128 + TB-281) — status-report cron run was
+    suppressed pre-flight. Carries `job="status-report"`, `trigger`
+    (`cron` or `chat`), and a `reason` field naming which gate
+    fired:
+      - `no_activity_since_last_report` (TB-128): the inter-report
+        window carries zero "interesting" events past the previous
+        `cron_complete name=status-report`.
+      - `duplicate_content` (TB-281): events DID land in the window
+        but the prospective post is structurally identical to the
+        last one (board counts + pending-review TB-Ns + decisions-
+        needed bullets + digest sub-sections + halt reason all
+        unchanged from the fingerprint stashed under
+        `status-report.last_post_fingerprint` in `cron_state.json`).
+        Closes goal.md focus-1's Done-when bullet "no two consecutive
+        reports repeat unchanged content".
+    Chat-trigger paths additionally carry `chat_reason` (the operator-
+    supplied trigger justification) so audit trails preserve the
+    invocation cause distinct from the suppression cause.
 
 The full canonical list lives in `ap2/howto.md`'s `## Event schema`
 section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)

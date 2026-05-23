@@ -29,6 +29,8 @@ operator asked for.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib as _hashlib
+import json as _json
 import os
 from dataclasses import dataclass
 from typing import Literal
@@ -36,7 +38,8 @@ from typing import Literal
 from . import automation_stats, automation_status, events
 from .board import Board
 from .config import Config
-from .cron import mark_run
+from .cron import load_state as _load_cron_state
+from .cron import mark_run, mark_run_with_payload
 
 
 # TB-151: shared truncation rule for pending-review TB-N lists. `ap2
@@ -885,6 +888,304 @@ def render_recent_task_activity_section(
     return _RECENT_TASK_ACTIVITY_HEADING + "\n\n" + "\n".join(rendered)
 
 
+# ---------------------------------------------------------------------------
+# TB-281: Content-fingerprint dedup gate so consecutive status-report posts
+# skip when nothing changed.
+#
+# Pre-TB-281 the skip-gate (`_status_report_should_skip`) only suppressed
+# fully-idle windows — windows where zero "interesting" events landed
+# since the previous `cron_complete name=status-report`. A window with
+# even one `ideation_skipped reason=focus_exhausted` event (which is
+# NOT in the boring-types denylist) bypassed the gate, the agent ran,
+# and the post landed — but its STRUCTURAL CONTENT (board counts,
+# pending-review TB-Ns, decisions-needed bullets, digest sub-sections,
+# halt reason) was byte-for-byte identical to the previous post. Three
+# consecutive low-delta posts trained the operator to ignore the
+# channel, defeating the monitoring half of the walk-away promise the
+# `Current focus: operator-legible reporting and monitoring` is built
+# around.
+#
+# The fingerprint approach: compute a SHA-1 hex (truncated to 12 chars)
+# over the structural inputs that drive the rendered post (board
+# per-section counts; sorted pending-review TB-Ns; sorted decisions-
+# needed bullet texts; content-fingerprints of each digest sub-section;
+# most-recent auto-approve halt reason — explicitly EXCLUDING the
+# headline timestamp). Persist the fingerprint in `cron_state.json`
+# alongside the last-run float via `mark_run_with_payload`. At the
+# next skip-check, recompute the prospective fingerprint — if it
+# matches the stored one, the post would be identical → skip with
+# `cron_skipped reason=duplicate_content` so the operator can audit
+# suppressions via `ap2 logs`.
+#
+# The fingerprint gate runs ONLY when the idle gate would let the
+# post through — the idle check stays the cheap-first fast path so
+# fully-idle windows pay zero hashing cost (loads + Board parse +
+# digest rendering).
+
+_LAST_POST_FINGERPRINT_FIELD = "last_post_fingerprint"
+
+
+def _compose_status_report_snapshot(cfg: Config) -> dict:
+    """Build the structural snapshot driving the next status-report post.
+
+    Returns a dict with:
+      - `pending_review_ids`: list[str] — Backlog TB-Ns blocked on review.
+      - `decisions_needed`: list[str] — ideator's
+        `## Decisions needed from operator` bullet texts.
+      - `digest_sections`: dict[str, str] mapping section heading →
+        rendered section content. Empty / omitted sections are
+        excluded so the fingerprint is sensitive to "appeared / went
+        away" transitions on each axis. Sections covered:
+        TB-228 (Automation loop activity), TB-244 (Focus rotation
+        activity), TB-245 (Validator-judge fail-open window),
+        TB-258 (Retrospective audit), TB-259 (Stats window aggregates),
+        TB-260 (Daemon env file stale), TB-280 (Recent task activity).
+      - `halt_reason`: str — most-recent auto-approve halt reason
+        (one of `consecutive_freezes` / `window_token_cap_exceeded` /
+        `per_task_token_cap_exceeded` / `task_error` /
+        `validator_judge_noisy`, or "" when no halt is active).
+      - `state_extras`: list[str] — ordered Markdown lines the routine
+        injects into `## Current state`. Shared with the
+        prompt-build wiring so `run_status_report` doesn't recompute
+        digests twice.
+      - `target_channel`: str — resolved Mattermost channel ID, "" if
+        unconfigured.
+
+    Pure read-only — composes existing helpers and emits no events.
+    Snapshot is sensitive to events.jsonl + TASKS.md + ideation_state.md
+    + cron_state.json at call time, so two calls back-to-back will
+    return identical dicts iff nothing structural moved between them.
+    """
+    from .ideation import parse_operator_decisions
+    from .janitor import (
+        recent_finding_counts_by_verdict as _recent_finding_counts,
+    )
+
+    state_extras: list[str] = []
+    digest_sections: dict[str, str] = {}
+
+    pending_ids = _pending_review_ids(cfg)
+    if pending_ids:
+        state_extras.append(
+            f"- Pending operator review ({len(pending_ids)}): "
+            f"{_format_pending_review_line(pending_ids)} "
+            "— `ap2 approve TB-N`"
+        )
+    operator_decisions = parse_operator_decisions(
+        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    )
+    if operator_decisions:
+        state_extras.append(
+            f"- Decisions needed from operator ({len(operator_decisions)}): "
+            + "; ".join(operator_decisions)
+        )
+    jcounts = _recent_finding_counts(cfg)
+    n_strand = jcounts["real_strand"]
+    n_draft = jcounts["operator_draft"]
+    n_ambig = jcounts["ambiguous"]
+    if n_strand or n_draft or n_ambig:
+        parts: list[str] = []
+        if n_strand:
+            parts.append(f"{n_strand} strand{'s' if n_strand != 1 else ''}")
+        if n_draft:
+            parts.append(f"{n_draft} draft{'s' if n_draft != 1 else ''}")
+        if n_ambig:
+            parts.append(f"{n_ambig} ambiguous")
+        state_extras.append(
+            f"- Janitor findings: {', '.join(parts)} — "
+            "`ap2 logs` (filter type=janitor_finding) to inspect"
+        )
+    target_channel = os.environ.get("AP2_MM_REPORT_CHANNEL", "").strip()
+    if not target_channel:
+        raw_channels = os.environ.get("AP2_MM_CHANNELS", "").strip()
+        for c in raw_channels.split(","):
+            c = c.strip()
+            if c:
+                target_channel = c
+                break
+    if target_channel:
+        state_extras.append(f"- post target channel: {target_channel}")
+
+    activity_tail = (
+        events.tail(cfg.events_file, 2000)
+        if cfg.events_file.exists() else []
+    )
+    since_idx = automation_status.find_previous_status_report_idx(
+        activity_tail,
+    )
+
+    automation_section = render_automation_loop_activity_section(
+        cfg, since_event_idx=since_idx, tail=activity_tail,
+    )
+    if automation_section:
+        state_extras.append(automation_section)
+        digest_sections[_AUTOMATION_DIGEST_HEADING] = automation_section
+    focus_rotation_section = render_focus_rotation_activity_section(
+        cfg, since_event_idx=since_idx, tail=activity_tail,
+    )
+    if focus_rotation_section:
+        state_extras.append(focus_rotation_section)
+        digest_sections[_FOCUS_ROTATION_HEADING] = focus_rotation_section
+    validator_judge_state = automation_status.collect_window_validator_judge(
+        cfg,
+    )
+    validator_judge_lines = render_validator_judge_activity_section(
+        validator_judge_state,
+    )
+    if validator_judge_lines:
+        block = "\n".join(validator_judge_lines)
+        state_extras.append(block)
+        digest_sections[_VALIDATOR_JUDGE_HEADING] = block
+    audit_state = automation_status.collect_audit_state(cfg)
+    audit_lines = render_audit_state_section(audit_state)
+    if audit_lines:
+        block = "\n".join(audit_lines)
+        state_extras.append(block)
+        digest_sections[_AUDIT_STATE_HEADING] = block
+    stats_window_s = _DEFAULT_STATS_WINDOW_S
+    if since_idx >= 0 and since_idx < len(activity_tail):
+        last_ts_raw = activity_tail[since_idx].get("ts")
+        if isinstance(last_ts_raw, str) and last_ts_raw:
+            try:
+                last_dt = _dt.datetime.strptime(
+                    last_ts_raw, "%Y-%m-%dT%H:%M:%SZ",
+                ).replace(tzinfo=_dt.timezone.utc)
+                delta_s = (
+                    _dt.datetime.now(_dt.timezone.utc) - last_dt
+                ).total_seconds()
+                if delta_s >= automation_stats.MIN_WINDOW_S:
+                    stats_window_s = int(delta_s)
+                elif delta_s > 0:
+                    stats_window_s = automation_stats.MIN_WINDOW_S
+            except (ValueError, TypeError):
+                pass
+    stats = automation_stats.collect_stats(cfg, window_s=stats_window_s)
+    stats_lines = render_stats_window_section(stats)
+    if stats_lines:
+        block = "\n".join(stats_lines)
+        state_extras.append(block)
+        digest_sections[_STATS_WINDOW_HEADING_FMT.format(
+            window=stats.get("window") or "?",
+        )] = block
+    env_staleness = automation_status.collect_env_staleness(cfg)
+    env_staleness_lines = render_env_staleness_section(env_staleness)
+    if env_staleness_lines:
+        block = "\n".join(env_staleness_lines)
+        state_extras.append(block)
+        digest_sections[_ENV_STALENESS_HEADING] = block
+    recent_task_activity_section = render_recent_task_activity_section(
+        cfg, since_event_idx=since_idx, tail=activity_tail,
+    )
+    if recent_task_activity_section:
+        state_extras.append(recent_task_activity_section)
+        digest_sections[_RECENT_TASK_ACTIVITY_HEADING] = (
+            recent_task_activity_section
+        )
+
+    # Most-recent auto-approve halt reason. `collect_auto_approve_state`
+    # returns the active halt's `pause_reason` (or None when healthy).
+    # We coalesce to "" so the JSON-stable fingerprint payload has a
+    # deterministic key even when no halt is active.
+    try:
+        auto_state = automation_status.collect_auto_approve_state(cfg)
+        halt_reason = auto_state.get("pause_reason") or ""
+    except Exception:  # noqa: BLE001 — never break the routine.
+        halt_reason = ""
+
+    return {
+        "pending_review_ids": pending_ids,
+        "decisions_needed": list(operator_decisions),
+        "digest_sections": digest_sections,
+        "halt_reason": halt_reason,
+        "state_extras": state_extras,
+        "target_channel": target_channel,
+    }
+
+
+def compute_status_report_fingerprint(
+    cfg: Config,
+    *,
+    board: Board | None = None,
+    snapshot: dict | None = None,
+) -> str:
+    """SHA-1 hex (truncated to 12 chars) over the post's structural inputs.
+
+    Inputs the fingerprint covers:
+      - per-section board counts (`board.sections[s]` lengths across all
+        six sections — Active / Ready / Backlog / Pipeline Pending /
+        Complete / Frozen);
+      - sorted tuple of pending-review TB-Ns (from `_pending_review_ids`);
+      - sorted tuple of decisions-needed bullet texts;
+      - per-digest-section content fingerprints (one SHA-1 of each
+        rendered sub-section's content) — sensitive to both
+        "appeared / disappeared" AND "content changed" axes;
+      - most-recent auto-approve halt reason ("" when healthy).
+
+    EXPLICITLY EXCLUDED: the headline timestamp, the cron-bookkeeping
+    `cron_start` / `cron_complete` / `status_report` events, and the
+    rendered Markdown prose flourish — only the deterministic structural
+    skeleton the daemon controls contributes to the hash. Two
+    back-to-back skip-checks against an unchanged events.jsonl +
+    TASKS.md will produce identical fingerprints; the headline `now:`
+    delta does NOT bust dedup.
+
+    `board` defaults to `Board.load(cfg.tasks_file)` (None on parse
+    failure → empty section_counts); `snapshot` defaults to
+    `_compose_status_report_snapshot(cfg)`. Tests drive the helper
+    with fabricated `snapshot` dicts to pin axis-by-axis sensitivity
+    without spinning up real events files.
+    """
+    if board is None:
+        if cfg.tasks_file.exists():
+            try:
+                board = Board.load(cfg.tasks_file)
+            except Exception:  # noqa: BLE001
+                board = None
+    if snapshot is None:
+        snapshot = _compose_status_report_snapshot(cfg)
+
+    section_counts: dict[str, int] = {}
+    if board is not None:
+        for s, lines in board.sections.items():
+            section_counts[s] = len(lines)
+
+    digest_sections = snapshot.get("digest_sections") or {}
+    digest_fingerprints = {
+        heading: _hashlib.sha1(content.encode("utf-8")).hexdigest()
+        for heading, content in sorted(digest_sections.items())
+        if content
+    }
+
+    payload = {
+        "section_counts": section_counts,
+        "pending_review_ids": sorted(
+            snapshot.get("pending_review_ids") or []
+        ),
+        "decisions_needed": sorted(snapshot.get("decisions_needed") or []),
+        "digest_sections": digest_fingerprints,
+        "halt_reason": snapshot.get("halt_reason") or "",
+    }
+    blob = _json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return _hashlib.sha1(blob).hexdigest()[:12]
+
+
+def _load_last_post_fingerprint(cfg: Config) -> str:
+    """Return the stored `status-report.last_post_fingerprint`, or ""
+    if absent (first-ever run / state file missing / file unreadable).
+
+    Reads via `cron.load_state` so the same lock-protected read path
+    backs both the skip-check and the post-success stash. Returns ""
+    (not None) so callers can do a simple `if fp and fp == ...` check
+    without juggling the unset case.
+    """
+    try:
+        state = _load_cron_state(cfg.cron_state_file)
+    except Exception:  # noqa: BLE001
+        return ""
+    fp = state.get(f"status-report.{_LAST_POST_FINGERPRINT_FIELD}")
+    return str(fp) if fp else ""
+
+
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
 # field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
 # the daemon's `run_cron` short-circuits status-report jobs to
@@ -1136,51 +1437,14 @@ _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
 })
 
 
-def _status_report_should_skip(cfg: Config) -> bool:
-    """Return True iff a status-report run would be a no-op (TB-128).
+def _status_report_idle_skip(cfg: Config) -> bool:
+    """Return True iff the inter-report window has zero interesting events.
 
-    "No-op" means: there's a previous `cron_complete job=status-report`
-    in the recent tail AND no events of interest have been appended
-    after it (positionally — the events log timestamps to one-second
-    resolution, so same-second self-noise after the cron_complete must
-    not be misread as fresh activity). Events of interest are anything
-    except this job's own bookkeeping (cron_start / cron_complete for
-    status-report, the agent's `status_report` log_event, the cron's
-    outbound `mattermost_reply` that quotes the status report header,
-    and previous `cron_skipped` markers).
-
-    Returns False if the job has never run before (or its last run
-    rolled out of the tail) — first-run / cold-cache, always run.
-
-    Pre-TB-144 this lived in `daemon.py` and was cron-only; now both
-    the cron tick AND the chat-trigger MCP tool route through the same
-    gate so on-demand operator reports honor the same idle-skip
-    semantics as scheduled ones.
-
-    TB-228: automation-loop events (`auto_approve_paused`,
-    `auto_approve_halted`, `auto_unfreeze_applied`,
-    `auto_unfreeze_skipped`, `auto_approved`) count as interesting —
-    they're listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES`
-    and fall through the boring-types denylist below. An operator
-    walking away should see the digest the moment a halt or fix
-    landed, even if no other board state changed.
-
-    TB-244: axis-4 focus-rotation events (`focus_advanced`,
-    `roadmap_complete`) are also surfaced in
-    `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` — a focus advance
-    or roadmap-complete halt landing in the window must keep the
-    report from skipping, so the operator's primary push channel
-    carries the rotation-state change without waiting on the next
-    `task_complete` or other automation-loop event.
-
-    TB-245: axis-1 validator-judge fail-open events
-    (`validator_judge_fail`, `validator_judge_timeout`) are also
-    treated as interesting — a fresh fail-open landing in the
-    window must keep the report from skipping so the operator's
-    primary push channel surfaces silent-degradation of the TB-235
-    dep-coherence judge without waiting on a manual `ap2 status`.
-    Parallel push-surface closure to TB-244 on the validator-judge
-    axis (TB-243 shipped the pull surfaces last cycle).
+    Factored out of `_status_report_should_skip` (TB-281) so the
+    fingerprint-dedup gate (`_status_report_skip_decision`) can reuse
+    the idle check as a cheap-first fast path and the existing
+    behavioral semantics stay byte-identical for callers that just
+    want the bool.
     """
     evts = events.tail(cfg.events_file, n=200)
     last_done_idx = -1
@@ -1210,6 +1474,97 @@ def _status_report_should_skip(cfg: Config) -> bool:
         return False
     # Reached end of tail without finding interesting activity → skip.
     return True
+
+
+def _status_report_skip_decision(cfg: Config) -> tuple[bool, str | None]:
+    """Return `(should_skip, reason)` for the next status-report run.
+
+    Two-tier gate:
+      1. `no_activity_since_last_report` (TB-128) — cheap idle check.
+         Suppresses windows where zero "interesting" events landed
+         since the previous `cron_complete name=status-report`.
+      2. `duplicate_content` (TB-281) — content-fingerprint check.
+         Suppresses windows where SOME interesting events landed but
+         the prospective post would be structurally identical to the
+         last one stashed in `cron_state.json[status-report.
+         last_post_fingerprint]`. The fingerprint hashes board counts
+         + pending-review TB-Ns + decisions-needed bullets + digest
+         sub-section contents + halt reason — see
+         `compute_status_report_fingerprint`.
+
+    The fingerprint tier runs ONLY when the idle gate would have
+    let the post through, so fully-idle windows pay zero hashing /
+    Board-parse / digest-rendering cost — same fast-path semantics
+    that TB-128 promised pre-TB-281.
+
+    Returns `(True, "no_activity_since_last_report")` from the idle
+    tier, `(True, "duplicate_content")` from the fingerprint tier,
+    `(False, None)` when the run should proceed.
+
+    Defensive fallback: if `_compose_status_report_snapshot` or
+    `compute_status_report_fingerprint` raises (corrupted events.jsonl
+    / TASKS.md parse error / unexpected exception), we treat the gate
+    as open (`False, None`) — the routine then runs to completion and
+    emits a fresh fingerprint on the post-success path. Failing OPEN
+    on the dedup gate is the load-bearing trade-off: a near-duplicate
+    extra post is fine; a missed legitimate post (because the gate
+    crashed silently) is not.
+    """
+    if _status_report_idle_skip(cfg):
+        return True, "no_activity_since_last_report"
+    stored_fp = _load_last_post_fingerprint(cfg)
+    if not stored_fp:
+        return False, None
+    try:
+        snapshot = _compose_status_report_snapshot(cfg)
+        prospective_fp = compute_status_report_fingerprint(
+            cfg, snapshot=snapshot,
+        )
+    except Exception:  # noqa: BLE001 — fail-open on the dedup gate.
+        return False, None
+    if prospective_fp == stored_fp:
+        return True, "duplicate_content"
+    return False, None
+
+
+def _status_report_should_skip(cfg: Config) -> bool:
+    """Return True iff a status-report run would be a no-op.
+
+    Two-tier gate (TB-128 idle + TB-281 content-fingerprint dedup).
+    Thin wrapper over `_status_report_skip_decision` so callers that
+    only need the bool (existing tests, the daemon's diagnostic
+    surfaces) stay byte-identical to the pre-TB-281 signature. Pre-
+    TB-281 this was the only skip-gate; the new helper that returns
+    `(bool, reason)` is the canonical entry point for the run path so
+    it can log the right `cron_skipped` reason on suppression.
+
+    "No-op" means one of:
+      - idle gate (TB-128): there's a previous `cron_complete
+        job=status-report` in the recent tail AND no events of
+        interest have been appended after it (positionally — the
+        events log timestamps to one-second resolution, so same-
+        second self-noise after the cron_complete must not be misread
+        as fresh activity). Events of interest are anything except
+        this job's own bookkeeping.
+      - duplicate-content gate (TB-281): events DID land in the
+        window, but the prospective post is structurally identical to
+        the one stashed under `status-report.last_post_fingerprint`
+        in `cron_state.json`.
+
+    Returns False if the job has never run before (or its last run
+    rolled out of the tail) — first-run / cold-cache, always run.
+
+    TB-228: automation-loop events (`auto_approve_paused`,
+    `auto_approve_halted`, `auto_unfreeze_applied`,
+    `auto_unfreeze_skipped`, `auto_approved`) count as interesting —
+    they fall through the boring-types denylist. TB-244: axis-4
+    focus-rotation events (`focus_advanced`, `roadmap_complete`) too.
+    TB-245: axis-1 validator-judge fail-open events
+    (`validator_judge_fail`, `validator_judge_timeout`) too. All
+    listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES`.
+    """
+    skip, _reason = _status_report_skip_decision(cfg)
+    return skip
 
 
 @dataclass
@@ -1325,11 +1680,17 @@ async def run_status_report(
     from . import prompts as _prompts
     from .tools import CONTROL_AGENT_TOOLS
 
-    if _status_report_should_skip(cfg):
+    # TB-281: two-tier skip-gate (idle + duplicate_content). The
+    # decision helper returns `(True, "no_activity_since_last_report")`
+    # from the cheap idle check OR `(True, "duplicate_content")` from
+    # the fingerprint comparison; the routine then logs whichever
+    # reason fired so `ap2 logs` and `/events` can audit suppressions.
+    should_skip, skip_reason = _status_report_skip_decision(cfg)
+    if should_skip:
         skip_payload: dict = {
             "job": "status-report",
             "trigger": trigger,
-            "reason": "no_activity_since_last_report",
+            "reason": skip_reason or "no_activity_since_last_report",
         }
         if reason:
             skip_payload["chat_reason"] = reason
@@ -1337,251 +1698,37 @@ async def run_status_report(
         if trigger == "cron":
             mark_run(cfg.cron_state_file, "status-report")
         return StatusReportResult(
-            skipped=True, reason="no_activity_since_last_report",
+            skipped=True,
+            reason=skip_reason or "no_activity_since_last_report",
         )
 
-    # TB-151: surface pending-review TB-Ns inside the `## Current state`
-    # snapshot block so the agent can copy the line verbatim into the
-    # posted Mattermost report. The list is collected fresh per run
-    # (board state moves between ticks); when N=0 we skip the line
-    # entirely so a clean board doesn't grow a noisy "0 pending"
-    # bullet. The wrapping prefix mirrors `diagnose._auto_diagnose_summary`'s
-    # phrasing — "Pending operator review (N): TB-..." — so an operator
-    # who reads watchdog summaries and status reports doesn't have to
-    # context-switch between two phrasings.
-    pending_ids = _pending_review_ids(cfg)
-    state_extras: list[str] = []
-    if pending_ids:
-        state_extras.append(
-            f"- Pending operator review ({len(pending_ids)}): "
-            f"{_format_pending_review_line(pending_ids)} "
-            "— `ap2 approve TB-N`"
-        )
-    # TB-173 / TB-191: surface the ideator's `## Decisions needed from
-    # operator` section so the cron status-report carries the same
-    # escalation signal as the CLI / web home (single source of truth
-    # via `parse_operator_decisions`). Bullets joined with `; ` so the
-    # line mirrors the CLI text rendering — the agent then forwards
-    # the line verbatim into the Mattermost post per the prompt's
-    # contract below. When the file or section is absent / empty the
-    # helper returns [] and we skip the line entirely so a clean
-    # board doesn't grow a noisy "0 decisions needed" bullet. The
-    # agent-internal `## Cycle observations` section (TB-191) is
-    # structurally excluded by the parser — it never reaches this
-    # surface and therefore never reaches the Mattermost post.
-    from .ideation import parse_operator_decisions
-
-    operator_decisions = parse_operator_decisions(
-        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    # TB-281: hoisted state_extras composition into the snapshot helper
+    # so the dedup gate (`_status_report_skip_decision`) and this routine
+    # share one source-of-truth for what the prompt's `## Current state`
+    # block carries. The snapshot dict also carries the digest-section
+    # contents the fingerprint hashes — so the fingerprint stashed on
+    # post-success matches what `_status_report_skip_decision` would
+    # compute on the NEXT tick (modulo events that landed in between).
+    # Pre-TB-281 the same composition lived inline here as a 220-line
+    # block (TB-151 pending-review + TB-173/191 decisions-needed +
+    # TB-177/178 janitor findings + TB-190 target-channel + TB-228
+    # automation digest + TB-244 focus rotation + TB-245 validator-judge
+    # + TB-258 audit + TB-259 stats window + TB-260 env staleness +
+    # TB-280 recent task activity). The helper preserves the bullet
+    # ordering byte-identically so prior axis-test expectations
+    # continue to pass.
+    snapshot = _compose_status_report_snapshot(cfg)
+    state_extras = snapshot["state_extras"]
+    # TB-281: compute the prospective post's fingerprint here (NOT in
+    # the gate) so the value we stash on the post-success path matches
+    # what the agent actually saw at prompt-build time. A later tick's
+    # skip-check recomputes against the same axes; if nothing
+    # structural moved, the hashes match and the cron emits
+    # `cron_skipped reason=duplicate_content` instead of re-firing the
+    # post.
+    post_fingerprint = compute_status_report_fingerprint(
+        cfg, snapshot=snapshot,
     )
-    if operator_decisions:
-        state_extras.append(
-            f"- Decisions needed from operator ({len(operator_decisions)}): "
-            + "; ".join(operator_decisions)
-        )
-    # TB-177 + TB-178: surface recent janitor findings inside the
-    # `## Current state` snapshot so the cron status-report routine can
-    # carry the signal into the Mattermost post. Verdict-aware split
-    # (strands vs drafts vs ambiguous) so `draft_*.md` operator
-    # notebooks don't read as urgent in the post; only `real_strand`
-    # carries the operator-attention urgency. Bundled next to
-    # pending-review + open-questions keeps the operator-attention
-    # signals on one screen.
-    from .janitor import (
-        recent_finding_counts_by_verdict as _recent_finding_counts,
-    )
-
-    jcounts = _recent_finding_counts(cfg)
-    n_strand = jcounts["real_strand"]
-    n_draft = jcounts["operator_draft"]
-    n_ambig = jcounts["ambiguous"]
-    if n_strand or n_draft or n_ambig:
-        parts: list[str] = []
-        if n_strand:
-            parts.append(f"{n_strand} strand{'s' if n_strand != 1 else ''}")
-        if n_draft:
-            parts.append(f"{n_draft} draft{'s' if n_draft != 1 else ''}")
-        if n_ambig:
-            parts.append(f"{n_ambig} ambiguous")
-        state_extras.append(
-            f"- Janitor findings: {', '.join(parts)} — "
-            "`ap2 logs` (filter type=janitor_finding) to inspect"
-        )
-    # TB-190: resolve the status-report target channel server-side.
-    # Pre-fix the prompt asked the agent to read `AP2_MM_REPORT_CHANNEL`
-    # itself, but control agents have no env-var access — the agent saw
-    # the literal env-var name and ended up posting to whatever channel
-    # the server defaulted to (town-square in practice), NOT the
-    # operator's configured channel. The pre-fix prompt also carried a
-    # `#autopilot` fallback string for the unset case, which was a
-    # dead letter — no `#autopilot` channel exists on the server, so
-    # the agent's "fallback" still resolved to town-square. The fix
-    # moves resolution to the daemon: explicit `AP2_MM_REPORT_CHANNEL`
-    # wins; otherwise fall back to the first entry of `AP2_MM_CHANNELS`
-    # (the inbound-watch channel is the natural place to send outbound
-    # status posts in single-channel projects). When neither is set we
-    # omit the line entirely — the prompt body then routes the agent
-    # into the explicit-skip branch with a `log_event` audit so the
-    # operator can grep events.jsonl for the configuration miss. The
-    # `#autopilot` literal is retained in this comment as a regression
-    # anchor: the prompt body must NEVER carry it (see the
-    # `test_status_report_prompt_drops_dead_letter_autopilot_fallback`
-    # regression pin), but referencing it here documents the historical
-    # bug shape for future readers and keeps the verification grep
-    # honest.
-    target_channel = os.environ.get("AP2_MM_REPORT_CHANNEL", "").strip()
-    if not target_channel:
-        raw_channels = os.environ.get("AP2_MM_CHANNELS", "").strip()
-        for c in raw_channels.split(","):
-            c = c.strip()
-            if c:
-                target_channel = c
-                break
-    if target_channel:
-        state_extras.append(f"- post target channel: {target_channel}")
-    # TB-228: render the Automation loop activity digest section into
-    # `state_extras` so the agent forwards it verbatim. The section's
-    # window scopes to "since the previous `cron_complete name=status-
-    # report` event"; on first-ever run (or when the previous report
-    # rolled out of the tail) we count from the start of the tail.
-    # The renderer returns "" when the operator hasn't opted in AND
-    # nothing of interest fired, so a pre-opt-in project stays clean.
-    activity_tail = (
-        events.tail(cfg.events_file, 2000)
-        if cfg.events_file.exists() else []
-    )
-    since_idx = automation_status.find_previous_status_report_idx(
-        activity_tail,
-    )
-    automation_section = render_automation_loop_activity_section(
-        cfg, since_event_idx=since_idx, tail=activity_tail,
-    )
-    if automation_section:
-        state_extras.append(automation_section)
-    # TB-244: render the axis-4 focus-rotation sub-block (parallel to
-    # the TB-228 automation digest above). Same `since_idx` scoping so
-    # both surfaces share one inter-report window; the renderer returns
-    # "" when no `focus_advanced` / `roadmap_complete` events landed in
-    # the window. Wiring lives here so axis-1/2/3 digest tests stay
-    # byte-identical when axis-4 is quiet — the briefing's option B
-    # (parallel renderer, not in-place extension).
-    focus_rotation_section = render_focus_rotation_activity_section(
-        cfg, since_event_idx=since_idx, tail=activity_tail,
-    )
-    if focus_rotation_section:
-        state_extras.append(focus_rotation_section)
-    # TB-245: render the axis-1 validator-judge fail-open sub-block
-    # (parallel to the TB-244 focus-rotation digest above). Window is
-    # rolling 24h to match TB-243's pull-surface so operator never
-    # reconciles two counts between `ap2 status` and the cron post.
-    # Placed AFTER the focus-rotation block so the digest reads top-
-    # down as "automation activity → focus rotation → validator-judge
-    # fail-open" (axis-1 safety net rendered last so the eye lands on
-    # it; mirrors TB-243's web home placement of the validator-judge
-    # row at the bottom of the automation card). Renderer returns []
-    # when both 24h counts are zero — quiet windows stay byte-identical
-    # to the pre-TB-245 baseline.
-    validator_judge_state = automation_status.collect_window_validator_judge(
-        cfg,
-    )
-    validator_judge_lines = render_validator_judge_activity_section(
-        validator_judge_state,
-    )
-    if validator_judge_lines:
-        state_extras.append("\n".join(validator_judge_lines))
-    # TB-258: render the retrospective-audit unreviewed-count sub-block
-    # (parallel to the TB-245 validator-judge digest above). Pure
-    # read-layer composition over `audit.list_unreviewed` +
-    # `audit.parse_audit_cursor` via `collect_audit_state`. The
-    # underlying boundary is the operator_log.md `ran audit (...)`
-    # cursor — count is window-INDEPENDENT (always the full unreviewed
-    # pile, not just since-last-report) so an audit pile that
-    # accumulated over a multi-day silence still surfaces on every
-    # report until the operator clears it. Placed AFTER the
-    # validator-judge sub-block so the digest reads top-down as
-    # "automation activity → focus rotation → validator-judge fail-open
-    # → retrospective audit" (operator-decision queue rendered last so
-    # the eye lands on it — the explicit "you have N to review" nudge
-    # is the digest's natural call-to-action). Renderer returns []
-    # when the unreviewed-count is zero — fully-reviewed / fresh
-    # projects stay byte-identical to the pre-TB-258 baseline.
-    audit_state = automation_status.collect_audit_state(cfg)
-    audit_lines = render_audit_state_section(audit_state)
-    if audit_lines:
-        state_extras.append("\n".join(audit_lines))
-    # TB-259: render the `*Stats window aggregates (<window>):*`
-    # sub-block (parallel to the TB-258 audit sub-block above). Pure
-    # read-layer composition over the existing-in-HEAD
-    # `automation_stats.collect_stats` helper TB-255 built for the
-    # `/stats` HTML + `/stats.json` PULL surface; this push wiring
-    # reuses the same aggregates (no new collect_stats fields). Window
-    # is scoped to "now - last status-report cron_complete ts" so the
-    # digest matches the inter-report window the TB-228 / TB-244 /
-    # TB-245 / TB-258 sub-blocks above scope against; falls back to
-    # 24h when no prior report ts is parseable (first-ever run, or
-    # the previous one rolled out of the tail). Renderer returns []
-    # when the window's task-completion count is zero — quiet
-    # windows stay byte-identical to the pre-TB-259 baseline.
-    stats_window_s = _DEFAULT_STATS_WINDOW_S
-    if since_idx >= 0 and since_idx < len(activity_tail):
-        last_ts_raw = activity_tail[since_idx].get("ts")
-        if isinstance(last_ts_raw, str) and last_ts_raw:
-            try:
-                last_dt = _dt.datetime.strptime(
-                    last_ts_raw, "%Y-%m-%dT%H:%M:%SZ",
-                ).replace(tzinfo=_dt.timezone.utc)
-                delta_s = (
-                    _dt.datetime.now(_dt.timezone.utc) - last_dt
-                ).total_seconds()
-                # Floor at `automation_stats.MIN_WINDOW_S` (1h) so a
-                # back-to-back-second report doesn't compute a
-                # zero-width window that excludes every event by
-                # `>= start_dt` arithmetic — mirrors `parse_window`'s
-                # same-named clamp on the pull surface so push and pull
-                # windows align at the edge case.
-                if delta_s >= automation_stats.MIN_WINDOW_S:
-                    stats_window_s = int(delta_s)
-                elif delta_s > 0:
-                    stats_window_s = automation_stats.MIN_WINDOW_S
-            except (ValueError, TypeError):
-                pass
-    stats = automation_stats.collect_stats(cfg, window_s=stats_window_s)
-    stats_lines = render_stats_window_section(stats)
-    if stats_lines:
-        state_extras.append("\n".join(stats_lines))
-    # TB-260: render the stale-env sub-block (parallel to the TB-259
-    # stats-window sub-block above). Reads `daemon_state.json`'s
-    # `env_file_mtime_at_start` stash via `collect_env_staleness` and
-    # compares against the live `.cc-autopilot/env` mtime. Placed
-    # AFTER the stats sub-block so the digest reads top-down as
-    # "automation activity → focus rotation → validator-judge fail-open
-    # → retrospective audit → stats window → daemon env staleness"
-    # (operator-restart nudge rendered last so the eye lands on it —
-    # the digest's natural call-to-action when active; mirrors
-    # TB-258's audit sub-block placement rationale). Renderer returns
-    # [] when not stale — healthy daemons stay byte-identical to the
-    # pre-TB-260 baseline.
-    env_staleness = automation_status.collect_env_staleness(cfg)
-    env_staleness_lines = render_env_staleness_section(env_staleness)
-    if env_staleness_lines:
-        state_extras.append("\n".join(env_staleness_lines))
-    # TB-280: render the `## Recent task activity` digest section
-    # (parallel to the TB-228 automation / TB-244 focus-rotation
-    # sub-blocks above). Pre-rendering each terminal task event as
-    # `- **TB-N** — <title>: <outcome>` closes goal.md focus-1's
-    # Done-when bullet "identifies tasks by title + one-line summary
-    # (never bare TB-N alone)" — the agent no longer composes bare
-    # TB-N bullets for events the daemon already pre-rendered. Same
-    # `since_idx` scoping as the other digests so all sub-blocks
-    # share one inter-report window. Renderer returns "" when no
-    # terminal task event landed in the window — quiet windows stay
-    # byte-identical to the pre-TB-280 baseline (load-bearing for
-    # the prior axis-1/2/3/4/audit/stats/env-stale digest tests).
-    recent_task_activity_section = render_recent_task_activity_section(
-        cfg, since_event_idx=since_idx, tail=activity_tail,
-    )
-    if recent_task_activity_section:
-        state_extras.append(recent_task_activity_section)
     # TB-280: project-identity headline substitution. The prompt body
     # carries the literal `<project_name>` token; the daemon swaps it
     # for `cfg.project_name` here so the agent posts
@@ -1645,7 +1792,19 @@ async def run_status_report(
         )
 
     if trigger == "cron":
-        mark_run(cfg.cron_state_file, "status-report")
+        # TB-281: stash the just-rendered post's fingerprint alongside
+        # the last-run timestamp via `mark_run_with_payload`. The
+        # sibling key `status-report.last_post_fingerprint` lands next
+        # to `status-report`'s float timestamp; `due_jobs` is untouched
+        # (the dotted key never collides with a job name). On the next
+        # tick's skip-check, `_status_report_skip_decision` reads this
+        # value back and compares against the prospective fingerprint
+        # — match ⇒ `cron_skipped reason=duplicate_content`.
+        mark_run_with_payload(
+            cfg.cron_state_file,
+            "status-report",
+            payload={_LAST_POST_FINGERPRINT_FIELD: post_fingerprint},
+        )
     events.append(
         cfg.events_file,
         "cron_complete",

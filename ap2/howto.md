@@ -568,7 +568,13 @@ shell-redirect-into-fenced-file corruption surface).
   place of `board_edit` (TB-145).
 - `status_report_run(channel, force)` (TB-144) — fire the
   status-report routine on demand (the same routine the cron job
-  invokes). The MM handler exposes it for `@claude-bot status`.
+  invokes). The MM handler exposes it for `@claude-bot status`. TB-281
+  added a content-fingerprint dedup gate (`cron_skipped
+  reason=duplicate_content`) so a chat-triggered post that would be
+  structurally identical to the last cron / chat post is suppressed
+  with an audit-event marker instead of re-firing the SDK; the gate
+  is shared with the cron tick (idle check + fingerprint compare both
+  honored on every entry).
 
 **Mattermost handler only** (`MM_HANDLER_TOOLS` =
 `CONTROL_AGENT_TOOLS` minus `ideation_state_write` + `board_edit`,
@@ -854,8 +860,18 @@ ISO-8601) + `type`; other fields vary. Categories:
 
 **Lifecycle.** `daemon_start`, `daemon_stop`, `daemon_pause`,
 `daemon_resume`, `task_start`, `task_complete`, `cron_start`,
-`cron_complete`, `cron_skipped` (status-report no-op when there's
-nothing new to summarize, TB-153), `cron_bootstrap` (first-run
+`cron_complete`, `cron_skipped` (status-report no-op — carries a
+`reason` field naming which gate fired:
+`reason=no_activity_since_last_report` (TB-128/153 — the inter-report
+window carries zero "interesting" events past the previous
+`cron_complete name=status-report`); `reason=duplicate_content`
+(TB-281 — events DID land but the prospective post is structurally
+identical to the last one, per the SHA-1 fingerprint stashed under
+`status-report.last_post_fingerprint` in `cron_state.json` over
+board counts + pending-review TB-Ns + decisions-needed bullets +
+digest sub-section contents + halt reason; closes goal.md focus-1's
+Done-when bullet "no two consecutive reports repeat unchanged
+content")), `cron_bootstrap` (first-run
 seeding of `cron.yaml` from `cron.default.yaml`), `ideation_empty_board`
 (skip — no slots OR cooldown), `ideation_forced` (operator forced via
 `ap2 ideate --force`), `ideation_skipped` / `ideation_skipped_no_slots`,

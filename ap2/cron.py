@@ -172,7 +172,17 @@ def update_job(cron_file: Path, action: str, **kw: Any) -> tuple[str, list[CronJ
 # ---- scheduling state ----
 
 
-def load_state(state_file: Path) -> dict[str, float]:
+def load_state(state_file: Path) -> dict[str, Any]:
+    """Return the cron state dict.
+
+    Primary keys are job names mapping to a last-run float timestamp
+    (TB-122). TB-281 added sibling keys of shape `f"{name}.{field}"`
+    that carry per-job auxiliary state alongside the timestamp — the
+    status-report job stashes `status-report.last_post_fingerprint`
+    for content-dedup gating. `due_jobs` only reads `state.get(name,
+    0.0)` so the sibling-key convention preserves the existing
+    scheduling arithmetic.
+    """
     if not state_file.exists():
         return {}
     try:
@@ -181,7 +191,7 @@ def load_state(state_file: Path) -> dict[str, float]:
         return {}
 
 
-def save_state(state_file: Path, state: dict[str, float]) -> None:
+def save_state(state_file: Path, state: dict[str, Any]) -> None:
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(state, indent=2, sort_keys=True))
 
@@ -215,6 +225,36 @@ def mark_run(state_file: Path, name: str, *, now: float | None = None) -> None:
     with locked_sidecar(state_file):
         state = load_state(state_file)
         state[name] = now if now is not None else time.time()
+        save_state(state_file, state)
+
+
+def mark_run_with_payload(
+    state_file: Path,
+    name: str,
+    *,
+    payload: dict[str, Any],
+    now: float | None = None,
+) -> None:
+    """Sibling of `mark_run` that also stashes auxiliary fields (TB-281).
+
+    Writes the schedule-arithmetic float at `state[name]` (preserving
+    the `due_jobs` contract — `state.get(j.name, 0.0)` arithmetic is
+    untouched) AND each `payload` entry at `state[f"{name}.{key}"]` so
+    callers can persist per-job structural state next to the timestamp
+    without breaking `load_state`'s primary-key reads.
+
+    Used by the status-report routine to atomically stash the just-
+    rendered post's `last_post_fingerprint` next to the last-run
+    timestamp — the content-dedup gate (TB-281) reads the sibling key
+    on the NEXT cron tick to skip back-to-back near-identical posts.
+    Generalized (not status-report-specific) so future cron jobs that
+    want similar sidecar state pay zero refactor cost.
+    """
+    with locked_sidecar(state_file):
+        state = load_state(state_file)
+        state[name] = now if now is not None else time.time()
+        for k, v in payload.items():
+            state[f"{name}.{k}"] = v
         save_state(state_file, state)
 
 
