@@ -119,6 +119,11 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     # Focus rotation
     "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
     "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
+    # TB-280: project identity prefix for the status-report headline.
+    # Operator renames should not require a daemon restart — the next
+    # `## Current state` snapshot build picks up the new value via the
+    # `_refresh_tunable_config_fields` rewrite below.
+    "AP2_PROJECT_NAME",
 })
 
 # Lifecycle knobs that CAN'T hot-reload. Each configures a stateful
@@ -258,6 +263,16 @@ def _refresh_tunable_config_fields(cfg: Config) -> None:
             "AP2_AUTO_DIAGNOSE_COOLDOWN_S",
             DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S,
         )
+    )
+    # TB-280: project identity prefix for the status-report headline.
+    # Mirrors `Config.load`'s "env override OR project_root.name" rule
+    # so a hot-reload reflects the same default-resolution semantics
+    # as a fresh daemon start. Whitespace-stripped so a stray space in
+    # the env file doesn't render a leading space in the bracketed
+    # headline.
+    cfg.project_name = (
+        os.environ.get("AP2_PROJECT_NAME", "").strip()
+        or cfg.project_root.name
     )
 
 
@@ -417,6 +432,9 @@ _TUNABLE_CONFIG_FIELDS: dict[str, str] = {
     "verify_timeout_s": "AP2_VERIFY_TIMEOUT_S",
     "auto_diagnose_idle_threshold_s": "AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S",
     "auto_diagnose_cooldown_s": "AP2_AUTO_DIAGNOSE_COOLDOWN_S",
+    # TB-280: project identity hot-reloads via the same `os.environ.get(...)
+    # or cfg.project_root.name` rule the startup pass uses.
+    "project_name": "AP2_PROJECT_NAME",
 }
 
 

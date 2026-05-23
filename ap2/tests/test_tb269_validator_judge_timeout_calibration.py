@@ -255,6 +255,8 @@ def _make_cfg(project_root: Path) -> Config:
         ),
         env_file=project_root / ".cc-autopilot" / "env",
         next_task_id=1,
+        # TB-280: project-identity headline prefix for status-report.
+        project_name=project_root.name,
         tick_interval_s=30,
         mm_tick_interval_s=10,
         event_context_size=50,

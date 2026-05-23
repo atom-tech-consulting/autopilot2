@@ -97,6 +97,16 @@ class Config:
     # ripples through the dataclass instead of every call site.
     env_file: Path
     next_task_id: int
+    # TB-280: operator-facing project identity. Leads every status-
+    # report Mattermost headline (`**[<project_name>] Autopilot Status
+    # Report** — <now>`) so a multi-project operator monitoring 5+
+    # daemons can identify a post's source project without alt-tabbing
+    # to the repo. Default is `project_root.name`; override via
+    # `AP2_PROJECT_NAME`. Surfaced on `Config` (not on a Routine-scoped
+    # struct) so the same field is available to web home, `ap2 status`,
+    # and any future push surface that wants to prefix the identity
+    # uniformly.
+    project_name: str
     tick_interval_s: int
     mm_tick_interval_s: int
     event_context_size: int
@@ -146,6 +156,17 @@ class Config:
             daemon_state_file=root / DAEMON_STATE_FILE,
             env_file=root / ENV_FILE,
             next_task_id=autopilot_section.get("next_task_id", 1),
+            # TB-280: project identity for status-report headline. Env
+            # override wins over the `project_root.name` default so a
+            # daemon hosting the project under a generic-named root
+            # (`/tmp/proj`, `/home/user/code/main`) can still post with
+            # an operator-meaningful identifier. Whitespace-stripped so
+            # an accidental `AP2_PROJECT_NAME=" foo"` doesn't render a
+            # leading space in the bracketed headline.
+            project_name=(
+                os.environ.get("AP2_PROJECT_NAME", "").strip()
+                or root.name
+            ),
             tick_interval_s=int(os.environ.get("AP2_TICK_S", DEFAULT_TICK_INTERVAL_S)),
             mm_tick_interval_s=int(
                 os.environ.get("AP2_MM_TICK_S", DEFAULT_MM_TICK_INTERVAL_S)

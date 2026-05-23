@@ -1660,6 +1660,14 @@ for the architecture + the `ap2 ack roadmap_complete` resume verb.
   `@claude-bot` mentions.
 - `AP2_MM_REPORT_CHANNEL` (TB-190) — explicit channel ID for
   status-report posts. Unset → falls back to `AP2_MM_CHANNELS[0]`.
+- `AP2_PROJECT_NAME` (TB-280) — operator-facing project identity that
+  leads the status-report Mattermost headline (`**[<project_name>]
+  Autopilot Status Report** — <now>`). Defaults to `project_root.name`
+  so a project at `/home/user/code/stoch` posts under `[stoch]`
+  without configuration; override when the directory name is generic
+  (`main`, `proj`) or carries a layout suffix the operator doesn't
+  want surfaced. Hot-reloadable — a rename takes effect on the next
+  tick without `ap2 stop && ap2 start`.
 - `AP2_MM_MENTION` (`@claude-bot`) — pattern that triggers handler
   dispatch.
 - `AP2_MM_BOT_USER_ID` — bot's user ID (used for self-message

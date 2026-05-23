@@ -700,6 +700,191 @@ def render_env_staleness_section(state: dict) -> list[str]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# TB-280: Recent task activity digest section. Parallels the
+# `render_automation_loop_activity_section` / TB-244 / TB-245 / TB-258 /
+# TB-259 / TB-260 pre-rendered sections above. Closes goal.md focus-1's
+# Done-when bullet "identifies tasks by title + one-line summary (never
+# bare TB-N alone) and leads with the project name".
+#
+# Pre-TB-280 the status-report prompt asked the agent to compose bullets
+# of shape `TB-N + 1-line outcome + short SHA` (prompt L741-744), forcing
+# the multi-project operator who hasn't seen this project since the
+# previous report to alt-tab to the repo to translate every TB-N into a
+# task title. This renderer walks the inter-report window (events at
+# indices > the previous `cron_complete job=status-report`), resolves
+# `Board.find(task_id).title` per terminal task event, and emits one
+# bullet per event so the agent's body bullets sit on top of an already-
+# titled digest the operator can read without context-switching.
+
+_RECENT_TASK_ACTIVITY_HEADING = "## Recent task activity"
+
+# Terminal task-event types the digest renders. Mirrors the briefing's
+# enumeration: `task_complete` covers the dominant happy/failed-verify
+# path (its `status` field distinguishes the two), `task_failed` is the
+# forward-compat hook for an explicit failure event, `verification_failed`
+# fires from the per-task verifier (predates the `task_complete` close-
+# out on retries), `retry_exhausted` fires when the retry budget is
+# spent.
+_TERMINAL_TASK_EVENT_TYPES: frozenset[str] = frozenset({
+    "task_complete",
+    "task_failed",
+    "verification_failed",
+    "retry_exhausted",
+})
+
+
+def _first_line(text: str | None) -> str:
+    """Return the first non-empty line of `text`, stripped.
+
+    Used as the title-lookup fallback when `Board.find(task_id)` misses
+    (task moved between sections, deleted, or never landed on the
+    board). The event's `summary` field carries the task agent's
+    one-sentence completion summary — its first line is the closest
+    operator-readable identifier we have when board lookup fails.
+    Returns the empty string when `text` is None / empty / whitespace
+    so callers can substitute a stable fallback marker.
+    """
+    if not text:
+        return ""
+    for line in text.splitlines():
+        s = line.strip()
+        if s:
+            return s
+    return ""
+
+
+def _resolve_task_title(cfg: Config, task_id: str, summary: str | None) -> str:
+    """Resolve a task's display title for the digest bullet.
+
+    Lookup order:
+      1. `Board.load(cfg.tasks_file).get(task_id).title` — the
+         operator-curated title from `TASKS.md`. Stable across the
+         task's lifetime (the daemon only mutates section / checkbox
+         on move, never the title text).
+      2. First non-empty line of the event's `summary` field —
+         falls back to the task agent's completion summary when the
+         task isn't on the board (deleted / never landed / board not
+         loadable).
+      3. The literal `"(title unavailable)"` when neither yields
+         text. A stable placeholder is better than rendering a bare
+         TB-N + colon and re-introducing the very regression this
+         section closes.
+
+    Board lookup failures (file missing, parse error) are swallowed —
+    the renderer must never break the status-report run for a board
+    snapshot issue.
+    """
+    if cfg.tasks_file.exists():
+        try:
+            board = Board.load(cfg.tasks_file)
+        except Exception:  # noqa: BLE001
+            board = None
+        if board is not None:
+            task = board.get(task_id)
+            if task is not None and task.title:
+                return task.title
+    summary_line = _first_line(summary)
+    if summary_line:
+        return summary_line
+    return "(title unavailable)"
+
+
+def _outcome_for_event(ev: dict) -> str:
+    """Render a one-line outcome string from a terminal task event.
+
+    The daemon supplies "title + structural shape only" (briefing's
+    Out-of-scope clause); per-bullet language polish stays with the
+    agent. We mechanically map the event's status / commit / counter
+    fields to a deterministic outcome label so the bullet has a
+    stable closing token even when the agent doesn't add anything
+    further. Operators reading two back-to-back digests see the same
+    rendering for the same event shape.
+    """
+    typ = ev.get("type", "")
+    if typ == "task_complete":
+        status = (ev.get("status") or "").strip() or "complete"
+        commit = (ev.get("commit") or "").strip()
+        if commit:
+            return f"{status} ({commit[:7]})"
+        return status
+    if typ == "task_failed":
+        reason = (ev.get("reason") or ev.get("status") or "").strip()
+        return f"failed ({reason})" if reason else "failed"
+    if typ == "verification_failed":
+        kind = (ev.get("kind") or "").strip()
+        return f"verification_failed ({kind})" if kind else "verification_failed"
+    if typ == "retry_exhausted":
+        attempts = ev.get("attempts")
+        last = (ev.get("last_status") or "").strip()
+        if isinstance(attempts, int) and attempts > 0 and last:
+            return f"retry_exhausted ({attempts} attempts, last={last})"
+        if isinstance(attempts, int) and attempts > 0:
+            return f"retry_exhausted ({attempts} attempts)"
+        return "retry_exhausted"
+    return typ or "(unknown)"
+
+
+def render_recent_task_activity_section(
+    cfg: Config,
+    *,
+    since_event_idx: int,
+    tail: list[dict] | None = None,
+) -> str:
+    """Return the Markdown `## Recent task activity` section the cron
+    agent forwards verbatim into the Mattermost post, or "" when no
+    terminal task event landed in the inter-report window.
+
+    `since_event_idx` is the positional index of the previous
+    `cron_complete job=status-report` event in the tail; only events
+    at strictly greater indices contribute. Mirrors the scoping
+    contract TB-228 / TB-244 use for their parallel digests.
+
+    Shape (when rendered):
+
+        ## Recent task activity
+
+        - **TB-N** — <title>: <one-line outcome>
+        - **TB-M** — <title>: <one-line outcome>
+
+    One bullet per terminal task event (`task_complete`, `task_failed`,
+    `verification_failed`, `retry_exhausted`) in tail order, so a window
+    with `verification_failed` + later `task_complete` for the same
+    TB-N reads chronologically (operator sees the failure resolution
+    arc).
+
+    Omit-on-empty: returns "" when zero terminal task events sit in
+    the window — quiet windows stay byte-identical to the pre-TB-280
+    digest baseline so the prior axis-1/2/3/4/audit/stats/env-stale
+    sub-block tests continue to pass when the window has no task
+    activity to summarize.
+    """
+    if tail is None:
+        if cfg.events_file.exists():
+            tail = events.tail(cfg.events_file, 2000)
+        else:
+            tail = []
+
+    start_at = since_event_idx + 1 if since_event_idx >= 0 else 0
+    rendered: list[str] = []
+    for ev in tail[start_at:]:
+        if ev.get("type") not in _TERMINAL_TASK_EVENT_TYPES:
+            continue
+        task_id = (ev.get("task") or "").strip()
+        if not task_id:
+            # No task ID → can't render a TB-N bullet. Skip rather
+            # than emit a bare `**?** — …` line that would re-
+            # introduce the very ambiguity this section closes.
+            continue
+        title = _resolve_task_title(cfg, task_id, ev.get("summary"))
+        outcome = _outcome_for_event(ev)
+        rendered.append(f"- **{task_id}** — {title}: {outcome}")
+
+    if not rendered:
+        return ""
+    return _RECENT_TASK_ACTIVITY_HEADING + "\n\n" + "\n".join(rendered)
+
+
 # Body that pre-TB-144 lived in `cron.default.yaml`. The cron job's prompt
 # field is now a stub ("see ap2.status_report.STATUS_REPORT_PROMPT") because
 # the daemon's `run_cron` short-circuits status-report jobs to
@@ -737,11 +922,24 @@ Freshness contract (TB-128 — non-negotiable):
   reflects current reality if you do post.
 
 Body shape (when posting):
-- Headline: `**Autopilot Status Report** — <now>`
-- 4-8 bullets covering: tasks completed (TB-N + 1-line outcome +
-  short SHA), tasks failed / verification_failed / retry_exhausted,
-  pipelines started/completed, cron / ideation activity, daemon
-  pause/resume, operator acks, open issues. Keep under 12 lines.
+- Headline: `**[<project_name>] Autopilot Status Report** — <now>`
+  (TB-280: the daemon substitutes `<project_name>` at prompt-build
+  time from `cfg.project_name` — a multi-project operator monitoring
+  several daemons reads the bracketed identifier to know which
+  project the post comes from without alt-tabbing to the repo.
+  Keep the literal `<project_name>` token in this prompt — it is the
+  load-bearing substitution target.)
+- 4-8 bullets covering: tasks completed, tasks failed /
+  verification_failed / retry_exhausted, pipelines started/completed,
+  cron / ideation activity, daemon pause/resume, operator acks, open
+  issues. Keep under 12 lines. TB-280: for terminal task events
+  (`task_complete`, `task_failed`, `verification_failed`,
+  `retry_exhausted`) in the inter-report window, DO NOT compose
+  bullets from scratch — the daemon pre-renders the
+  `## Recent task activity` section below with one
+  `**TB-N** — <title>: <outcome>` line per terminal event, which you
+  forward verbatim. Your bullets cover the OTHER signal (pipelines,
+  cron / ideation, daemon lifecycle, operator acks, open issues).
 - TB-151: if the snapshot's `## Current state` block carries a
   `- Pending operator review (N): TB-...` line, copy that line
   VERBATIM as one of your bullets so the operator sees which TB-Ns
@@ -841,6 +1039,20 @@ Body shape (when posting):
   bottom of the digest — the natural call-to-action position.
   Absent ⇒ 0 unreviewed shipped tasks (fully-reviewed / fresh
   project) ⇒ omit.
+- TB-280: if the snapshot's `## Current state` block carries a
+  `## Recent task activity` section (heading + one bullet per
+  terminal task event in the inter-report window, each shaped as
+  `- **TB-N** — <title>: <outcome>`), copy that entire section
+  VERBATIM into your post (preserve the heading and every bullet).
+  The daemon already resolved each task's title via `Board.find` and
+  composed the outcome — do NOT recompute, paraphrase, or drop
+  bullets, and do NOT re-emit bare TB-N references for events
+  already pre-rendered here. Position this section AFTER your body
+  bullets but BEFORE the automation / focus-rotation / validator-
+  judge / audit / stats / env-stale sub-blocks so the operator
+  scanning the post sees task-completion identity first, then the
+  axis-level digests. Absent ⇒ no terminal task events landed in
+  the window ⇒ omit (the daemon renders nothing in that case).
 - TB-259: if the snapshot's `## Current state` block carries a
   `*Stats window aggregates (<window>):*` sub-block (italicized
   header naming the inter-report window + 3 bullets summarizing
@@ -1353,8 +1565,35 @@ async def run_status_report(
     env_staleness_lines = render_env_staleness_section(env_staleness)
     if env_staleness_lines:
         state_extras.append("\n".join(env_staleness_lines))
+    # TB-280: render the `## Recent task activity` digest section
+    # (parallel to the TB-228 automation / TB-244 focus-rotation
+    # sub-blocks above). Pre-rendering each terminal task event as
+    # `- **TB-N** — <title>: <outcome>` closes goal.md focus-1's
+    # Done-when bullet "identifies tasks by title + one-line summary
+    # (never bare TB-N alone)" — the agent no longer composes bare
+    # TB-N bullets for events the daemon already pre-rendered. Same
+    # `since_idx` scoping as the other digests so all sub-blocks
+    # share one inter-report window. Renderer returns "" when no
+    # terminal task event landed in the window — quiet windows stay
+    # byte-identical to the pre-TB-280 baseline (load-bearing for
+    # the prior axis-1/2/3/4/audit/stats/env-stale digest tests).
+    recent_task_activity_section = render_recent_task_activity_section(
+        cfg, since_event_idx=since_idx, tail=activity_tail,
+    )
+    if recent_task_activity_section:
+        state_extras.append(recent_task_activity_section)
+    # TB-280: project-identity headline substitution. The prompt body
+    # carries the literal `<project_name>` token; the daemon swaps it
+    # for `cfg.project_name` here so the agent posts
+    # `**[<name>] Autopilot Status Report** — <now>` to Mattermost.
+    # `.replace` (not `.format`) avoids collisions with the prompt's
+    # existing curly braces (none today; defense against future
+    # `{ts}`-style interpolation additions).
+    prompt_body = STATUS_REPORT_PROMPT.replace(
+        "<project_name>", cfg.project_name,
+    )
     prompt = _prompts.build_control_prompt(
-        cfg, "status-report", STATUS_REPORT_PROMPT,
+        cfg, "status-report", prompt_body,
         state_extras=state_extras,
     )
     start_payload: dict = {"job": "status-report", "trigger": trigger}
