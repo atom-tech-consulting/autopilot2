@@ -8,8 +8,8 @@
 
 ## Backlog
 
-- [ ] **TB-285** **Rename Done-when sub-block to Progress signals in goal.md format** `@blocked:TB-283` [→ brief](.cc-autopilot/tasks/rename-done-when-sub-block-to-progress-s.md)
 - [ ] **TB-286** **Update ap2/howto.md for empty-cycles advancement + Progress signals rename** `@blocked:TB-283,TB-284,TB-285` [→ brief](.cc-autopilot/tasks/update-ap2-howto-md-for-empty-cycles-adv.md)
+- [ ] **TB-285** **Rename Done-when sub-block to Progress signals in goal.md format** `@blocked:TB-283` [→ brief](.cc-autopilot/tasks/rename-done-when-sub-block-to-progress-s.md)
 
 ## Pipeline Pending
 
