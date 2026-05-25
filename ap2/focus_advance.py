@@ -6,25 +6,23 @@ module owns the pointer-advance policy itself:
 
   - `_ideation_empty_against_focus`: tail-scan counter for the heuristic
     "N consecutive 0-proposal cycles against the active focus" path.
-  - `_judge_done_when`: one-shot SDK judge call evaluating whether a
-    focus's `Done when:` bullets are substantively met. Test seam: the
-    monkey-patched value on `daemon._judge_done_when` takes effect via
-    the daemon-module attribute lookup below.
   - `_maybe_advance_focus`: the orchestrator entry point. Reads goal.md's
     focus list + `focus_pointer.json`, advances the in-memory pointer
     when criteria are met, emits `roadmap_complete` when all foci are
     exhausted.
 
 Reads goal.md's multi-`## Current focus:` heading list + the runtime
-pointer (`focus_pointer.json`). Advances the in-memory pointer when:
-  - The active focus carries an explicit `Done when:` sub-block AND a
-    short LLM-judge call rules the bullets substantively met (one judge
-    call per advance attempt, cost knob `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT`).
-  - The active focus has NO explicit `Done when:` sub-block AND the
-    heuristic-fallback empty-cycles counter has reached
-    `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3). The counter
-    increments on each tick where ideation produced 0 proposals against
-    the active focus (the empty-board signal).
+pointer (`focus_pointer.json`). TB-283: the empty-cycles heuristic is
+the sole advance signal — a focus advances after
+`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3) consecutive ideation
+cycles produce zero proposals against it (the empty-board signal).
+The prior LLM-judge path against operator-authored `Done when:`
+bullets was deleted because the judge ruled on commit diffs of code
+the running daemon had never executed, collapsing multi-week foci
+into ~3-task cycles whenever each task commit-satisfied one
+shape-shaped bullet. The `Done when:` sub-block in goal.md remains
+as advisory ideation-prompt context but no longer gates advancement.
+
 When all foci exhaust, emit `roadmap_complete` (once) + a
 `## Decisions needed from operator` bullet so `ap2 status` and the web
 home page surface the parked-ideation state. TB-275: this is an
@@ -46,8 +44,6 @@ advance attempt even when criteria are met. The daemon surfaces a
 can advance manually via `ap2 update-goal`.
 """
 from __future__ import annotations
-
-import os
 
 from . import events, goal
 from .auto_approve import _append_decisions_needed_bullet
@@ -112,11 +108,17 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
     (early return; the daemon's other gates handle the pre-focus-list
     state).
 
-    The SDK Done-when judge is invoked at most once per tick (only when
-    the active focus has explicit `Done when:` bullets). Cost is bounded
-    by `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` (default `medium` — cheaper
-    than the verifier's `high` because the question is one-shot and
-    coarse-grained).
+    TB-283: the empty-cycles heuristic is the sole advance signal —
+    used for every focus regardless of whether it carries a
+    `Done when:` sub-block. The prior LLM-judge path that ruled on
+    operator-authored Done-when bullets was deleted because it
+    collapsed to "did the last N task commits look goal-shaped?",
+    a diff-reading proxy the running daemon could not verify
+    behaviorally; foci kept collapsing into ~3-task cycles whenever
+    each task commit-satisfied one shape-shaped bullet. The `sdk`
+    parameter is now vestigial (no SDK calls remain inside the
+    advance pass) but is retained so callers and the test harness
+    can keep passing it without ceremony.
     """
     foci = goal.read_focus_list(cfg)
     if not foci:
@@ -190,41 +192,23 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
 
     advance_trigger: str | None = None
 
-    if active.has_done_when() and active.done_when_bullets:
-        # Done-when judge path. Pure / SDK call only when the focus
-        # has bullets to evaluate against. An empty Done-when sub-
-        # block ("operator authored the heading but no criteria yet")
-        # falls through to the heuristic path: there's nothing to
-        # judge yet.
-        #
-        # TB-263: indirection through `daemon._judge_done_when` so the
-        # test seam `monkeypatch.setattr(daemon, "_judge_done_when", ...)`
-        # in `test_tb226_focus_rotation.py` continues to take effect
-        # after the focus-advance lift. The daemon re-exports
-        # `_judge_done_when` from this module; the late `from .`
-        # binding here means each call resolves through daemon's
-        # current attribute value (the monkey-patched stub).
-        from . import daemon as _daemon
-        verdict = await _daemon._judge_done_when(cfg, sdk, active)
-        if verdict == "yes":
-            advance_trigger = "done_when_judge"
-        # `no` / `insufficient_evidence` / judge-error → no advance.
-    else:
-        # Heuristic-fallback path: count consecutive ideation cycles
-        # that produced 0 proposals against the active focus.
-        threshold = goal.advance_empty_cycles_threshold()
-        tail = events.tail(cfg.events_file, _FOCUS_RECENT_TAIL_N)
-        empty_cycles = _ideation_empty_against_focus(tail, active.title)
-        # Keep the pointer's empty_cycles field in sync (forensic /
-        # observability surface for `ap2 status` / web UI).
-        if pointer.get("empty_cycles") != empty_cycles:
-            pointer["empty_cycles"] = empty_cycles
-            try:
-                goal.save_pointer(cfg, pointer)
-            except OSError:
-                pass
-        if empty_cycles >= threshold:
-            advance_trigger = "empty_cycles_heuristic"
+    # TB-283: empty-cycles is the sole advance signal — runs for every
+    # focus regardless of whether it carries a `Done when:` sub-block.
+    # Count consecutive ideation cycles that produced 0 proposals
+    # against the active focus.
+    threshold = goal.advance_empty_cycles_threshold()
+    tail = events.tail(cfg.events_file, _FOCUS_RECENT_TAIL_N)
+    empty_cycles = _ideation_empty_against_focus(tail, active.title)
+    # Keep the pointer's empty_cycles field in sync (forensic /
+    # observability surface for `ap2 status` / web UI).
+    if pointer.get("empty_cycles") != empty_cycles:
+        pointer["empty_cycles"] = empty_cycles
+        try:
+            goal.save_pointer(cfg, pointer)
+        except OSError:
+            pass
+    if empty_cycles >= threshold:
+        advance_trigger = "empty_cycles_heuristic"
 
     if advance_trigger is None:
         return
@@ -281,112 +265,3 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
         new_index=new_idx,
         total_foci=len(foci),
     )
-
-
-async def _judge_done_when(cfg: Config, sdk, focus: "goal.FocusItem") -> str:
-    """Invoke a short SDK judge call to evaluate whether a focus's
-    `Done when:` bullets are substantively met.
-
-    Returns one of `"yes"`, `"no"`, `"insufficient_evidence"`, or
-    `"judge_error"`. The caller only advances on `"yes"`; all other
-    verdicts are conservative (leave the pointer alone).
-
-    Cost is bounded by `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` (default
-    `medium`). The prompt is a compact stand-alone block: focus title +
-    Done-when bullets + the last ~10 `task_complete` titles + the head
-    of `ideation_state.md`. No filesystem reads beyond those — the
-    judge gets a finite context window per advance attempt.
-
-    Test seam: the SDK call is mocked in `test_tb226_focus_rotation.py`
-    by monkey-patching this function to return a fixed verdict. The
-    function is async so the test stub can be an `async def`.
-    """
-    bullets = focus.done_when_bullets or []
-    if not bullets:
-        # Defensive: caller should already check `has_done_when()` +
-        # non-empty bullets, but if we get here we can't make a
-        # judgment.
-        return "insufficient_evidence"
-
-    # Build the prompt body. Compact — the brief stipulates a SHORT
-    # judge call, not a full agent.
-    tail = events.tail(cfg.events_file, 200)
-    recent_completes: list[str] = []
-    for e in tail:
-        if e.get("type") != "task_complete":
-            continue
-        tid = str(e.get("task") or "")
-        status = str(e.get("status") or "")
-        summary = str(e.get("summary") or "")[:200]
-        if tid:
-            recent_completes.append(f"- {tid} [{status}] {summary}")
-    recent_completes = recent_completes[-10:]
-
-    ideation_state_path = (
-        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
-    )
-    if ideation_state_path.exists():
-        try:
-            ideation_head = ideation_state_path.read_text()[:3000]
-        except OSError:
-            ideation_head = ""
-    else:
-        ideation_head = ""
-
-    bullet_block = "\n".join(f"- {b}" for b in bullets)
-    completes_block = "\n".join(recent_completes) or "(none in window)"
-    prompt = (
-        f"You are evaluating whether the focus `{focus.title}` in "
-        f"goal.md is substantively done.\n\n"
-        f"## Done-when bullets\n\n{bullet_block}\n\n"
-        f"## Recent task completes (last 10)\n\n{completes_block}\n\n"
-        f"## Ideation state (head)\n\n{ideation_head}\n\n"
-        f"Are the Done-when bullets substantively met? Reply with one "
-        f"of `yes` / `no` / `insufficient_evidence` on the FIRST line "
-        f"of your response, followed by a single sentence of "
-        f"rationale. The daemon parses the first token only."
-    )
-
-    effort = goal.done_when_judge_effort()
-    text = ""
-    try:
-        options = sdk.ClaudeAgentOptions(
-            cwd=str(cfg.project_root),
-            allowed_tools=[],
-            permission_mode="bypassPermissions",
-            # 4 turns is enough for the verdict + rationale; the judge
-            # has no tools so it cannot ramble across many turns. Kept
-            # as a small int literal (not an env knob) because the
-            # briefing names only the three TB-226 knobs as new surface
-            # and adding a fourth dilutes the operator-facing knob list.
-            max_turns=4,
-            setting_sources=["project"],
-            model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
-            extra_args={"effort": effort},
-        )
-        async for msg in sdk.query(prompt=prompt, options=options):
-            content = getattr(msg, "content", None)
-            if isinstance(content, list):
-                for part in content:
-                    t = getattr(part, "text", None)
-                    if isinstance(t, str) and t.strip():
-                        text = t.strip()
-            else:
-                t = getattr(msg, "result", None)
-                if isinstance(t, str) and t.strip():
-                    text = t.strip()
-    except Exception:  # noqa: BLE001
-        return "judge_error"
-
-    if not text:
-        return "insufficient_evidence"
-    first = text.splitlines()[0].strip().lower()
-    # Tolerate `**yes**` / `Yes.` / ``"yes"`` shapes.
-    first = first.strip("*`'\".:, ")
-    if first.startswith("yes"):
-        return "yes"
-    if first.startswith("no"):
-        return "no"
-    if "insufficient" in first:
-        return "insufficient_evidence"
-    return "insufficient_evidence"

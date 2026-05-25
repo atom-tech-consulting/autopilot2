@@ -376,7 +376,6 @@ def save_pointer(cfg, pointer: dict[str, Any]) -> None:
 ADVANCE_EMPTY_CYCLES_DEFAULT = 3
 ADVANCE_EMPTY_CYCLES_MIN = 1
 ADVANCE_EMPTY_CYCLES_MAX = 20
-DONE_WHEN_JUDGE_EFFORT_DEFAULT = "medium"
 
 
 def advance_empty_cycles_threshold() -> int:
@@ -410,34 +409,14 @@ def auto_advance_disabled() -> bool:
     enabled).
 
     The kill-switch: when True, the daemon never auto-advances even
-    if the Done-when judge says criteria are met or the heuristic
-    fallback threshold tripped. A `focus_advance_blocked` decisions-
-    needed bullet surfaces so the operator can advance manually via
-    `ap2 update-goal` or by flipping the knob.
+    if the empty-cycles heuristic threshold tripped. A
+    `focus_advance_blocked` decisions-needed bullet surfaces so the
+    operator can advance manually via `ap2 update-goal` or by
+    flipping the knob.
     """
     import os
     raw = os.environ.get("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "").strip().lower()
     return raw in ("1", "true", "yes", "on")
-
-
-def done_when_judge_effort() -> str:
-    """Effort knob for the LLM-judge call that evaluates Done-when
-    bullets. Mirrors `AP2_JANITOR_JUDGE_EFFORT`'s shape.
-
-    Returns the explicit `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` value when
-    set, else falls back to `AP2_AGENT_EFFORT`, else the
-    `DONE_WHEN_JUDGE_EFFORT_DEFAULT` constant ("medium" — cheaper than
-    the verifier's "high" default because the Done-when judgment is
-    one-shot per advance attempt, not per-bullet-per-task).
-    """
-    import os
-    explicit = os.environ.get("AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT", "").strip()
-    if explicit:
-        return explicit
-    fallback = os.environ.get("AP2_AGENT_EFFORT", "").strip()
-    if fallback:
-        return fallback
-    return DONE_WHEN_JUDGE_EFFORT_DEFAULT
 
 
 # ===========================================================================

@@ -1712,14 +1712,15 @@ from .auto_unfreeze import (
 
 # TB-263: TB-226 focus-list pointer advance lives in `ap2.focus_advance`.
 # Re-exported here so existing test paths (`daemon._maybe_advance_focus`,
-# `daemon._judge_done_when`, `daemon._ideation_empty_against_focus`) and
-# the orchestrator's tick-loop call in `_tick` resolve through one name.
-# The new module owns the pointer-advance policy; the orchestrator below
-# decides when to consult it.
+# `daemon._ideation_empty_against_focus`) and the orchestrator's
+# tick-loop call in `_tick` resolve through one name. The new module
+# owns the pointer-advance policy; the orchestrator below decides when
+# to consult it. TB-283: the prior LLM-judge re-export was dropped when
+# the Done-when judge path was deleted in favor of an empty-cycles-only
+# advance signal — see `ap2/focus_advance.py` module docstring.
 from .focus_advance import (
     _FOCUS_RECENT_TAIL_N,
     _ideation_empty_against_focus,
-    _judge_done_when,
     _maybe_advance_focus,
 )
 

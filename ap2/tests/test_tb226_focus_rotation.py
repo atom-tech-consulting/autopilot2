@@ -20,7 +20,7 @@ Behavioral cases pinned here:
     - non-string / empty input returns []
 
   Env knobs (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`,
-  `AP2_FOCUS_AUTO_ADVANCE_DISABLED`, `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT`):
+  `AP2_FOCUS_AUTO_ADVANCE_DISABLED`):
     - default / override / invalid-value parse for each knob
     - empty-cycles clamp to [1, 20]
 
@@ -29,10 +29,11 @@ Behavioral cases pinned here:
     - load of missing file returns the default-emit shape
     - load tolerates malformed JSON without crashing
 
-  Advance heuristic:
-    - empty-cycles fallback fires when threshold reached
+  Advance heuristic (TB-283: empty-cycles is the sole signal):
+    - empty-cycles fires when threshold reached
     - empty-cycles counter resets on `ideation_proposal_recorded`
-    - Done-when judge advance via stubbed SDK verdict
+    - a focus carrying `Done when:` bullets advances via the SAME
+      empty-cycles signal (no separate LLM-judge path)
     - `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits even
       when criteria are met
 
@@ -72,14 +73,15 @@ from ap2.init import init_project
 # Direct references to the names the briefing's `## Verification`
 # bullets / coverage-drift gates expect to see in this test file.
 # Loaded at module top so a refactor that removes them surfaces
-# cleanly on import.
+# cleanly on import. TB-283: `done_when_judge_effort` was dropped
+# from goal.py along with the LLM-judge advance path; the empty-
+# cycles heuristic is now the sole signal.
 _NAMES_FOR_DRIFT_GATE = (
     daemon._maybe_advance_focus,
     goal.parse_focus_list,
     goal.read_focus_list,
     goal.advance_empty_cycles_threshold,
     goal.auto_advance_disabled,
-    goal.done_when_judge_effort,
     goal.load_pointer,
     goal.save_pointer,
     goal.roadmap_exhausted,
@@ -89,11 +91,12 @@ _NAMES_FOR_DRIFT_GATE = (
 # Env-knob name substrings the docs-drift / coverage-drift gates scan
 # for (they assert each `AP2_*` env knob appears somewhere under
 # `ap2/tests/`).  Keeping them grouped here makes the substring
-# coverage obvious and self-documenting.
+# coverage obvious and self-documenting. TB-283: the
+# `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` knob was retired along with the
+# LLM-judge advance path.
 _ENV_KNOB_SUBSTRINGS = (
     "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
     "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
-    "AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT",
 )
 
 
@@ -308,24 +311,10 @@ def test_auto_advance_disabled_falsy(monkeypatch):
         assert goal.auto_advance_disabled() is False, f"failed for {val!r}"
 
 
-def test_done_when_judge_effort_default(monkeypatch):
-    """Default unset → `medium`. Pins the briefing's stated default."""
-    monkeypatch.delenv("AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT", raising=False)
-    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
-    assert goal.done_when_judge_effort() == "medium"
-
-
-def test_done_when_judge_effort_explicit(monkeypatch):
-    """Explicit override wins. Pins the override shape."""
-    monkeypatch.setenv("AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT", "high")
-    assert goal.done_when_judge_effort() == "high"
-
-
-def test_done_when_judge_effort_fallback(monkeypatch):
-    """Falls back to `AP2_AGENT_EFFORT` when its own knob is unset."""
-    monkeypatch.delenv("AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT", raising=False)
-    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
-    assert goal.done_when_judge_effort() == "xhigh"
+# TB-283: the `done_when_judge_effort` env-knob tests were retired
+# along with the `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` knob itself
+# (deleted from `ap2/goal.py`). The LLM-judge advance path is gone;
+# the empty-cycles heuristic is the sole signal.
 
 
 # ===========================================================================
@@ -492,15 +481,22 @@ def test_empty_cycles_resets_on_proposal(cfg, monkeypatch):
 
 
 # ===========================================================================
-# Advance pass — Done-when judge path (stubbed SDK)
+# TB-283: the Done-when judge path is gone. Empty-cycles is the sole
+# advance signal (see `ap2/focus_advance.py`). Even when a focus carries
+# explicit `Done when:` bullets, the daemon advances solely off the
+# heuristic — the bullets remain in goal.md as ideation-prompt context
+# but no longer gate the pointer. The judge-path tests were removed
+# along with `_judge_done_when` itself.
 # ===========================================================================
 
 
-def test_done_when_judge_yes_advances(cfg, monkeypatch):
-    """LLM-judge verdict `yes` → advance with `done_when_judge` trigger."""
+def test_done_when_focus_advances_via_empty_cycles_only(cfg, monkeypatch):
+    """TB-283 pin: a focus that carries `Done when:` bullets advances
+    via the SAME empty-cycles heuristic as any other focus. The bullets
+    are advisory ideation-prompt context; they no longer trip a
+    separate LLM-judge advance path."""
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    _write_goal_with_done_when(cfg, "alpha", ["criterion 1", "criterion 2"])
-    # Add a second focus so the advance lands somewhere live.
     (cfg.project_root / "goal.md").write_text(
         _make_goal_md(
             "## Current focus: alpha\n\n"
@@ -513,47 +509,24 @@ def test_done_when_judge_yes_advances(cfg, monkeypatch):
         )
     )
 
-    async def _yes_judge(_cfg, _sdk, _focus):
-        return "yes"
+    # Three empty ideation cycles against alpha → advance via the
+    # heuristic, regardless of the `Done when:` block's presence.
+    for _ in range(3):
+        _emit_ideation_empty(cfg)
 
-    monkeypatch.setattr(daemon, "_judge_done_when", _yes_judge)
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
     pointer = goal.load_pointer(cfg)
     assert pointer["active_index"] == 1
     assert pointer["active_title"] == "beta"
+
     advanced = [
         e for e in events.tail(cfg.events_file, 50)
         if e.get("type") == "focus_advanced"
     ]
     assert advanced
-    assert advanced[-1]["trigger"] == "done_when_judge"
-
-
-def test_done_when_judge_no_does_not_advance(cfg, monkeypatch):
-    """Verdicts `no` / `insufficient_evidence` / `judge_error` do NOT
-    advance. Conservative-by-default."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    (cfg.project_root / "goal.md").write_text(
-        _make_goal_md(
-            "## Current focus: alpha\n\n"
-            "Body.\n\n"
-            "Done when:\n"
-            "- criterion 1\n\n"
-            "## Current focus: beta\n\n"
-            "Beta body.\n\n"
-        )
-    )
-
-    for verdict in ("no", "insufficient_evidence", "judge_error"):
-        async def _stub(_cfg, _sdk, _focus, v=verdict):
-            return v
-        monkeypatch.setattr(daemon, "_judge_done_when", _stub)
-        asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
-        pointer = goal.load_pointer(cfg)
-        assert pointer["active_index"] == 0, (
-            f"verdict {verdict!r} should not advance"
-        )
+    # Sole trigger value the daemon emits post-TB-283.
+    assert advanced[-1]["trigger"] == "empty_cycles_heuristic"
 
 
 # ===========================================================================

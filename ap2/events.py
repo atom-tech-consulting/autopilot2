@@ -116,16 +116,17 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     the check is bypassed entirely and neither event fires).
   - `focus_advanced` (TB-226) — daemon advanced its in-memory focus
     pointer past an exhausted `## Current focus:` heading in
-    goal.md. Triggered by either an LLM-judge verdict on the
-    focus's explicit `Done when:` bullets being substantively met
-    OR by the empty-cycles heuristic fallback
-    (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive 0-proposal
-    cycles against the active focus). Payload: `from` (old focus
+    goal.md. TB-283: triggered solely by the empty-cycles
+    heuristic (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive
+    0-proposal ideation cycles against the active focus). The
+    prior LLM-judge path against `Done when:` bullets was deleted
+    because it collapsed multi-week foci into ~3-task cycles by
+    diff-reading commit shape. Payload: `from` (old focus
     title), `to` (new focus title, empty string when the advance
     crossed the last focus into roadmap-exhausted state),
-    `trigger` (one of `done_when_judge` / `empty_cycles_heuristic`),
-    `new_index` (the pointer's new `active_index`), `total_foci`
-    (current foci-list length).
+    `trigger` (`empty_cycles_heuristic`), `new_index` (the
+    pointer's new `active_index`), `total_foci` (current foci-
+    list length).
   - `roadmap_complete` (TB-226) — focus pointer has advanced past
     the last `## Current focus:` heading in goal.md. TB-275:
     ideation parks on subsequent ticks (`_maybe_ideate` skips with
