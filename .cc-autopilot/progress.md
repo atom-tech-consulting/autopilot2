@@ -929,3 +929,9 @@
 - **Summary:** Empty-cycles is now the sole focus-advance signal: collapsed _maybe_advance_focus to the heuristic path, deleted _judge_done_when + AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT env knob + done_when_judge_effort() helper, dropped done_when_judge from events.py + daemon.py re-exports, refreshed test_tb226 (removed 2 judge-path + 3 judge-effort tests, added empty-cycles pin for foci with Done when: bullets). All 1982 tests pass.
 - **Files:** ap2/daemon.py, ap2/events.py, ap2/focus_advance.py, ap2/goal.py, ap2/tests/test_tb226_focus_rotation.py
 - **Tests:** pass
+
+## [2026-05-25] TB-284: Scrub exhaustion language from ideation_state.md after each ideation write
+- **Commit:** `fc96085`
+- **Summary:** TB-284: new ap2/ideation_scrub.py (Haiku post-write filter, fail-safe), wired into _run_ideation via _maybe_scrub_ideation_state emitting ideation_state_scrubbed; deleted focus_exhausted self-skip predicate; added AP2_IDEATION_SCRUB_MODEL env knob (config + hot-reload + howto.md); 16-test regression module; full suite green (1995 tests).
+- **Files:** ap2/ideation_scrub.py, ap2/ideation.py, ap2/events.py, ap2/config.py, ap2/env_reload.py, ap2/howto.md, ap2/tests/test_scrub_exhaustion_language.py, ap2/tests/test_ideation_trigger.py
+- **Tests:** pass
