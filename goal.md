@@ -210,7 +210,7 @@ a glance which project needs them and why, in plain terms — not raw event type
 or counts. Delete-test: if not shipped, monitoring stays pull-not-push; the
 operator must poll each project to find problems.
 
-Done when:
+Progress signals:
 - A status report identifies tasks by title + one-line summary (never bare
   `TB-N` alone) and leads with the project name — a reader who hasn't seen the
   project since the last report understands it without a follow-up or opening

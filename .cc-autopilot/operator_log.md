@@ -233,3 +233,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-25T05:45:28Z — applied operator-queued add_backlog → TB-284
 - 2026-05-25T05:46:32Z — applied operator-queued add_backlog → TB-285
 - 2026-05-25T05:47:31Z — applied operator-queued add_backlog → TB-286
+- 2026-05-25T17:18:07Z — applied operator-queued update_goal
+- 2026-05-25T17:18:07Z — operator updated goal.md (rename Done-when sub-block heading to Progress signals (completes TB-285 scope item 3 that task agent was fenced from making))
