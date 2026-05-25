@@ -9,7 +9,6 @@
 ## Backlog
 
 - [ ] **TB-286** **Update ap2/howto.md for empty-cycles advancement + Progress signals rename** `@blocked:TB-283,TB-284,TB-285` [→ brief](.cc-autopilot/tasks/update-ap2-howto-md-for-empty-cycles-adv.md)
-- [ ] **TB-285** **Rename Done-when sub-block to Progress signals in goal.md format** `@blocked:TB-283` [→ brief](.cc-autopilot/tasks/rename-done-when-sub-block-to-progress-s.md)
 
 ## Pipeline Pending
 
@@ -172,6 +171,7 @@
 - [x] **TB-282** **Proactive `attention_raised` push surface + stuck-Active-task detector for operator-legible monitoring** `#autopilot` `#attention` `#status-report` `#operator-legible` `#monitoring` `#regression-pin` — New `ap2/attention.py` with `detect_attention_conditions(cfg)`; seeds one detector (`task_stuck` — Active task with `task_start` older than `AP2_TASK_STUCK_THRESHOLD_S`); emits `attention_raised` events with `AP2_ATTENTION_DEBOUNCE_S` per-key debounce; status-report grows a distinct `## Attention needed` section forwarded VERBATIM by the agent. Closes goal.md focus-1 Done-when bullet on shallow monitoring. [→ brief](.cc-autopilot/tasks/proactive-attention-raised-push-surface.md)
 - [x] **TB-283** **Make empty-cycles the sole focus-advance signal; delete done-when judge** [→ brief](.cc-autopilot/tasks/make-empty-cycles-the-sole-focus-advance.md)
 - [x] **TB-284** **Scrub exhaustion language from ideation_state.md after each ideation write** [→ brief](.cc-autopilot/tasks/scrub-exhaustion-language-from-ideation.md)
+- [x] **TB-285** **Rename Done-when sub-block to Progress signals in goal.md format** `@blocked:TB-283` [→ brief](.cc-autopilot/tasks/rename-done-when-sub-block-to-progress-s.md)
 
 ## Frozen
 

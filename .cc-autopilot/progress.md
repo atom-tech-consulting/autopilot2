@@ -935,3 +935,8 @@
 - **Summary:** TB-284: new ap2/ideation_scrub.py (Haiku post-write filter, fail-safe), wired into _run_ideation via _maybe_scrub_ideation_state emitting ideation_state_scrubbed; deleted focus_exhausted self-skip predicate; added AP2_IDEATION_SCRUB_MODEL env knob (config + hot-reload + howto.md); 16-test regression module; full suite green (1995 tests).
 - **Files:** ap2/ideation_scrub.py, ap2/ideation.py, ap2/events.py, ap2/config.py, ap2/env_reload.py, ap2/howto.md, ap2/tests/test_scrub_exhaustion_language.py, ap2/tests/test_ideation_trigger.py
 - **Tests:** pass
+
+## [2026-05-25] TB-285: Rename Done-when sub-block to Progress signals in goal.md format
+- **Commit:** `ac4f861`
+- **Summary:** Previously committed: code-side rename (scope 1, 2, 4, 5, 6) landed in ac4f861; the goal.md L213 `Done when:` → `Progress signals:` rename (scope 3) — fenced from task-agent SDK writes — was applied by the operator via `ap2 update-goal` in drain commit 6143c81 between the third blocked attempt and this retry. Verified completeness: all 6 grep verification bullets PASS (`! grep -rq '_DONE_WHEN' ap2/`, `! grep -rqE 'done_when_bullets|has_done_when' ap2/`, `! grep -qE '^Done when:|^### Done when' goal.md`, `grep -q '_PROGRESS_SIGNALS' ap2/goal.py`, `grep -qE 'progress_signals_bullets|has_progress_signals' ap2/goal.py`, `grep -qE '^Progress signals:|^### Progress signals' goal.md`) and `uv run pytest -q ap2/tests/` → 1997 passed in 99.64s. The descriptive prose mentions of `Done when:` at goal.md L120/L122 are in a paragraph describing the legacy gating mechanism and don't match the `^Done when:` regex (a separate howto/goal.md prose sweep is scoped to TB-286 per the briefing's out-of-scope note). No new commit warranted.
+- **Tests:** pass
