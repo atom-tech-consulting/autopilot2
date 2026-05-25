@@ -923,3 +923,9 @@
 - **Summary:** Previously committed in 15e77e9 — ap2/attention.py (detect_attention_conditions + task_stuck detector), daemon._tick wire-up with per-(type,key) debounce, attention_raised registered in events.py + IDEATION_RELEVANT_EVENT_TYPES + _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES, render_attention_section in status_report.py wired BEFORE routine progress bullets, AP2_TASK_STUCK_THRESHOLD_S/AP2_ATTENTION_DEBOUNCE_S knobs in config.py + env_reload.py, and regression-pin test_tb282_attention_stuck_task.py (27 tests). Prior verification_failed was due to pre-existing hermeticity-broken tests since fixed by 1b12c11 (TB-280 follow-up); all 8 verification bullets now pass and full suite is green (1986 passed in 97s).
 - **Files:** ap2/attention.py, ap2/config.py, ap2/daemon.py, ap2/env_reload.py, ap2/events.py, ap2/howto.md, ap2/ideation.py, ap2/status_report.py, ap2/tests/test_tb282_attention_stuck_task.py
 - **Tests:** pass
+
+## [2026-05-25] TB-283: Make empty-cycles the sole focus-advance signal; delete done-when judge
+- **Commit:** `496774dd`
+- **Summary:** Empty-cycles is now the sole focus-advance signal: collapsed _maybe_advance_focus to the heuristic path, deleted _judge_done_when + AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT env knob + done_when_judge_effort() helper, dropped done_when_judge from events.py + daemon.py re-exports, refreshed test_tb226 (removed 2 judge-path + 3 judge-effort tests, added empty-cycles pin for foci with Done when: bullets). All 1982 tests pass.
+- **Files:** ap2/daemon.py, ap2/events.py, ap2/focus_advance.py, ap2/goal.py, ap2/tests/test_tb226_focus_rotation.py
+- **Tests:** pass
