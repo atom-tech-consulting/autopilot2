@@ -875,7 +875,13 @@ content")), `cron_bootstrap` (first-run
 seeding of `cron.yaml` from `cron.default.yaml`), `ideation_empty_board`
 (skip — no slots OR cooldown), `ideation_forced` (operator forced via
 `ap2 ideate --force`), `ideation_skipped` / `ideation_skipped_no_slots`,
-`ideation_complete`, `ideation_state_updated`, `web_start`, `web_stop`,
+`ideation_complete`, `ideation_state_updated`, `ideation_state_scrubbed`
+(TB-284 — `_run_ideation`'s post-write filter stripped exhaustion-
+asserting sentences from `ideation_state.md` after the agent finished
+writing; payload `removed_chars=<N>` byte-length delta; fires only
+when the scrubbed text differs from the agent's original — already-
+clean files are the steady-state silent no-op; the scrub is fail-safe
+by returning the input unchanged on any SDK error), `web_start`, `web_stop`,
 `env_reloaded` (TB-271 — daemon `_tick` re-sourced `.cc-autopilot/env`
 at tick-top and detected at least one knob whose value changed; payload
 `changed` / `hot` / `fixed` / `other` knob lists; mutates the tunable
@@ -1368,6 +1374,19 @@ symmetry.
   `1` for the legacy "fire only when the working queue is fully empty"
   behavior; raise it (e.g. `5`) for projects with very fluid scope.
   Invalid (non-int, non-positive) values fall back to the default.
+- `AP2_IDEATION_SCRUB_MODEL` (default `claude-haiku-4-5-20251001`) —
+  TB-284: model for the post-write scrub that strips exhaustion-
+  asserting sentences ("this focus is essentially done", "once Y ships
+  nothing remains") from `ideation_state.md` after each ideation cycle.
+  The scrub keeps verdict language from priming the next cycle to
+  repeat the verdict. Haiku-4.5 is the cost-target floor since the
+  task is sentence-level classification, not deep reasoning; operators
+  can swap models for cost / quality trade-offs without a daemon
+  restart (knob is hot-reloadable). On any SDK error the scrub
+  fail-opens and leaves the file unchanged — structure (axis
+  breadcrumbs, proposed-task lists) is more valuable to keep than
+  verdict sentences are to remove on any single cycle. See
+  `ap2/ideation_scrub.py` for the prompt contract.
 
 **Operator-in-the-loop relaxations (TB-223).** Three layered safety
 knobs that let an operator who trusts the upstream gates dispatch

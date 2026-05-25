@@ -83,6 +83,20 @@ DEFAULT_TASK_MAX_TURNS = 200
 DEFAULT_CONTROL_MAX_TURNS = 15
 DEFAULT_IDEATION_MAX_TURNS = 100
 
+# TB-284: model for `ap2/ideation_scrub.py`'s post-write filter that
+# strips exhaustion-asserting sentences from `ideation_state.md` after
+# each ideation cycle. Haiku-4.5 is the cost-target floor — sentence-
+# level classification, not deep reasoning. Operator override:
+# `AP2_IDEATION_SCRUB_MODEL`. Listed in
+# `env_reload.HOT_RELOADABLE_KNOBS` so an operator swapping the scrub
+# model takes effect on the next ideation tick without a daemon
+# restart. The runtime reads `AP2_IDEATION_SCRUB_MODEL` fresh from
+# `os.environ` inside `ideation_scrub._resolved_model()` at call-time
+# (parallel to `AP2_AGENT_MODEL`'s wiring), so this default lives
+# here for discoverability — `Config.load` does NOT stash it on the
+# dataclass because the call-site read is the source of truth.
+DEFAULT_IDEATION_SCRUB_MODEL = "claude-haiku-4-5-20251001"
+
 
 @dataclass
 class Config:

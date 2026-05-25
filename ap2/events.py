@@ -230,6 +230,23 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     fresh fire un-skips the dedup/idle gate, parallel to the
     TB-244 / TB-245 pattern). Closes goal.md focus-1's Done-when
     bullet on shallow monitoring.
+  - `ideation_state_scrubbed` (TB-284) — `_run_ideation`'s post-write
+    scrub stripped exhaustion-asserting sentences from
+    `ideation_state.md` after the ideation control-agent finished
+    writing it. Trigger: each ideation cycle (natural-cron or forced)
+    runs `ideation_scrub.scrub_exhaustion_language` on the just-
+    written file; the event fires ONLY when the scrubbed text differs
+    from the agent's original (silent no-op on already-clean files,
+    which is the steady-state path once the scrub has trained the
+    file's content shape). Payload: `removed_chars` (int, byte
+    length delta — always positive in steady state since the scrub
+    only deletes sentences). Closes the goal.md `## Done when`
+    failure mode "ideation reliably proposes goal-aligned next steps
+    that substantively advance the goal (not just goal-shaped
+    pro-forma compliance)" by removing the verdict-language anchor
+    that primed the next cycle toward repeating "we're nearly done"
+    framing. See `ap2/ideation_scrub.py` for the prompt contract and
+    the fail-safe-by-returning-input-unchanged design.
   - `cron_skipped` (TB-128 + TB-281) — status-report cron run was
     suppressed pre-flight. Carries `job="status-report"`, `trigger`
     (`cron` or `chat`), and a `reason` field naming which gate

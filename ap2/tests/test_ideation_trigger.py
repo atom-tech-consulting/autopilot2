@@ -707,161 +707,18 @@ def test_ideation_default_md_has_no_hardcoded_fewer_than_workable(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# TB-174: focus-exhausted self-skip gate. When the prior cycle's
-# `ideation_state.md` self-reports `Status: exhausted-needs-operator`
-# for every focus item under `## Current focus assessment`, the natural
-# ideation path skips the SDK call (emits `ideation_skipped
-# reason=focus_exhausted` and advances the cooldown). Forced runs
-# (`force_ideate`, TB-159) bypass the gate so the operator can override
-# after refreshing goal.md.
-
-
-def _write_ideation_state_focus(cfg: Config, statuses: list[tuple[str, str]]) -> None:
-    """Write a `.cc-autopilot/ideation_state.md` with `## Current focus
-    assessment` populated from `statuses` (list of `(title, status)`
-    tuples). Used by the gate-behavior tests below."""
-    body = ["# Ideation State\n", "\n", "## Current focus assessment\n", "\n"]
-    for title, status in statuses:
-        body.append(f"- **{title}**\n")
-        body.append(f"  - Status: `{status}`\n")
-    body.append("\n## Decisions needed from operator\n\n- placeholder\n")
-    state_file = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text("".join(body))
-
-
-def test_maybe_ideate_skips_when_all_focus_exhausted(tmp_path, monkeypatch):
-    """All focus items self-report `exhausted-needs-operator` →
-    `_maybe_ideate` skips the SDK call, emits `ideation_skipped
-    reason=focus_exhausted` with `focus_count=N`, and calls `mark_run`
-    so the cooldown clock advances (a daemon tick every 30s doesn't
-    keep re-evaluating the gate).
-
-    Pins all four behaviors:
-      (a) the SDK is NOT invoked (capture spy stays empty);
-      (b) `ideation_skipped` lands in events.jsonl with
-          `reason=focus_exhausted` and `focus_count` populated;
-      (c) `mark_run` advances the cooldown timestamp;
-      (d) the historical entry-marker `ideation_empty_board` is
-          ABSENT — this is a skip, not an SDK invocation.
-    """
-    monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
-    cfg = _make_project(
-        tmp_path,
-        monkeypatch,
-        sections={"Backlog": [("TB-1", "first")]},
-    )
-    _write_ideation_state_focus(
-        cfg,
-        statuses=[
-            ("First focus", "exhausted-needs-operator"),
-            ("Second focus", "exhausted-needs-operator"),
-        ],
-    )
-    # Anchor the cooldown timestamp at a stale value so the post-call
-    # check can prove `mark_run` advanced it.
-    save_state(cfg.cron_state_file, {IDEATION_NAME: 0.0})
-    calls = _stub_run_control_agent(monkeypatch)
-
-    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
-
-    # (a) SDK not invoked.
-    assert calls == [], "ideation should have skipped — focus exhausted"
-
-    # (b) Skip event landed with the briefing-pinned shape.
-    evts = events.tail(cfg.events_file, 20)
-    skips = [e for e in evts if e["type"] == "ideation_skipped"]
-    assert len(skips) == 1, (
-        f"expected exactly one ideation_skipped event; got: "
-        f"{[e['type'] for e in evts]}"
-    )
-    assert skips[0]["reason"] == "focus_exhausted"
-    assert skips[0]["focus_count"] == 2
-
-    # (c) Cooldown advanced.
-    state = load_state(cfg.cron_state_file)
-    assert state[IDEATION_NAME] > time.time() - 5, (
-        "_maybe_ideate must call mark_run on the focus-exhausted skip "
-        "path so the cooldown clock advances"
-    )
-
-    # (d) The historical entry-marker is absent.
-    assert "ideation_empty_board" not in [e["type"] for e in evts]
-
-
-def test_maybe_ideate_runs_when_any_focus_in_progress(tmp_path, monkeypatch):
-    """Mixed focus statuses (one `in-progress`, one
-    `exhausted-needs-operator`) does NOT trip the gate — the natural
-    path still fires. This is the load-bearing partial-exhaustion
-    case: even one focus item with remaining work keeps the cron
-    alive."""
-    monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
-    cfg = _make_project(
-        tmp_path,
-        monkeypatch,
-        sections={"Backlog": [("TB-1", "first")]},
-    )
-    _write_ideation_state_focus(
-        cfg,
-        statuses=[
-            ("Active focus", "in-progress"),
-            ("Done focus", "exhausted-needs-operator"),
-        ],
-    )
-    calls = _stub_run_control_agent(monkeypatch)
-
-    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
-
-    assert len(calls) == 1, (
-        "ideation should have fired — at least one focus item is still "
-        "in-progress"
-    )
-    # And no `ideation_skipped reason=focus_exhausted` event lands —
-    # the gate did not trip.
-    evts = events.tail(cfg.events_file, 20)
-    skips = [
-        e for e in evts
-        if e["type"] == "ideation_skipped" and e.get("reason") == "focus_exhausted"
-    ]
-    assert skips == [], (
-        f"focus-exhausted skip must NOT fire on a mixed-status board; "
-        f"events: {[e['type'] for e in evts]}"
-    )
-
-
-def test_force_ideate_bypasses_focus_exhausted_gate(tmp_path, monkeypatch):
-    """`force_ideate` invokes the SDK even when every focus item is
-    `exhausted-needs-operator`. The forced path is the operator's
-    override — typically used after refreshing goal.md so the fresh
-    focus has somewhere to land its first proposals.
-
-    Sanity-checks both halves: (a) `_maybe_ideate` would have skipped
-    on this fixture (precondition); (b) `force_ideate` invokes the
-    SDK once anyway."""
-    cfg = _make_project(tmp_path, monkeypatch, sections={})
-    _write_ideation_state_focus(
-        cfg,
-        statuses=[
-            ("Only focus", "exhausted-needs-operator"),
-        ],
-    )
-    save_state(cfg.cron_state_file, {IDEATION_NAME: time.time() - 10000})
-
-    # (a) Precondition: `_maybe_ideate` skips on this fixture.
-    natural_calls = _stub_run_control_agent(monkeypatch)
-    asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
-    assert natural_calls == [], (
-        "_maybe_ideate sanity check — focus-exhausted gate must skip "
-        "before we test the forced override"
-    )
-
-    # (b) `force_ideate` runs the helper anyway — the forced path
-    # bypasses the focus-exhausted gate.
-    asyncio.run(force_ideate(cfg, sdk=None, mcp_server=None))
-    assert len(natural_calls) == 1, (
-        "force_ideate must invoke the control agent unconditionally — "
-        "the focus-exhausted gate is bypassed on the forced path"
-    )
+# TB-284: the TB-174 focus-exhausted self-skip predicate
+# (`_maybe_ideate` short-circuit on every-focus-`exhausted-needs-operator`
+# self-report) was deleted. The empty-cycles focus-advance heuristic
+# (TB-283) is now the authority on exhaustion, and the post-write
+# `ideation_scrub.scrub_exhaustion_language` filter strips the verdict
+# language that was the only thing producing the cached statuses the
+# deleted gate read. Tests covering the new behaviour live in
+# `ap2/tests/test_scrub_exhaustion_language.py`:
+#   - `test_focus_exhausted_predicate_no_longer_in_ideation_source`
+#     asserts the substring is gone from `ap2/ideation.py`;
+#   - `test_maybe_ideate_does_not_emit_reason_focus_exhausted`
+#     seeds the legacy gate condition and asserts ideation runs.
 
 
 # ---------------------------------------------------------------------------

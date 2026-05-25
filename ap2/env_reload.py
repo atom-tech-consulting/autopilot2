@@ -88,6 +88,13 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     "AP2_IDEATION_DISABLED",
     "AP2_IDEATION_TRIGGER_TASK_COUNT",
     "AP2_IDEATION_COOLDOWN_S",
+    # TB-284: model for the post-write scrub that strips exhaustion
+    # language from `ideation_state.md` after each ideation cycle.
+    # Read fresh from `os.environ` inside
+    # `ideation_scrub._resolved_model()` at call-time so a hot-reload
+    # propagates without rebinding any cached state — parallel to
+    # `AP2_AGENT_MODEL` / `AP2_AGENT_EFFORT`.
+    "AP2_IDEATION_SCRUB_MODEL",
     # Auto-approve / auto-unfreeze thresholds (all read from os.environ
     # at decision-time inside `auto_approve.py` / `auto_unfreeze.py`)
     "AP2_AUTO_APPROVE",

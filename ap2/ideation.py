@@ -102,12 +102,16 @@ IDEATION_RELEVANT_EVENT_TYPES: tuple[str, ...] = (
     "task_updated",
     # Cron proposals — explicit ideation.default.md rule.
     "cron_proposed",
-    # Self-skip telemetry (TB-174) — when the natural ideation cron
-    # short-circuited because every focus item is
-    # `exhausted-needs-operator`. Visible to the next cycle so the
-    # ideator sees the prior gate trip in its events block (avoids
-    # re-discovering a stale "we already self-reported exhausted"
-    # signal across cycles).
+    # Self-skip telemetry — emitted by `_maybe_ideate` when a gate
+    # short-circuits the natural ideation cron (today: TB-246
+    # `reason=roadmap_complete` when the focus pointer has crossed
+    # the last goal.md `## Current focus:` heading). Visible to the
+    # next cycle so the ideator sees the prior gate trip in its
+    # events block (avoids re-discovering stale skip signals across
+    # cycles). TB-284 retired the focus-exhaustion-self-report
+    # variant along with its predicate — the empty-cycles
+    # focus-advance heuristic (TB-283) is now the authority on
+    # exhaustion.
     "ideation_skipped",
     # Per-proposal record activity (TB-196) — emitted by
     # `write_ideation_proposal_record` on seed-write and
@@ -323,10 +327,16 @@ def parse_operator_decisions(path: Path) -> list[str]:
 #       - Status: `in-progress` | `exhausted-needs-operator` | `deferred`
 #       - Reasoning: <one sentence>
 #
-# `parse_focus_statuses` returns `{focus title: status}` so the daemon
-# can self-skip the natural ideation cron when every focus item is
-# `exhausted-needs-operator` (gate in `_maybe_ideate`). The forced
-# operator path (`force_ideate`, TB-159) bypasses the gate.
+# `parse_focus_statuses` returns `{focus title: status}` for surfaces
+# that want to render the per-cycle self-assessment (web home page,
+# `ap2 status`, future operator-facing summaries). TB-284 removed the
+# `_maybe_ideate` self-skip predicate that used to short-circuit the
+# natural ideation cron when every focus item was
+# `exhausted-needs-operator` — the empty-cycles focus-advance heuristic
+# (TB-283) is now the authority on exhaustion, and the post-write
+# scrub (`ideation_scrub.scrub_exhaustion_language`) strips the verdict
+# language that was the only thing producing the cached
+# `exhausted-needs-operator` statuses anyway.
 #
 # Section-slicing reuses the same `^##\s+` next-section regex as
 # `parse_operator_decisions` (the next H2 heading or EOF terminates the
@@ -359,9 +369,9 @@ def parse_focus_statuses(path: Path) -> dict[str, str]:
     backticks stripped). Statuses outside the canonical set
     {`in-progress`, `exhausted-needs-operator`, `deferred`} — including
     a focus item with no `Status:` sub-bullet at all — are reported as
-    `unknown`. The gate in `_maybe_ideate` only short-circuits on
-    `exhausted-needs-operator`, so `unknown` keeps the natural ideation
-    path running (the safer default — never skip on a parse glitch).
+    `unknown`. TB-284 removed the `_maybe_ideate` self-skip predicate
+    that used these values; the parser is now a pure read used by
+    rendering surfaces (web home, `ap2 status`).
 
     Title handling: the title may wrap across one indented continuation
     line before its closing `**` (the load-bearing example from
@@ -371,8 +381,8 @@ def parse_focus_statuses(path: Path) -> dict[str, str]:
 
     Pure / no I/O beyond the single read of `path`. Defensive against
     OSErrors (returns ``{}`` rather than raising) so a transient
-    permission glitch on the ideation_state file never crashes
-    `_maybe_ideate`.
+    permission glitch on the ideation_state file never crashes a
+    caller mid-tick.
     """
     if not path.is_file():
         return {}
@@ -448,6 +458,68 @@ def load_prompt(cfg: Config) -> str:
     if override.is_file():
         return override.read_text()
     return _DEFAULT_PROMPT_PATH.read_text()
+
+
+def _maybe_scrub_ideation_state(cfg: Config, sdk) -> None:
+    """TB-284: scrub exhaustion language from ``ideation_state.md``.
+
+    Reads the file the ideation control-agent just wrote, runs it
+    through ``ideation_scrub.scrub_exhaustion_language``, and overwrites
+    if the scrubbed text differs. Emits ``ideation_state_scrubbed``
+    with ``removed_chars=<N>`` when the scrub actually modified the
+    file; silent no-op when the scrubbed text matches byte-for-byte
+    (an already-clean file is the steady-state happy path once the
+    scrub has trained the file's content shape).
+
+    Fail-safe at every layer:
+      - File missing (first-ever cycle / agent skipped the write) →
+        silent return.
+      - File unreadable / unwritable → silent return (the next cycle
+        will retry against the next agent write).
+      - SDK error inside ``scrub_exhaustion_language`` → that helper
+        returns the input unchanged; we observe no diff and emit
+        nothing.
+
+    Lazy import of ``ideation_scrub`` mirrors the lazy-import pattern
+    used elsewhere in this module (`from . import daemon as _daemon`,
+    `from . import goal as _goal`) and avoids surfacing
+    ``claude_agent_sdk`` at ap2.ideation import time on test paths
+    that mock the SDK out.
+    """
+    target = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
+    if not target.is_file():
+        return
+    try:
+        original = target.read_text()
+    except OSError:
+        return
+    if not original.strip():
+        return
+    from . import ideation_scrub
+    scrubbed = ideation_scrub.scrub_exhaustion_language(original, sdk=sdk)
+    if scrubbed == original:
+        # Steady-state happy path: the file was already clean (or the
+        # SDK returned the input verbatim because no sentence matched
+        # the delete criteria). No event, no rewrite.
+        return
+    try:
+        # Atomic write (tmpfile + rename) so a concurrent reader (the
+        # web home page's `parse_focus_statuses` call, `ap2 status`'s
+        # `parse_operator_decisions` call) can't observe a partial
+        # file. Mirrors `do_ideation_state_write`'s shape.
+        tmp = target.with_suffix(".md.tmp")
+        tmp.write_text(scrubbed)
+        tmp.replace(target)
+    except OSError:
+        # Write failed — leave the original on disk. The next cycle's
+        # scrub pass will try again.
+        return
+    removed = len(original) - len(scrubbed)
+    events.append(
+        cfg.events_file,
+        "ideation_state_scrubbed",
+        removed_chars=removed,
+    )
 
 
 def _cooldown_s() -> int:
@@ -723,6 +795,18 @@ async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
             stderr_tail=stderr_tail,
             prompt_dump=str(prompt_dump),
         )
+    # TB-284: scrub exhaustion language from ideation_state.md AFTER the
+    # control agent has finished writing (the agent's `ideation_state_write`
+    # tool call lands its content during `_run_control_agent`). Removes
+    # any sentence claiming a focus / axis is exhausted, near-exhausted, or
+    # naming conditions of exhaustion before the state file's text becomes
+    # the next cycle's authoritative context. Runs BEFORE the post-snapshot
+    # diff so the scrubbed bytes ride along in the same `state: ideation`
+    # commit instead of getting committed in a follow-up tick. Fail-safe:
+    # `scrub_exhaustion_language` swallows SDK errors and returns the
+    # input unchanged, and the file-IO wrapper here swallows OSErrors so
+    # a transient FS hiccup can't break the rest of the cycle bookkeeping.
+    _maybe_scrub_ideation_state(cfg, sdk)
     # Always advance the cooldown — even on failure — so a broken
     # ideation agent doesn't get hammered every tick. For forced runs
     # this is what makes back-to-back `ap2 ideate` calls still subject
@@ -781,18 +865,15 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
        subsumes the pre-TB-183 `queued >= threshold` silent-return
        check — same trigger condition, but with explicit event +
        cooldown advancement.
-    5. Focus-exhausted gate (TB-174) — when the prior cycle's
-       `ideation_state.md` self-reports `Status:
-       exhausted-needs-operator` for EVERY focus item under
-       `## Current focus assessment`, ideation skips the SDK call
-       (emits `ideation_skipped reason=focus_exhausted` and advances
-       the cooldown). Closes goal.md's "stops proposing when target
-       project's `## Done when` criteria are all met" Done-when
-       bullet at the ideator-self-report level: today, even a
-       unanimous `exhausted-needs-operator` self-report keeps burning
-       SDK cost on increasingly thin proposals every cooldown window.
-       The forced path (`force_ideate`, TB-159) bypasses this gate so
-       the operator can override after refreshing goal.md.
+    TB-284 removed a fifth gate that previously read
+    ``parse_focus_statuses(ideation_state.md)`` and skipped when every
+    focus item self-reported ``Status: exhausted-needs-operator``.
+    The empty-cycles focus-advance signal (TB-283) is now the
+    authority on exhaustion, and TB-284's post-write scrub strips the
+    verdict language that was the only thing keeping
+    ``exhausted-needs-operator`` values in the cache for that
+    predicate to read — the gate became dead code in lockstep with
+    the scrub landing.
 
     Delegates the actual SDK invocation + bookkeeping to `_run_ideation`
     so the forced-run path (`force_ideate`, TB-159) shares the same
@@ -853,45 +934,28 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     # matching ideation gate, ideation keeps firing every cooldown
     # window during a walk-away weekend and proposals pile up as
     # `@blocked:review` against an already-exhausted roadmap (up to
-    # ~48 wasted SDK calls per 48h × 60-min cooldown). Mirrors the
-    # TB-174 focus-exhausted gate's shape (same `ideation_skipped`
-    # event type with a structured `reason` field, same `mark_run`
-    # cooldown bump) and uses the SAME canonical predicate the
-    # dispatch + auto-approve gates use — single source of truth, no
-    # new state file. Cheaper than the focus-exhausted gate below
-    # (dict load + bounded event-tail scan vs. ideation_state.md
-    # parse) so it runs first. `force_ideate` bypasses this gate
-    # alongside the focus-exhausted gate so the operator's recovery
-    # path (`ap2 ack roadmap_complete && ap2 update-goal && ap2
-    # ideate --force`) still works if the ack hasn't propagated to
-    # the pointer state yet.
+    # ~48 wasted SDK calls per 48h × 60-min cooldown). Uses the SAME
+    # canonical predicate the dispatch + auto-approve gates use —
+    # single source of truth, no new state file. `force_ideate`
+    # bypasses this gate so the operator's recovery path (`ap2 ack
+    # roadmap_complete && ap2 update-goal && ap2 ideate --force`)
+    # still works if the ack hasn't propagated to the pointer state
+    # yet.
+    #
+    # TB-284 deleted the predecessor focus-exhausted gate that read
+    # `parse_focus_statuses(ideation_state.md)` and skipped when
+    # every focus item self-reported `exhausted-needs-operator`.
+    # The empty-cycles focus-advance heuristic (TB-283) is now the
+    # authority on exhaustion; the post-write scrub
+    # (`ideation_scrub.scrub_exhaustion_language`) strips the verdict
+    # language that was the only thing producing the cached statuses
+    # the deleted gate read.
     from . import goal as _goal  # local import to avoid module-load cycle
     if _goal.roadmap_exhausted(cfg):
         events.append(
             cfg.events_file,
             "ideation_skipped",
             reason="roadmap_complete",
-        )
-        mark_run(cfg.cron_state_file, IDEATION_NAME)
-        return
-    # TB-174: focus-exhausted gate — if the prior cycle's
-    # ideation_state.md self-reports `Status: exhausted-needs-operator`
-    # for every focus item under `## Current focus assessment`, skip
-    # the SDK call. The natural path is the only one that gates here;
-    # `force_ideate` (TB-159) bypasses this check so the operator can
-    # override after refreshing goal.md. We still call `mark_run` so a
-    # 30s daemon tick doesn't keep re-evaluating the gate every loop.
-    focus_statuses = parse_focus_statuses(
-        cfg.project_root / ".cc-autopilot" / "ideation_state.md"
-    )
-    if focus_statuses and all(
-        s == "exhausted-needs-operator" for s in focus_statuses.values()
-    ):
-        events.append(
-            cfg.events_file,
-            "ideation_skipped",
-            reason="focus_exhausted",
-            focus_count=len(focus_statuses),
         )
         mark_run(cfg.cron_state_file, IDEATION_NAME)
         return
