@@ -236,3 +236,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-25T17:18:07Z — applied operator-queued update_goal
 - 2026-05-25T17:18:07Z — operator updated goal.md (rename Done-when sub-block heading to Progress signals (completes TB-285 scope item 3 that task agent was fenced from making))
 - 2026-05-25T17:32:48Z — applied operator-queued unfreeze → TB-285
+- 2026-05-25T21:52:05Z — applied operator-queued update_goal
+- 2026-05-25T21:52:05Z — operator updated goal.md (rewrite focus-advancement prose in (4) Multi-focus sequential execution to reflect new behavioral empty-cycles gate (TB-283) and Progress signals advisory framing (TB-285))

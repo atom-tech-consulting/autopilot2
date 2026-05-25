@@ -116,12 +116,14 @@ the operator's per-task review currently catches.
 `## Current focus:` headings in priority order (top = active). ap2
 works the topmost focus until it's exhausted, then advances its
 internal pointer to the next — without operator-mediated rotation.
-The exhaustion gate is mixed: each focus can optionally carry a
-`Done when:` sub-block listing concrete completion criteria, in which
-case ideation gates advancement on those criteria being substantively
-met; foci without an explicit `Done when:` fall back to a heuristic
-(N consecutive 0-proposal cycles against the focus, configurable via
-`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`, default 3). The daemon advances by
+The exhaustion gate is behavioral: a focus advances after N
+consecutive ideation cycles produce 0 new proposals against it
+(configurable via `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`, default 3). Each
+focus can optionally carry a `Progress signals:` sub-block sketching
+what substantive progress looks like — ideation reads it as prompt
+context, not as a gating criterion; advance is always gated by
+empty-cycles whether or not the block is present. The daemon
+advances by
 updating an in-memory pointer + emitting `focus_advanced from=<old>
 to=<new>` to the event log — it never mutates `goal.md` itself
 (operator still owns the file; adding, reordering, or retiring foci
