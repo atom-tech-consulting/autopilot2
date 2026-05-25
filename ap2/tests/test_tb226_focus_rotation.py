@@ -13,11 +13,15 @@ Behavioral cases pinned here:
 
   Parser:
     - happy path with zero / one / three `## Current focus:` headings
-    - malformed `Done when:` sub-block (heading present, no bullets)
+    - malformed `Progress signals:` sub-block (heading present, no
+      bullets)
     - embedded code fences ` ``` ... ``` ` don't confuse bullet
       collection
-    - nested `### Done when` sub-heading variant
+    - nested `### Progress signals` sub-heading variant
     - non-string / empty input returns []
+    - absent `Progress signals:` sub-block parses with
+      `progress_signals_bullets=None` (the block is OPTIONAL per the
+      TB-285 contract)
 
   Env knobs (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`,
   `AP2_FOCUS_AUTO_ADVANCE_DISABLED`):
@@ -32,8 +36,9 @@ Behavioral cases pinned here:
   Advance heuristic (TB-283: empty-cycles is the sole signal):
     - empty-cycles fires when threshold reached
     - empty-cycles counter resets on `ideation_proposal_recorded`
-    - a focus carrying `Done when:` bullets advances via the SAME
-      empty-cycles signal (no separate LLM-judge path)
+    - a focus carrying `Progress signals:` bullets advances via the
+      SAME empty-cycles signal (no separate LLM-judge path; the
+      bullets are advisory ideation-prompt context only)
     - `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits even
       when criteria are met
 
@@ -73,7 +78,7 @@ from ap2.init import init_project
 # Direct references to the names the briefing's `## Verification`
 # bullets / coverage-drift gates expect to see in this test file.
 # Loaded at module top so a refactor that removes them surfaces
-# cleanly on import. TB-283: `done_when_judge_effort` was dropped
+# cleanly on import. TB-283: the LLM-judge-effort knob was dropped
 # from goal.py along with the LLM-judge advance path; the empty-
 # cycles heuristic is now the sole signal.
 _NAMES_FOR_DRIFT_GATE = (
@@ -91,9 +96,9 @@ _NAMES_FOR_DRIFT_GATE = (
 # Env-knob name substrings the docs-drift / coverage-drift gates scan
 # for (they assert each `AP2_*` env knob appears somewhere under
 # `ap2/tests/`).  Keeping them grouped here makes the substring
-# coverage obvious and self-documenting. TB-283: the
-# `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` knob was retired along with the
-# LLM-judge advance path.
+# coverage obvious and self-documenting. TB-283: the prior
+# judge-effort env knob was retired along with the LLM-judge advance
+# path; the empty-cycles heuristic is the sole signal.
 _ENV_KNOB_SUBSTRINGS = (
     "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
     "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
@@ -169,66 +174,104 @@ def test_parse_focus_list_one_heading():
     assert len(foci) == 1
     assert foci[0].title == "end-to-end automation"
     assert "Body of the active focus." in foci[0].body
-    assert foci[0].done_when_bullets is None  # no Done-when sub-block
-    assert foci[0].has_done_when() is False
+    # TB-285: a `## Current focus:` heading with no `Progress signals:`
+    # sub-block parses cleanly — the block is OPTIONAL.
+    assert foci[0].progress_signals_bullets is None
+    assert foci[0].has_progress_signals() is False
 
 
 def test_parse_focus_list_three_headings():
     """Three sequential `## Current focus:` headings, mixed
-    Done-when-shapes. Pins the multi-focus walk."""
+    Progress-signals shapes. Pins the multi-focus walk."""
     text = _make_goal_md(
         "## Current focus: alpha\n\n"
         "Alpha body.\n\n"
-        "Done when:\n"
+        "Progress signals:\n"
         "- alpha bullet 1\n"
         "- alpha bullet 2\n\n"
         "## Current focus: beta\n\n"
-        "Beta body with no Done-when block.\n\n"
+        "Beta body with no Progress-signals block.\n\n"
         "## Current focus: gamma\n\n"
         "Gamma body.\n\n"
-        "### Done when\n\n"
+        "### Progress signals\n\n"
         "- gamma bullet 1\n\n"
     )
     foci = goal.parse_focus_list(text)
     assert [f.title for f in foci] == ["alpha", "beta", "gamma"]
-    assert foci[0].done_when_bullets == ["alpha bullet 1", "alpha bullet 2"]
-    assert foci[1].done_when_bullets is None
-    assert foci[1].has_done_when() is False
-    assert foci[2].done_when_bullets == ["gamma bullet 1"]
+    assert foci[0].progress_signals_bullets == ["alpha bullet 1", "alpha bullet 2"]
+    assert foci[1].progress_signals_bullets is None
+    assert foci[1].has_progress_signals() is False
+    assert foci[2].progress_signals_bullets == ["gamma bullet 1"]
 
 
-def test_parse_focus_list_empty_done_when_block():
-    """A `Done when:` heading with no following bullets returns an
-    empty list (NOT None). The parser distinguishes "no block" from
-    "empty block" — both downstream paths handle the difference.
+def test_parse_focus_list_empty_progress_signals_block():
+    """A `Progress signals:` heading with no following bullets returns
+    an empty list (NOT None). The parser distinguishes "no block" from
+    "empty block".
     """
     text = _make_goal_md(
         "## Current focus: alpha\n\n"
         "Alpha body.\n\n"
-        "Done when:\n\n"
+        "Progress signals:\n\n"
         "Some trailing prose.\n\n"
     )
     foci = goal.parse_focus_list(text)
     assert len(foci) == 1
-    assert foci[0].has_done_when() is True
-    assert foci[0].done_when_bullets == []
+    assert foci[0].has_progress_signals() is True
+    assert foci[0].progress_signals_bullets == []
 
 
 def test_parse_focus_list_code_fence_skipped():
     """Bullets inside fenced ``` ... ``` code blocks don't get
-    mistakenly collected as Done-when bullets."""
+    mistakenly collected as Progress-signals bullets."""
     text = _make_goal_md(
         "## Current focus: alpha\n\n"
         "Body with a code sample:\n\n"
         "```\n"
-        "- this is shell output, not a Done-when bullet\n"
+        "- this is shell output, not a Progress-signals bullet\n"
         "- neither is this\n"
         "```\n\n"
-        "Done when:\n"
-        "- real done-when bullet\n\n"
+        "Progress signals:\n"
+        "- real progress-signals bullet\n\n"
     )
     foci = goal.parse_focus_list(text)
-    assert foci[0].done_when_bullets == ["real done-when bullet"]
+    assert foci[0].progress_signals_bullets == ["real progress-signals bullet"]
+
+
+def test_parse_focus_list_legacy_done_when_not_accepted():
+    """TB-285 hard cut: the legacy `Done when:` / `### Done when`
+    heading is NOT accepted by the parser. A focus body that uses the
+    old heading parses with `progress_signals_bullets=None` — the same
+    shape as a focus with no sub-block at all.
+
+    Per project norm (git history is the rollback substrate), no
+    backcompat shim. The in-tree goal.md is updated in the same arc;
+    external consumers do not exist."""
+    text = _make_goal_md(
+        "## Current focus: alpha\n\n"
+        "Alpha body.\n\n"
+        "Done when:\n"
+        "- legacy bullet — must NOT be collected\n\n"
+    )
+    foci = goal.parse_focus_list(text)
+    assert len(foci) == 1
+    assert foci[0].progress_signals_bullets is None
+    assert foci[0].has_progress_signals() is False
+
+
+def test_parse_focus_list_progress_signals_block_optional():
+    """TB-285 contract pin: the `Progress signals:` sub-block is
+    OPTIONAL. A focus heading with no sub-block parses with
+    `progress_signals_bullets=None` and `has_progress_signals()`
+    returning False — distinct from an empty-but-present block."""
+    text = _make_goal_md(
+        "## Current focus: alpha\n\n"
+        "Just a body paragraph, no Progress-signals sub-block.\n\n"
+    )
+    foci = goal.parse_focus_list(text)
+    assert len(foci) == 1
+    assert foci[0].progress_signals_bullets is None
+    assert foci[0].has_progress_signals() is False
 
 
 def test_parse_focus_list_handles_non_string():
@@ -311,10 +354,9 @@ def test_auto_advance_disabled_falsy(monkeypatch):
         assert goal.auto_advance_disabled() is False, f"failed for {val!r}"
 
 
-# TB-283: the `done_when_judge_effort` env-knob tests were retired
-# along with the `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` knob itself
-# (deleted from `ap2/goal.py`). The LLM-judge advance path is gone;
-# the empty-cycles heuristic is the sole signal.
+# TB-283: the prior judge-effort env-knob tests were retired along
+# with the knob itself (deleted from `ap2/goal.py`). The LLM-judge
+# advance path is gone; the empty-cycles heuristic is the sole signal.
 
 
 # ===========================================================================
@@ -382,22 +424,24 @@ def test_pointer_load_tolerates_missing_keys(cfg):
 
 def _write_goal_with_foci(cfg: Config, *titles: str) -> None:
     """Write a goal.md with the given titles in `## Current focus:`
-    headings, each carrying a bare body and NO `Done when:` block
-    (so the heuristic fallback path fires)."""
+    headings, each carrying a bare body and NO `Progress signals:`
+    block (the empty-cycles heuristic fires regardless of the
+    sub-block's presence post-TB-283)."""
     sections = "".join(
         f"## Current focus: {t}\n\nBody for {t}.\n\n" for t in titles
     )
     (cfg.project_root / "goal.md").write_text(_make_goal_md(sections))
 
 
-def _write_goal_with_done_when(cfg: Config, title: str, bullets: list[str]) -> None:
-    """Write a single-focus goal.md with an explicit `Done when:`
-    sub-block so the LLM-judge path fires."""
+def _write_goal_with_progress_signals(cfg: Config, title: str, bullets: list[str]) -> None:
+    """Write a single-focus goal.md with an explicit
+    `Progress signals:` sub-block (advisory ideation-prompt context;
+    does NOT gate the advance pass post-TB-283)."""
     bullet_block = "\n".join(f"- {b}" for b in bullets)
     body = (
         f"## Current focus: {title}\n\n"
         f"Body for {title}.\n\n"
-        f"Done when:\n{bullet_block}\n\n"
+        f"Progress signals:\n{bullet_block}\n\n"
     )
     (cfg.project_root / "goal.md").write_text(_make_goal_md(body))
 
@@ -481,36 +525,37 @@ def test_empty_cycles_resets_on_proposal(cfg, monkeypatch):
 
 
 # ===========================================================================
-# TB-283: the Done-when judge path is gone. Empty-cycles is the sole
+# TB-283: the LLM-judge advance path is gone. Empty-cycles is the sole
 # advance signal (see `ap2/focus_advance.py`). Even when a focus carries
-# explicit `Done when:` bullets, the daemon advances solely off the
+# explicit `Progress signals:` bullets (TB-285 rename of the prior
+# `Done when:` sub-block), the daemon advances solely off the
 # heuristic — the bullets remain in goal.md as ideation-prompt context
 # but no longer gate the pointer. The judge-path tests were removed
-# along with `_judge_done_when` itself.
+# along with the judge itself.
 # ===========================================================================
 
 
-def test_done_when_focus_advances_via_empty_cycles_only(cfg, monkeypatch):
-    """TB-283 pin: a focus that carries `Done when:` bullets advances
-    via the SAME empty-cycles heuristic as any other focus. The bullets
-    are advisory ideation-prompt context; they no longer trip a
-    separate LLM-judge advance path."""
+def test_progress_signals_focus_advances_via_empty_cycles_only(cfg, monkeypatch):
+    """TB-283 + TB-285 pin: a focus that carries `Progress signals:`
+    bullets advances via the SAME empty-cycles heuristic as any other
+    focus. The bullets are advisory ideation-prompt context; they no
+    longer trip a separate LLM-judge advance path."""
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
     (cfg.project_root / "goal.md").write_text(
         _make_goal_md(
             "## Current focus: alpha\n\n"
             "Body.\n\n"
-            "Done when:\n"
-            "- criterion 1\n"
-            "- criterion 2\n\n"
+            "Progress signals:\n"
+            "- signal 1\n"
+            "- signal 2\n\n"
             "## Current focus: beta\n\n"
             "Beta body.\n\n"
         )
     )
 
     # Three empty ideation cycles against alpha → advance via the
-    # heuristic, regardless of the `Done when:` block's presence.
+    # heuristic, regardless of the `Progress signals:` block's presence.
     for _ in range(3):
         _emit_ideation_empty(cfg)
 

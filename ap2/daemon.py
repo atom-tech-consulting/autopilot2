@@ -1856,14 +1856,16 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # dispatch / ideation so a freshly-advanced pointer is visible to
     # every later stage on this tick. Reads `goal.md`'s focus list and
     # `.cc-autopilot/focus_pointer.json`; advances the in-memory pointer
-    # when the active focus's `Done when:` bullets are substantively met
-    # (LLM-judge) or the heuristic-fallback empty-cycles threshold is
-    # tripped (no explicit Done-when). Emits `focus_advanced` per
-    # advance, `roadmap_complete` + decisions-needed bullet when all
-    # foci exhaust. Auto-advance is opt-out via
-    # `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` (kill-switch). Goal.md itself
-    # is never mutated — pointer is in-memory state only (goal.md
-    # L187-191 "Goal.md auto-rotation" Non-goal).
+    # when the empty-cycles heuristic trips
+    # (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive 0-proposal ideation
+    # cycles against the active focus — the sole signal post-TB-283;
+    # the per-focus `Progress signals:` sub-block renamed by TB-285 is
+    # advisory ideation-prompt context only and does NOT gate the
+    # pointer). Emits `focus_advanced` per advance, `roadmap_complete`
+    # + decisions-needed bullet when all foci exhaust. Auto-advance is
+    # opt-out via `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` (kill-switch).
+    # Goal.md itself is never mutated — pointer is in-memory state only
+    # (goal.md L187-191 "Goal.md auto-rotation" Non-goal).
     try:
         await _maybe_advance_focus(cfg, sdk)
     except Exception as e:  # noqa: BLE001

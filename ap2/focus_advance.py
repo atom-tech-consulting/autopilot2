@@ -16,12 +16,14 @@ pointer (`focus_pointer.json`). TB-283: the empty-cycles heuristic is
 the sole advance signal — a focus advances after
 `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3) consecutive ideation
 cycles produce zero proposals against it (the empty-board signal).
-The prior LLM-judge path against operator-authored `Done when:`
-bullets was deleted because the judge ruled on commit diffs of code
-the running daemon had never executed, collapsing multi-week foci
-into ~3-task cycles whenever each task commit-satisfied one
-shape-shaped bullet. The `Done when:` sub-block in goal.md remains
-as advisory ideation-prompt context but no longer gates advancement.
+The prior LLM-judge path against operator-authored bullets was
+deleted because the judge ruled on commit diffs of code the running
+daemon had never executed, collapsing multi-week foci into ~3-task
+cycles whenever each task commit-satisfied one shape-shaped bullet.
+TB-285 renamed the per-focus sub-block from `Done when:` to
+`Progress signals:` to reflect the new advisory semantics — the
+bullets remain in goal.md as ideation-prompt context but no longer
+gate advancement.
 
 When all foci exhaust, emit `roadmap_complete` (once) + a
 `## Decisions needed from operator` bullet so `ap2 status` and the web
@@ -110,15 +112,16 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
 
     TB-283: the empty-cycles heuristic is the sole advance signal —
     used for every focus regardless of whether it carries a
-    `Done when:` sub-block. The prior LLM-judge path that ruled on
-    operator-authored Done-when bullets was deleted because it
-    collapsed to "did the last N task commits look goal-shaped?",
-    a diff-reading proxy the running daemon could not verify
-    behaviorally; foci kept collapsing into ~3-task cycles whenever
-    each task commit-satisfied one shape-shaped bullet. The `sdk`
-    parameter is now vestigial (no SDK calls remain inside the
-    advance pass) but is retained so callers and the test harness
-    can keep passing it without ceremony.
+    `Progress signals:` sub-block (TB-285 rename of the prior
+    `Done when:` block). The prior LLM-judge path that ruled on
+    operator-authored bullets was deleted because it collapsed to
+    "did the last N task commits look goal-shaped?", a diff-reading
+    proxy the running daemon could not verify behaviorally; foci kept
+    collapsing into ~3-task cycles whenever each task commit-
+    satisfied one shape-shaped bullet. The `sdk` parameter is now
+    vestigial (no SDK calls remain inside the advance pass) but is
+    retained so callers and the test harness can keep passing it
+    without ceremony.
     """
     foci = goal.read_focus_list(cfg)
     if not foci:
@@ -193,7 +196,8 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
     advance_trigger: str | None = None
 
     # TB-283: empty-cycles is the sole advance signal — runs for every
-    # focus regardless of whether it carries a `Done when:` sub-block.
+    # focus regardless of whether it carries a `Progress signals:`
+    # sub-block (TB-285 rename of the prior `Done when:` block).
     # Count consecutive ideation cycles that produced 0 proposals
     # against the active focus.
     threshold = goal.advance_empty_cycles_threshold()

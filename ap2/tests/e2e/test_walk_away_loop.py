@@ -561,13 +561,13 @@ def test_auto_unfreeze_briefingfix_repairs_frozen_task(
 # (goal.md L131-138: "walk-away time scales with the operator-declared
 # roadmap length") is verified end-to-end under real `_tick` dispatch.
 #
-# Setup: two-focus goal.md (focus-a, focus-b) with no `Done when:` block on
-# either — that forces the heuristic empty-cycles path in
-# `_maybe_advance_focus` (the Done-when judge path is skipped when bullets
-# are absent; see daemon.py ~L3619). FakeSDK ideation returns 0 proposals
-# on every invocation (an `ideation_complete` event with no `add_backlog`
-# call), simulating "ideation can't find proposals against the active
-# focus" each cycle.
+# Setup: two-focus goal.md (focus-a, focus-b) with no `Progress signals:`
+# block on either — though post-TB-283 the empty-cycles heuristic runs
+# regardless of sub-block presence (the prior LLM-judge advance path
+# was deleted; TB-285 renamed the sub-block to reflect the new advisory
+# semantics). FakeSDK ideation returns 0 proposals on every invocation
+# (an `ideation_complete` event with no `add_backlog` call), simulating
+# "ideation can't find proposals against the active focus" each cycle.
 #
 # Empty-cycles threshold is set to 2 via `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`.
 # Per the heuristic in `_ideation_empty_against_focus`, BOTH
@@ -603,18 +603,14 @@ def test_auto_unfreeze_briefingfix_repairs_frozen_task(
 # ===========================================================================
 
 
-# Two-focus goal.md fixture. NEITHER focus carries a `Done when:` sub-block
-# so the heuristic empty-cycles path is the one driving advancement
-# (the Done-when judge branch in `_maybe_advance_focus` only fires when
-# `active.has_done_when() and active.done_when_bullets`). The briefing's
-# scope (2) wording ("Done when: sub-block ... so the heuristic empty-cycles
-# path is what drives advancement") is internally inconsistent with the
-# current code — having Done-when bullets forces the judge path, NOT the
-# heuristic — so we honor the SPIRIT (heuristic-driven advancement) by
-# omitting the Done-when blocks entirely. If a follow-up adds a fall-
-# through from "judge said no" to "heuristic still counts", revisit this
-# fixture to include trivially-met bullets that the stubbed judge marks as
-# `no`.
+# Two-focus goal.md fixture. NEITHER focus carries a `Progress signals:`
+# sub-block (rendered name post-TB-285 of the prior `Done when:` block).
+# Post-TB-283 the empty-cycles heuristic runs regardless of the
+# sub-block's presence — the prior LLM-judge advance path that read
+# operator-authored bullets was deleted because it ruled on commit
+# diffs rather than substantive progress. Omitting the sub-block here
+# is purely a minimal-fixture choice; the advancement behavior is the
+# same with or without it.
 _MULTI_FOCUS_GOAL_MD = (
     "# Project Goals\n\n"
     "## Mission\n\n"

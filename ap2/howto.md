@@ -1700,13 +1700,6 @@ for the architecture + the `ap2 ack roadmap_complete` resume verb.
   met; the daemon surfaces a `## Decisions needed from operator`
   bullet instead so the operator can advance manually via
   `ap2 update-goal`. Default unset → auto-advance enabled.
-- `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` (default `medium`) — effort
-  level for the LLM-judge call that evaluates whether a focus's
-  `Done when:` bullets are substantively met. Mirrors
-  `AP2_JANITOR_JUDGE_EFFORT`'s shape: explicit value > fallback to
-  `AP2_AGENT_EFFORT` > the `medium` default. Default `medium`
-  (cheaper than the verifier's `high`) because the question is
-  one-shot per advance attempt, not per-bullet-per-task.
 
 **Watchdog (auto-diagnose).**
 - `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` (10800 = 3h) — idle duration
@@ -1777,8 +1770,12 @@ the advance path:
    Done-when bullets, the last ~10 task-complete titles + summaries,
    and the head of `ideation_state.md`. The judge replies on the
    first line with one of `yes` / `no` / `insufficient_evidence`;
-   only `yes` triggers advance. Cost bounded by
-   `AP2_FOCUS_DONE_WHEN_JUDGE_EFFORT` (default `medium`).
+   only `yes` triggers advance. (Note: this judge-driven path was
+   retired in TB-283; the per-focus sub-block — renamed to
+   `Progress signals:` in TB-285 — is now advisory ideation-prompt
+   context only and does NOT gate advancement. See item 2 for the
+   sole post-TB-283 advance signal; the broader howto sweep for the
+   new mechanism is tracked in TB-286.)
 2. *No `Done when:` sub-block* — heuristic fallback. The daemon
    counts consecutive recent ideation cycles that produced 0
    proposals against the active focus

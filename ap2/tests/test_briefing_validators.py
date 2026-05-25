@@ -521,7 +521,7 @@ def test_validate_briefing_anchor_check_fires_via_operator_queue_append(
     assert not qpath.exists() or qpath.read_text() == ""
 
 
-def test_goal_md_anchors_extracts_done_when_bullets_and_focus_titles(tmp_path):
+def test_goal_md_anchors_extracts_done_when_phrases_and_focus_titles(tmp_path):
     """Direct unit test on `_goal_md_anchors` — pins the phrase shapes
     so a future tweak (e.g. word-count window) doesn't silently change
     which goal.md content survives normalization. The anchor set should

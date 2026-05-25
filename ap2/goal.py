@@ -2,17 +2,22 @@
 
 Implements the multi-`## Current focus:` heading contract from goal.md
 L115-138: the operator can list multiple `## Current focus:` headings in
-priority order (top = active), each optionally carrying a `Done when:`
-sub-block (an inline `Done when:` line whose immediately-following
-bullets are the explicit completion criteria, or a nested
-`### Done when` sub-heading whose body bullets serve the same role).
+priority order (top = active), each optionally carrying a
+`Progress signals:` sub-block (an inline `Progress signals:` line whose
+immediately-following bullets are advisory outcome guidance for the
+ideation prompt, or a nested `### Progress signals` sub-heading whose
+body bullets serve the same role). The sub-block is OPTIONAL — a focus
+heading with no `Progress signals:` block parses cleanly as a focus
+with `progress_signals_bullets=None`.
 
 The daemon advances its in-memory pointer (`focus_pointer.json`) to the
-next focus when the topmost is exhausted — either by an ideation-judge
-verdict on the `Done when:` bullets being substantively met, or, for
-foci with no explicit `Done when:` block, by a heuristic fallback (N
-consecutive 0-proposal cycles against the active focus, configurable
-via `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`, default 3).
+next focus via the empty-cycles heuristic (N consecutive 0-proposal
+ideation cycles against the active focus, configurable via
+`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`, default 3); see `ap2/focus_advance.py`.
+The `Progress signals:` bullets are advisory ideation-prompt context
+only — they do NOT gate the pointer (TB-283 deleted the prior LLM-judge
+advance path; TB-285 renamed the sub-block to reflect the new advisory
+semantics).
 
 When all foci exhaust, the daemon emits a `roadmap_complete` event +
 decisions-needed bullet and halts auto-promotion until the operator
@@ -22,16 +27,18 @@ The daemon NEVER mutates goal.md itself (goal.md L187-191 "Goal.md
 auto-rotation" Non-goal); the pointer is in-memory runtime state only.
 
 Parser shape: line-based scan, not full Markdown AST. The schema is
-shallow (heading + body + optional `Done when:` sub-block), so a
+shallow (heading + body + optional `Progress signals:` sub-block), so a
 mistune dependency in the daemon hot path isn't paying rent. The
 heading regex matches `## Current focus:` (with or without trailing
 disambiguators after `:`); the body is everything until the next
 `^## ` heading or EOF. Inside the body we look for an inline
-`Done when:` line whose following bullets we collect (terminating at
-the first blank line that isn't followed by another bullet, OR at the
-next `### ` sub-heading, OR at the next `^## ` heading / EOF).
+`Progress signals:` line whose following bullets we collect (terminating
+at the first blank line that isn't followed by another bullet, OR at
+the next `### ` sub-heading, OR at the next `^## ` heading / EOF).
 Fenced code blocks (``` ... ```) are ignored — bullets inside them
-don't count as Done-when criteria.
+don't count as Progress-signals bullets. The legacy `Done when:` /
+`### Done when` heading is NOT accepted (TB-285 hard cut — no
+backcompat shim).
 """
 from __future__ import annotations
 
@@ -59,8 +66,8 @@ POINTER_SCHEMA_VERSION = 1
 
 _HEADING_RE = re.compile(r"^##\s+Current focus:\s*(.*?)\s*$", re.M)
 _NEXT_H2_RE = re.compile(r"^##\s+", re.M)
-_DONE_WHEN_INLINE_RE = re.compile(r"^Done when:\s*$", re.M)
-_DONE_WHEN_SUBHEAD_RE = re.compile(r"^###\s+Done when\b.*$", re.M)
+_PROGRESS_SIGNALS_INLINE_RE = re.compile(r"^Progress signals:\s*$", re.M)
+_PROGRESS_SIGNALS_SUBHEAD_RE = re.compile(r"^###\s+Progress signals\b.*$", re.M)
 _BULLET_RE = re.compile(r"^\s*-\s+(.+?)\s*$")
 _NEXT_H3_RE = re.compile(r"^###\s+", re.M)
 _FENCE_RE = re.compile(r"^```")
@@ -73,28 +80,37 @@ class FocusItem:
     `title` is the trimmed heading suffix (everything after `## Current
     focus:`). Empty when the heading was bare. `body` is the full body
     text between this heading and the next `## ` heading (or EOF),
-    `\n`-terminated lines preserved. `done_when_bullets` is the list
-    of explicit Done-when bullet bodies, or `None` when no `Done when:`
-    sub-block was found (the parser distinguishes "no block" from
-    "empty block" — both heuristic-fallback advance paths). `line_range`
-    is the 1-indexed `(start, end)` line span of the heading + body in
-    the source text (inclusive on both ends; useful for operator-facing
-    diagnostics that quote the offending region).
+    `\n`-terminated lines preserved. `progress_signals_bullets` is the
+    list of Progress-signals bullet bodies, or `None` when no
+    `Progress signals:` sub-block was found (the parser distinguishes
+    "no block" from "empty block"; the sub-block is OPTIONAL — a focus
+    heading with no `Progress signals:` block is valid and parses with
+    `progress_signals_bullets=None`). `line_range` is the 1-indexed
+    `(start, end)` line span of the heading + body in the source text
+    (inclusive on both ends; useful for operator-facing diagnostics
+    that quote the offending region).
     """
 
     title: str
     body: str
-    done_when_bullets: list[str] | None
+    progress_signals_bullets: list[str] | None
     line_range: tuple[int, int]
 
-    def has_done_when(self) -> bool:
-        """True iff a `Done when:` sub-block was structurally present.
+    def has_progress_signals(self) -> bool:
+        """True iff a `Progress signals:` sub-block was structurally
+        present.
 
         Note: an empty-but-present sub-block returns True (the operator
-        wrote `Done when:` with no bullets — likely a draft / TODO).
-        Heuristic-fallback only fires when the sub-block is ABSENT.
+        wrote `Progress signals:` with no bullets — likely a draft /
+        TODO). The sub-block is OPTIONAL — a focus heading with no
+        `Progress signals:` block returns False here and parses with
+        `progress_signals_bullets=None`. The empty-cycles advance
+        heuristic (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`) runs the same way
+        regardless of presence; the bullets are advisory ideation-
+        prompt context only (TB-283 deleted the prior LLM-judge advance
+        path).
         """
-        return self.done_when_bullets is not None
+        return self.progress_signals_bullets is not None
 
 
 def parse_focus_list(text: str) -> list[FocusItem]:
@@ -109,14 +125,16 @@ def parse_focus_list(text: str) -> list[FocusItem]:
     as an archived-section pattern without confusing the parser, as
     long as the colon-after-`focus` is preserved.
 
-    Done-when extraction: for each focus body, looks for the first
-    structural Done-when marker — either an inline `Done when:` line
-    or a nested `### Done when` sub-heading. Bullets are collected
-    from the lines immediately following the marker up to the first
-    section break (blank line not immediately followed by another
-    bullet, next `### ` sub-heading, or `^## ` heading / EOF). Fenced
-    code blocks inside the body are skipped (bullets inside `` ` ``
-    fences don't count as Done-when criteria).
+    Progress-signals extraction: for each focus body, looks for the
+    first structural Progress-signals marker — either an inline
+    `Progress signals:` line or a nested `### Progress signals`
+    sub-heading. Bullets are collected from the lines immediately
+    following the marker up to the first section break (blank line not
+    immediately followed by another bullet, next `### ` sub-heading, or
+    `^## ` heading / EOF). Fenced code blocks inside the body are
+    skipped (bullets inside `` ` `` fences don't count as
+    Progress-signals bullets). The legacy `Done when:` heading is NOT
+    accepted (TB-285 hard cut — no backcompat shim).
     """
     if not isinstance(text, str) or not text:
         return []
@@ -148,35 +166,45 @@ def parse_focus_list(text: str) -> list[FocusItem]:
         next_h2 = _NEXT_H2_RE.search(text, m.end())
         body_end = next_h2.start() if next_h2 else len(text)
         body = text[body_start:body_end]
-        done_when = _parse_done_when_from_body(body)
+        progress_signals = _parse_progress_signals_from_body(body)
         line_range = (line_of(m.start()), line_of(max(body_end - 1, m.end())))
         items.append(FocusItem(
             title=title,
             body=body,
-            done_when_bullets=done_when,
+            progress_signals_bullets=progress_signals,
             line_range=line_range,
         ))
     return items
 
 
-def _parse_done_when_from_body(body: str) -> list[str] | None:
-    """Locate the Done-when sub-block in `body` (a focus's heading-stripped
-    body text) and return the list of bullet bodies, or None when no
-    Done-when marker is structurally present.
+def _parse_progress_signals_from_body(body: str) -> list[str] | None:
+    """Locate the Progress-signals sub-block in `body` (a focus's
+    heading-stripped body text) and return the list of bullet bodies,
+    or None when no Progress-signals marker is structurally present.
 
-    Marker precedence: inline `Done when:` line FIRST, then nested
-    `### Done when` sub-heading. Two markers are equivalent in effect
-    but the parser only honors the first one encountered. Fenced code
-    blocks (``` ... ```) are skipped so bullets inside them don't
-    accidentally count as criteria.
+    Marker precedence: inline `Progress signals:` line FIRST, then
+    nested `### Progress signals` sub-heading. Two markers are
+    equivalent in effect but the parser only honors the first one
+    encountered. Fenced code blocks (``` ... ```) are skipped so
+    bullets inside them don't accidentally count as bullets.
+
+    Optionality is explicit (TB-285 contract): a focus heading with no
+    `Progress signals:` sub-block is valid and returns None here. The
+    empty-cycles advance heuristic
+    (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`) runs the same way for both
+    block-present and block-absent foci; the bullets are advisory
+    ideation-prompt context only (TB-283 deleted the prior LLM-judge
+    advance path). The legacy `Done when:` heading is NOT accepted
+    (hard cut — no backcompat shim per the project's
+    git-history-is-the-rollback-substrate norm).
 
     Returns:
-        - None when no Done-when marker was found.
+        - None when no Progress-signals marker was found (the
+          common no-block case).
         - A possibly-empty list when the marker was present but no
-          bullets followed (operator authored a draft Done-when block
-          with the heading but no criteria yet — the daemon treats
-          this as "explicit Done-when, zero bullets met" and relies
-          on the LLM judge to short-circuit to "insufficient evidence").
+          bullets followed (operator authored a draft Progress-signals
+          block with the heading but no bullets yet — fine; the bullets
+          are advisory and the daemon's advance pass doesn't read them).
     """
     if not body:
         return None
@@ -187,8 +215,8 @@ def _parse_done_when_from_body(body: str) -> list[str] | None:
     # downstream regex stays well-behaved.
     cleaned = _strip_fenced_blocks(body)
 
-    inline_m = _DONE_WHEN_INLINE_RE.search(cleaned)
-    subhead_m = _DONE_WHEN_SUBHEAD_RE.search(cleaned)
+    inline_m = _PROGRESS_SIGNALS_INLINE_RE.search(cleaned)
+    subhead_m = _PROGRESS_SIGNALS_SUBHEAD_RE.search(cleaned)
     if inline_m is None and subhead_m is None:
         return None
     if inline_m is not None and (subhead_m is None or inline_m.start() < subhead_m.start()):
