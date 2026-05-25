@@ -940,3 +940,9 @@
 - **Commit:** `ac4f861`
 - **Summary:** Previously committed: code-side rename (scope 1, 2, 4, 5, 6) landed in ac4f861; the goal.md L213 `Done when:` → `Progress signals:` rename (scope 3) — fenced from task-agent SDK writes — was applied by the operator via `ap2 update-goal` in drain commit 6143c81 between the third blocked attempt and this retry. Verified completeness: all 6 grep verification bullets PASS (`! grep -rq '_DONE_WHEN' ap2/`, `! grep -rqE 'done_when_bullets|has_done_when' ap2/`, `! grep -qE '^Done when:|^### Done when' goal.md`, `grep -q '_PROGRESS_SIGNALS' ap2/goal.py`, `grep -qE 'progress_signals_bullets|has_progress_signals' ap2/goal.py`, `grep -qE '^Progress signals:|^### Progress signals' goal.md`) and `uv run pytest -q ap2/tests/` → 1997 passed in 99.64s. The descriptive prose mentions of `Done when:` at goal.md L120/L122 are in a paragraph describing the legacy gating mechanism and don't match the `^Done when:` regex (a separate howto/goal.md prose sweep is scoped to TB-286 per the briefing's out-of-scope note). No new commit warranted.
 - **Tests:** pass
+
+## [2026-05-25] TB-286: Update ap2/howto.md for empty-cycles advancement + Progress signals rename
+- **Commit:** `b22b8d0`
+- **Summary:** Rewrote ap2/howto.md focus-advancement section as empty-cycles-sole-signal (dropped two-path framing + done_when_judge trigger), added Optional Progress signals: sub-block paragraph to Current focus authoring guidance, added Operator advancement workflow paragraph (ap2 update-goal / ap2 ack roadmap_complete / AP2_FOCUS_AUTO_ADVANCE_DISABLED kill-switch), rewrote focus_advanced event description and AP2_FOCUS_ADVANCE_EMPTY_CYCLES knob doc, audited+fixed two stale per-focus Done-when references in classify-verdicts and cron_skipped sections. All 6 briefing verification bullets pass; 1997 tests pass.
+- **Files:** ap2/howto.md
+- **Tests:** pass
