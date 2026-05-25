@@ -180,6 +180,40 @@ back to this focus — a briefing whose `## Goal` body contains the
 substring `Current focus: webhook reliability` (case-insensitive after
 punctuation normalization) passes TB-161.
 
+**Optional `Progress signals:` sub-block (TB-285).** A focus heading
+MAY carry a `Progress signals:` sub-block (either an inline
+`Progress signals:` paragraph leading a bulleted list, or a nested
+`### Progress signals` sub-heading with bullets underneath). The
+bullets are advisory ideation-prompt context — concrete examples of
+what visible progress against the focus looks like — and feed the
+ideation agent's per-cycle assessment so proposals lean toward
+movement on the named signals. They are NOT a gating criterion: focus
+advancement is driven solely by the empty-cycles heuristic
+(`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`; see `### Focus rotation (axis 4)`),
+which fires for foci with AND without a `Progress signals:` block.
+Authors who want to give ideation explicit "what good looks like"
+hints can include the sub-block; authors who'd rather let the focus's
+prose carry the framing can omit it without changing how the daemon
+advances.
+
+> ## Current focus: webhook reliability
+>
+> The broker webhook is the bot's single ingestion path — alerts dropped
+> here never reach the summary. The focus is on retry semantics, dead-
+> letter handling, and observability of webhook delivery.
+>
+> Progress signals:
+> - Missed alerts surface within 5 minutes via an observable counter.
+> - A killed webhook subscription auto-recovers without operator action.
+
+The bullets give ideation concrete shapes to favor — they do NOT
+auto-fire focus advancement when satisfied (operator authorship of
+the next focus, or the empty-cycles heuristic, drives that). The
+sub-block's historical name (the one renamed in TB-285) was
+dropped to clear the gating connotation it carried; the legacy
+heading does not parse (hard cut — `ap2 update-goal` to migrate
+any pre-TB-285 goal.md to the `Progress signals:` heading).
+
 ### Non-goals
 
 Bulleted list of explicit non-goals. Ideation's Step 0 includes a
@@ -806,9 +840,10 @@ bucket. Pick the verdict by running two delete-tests in sequence:
 - **`advanced-goal`** — substantively advanced the goal (positive).
   Passes the base delete-test: "if we deleted this task, would the
   goal still ship?" Answer: no — the goal would be visibly worse off
-  without this work. Use when the task moved the focus's Done-when
-  criteria closer, unblocked a downstream task, or shipped a
-  user-visible capability the goal names.
+  without this work. Use when the task moved the active focus's
+  progress signals closer (or the top-level `## Done when` criteria,
+  if the work cuts across foci), unblocked a downstream task, or
+  shipped a user-visible capability the goal names.
 
 - **`pro-forma`** — goal-shaped but didn't advance — compliance signal
   (no-impact + no-harm). Fails the base delete-test: deleting this
@@ -869,9 +904,9 @@ window carries zero "interesting" events past the previous
 identical to the last one, per the SHA-1 fingerprint stashed under
 `status-report.last_post_fingerprint` in `cron_state.json` over
 board counts + pending-review TB-Ns + decisions-needed bullets +
-digest sub-section contents + halt reason; closes goal.md focus-1's
-Done-when bullet "no two consecutive reports repeat unchanged
-content")), `cron_bootstrap` (first-run
+digest sub-section contents + halt reason; closes a goal.md focus
+`Progress signals:` bullet on report-worthy change vs clock-driven
+re-fires)), `cron_bootstrap` (first-run
 seeding of `cron.yaml` from `cron.default.yaml`), `ideation_empty_board`
 (skip — no slots OR cooldown), `ideation_forced` (operator forced via
 `ap2 ideate --force`), `ideation_skipped` / `ideation_skipped_no_slots`,
@@ -1048,14 +1083,19 @@ extension pattern).
 against goal.md's `## Current focus:` headings. See
 `### Focus rotation (axis 4)` below for the full design.
 
-- `focus_advanced` (TB-226) — daemon advanced its in-memory pointer
-  past an exhausted `## Current focus:` heading. Trigger field is
-  one of `done_when_judge` (LLM-judge ruled the focus's `Done when:`
-  bullets substantively met) or `empty_cycles_heuristic` (focus had
-  no explicit `Done when:` block; `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
-  consecutive 0-proposal cycles tripped the fallback). Payload also
-  carries `from` (old title), `to` (new title — empty string when
-  the advance crossed the last focus), `new_index`, `total_foci`.
+- `focus_advanced` (TB-226; advance mechanism reshaped in TB-283)
+  — daemon advanced its in-memory pointer past an exhausted
+  `## Current focus:` heading. Trigger field is always
+  `empty_cycles_heuristic` post-TB-283: the focus accumulated
+  `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3) consecutive ideation
+  cycles producing zero proposals against it. The pre-TB-283
+  LLM-judge advance path (which ruled on operator-authored progress
+  bullets) was deleted; an optional `Progress signals:` sub-block
+  (renamed from the legacy sub-block name in TB-285) is now
+  advisory ideation-prompt context only and never fires advancement
+  on its own. Payload also carries `from` (old title), `to` (new
+  title — empty string when the advance crossed the last focus),
+  `new_index`, `total_foci`.
 - `roadmap_complete` (TB-226; rescoped TB-275) — pointer crossed
   past the last `## Current focus:` heading; the ideation TRIGGER
   parks (`_maybe_ideate` emits `ideation_skipped reason=
@@ -1687,13 +1727,16 @@ focus-list pointer's advance. See `### Focus rotation (axis 4)` below
 for the architecture + the `ap2 ack roadmap_complete` resume verb.
 
 - `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default `3`, min `1`, max `20`) —
-  heuristic-fallback threshold: when the active focus has NO
-  explicit `Done when:` sub-block, the daemon advances after this
-  many consecutive ideation cycles produced 0 proposals against
-  the focus. Invalid (non-int / empty) values fall back to the
-  default; values outside the clamp range are pinned to the
-  nearest bound (so a typo `0` doesn't disable advance and `999`
-  doesn't wedge it permanently).
+  sole-signal threshold: the daemon advances the focus pointer
+  past the active focus after this many consecutive ideation
+  cycles produce 0 proposals against it (TB-283 collapsed the
+  pre-existing two-path advance mechanism to this single
+  empty-cycles heuristic; it now applies uniformly regardless of
+  whether the focus carries a `Progress signals:` sub-block).
+  Invalid (non-int / empty) values fall back to the default;
+  values outside the clamp range are pinned to the nearest bound
+  (so a typo `0` doesn't disable advance and `999` doesn't wedge
+  it permanently).
 - `AP2_FOCUS_AUTO_ADVANCE_DISABLED` — kill-switch. Set to `1` /
   `true` / `yes` / `on` (same convention as `AP2_IDEATION_DISABLED`)
   to prevent the daemon from auto-advancing even when criteria are
@@ -1759,41 +1802,79 @@ Non-goal); pointer state is in-memory only.
 don't re-fire stale `focus_advanced` events. Schema-versioned via
 the `schema: 1` field so a future migration can branch cleanly.
 
-**Advance heuristic.**
+**Advance heuristic (empty-cycles, sole signal).**
 Each tick, `_maybe_advance_focus(cfg, sdk)` runs as step 0.6 of
 `_tick` (after the auto-unfreeze sweep, before cron / pipeline /
-dispatch / ideation). The active focus's structural shape decides
-the advance path:
+dispatch / ideation). One signal drives advancement, applied to
+every focus regardless of whether it carries a `Progress signals:`
+sub-block: the daemon counts consecutive recent ideation cycles
+that produced 0 proposals against the active focus
+(`ideation_empty_board` + `ideation_complete` events with zero
+recorded proposals, reset by `ideation_proposal_recorded`). When
+the count reaches `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default `3`,
+clamped to `[1, 20]`), the pointer advances and the empty-cycles
+counter resets against the new focus.
 
-1. *Explicit `Done when:` sub-block* — the daemon invokes a short
-   SDK judge call (`_judge_done_when`) with the focus title, its
-   Done-when bullets, the last ~10 task-complete titles + summaries,
-   and the head of `ideation_state.md`. The judge replies on the
-   first line with one of `yes` / `no` / `insufficient_evidence`;
-   only `yes` triggers advance. (Note: this judge-driven path was
-   retired in TB-283; the per-focus sub-block — renamed to
-   `Progress signals:` in TB-285 — is now advisory ideation-prompt
-   context only and does NOT gate advancement. See item 2 for the
-   sole post-TB-283 advance signal; the broader howto sweep for the
-   new mechanism is tracked in TB-286.)
-2. *No `Done when:` sub-block* — heuristic fallback. The daemon
-   counts consecutive recent ideation cycles that produced 0
-   proposals against the active focus
-   (`ideation_empty_board` + `ideation_complete` events,
-   reset by `ideation_proposal_recorded`). When the count reaches
-   `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3, clamped to
-   [1, 20]), advance.
+The intuition: ideation reads the full goal.md + the recent task
+arc every cycle. If multiple consecutive cycles can find nothing
+substantive worth proposing against the active focus, ideation has
+itself implicitly judged the focus exhausted — that's the
+load-bearing signal. Per-focus `Progress signals:` bullets (if
+present) feed ideation's per-cycle assessment as advisory context
+but do NOT gate the pointer; ideation's empty-output behavior is
+what the daemon reacts to.
+
+Pre-TB-283 the daemon also ran an LLM-judge advance path that
+diff-read recent task commits against the operator-authored
+per-focus completion bullets (the sub-block now named
+`Progress signals:`) and advanced on a `yes` verdict. That path
+collapsed multi-week foci into ~3-task cycles whenever each commit
+shape-satisfied one bullet, without ever actually verifying
+substantive progress (the judge had no way to execute the code it
+was reading diffs of). TB-283 deleted it; TB-285 renamed the
+sub-block to clear the gating connotation that the prior name
+carried.
 
 On advance, the daemon emits `focus_advanced from=<old_title>
-to=<new_title> trigger=<done_when_judge|empty_cycles_heuristic>
-new_index=<i> total_foci=<n>` and writes the updated pointer.
+to=<new_title> trigger=empty_cycles_heuristic new_index=<i>
+total_foci=<n>` and writes the updated pointer. (The `trigger`
+field is single-valued post-TB-283 — kept on the event so
+downstream consumers stay schema-stable even though the value no
+longer discriminates.)
 
 **Kill-switch.**
 `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits the advance even
 when criteria are met. The daemon surfaces a `## Decisions needed
 from operator` bullet so the operator advances manually via
-`ap2 update-goal`. The pointer doesn't move; the next tick re-emits
-the bullet if criteria still trip — acceptable noise floor.
+`ap2 update-goal` (extending or retiring the focus). The pointer
+doesn't move; the next tick re-emits the bullet if criteria still
+trip — acceptable noise floor. Use this for full-manual focus
+governance when the operator wants per-rotation review.
+
+**Operator advancement workflow.**
+The advancement loop is fully covered by existing verbs — no
+dedicated `ap2 advance` command exists or is needed:
+
+- *Extend a focus* — author additional `## Current focus:` headings
+  in `goal.md` and apply via `ap2 update-goal --file PATH`. The
+  daemon re-parses on the next tick, the pointer continues onto
+  the new heading once the prior one exhausts via empty-cycles.
+- *Retire the roadmap* — when every authored focus has exhausted,
+  the daemon emits `roadmap_complete` once, parks the IDEATION
+  TRIGGER (task dispatch still drains the existing Backlog), and
+  surfaces a `## Decisions needed from operator` bullet. Resume
+  either by extending the roadmap (`ap2 update-goal`) — which re-
+  arms ideation against the new focus — or by dismissing the
+  notice (`ap2 ack roadmap_complete --reason "..."`) when the
+  walk is genuinely over.
+- *Pause the whole loop* — `ap2 pause` for full stop (in-flight
+  tasks finish, no new dispatch). Distinct from roadmap-complete:
+  the parked-ideation state still dispatches operator-added
+  Backlog tasks; pause stops everything.
+- *Full-manual focus governance* — set
+  `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` as above. The daemon never
+  rotates on its own; the operator decides each transition via
+  `ap2 update-goal`.
 
 **Roadmap-complete: ideation parks (TB-275).**
 When the pointer advances past the LAST `## Current focus:`
