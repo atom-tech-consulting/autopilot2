@@ -964,3 +964,9 @@
 - **Summary:** Added `_detect_auto_approve_paused` to ap2/attention.py — surfaces a single `## Attention needed` bullet (per-reason key `auto_approve_paused:<reason>`, ack-verb via `_PAUSE_REASON_ACK_VERB`) whenever `collect_auto_approve_state(cfg).pause_reason` is non-None; wired into `detect_attention_conditions` as the 4th `out.extend`. Howto + architecture inventories updated. 12 new tests cover no-fire/none, consecutive_freezes, validator_judge_noisy, per-reason dedup, disabled vs paused distinction, debounce within/past window, noisy-pause opt-out, union dispatcher symmetry, render-section path, and source-anchor greps. Full suite 2036 passed.
 - **Files:** ap2/attention.py, ap2/howto.md, ap2/architecture.md, ap2/tests/test_tb289_attention_auto_approve_paused.py
 - **Tests:** pass
+
+## [2026-05-26] TB-291: Fence ideation toolset to board_edit only; remove operator_queue_append
+- **Commit:** `3ba0418`
+- **Summary:** Added `IDEATION_TOOLS` to `ap2/tools.py` (strict subset of `CONTROL_AGENT_TOOLS` minus `mcp__autopilot__operator_queue_append`) with a header comment explaining the TOCTOU-doesn't-apply-to-ideation rationale; wired `_run_ideation` in `ap2/ideation.py` to import + pass `allowed_tools=IDEATION_TOOLS`; added 5-test regression-pin module `ap2/tests/test_ideation_tools_fence.py` covering importability, the operator_queue_append exclusion, the board_edit inclusion, the strict-subset relation, and the `_run_ideation` wire-up via `inspect.getsource`. Full suite: 2041 passed in 90s.
+- **Files:** ap2/tools.py, ap2/ideation.py, ap2/tests/test_ideation_tools_fence.py
+- **Tests:** pass
