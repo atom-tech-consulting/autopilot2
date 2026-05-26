@@ -1126,6 +1126,35 @@ CONTROL_AGENT_TOOLS = [
     "mcp__autopilot__status_report_run",
 ]
 
+# TB-291: ideation's toolset is `CONTROL_AGENT_TOOLS` minus
+# `operator_queue_append`. The queue path exists to defend against a TOCTOU
+# race — direct `board_edit` mutates `TASKS.md` immediately, which is unsafe
+# while a task agent is mid-run because TB-110's snapshot-window check would
+# flag the concurrent state mutation. The MM handler defers to the queue
+# precisely because it can fire mid-task. Ideation, by contrast, is
+# sequential with task execution by construction: `_maybe_ideate` only fires
+# when Active is empty, and the daemon's tick loop holds back new tasks
+# until ideation's run commits. The TOCTOU race the queue path defends
+# against therefore cannot occur during ideation, so the tool is
+# unnecessary surface — and the agent will defensively prefer it over
+# direct `board_edit` because the queue-tool's own docstring recommends it
+# as the safer choice when a task agent might be active. That defensive
+# preference desynced the empty-cycles counter on 2026-05-26: the queue
+# path emits `operator_queue_append op=add_backlog`, NOT
+# `ideation_proposal_recorded` — and the counter in
+# `ap2/focus_advance.py:_ideation_empty_against_focus` only treats
+# `ideation_proposal_recorded` as a reset signal. One productive cycle
+# (TB-290) routed via the queue ticked the counter as if empty, falsely
+# advancing the focus to ROADMAP_COMPLETE. Fencing the toolset forces
+# ideation down the direct `board_edit` path the counter expects, aligning
+# prompt + tool surface + event vocabulary on one consistent shape. Other
+# control agents (cron jobs) keep `operator_queue_append` in their
+# `CONTROL_AGENT_TOOLS` — only ideation needs the fence.
+IDEATION_TOOLS = [
+    t for t in CONTROL_AGENT_TOOLS
+    if t != "mcp__autopilot__operator_queue_append"
+]
+
 # TB-145: the Mattermost handler ALWAYS runs with this single (narrowed)
 # toolset, regardless of whether a task agent is currently in flight. The
 # previous TB-122 design picked between FULL and RESTRICTED variants based on

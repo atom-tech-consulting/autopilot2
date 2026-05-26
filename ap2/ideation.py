@@ -712,7 +712,7 @@ async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
     # Lazy imports to avoid daemon ↔ ideation circular dependency.
     from . import daemon as _daemon
     from . import prompts
-    from .tools import CONTROL_AGENT_TOOLS
+    from .tools import IDEATION_TOOLS
 
     # TB-168: ideation opts out of the board-counts and recent-commits
     # sub-blocks of `_current_state_block`. The board snapshot is
@@ -776,7 +776,7 @@ async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
         mcp_server,
         label="ideation",
         prompt=full_prompt,
-        allowed_tools=CONTROL_AGENT_TOOLS,
+        allowed_tools=IDEATION_TOOLS,
         max_turns=max_turns,
     )
     if timed_out:
