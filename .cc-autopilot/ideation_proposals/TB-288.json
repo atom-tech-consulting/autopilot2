@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-282",
   "briefing_path": ".cc-autopilot/tasks/validator-judge-noisy-attention-detector.md",
   "focus_anchor": "current focus operator legible reporting and monitoring",
+  "outcome": {
+    "commit": "c7fdf76",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-26T06:47:39Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-26T06:15:53Z",
   "tb_id": "TB-288",
   "why_now": "TB-243 surfaced 24h fail-counts in `ap2 status` text/JSON + web automation card; TB-245 forwards a bottom-of-digest sub-block into the status-report; TB-272 added `validator_judge_noisy` as an auto-approve pause_reason. All three are pull/sub-block surfaces \u2014 the noisy state is buried inside the digest near the end of the post, NOT in the daemon-rendered `## Attention needed` block that TB-282 places ABOVE the body bullets. The Progress signals bullet explicitly contrasts \"distinct from routine progress updates\" \u2014 today the noisy state IS tied to routine sub-blocks. Promoting to Attention closes the visual-hierarchy gap without changing the underlying count infrastructure."

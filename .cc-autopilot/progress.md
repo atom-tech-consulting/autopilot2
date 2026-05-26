@@ -952,3 +952,9 @@
 - **Summary:** Added `_detect_task_frozen` to ap2/attention.py (per-task `task_frozen:<id>` debounce key, walks tail for most-recent `retry_exhausted`/`task_failed` and aborts on intervening `task_unfrozen`/`task_deleted`, recency-gated by `AP2_TASK_FROZEN_RECENCY_S` default 86400s/24h, hot-reloadable via env_reload). Wired into `detect_attention_conditions` alongside `_detect_task_stuck`, extended howto.md + architecture.md + events.py docstring, and landed 14 new pins in test_tb287_attention_task_frozen.py covering happy-path / dormancy / intervening-unfreeze / per-key dedup / env-knob override plus default + invalid fallback. Full suite `uv run pytest -q ap2/tests/` — 2011 passed.
 - **Files:** ap2/attention.py, ap2/config.py, ap2/env_reload.py, ap2/events.py, ap2/howto.md, ap2/architecture.md, ap2/tests/test_tb287_attention_task_frozen.py
 - **Tests:** pass
+
+## [2026-05-26] TB-288: `validator_judge_noisy` attention detector — promote 24h fail-count threshold to the Attention surface (TB-282 follow-up closing Progress signal #3 "validator-judge anomalies" leg)
+- **Commit:** `c7fdf76`
+- **Summary:** Added _detect_validator_judge_noisy to ap2/attention.py (singleton condition, fires when 24h validator_judge_fail+timeout >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD, default 5), 13-test regression module pinning the five briefing arcs + render-verbatim + union dispatcher + source-anchor greps, and inventory updates in howto.md / architecture.md. Reuses automation_status._count_events_24h + validator_judge_noisy_threshold for no-drift with TB-243/TB-245 surfaces. Full pytest suite 2024 passed.
+- **Files:** ap2/attention.py, ap2/tests/test_tb288_attention_validator_judge_noisy.py, ap2/howto.md, ap2/architecture.md
+- **Tests:** pass
