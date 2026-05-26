@@ -970,3 +970,9 @@
 - **Summary:** Added `IDEATION_TOOLS` to `ap2/tools.py` (strict subset of `CONTROL_AGENT_TOOLS` minus `mcp__autopilot__operator_queue_append`) with a header comment explaining the TOCTOU-doesn't-apply-to-ideation rationale; wired `_run_ideation` in `ap2/ideation.py` to import + pass `allowed_tools=IDEATION_TOOLS`; added 5-test regression-pin module `ap2/tests/test_ideation_tools_fence.py` covering importability, the operator_queue_append exclusion, the board_edit inclusion, the strict-subset relation, and the `_run_ideation` wire-up via `inspect.getsource`. Full suite: 2041 passed in 90s.
 - **Files:** ap2/tools.py, ap2/ideation.py, ap2/tests/test_ideation_tools_fence.py
 - **Tests:** pass
+
+## [2026-05-26] TB-292: Restructure empty-cycles counter to cycle-grouped semantics
+- **Commit:** `4e4d5e7`
+- **Summary:** Restructured `_ideation_empty_against_focus` in ap2/focus_advance.py to cycle-grouped semantics (entry-marker `ideation_empty_board` + exit-marker `ideation_complete`/`_timeout`/`_error` form one cycle; per-cycle +1 / 0 / unchanged based on whether an `ideation_proposal_recorded` fired inside the cycle). Closes the pre-TB-292 double-count where one cycle bumped the counter by 2. Added 15-case regression-pin module `ap2/tests/test_empty_cycles_counter.py`; updated `test_tb226_focus_rotation.py` (`_emit_ideation_empty` now emits entry+exit; new `_emit_ideation_productive` helper) and the walk-away e2e (`test_focus_advance_and_roadmap_complete_across_ticks` bumped from 4 → 6 ticks to match the new cadence). Full suite passes (2056 tests).
+- **Files:** ap2/focus_advance.py, ap2/tests/test_empty_cycles_counter.py, ap2/tests/test_tb226_focus_rotation.py, ap2/tests/e2e/test_walk_away_loop.py
+- **Tests:** pass
