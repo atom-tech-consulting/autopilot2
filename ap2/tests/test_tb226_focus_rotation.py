@@ -447,9 +447,27 @@ def _write_goal_with_progress_signals(cfg: Config, title: str, bullets: list[str
 
 
 def _emit_ideation_empty(cfg: Config) -> None:
-    """Append an `ideation_empty_board` event so the heuristic counter
-    can see it."""
+    """Append one full empty ideation cycle so the heuristic counter
+    can see it: `ideation_empty_board` (entry) + `ideation_complete`
+    (exit) with no `ideation_proposal_recorded` in between.
+
+    TB-292: the counter is now cycle-grouped — each cycle needs both
+    entry and exit markers to count toward the empty total. Prior to
+    TB-292 a bare `ideation_empty_board` was enough (and the counter
+    double-counted full cycles), but the new semantics mirror what
+    the env-knob name (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`) advertises.
+    """
     events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
+    events.append(cfg.events_file, "ideation_complete", summary="empty cycle")
+
+
+def _emit_ideation_productive(cfg: Config, *, task: str = "TB-X") -> None:
+    """Append one full productive ideation cycle: entry + proposal +
+    exit. Resets the empty-cycles counter under the TB-292 cycle-
+    grouped semantics."""
+    events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
+    events.append(cfg.events_file, "ideation_proposal_recorded", task=task)
+    events.append(cfg.events_file, "ideation_complete", summary=f"productive cycle ({task})")
 
 
 def test_empty_cycles_heuristic_advance(cfg, monkeypatch):
@@ -503,17 +521,21 @@ def test_empty_cycles_heuristic_below_threshold(cfg, monkeypatch):
 
 
 def test_empty_cycles_resets_on_proposal(cfg, monkeypatch):
-    """`ideation_proposal_recorded` resets the empty-cycles counter:
-    even with 5 prior empty cycles, a single recorded proposal pushes
-    the count back to 0 until new empty cycles accumulate."""
+    """A productive ideation cycle (entry + `ideation_proposal_recorded`
+    + exit) resets the empty-cycles counter: even with 5 prior empty
+    cycles, a single productive cycle pushes the count back to 0 until
+    new empty cycles accumulate. TB-292: under the cycle-grouped
+    semantics, the reset is anchored to a cycle's exit (with a proposal
+    recorded inside it), not to a bare `ideation_proposal_recorded`
+    event."""
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta")
 
     for _ in range(5):
         _emit_ideation_empty(cfg)
-    # A proposal landed → counter resets.
-    events.append(cfg.events_file, "ideation_proposal_recorded", task="TB-1")
+    # A productive cycle → counter resets to 0 at this cycle's exit.
+    _emit_ideation_productive(cfg, task="TB-1")
     # One more empty cycle after the reset; well below threshold now.
     _emit_ideation_empty(cfg)
 

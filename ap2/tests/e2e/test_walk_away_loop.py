@@ -570,24 +570,31 @@ def test_auto_unfreeze_briefingfix_repairs_frozen_task(
 # "ideation can't find proposals against the active focus" each cycle.
 #
 # Empty-cycles threshold is set to 2 via `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`.
-# Per the heuristic in `_ideation_empty_against_focus`, BOTH
-# `ideation_empty_board` AND `ideation_complete` events count toward the
-# threshold — so each ideation invocation increments the counter by 2. With
-# threshold=2, one ideation invocation per focus is enough to trip the
-# advance pass on the NEXT tick (the advance pass runs at step 0.6 of
-# `_tick`, BEFORE step 4's `_maybe_ideate`; the events from tick N's
-# ideation are visible to tick N+1's advance pass).
+# Per the TB-292 cycle-grouped heuristic in
+# `_ideation_empty_against_focus`, each ideation invocation that exits
+# via `ideation_complete` with NO `ideation_proposal_recorded` inside
+# the cycle increments the counter by exactly 1 (entry + exit form one
+# cycle; pre-TB-292 the counter naively summed both event types and
+# bumped by 2 per cycle — the bug this restructure closed). With
+# threshold=2, TWO ideation invocations per focus are needed before
+# the advance pass trips on the NEXT tick (the advance pass runs at
+# step 0.6 of `_tick`, BEFORE step 4's `_maybe_ideate`; the events
+# from tick N's ideation are visible to tick N+1's advance pass).
 #
 # Tick-by-tick trace (asserted below):
 #   - Tick 1: advance pass sees 0 empty cycles → no advance; ideation runs
-#     against focus-a (+2 events).
-#   - Tick 2: advance pass sees 2 empty cycles against focus-a → ADVANCE
-#     focus-a → focus-b; ideation runs against focus-b (+2 events; cutoff
-#     starts at tick 2's `focus_advanced to=focus-b`).
-#   - Tick 3: advance pass sees 2 empty cycles against focus-b → ADVANCE
+#     against focus-a (1 empty cycle, count=1).
+#   - Tick 2: advance pass sees 1 empty cycle → no advance; ideation runs
+#     against focus-a again (count=2).
+#   - Tick 3: advance pass sees 2 empty cycles against focus-a → ADVANCE
+#     focus-a → focus-b; ideation runs against focus-b (1 empty cycle
+#     past the cutoff; count for focus-b = 1).
+#   - Tick 4: advance pass sees 1 empty cycle for focus-b → no advance;
+#     ideation runs (count for focus-b = 2).
+#   - Tick 5: advance pass sees 2 empty cycles against focus-b → ADVANCE
 #     focus-b → "" (pointer past last); ideation runs (no-op for the
 #     pointer since it's already past last).
-#   - Tick 4: advance pass sees `active_idx >= len(foci)` → emits
+#   - Tick 6: advance pass sees `active_idx >= len(foci)` → emits
 #     `roadmap_complete`; ideation runs.
 #
 # After tick 4: assert `focus_advanced` precedes `roadmap_complete`,
@@ -638,11 +645,12 @@ def test_focus_advance_and_roadmap_complete_across_ticks(
     # proposals on every invocation).
     (cfg.project_root / "goal.md").write_text(_MULTI_FOCUS_GOAL_MD)
 
-    # Bound empty-cycles to 2 so one ideation invocation per focus is
-    # enough to trip the advance pass on the NEXT tick (each invocation
-    # emits BOTH `ideation_empty_board` AND `ideation_complete`, and both
-    # event types count toward the heuristic — see
-    # `_ideation_empty_against_focus` in daemon.py).
+    # Bound empty-cycles to 2 so two ideation invocations per focus are
+    # enough to trip the advance pass on the following tick. Each
+    # invocation emits entry (`ideation_empty_board`) + exit
+    # (`ideation_complete`) with no proposal inside, forming one full
+    # empty cycle (+1 to the counter under TB-292's cycle-grouped
+    # semantics; pre-TB-292 the same shape naively bumped by +2).
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "2")
     # Kill-switch off (default) so the advance pass is allowed to fire.
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
@@ -692,10 +700,13 @@ def test_focus_advance_and_roadmap_complete_across_ticks(
     sdk = FakeSDK()
     sdk.on("TB-237 walk-away ideation prompt", ideation_factory)
 
-    # Drive 4 ticks through `daemon._tick`. Each tick runs the focus-
+    # Drive 6 ticks through `daemon._tick`. Each tick runs the focus-
     # advance pass (step 0.6) and then ideation (step 4). The trace
     # above this function explains the expected event sequence.
-    for _ in range(4):
+    # TB-292: bumped from 4 → 6 ticks to match the cycle-grouped
+    # counter (two empty cycles per advance instead of the pre-TB-292
+    # double-count's one).
+    for _ in range(6):
         asyncio.run(_tick(cfg, sdk, mcp_server=None))
 
     evts = events.tail(cfg.events_file, 1000)

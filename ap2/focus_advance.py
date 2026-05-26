@@ -4,8 +4,14 @@ Lifted from `ap2/daemon.py` as part of TB-263's responsibility split. The
 orchestrator (`_tick`) calls `_maybe_advance_focus` once per tick; this
 module owns the pointer-advance policy itself:
 
-  - `_ideation_empty_against_focus`: tail-scan counter for the heuristic
-    "N consecutive 0-proposal cycles against the active focus" path.
+  - `_ideation_empty_against_focus`: cycle-grouped counter for the
+    heuristic "N consecutive 0-proposal cycles against the active
+    focus" path. Each ideation cycle is bounded by
+    `ideation_empty_board` (entry) and one of `ideation_complete` /
+    `ideation_timeout` / `ideation_error` (exit); per-cycle accounting
+    avoids the pre-TB-292 double-count where one cycle bumped the
+    counter by 2 (entry + exit events both counted) and one productive
+    cycle netted +1 (reset zeroed only between the two increments).
   - `_maybe_advance_focus`: the orchestrator entry point. Reads goal.md's
     focus list + `focus_pointer.json`, advances the in-memory pointer
     when criteria are met, emits `roadmap_complete` when all foci are
@@ -56,41 +62,67 @@ _FOCUS_RECENT_TAIL_N = 200
 
 
 def _ideation_empty_against_focus(tail: list[dict], focus_title: str) -> int:
-    """Count consecutive recent ideation cycles that produced 0 proposals
-    against `focus_title`. Walks `tail` (newest events at the end)
-    backwards; resets the count at the first cycle that DID propose
-    something against the focus (an `ideation_complete` whose summary
-    mentions a TB-N proposal against the focus title, OR any
-    `ideation_proposal_recorded` event in the window).
+    """Count consecutive recent ideation cycles that exited without
+    recording a proposal against `focus_title`. Cycle-grouped: each
+    ideation cycle is bounded by `ideation_empty_board` (daemon-emitted
+    entry marker at `ideation._run_ideation`) and one of
+    `ideation_complete` / `ideation_timeout` / `ideation_error` (exit).
+    Per cycle:
 
-    Counting policy (deliberately permissive — the briefing's heuristic
-    is "N consecutive 0-proposal cycles against the active focus"):
-      - `ideation_empty_board` and `ideation_complete` events with no
-        proposal-recorded counterpart in the same window count toward
-        the empty-cycles total.
-      - `ideation_proposal_recorded` resets the counter (a fresh
-        proposal landed against the active focus; the focus isn't
-        exhausted).
-      - Events older than the most recent `focus_advanced from=<title>`
-        are ignored (the prior focus's cycles don't count against the
-        new active focus's freshness).
+      - Exited via `ideation_complete` AND no `ideation_proposal_recorded`
+        fired within the cycle → increment count by 1.
+      - Any `ideation_proposal_recorded` fired within the cycle → on
+        `ideation_complete`, reset count to 0 (a fresh proposal landed
+        against the active focus; the focus isn't exhausted).
+      - Exited via `ideation_timeout` / `ideation_error` → leave count
+        unchanged. These are infrastructure failures (SDK budget
+        exhausted, agent crash) — not "ideation reasoned and found
+        nothing." Treating them as empty would let transient SDK
+        slowness or a network blip falsely trip focus advance.
+
+    Events older than the most recent `focus_advanced to=<focus_title>`
+    are ignored (the prior focus's cycles don't count against the new
+    active focus's freshness). Truncated cycles (events appearing
+    after the cutoff without their matching `ideation_empty_board`
+    entry marker, or a cycle whose exit marker fell off the tail) are
+    handled cleanly via the `in_cycle` flag — orphan proposal/exit
+    events outside any cycle are ignored, and a fresh `ideation_empty_board`
+    resets the flags without spurious increments.
+
+    TB-292 restructured this from the prior event-walking flat-
+    increment counter (one cycle = +2 because both `ideation_empty_board`
+    and `ideation_complete` counted independently; one productive
+    cycle netted +1 because the reset only zeroed between increments)
+    to the cycle-grouped semantic that the `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+    env-knob name advertises ("3 consecutive empty cycles to trip").
     """
-    # Reset cutoff: the most recent `focus_advanced` event marks the
-    # start of the current focus's window.
+    # Reset cutoff: the most recent `focus_advanced to=<focus_title>`
+    # event marks the start of the current focus's window.
     cutoff_idx = -1
     for i, e in enumerate(tail):
         if e.get("type") == "focus_advanced" and str(e.get("to") or "") == focus_title:
             cutoff_idx = i
     relevant = tail[cutoff_idx + 1:]
+
     count = 0
+    in_cycle = False
+    cycle_had_proposal = False
     for e in relevant:
         typ = e.get("type")
-        if typ == "ideation_proposal_recorded":
-            # A real proposal landed → reset.
-            count = 0
-            continue
-        if typ in ("ideation_empty_board", "ideation_complete"):
-            count += 1
+        if typ == "ideation_empty_board":
+            # Entry marker: open a fresh cycle. If a prior cycle's exit
+            # marker fell off the tail, this implicitly closes it
+            # without counting (defensive shape for truncated tails).
+            in_cycle = True
+            cycle_had_proposal = False
+        elif typ == "ideation_proposal_recorded" and in_cycle:
+            cycle_had_proposal = True
+        elif typ == "ideation_complete" and in_cycle:
+            count = 0 if cycle_had_proposal else count + 1
+            in_cycle = False
+        elif typ in ("ideation_timeout", "ideation_error") and in_cycle:
+            # Infrastructure failure: don't count, don't reset.
+            in_cycle = False
     return count
 
 
