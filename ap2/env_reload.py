@@ -145,6 +145,13 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     # `ap2/attention.py` (`_task_frozen_recency_s`), same shape as the
     # TB-282 pair above.
     "AP2_TASK_FROZEN_RECENCY_S",
+    # TB-290: `cost_cap_approach` detector percentage threshold — read
+    # fresh from `os.environ` at detection-time inside
+    # `ap2/attention.py` (`_cost_approach_pct`), same shape as the
+    # TB-282 / TB-287 detector-sensitivity knobs above. An operator
+    # tightening the threshold (e.g. 75 → 50 for an earlier nudge)
+    # takes effect on the next tick without a daemon restart.
+    "AP2_AUTO_APPROVE_COST_APPROACH_PCT",
 })
 
 # Lifecycle knobs that CAN'T hot-reload. Each configures a stateful

@@ -1049,7 +1049,7 @@ skip-gate from firing — operator never misses a degradation
 signal because the 2h post coincided with an otherwise-quiet
 window.
 
-**Proactive attention surface (TB-282; TB-287, TB-288, TB-289 extended).**
+**Proactive attention surface (TB-282; TB-287, TB-288, TB-289, TB-290 extended).**
 `attention_raised` is the distinct push-surface event for conditions
 that warrant immediate operator attention. Detector inventory:
 `task_stuck` (TB-282) flags an Active task whose most recent
@@ -1080,7 +1080,27 @@ decision" leg by promoting the pause state from the bottom-of-
 digest TB-228 automation-digest sub-block + `ap2 status` line to a
 top-of-post `## Attention needed` bullet naming the
 `ap2 ack <verb>` resume nudge (verb resolves via
-`_PAUSE_REASON_ACK_VERB` in `ap2/automation_status.py`). The
+`_PAUSE_REASON_ACK_VERB` in `ap2/automation_status.py`);
+`cost_cap_approach` (TB-290) is the pre-trip companion to the
+post-trip `auto_approve_paused:window_token_cap_exceeded` surface —
+singleton project-wide condition (key `cost_cap_approach:window`,
+NOT per-task) that fires when the rolling 24h auto-approved
+`task_run_usage` token sum is ≥
+`AP2_AUTO_APPROVE_COST_APPROACH_PCT` (default 75) percent of
+`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` AND strictly below the cap, so
+the walk-away operator gets a budget-spending nudge hours before
+dispatch halts and they must `ap2 ack auto_approve_window_resume`.
+The walk reuses the same `_auto_approve_window_resume_idx` reset
++ `_auto_approved_task_ids` filter + 24h roll + `_event_combined_tokens`
+sum the TB-224 trip-check in
+`auto_approve._auto_approve_check_violations` uses, so the
+approach-check sum is structurally guaranteed to match the
+trip-check sum (no drift between predicting the pause and the
+pause itself). Hands off explicitly above the cap so the operator
+sees one bullet, not two; no-op when the cap is unset
+(operator-opt-in, mirroring the TB-224 trip surface's
+"operators who haven't budgeted their project don't get a
+hardcoded cap surprising them" design). The
 daemon's `_tick` calls
 `ap2.attention.detect_attention_conditions(cfg)`, debounces each
 candidate against any prior matching fire within
@@ -1089,21 +1109,25 @@ candidate against any prior matching fire within
 key) debounce so a second stuck/frozen task doesn't get suppressed
 because a first one fired recently. Payload: `attention_type`
 (detector kind — `task_stuck`, `task_frozen`,
-`validator_judge_noisy`, and `auto_approve_paused` are the seeds
-today; future detectors land alongside as `cost_cap_approach` /
-`decisions_needed_new` / etc.), `key` (per-condition dedup key —
-e.g. `task_stuck:TB-N` / `task_frozen:TB-N` for per-task detectors,
-`validator_judge_noisy` (singleton) for the noisy-window detector,
-or `auto_approve_paused:<reason>` for the per-reason pause
-detector), `summary` (operator-legible one-line string the
-status-report renderer surfaces), plus a detector-specific extras
-blob (`task_stuck` carries `task`, `title`, `age_s`, `start_ts`,
-`threshold_s`; `task_frozen` carries `task`, `title`, `age_s`,
-`freeze_ts`, `recency_s`; `validator_judge_noisy` carries
-`fail_count_24h`, `timeout_count_24h`, `threshold`, `window_s`;
+`validator_judge_noisy`, `auto_approve_paused`, and
+`cost_cap_approach` are the seeds today; future detectors land
+alongside as `decisions_needed_new` / etc.), `key` (per-condition
+dedup key — e.g. `task_stuck:TB-N` / `task_frozen:TB-N` for per-
+task detectors, `validator_judge_noisy` (singleton) for the
+noisy-window detector, `auto_approve_paused:<reason>` for the
+per-reason pause detector, or `cost_cap_approach:window`
+(singleton) for the window-cap-approach detector), `summary`
+(operator-legible one-line string the status-report renderer
+surfaces), plus a detector-specific extras blob (`task_stuck`
+carries `task`, `title`, `age_s`, `start_ts`, `threshold_s`;
+`task_frozen` carries `task`, `title`, `age_s`, `freeze_ts`,
+`recency_s`; `validator_judge_noisy` carries `fail_count_24h`,
+`timeout_count_24h`, `threshold`, `window_s`;
 `auto_approve_paused` carries `pause_reason`, `ack_verb`,
 `consecutive_freezes`, `validator_judge_fail_count_24h`,
-`validator_judge_timeout_count_24h`).
+`validator_judge_timeout_count_24h`; `cost_cap_approach` carries
+`total_tokens_24h`, `window_cap`, `approach_pct`, `pct_used`,
+`window_s`).
 The
 status-report cron's `render_attention_section` reads the still-
 active conditions per tick and emits one bullet per condition under

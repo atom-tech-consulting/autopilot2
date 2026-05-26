@@ -82,6 +82,25 @@ DEFAULT_ATTENTION_DEBOUNCE_S = 21600  # 6h
 # tunes detection sensitivity, not lifecycle.
 DEFAULT_TASK_FROZEN_RECENCY_S = 86400  # 24h
 
+# TB-290: `cost_cap_approach` attention detector percentage threshold.
+# Pre-trip companion to the post-trip `auto_approve_paused` surface for
+# the `window_token_cap_exceeded` reason (TB-224). The detector fires a
+# `## Attention needed` bullet when the rolling 24h auto-approved
+# token sum is >= `AP2_AUTO_APPROVE_COST_APPROACH_PCT` percent of
+# `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` AND strictly below the cap, so
+# the walk-away operator gets a budget-spending nudge hours before
+# auto-approve halts and they must `ap2 ack auto_approve_window_resume`.
+# Default 75 (%) — leaves enough headroom for the operator to react
+# (raise the cap, pause via ack, or wait the 24h window out) before
+# the trip fires. Read fresh from `os.environ` at detection-time
+# inside `ap2/attention.py` (`_cost_approach_pct`) and listed in
+# `env_reload.HOT_RELOADABLE_KNOBS` so an operator tightening the
+# threshold takes effect on the next tick without a daemon restart.
+# The cap itself (`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`) remains the
+# operator opt-in — when the cap is unset / 0 the detector is a
+# no-op (same operator-friendly default as the TB-224 trip surface).
+DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT = 75
+
 # TB-278: max-turn caps promoted to named constants alongside the
 # DEFAULT_*_TIMEOUT_S family above so every battle-tested default sits in
 # one discoverable place. Defaults raised from the old inline literals

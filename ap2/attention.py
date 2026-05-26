@@ -34,13 +34,18 @@ per-task); TB-289 added `auto_approve_paused` (any non-None
 condition keyed `auto_approve_paused:<reason>`, surfaces the
 `ap2 ack <verb>` resume nudge so the operator's first-touch
 walk-away channel carries the pending decision proactively rather
-than only as a TB-228 automation-digest sub-block line). Future
-detectors land here as new functions following the same shape
+than only as a TB-228 automation-digest sub-block line); TB-290
+added `cost_cap_approach` (singleton pre-trip companion to the
+post-trip `auto_approve_paused:window_token_cap_exceeded`
+surface — rolling 24h auto-approved token sum
+`>= AP2_AUTO_APPROVE_COST_APPROACH_PCT * AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`
+AND strictly below the cap, so the walk-away operator gets a
+budget-spending nudge hours before dispatch halts and they must
+`ap2 ack auto_approve_window_resume`). Future detectors land here
+as new functions following the same shape
 (`def _detect_<name>(cfg, *, tail, now) -> list[AttentionCondition]`)
 and are added to `detect_attention_conditions`'s `out.extend(...)`
-list. The briefing's Out-of-scope clause names the remaining obvious
-follow-ups (cost-cap approach, decisions-needed-new) — each its own
-focused task to keep this module landable.
+list.
 """
 from __future__ import annotations
 
@@ -50,6 +55,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import events
+from .auto_approve import (
+    _AUTO_APPROVE_WINDOW_S,
+    _auto_approve_window_resume_idx,
+    _auto_approved_task_ids,
+    _event_combined_tokens,
+    _parse_event_ts,
+    _window_token_cap,
+)
 from .automation_status import (
     _PAUSE_REASON_ACK_VERB,
     _count_events_24h as _automation_count_events_24h,
@@ -60,6 +73,7 @@ from .board import Board
 from .config import (
     Config,
     DEFAULT_ATTENTION_DEBOUNCE_S,
+    DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT,
     DEFAULT_TASK_FROZEN_RECENCY_S,
     DEFAULT_TASK_STUCK_THRESHOLD_S,
 )
@@ -170,6 +184,38 @@ def _task_frozen_recency_s() -> int:
         return DEFAULT_TASK_FROZEN_RECENCY_S
     if val <= 0:
         return DEFAULT_TASK_FROZEN_RECENCY_S
+    return val
+
+
+def _cost_approach_pct() -> int:
+    """Resolve `AP2_AUTO_APPROVE_COST_APPROACH_PCT` with the documented
+    default + invalid-value fallback (TB-290). Mirrors
+    `_task_frozen_recency_s` — fresh-read-each-call from `os.environ`
+    so env-reload propagates without re-threading state.
+
+    Clamp semantics: any non-int / empty / negative value falls back
+    to the default (`DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT`, 75).
+    Values >= 100 are clamped to 99 — a 100% approach threshold would
+    coincide with the trip line (which the post-trip
+    `auto_approve_paused` detector owns), so a value >= 100 means
+    "trip-not-approach" and the detector caps it just below the trip
+    to avoid the double-bullet noise the briefing's Design clause
+    pins. 0 is allowed (operator wants to fire on any auto-approved
+    token spend while the cap is set) but is unusual; the cap itself
+    (`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`) is the operator-facing
+    opt-in.
+    """
+    raw = os.environ.get("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "")
+    if not raw:
+        return DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT
+    if val < 0:
+        return DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT
+    if val >= 100:
+        return 99
     return val
 
 
@@ -615,6 +661,130 @@ def _detect_auto_approve_paused(
     )]
 
 
+def _detect_cost_cap_approach(
+    cfg: Config,  # noqa: ARG001 — accepted for parity with sibling detectors
+    *,
+    tail: list[dict],
+    now: _dt.datetime,
+) -> list[AttentionCondition]:
+    """Return a SINGLETON `AttentionCondition` (zero or one element) when
+    the rolling 24h auto-approved `task_run_usage` token sum is
+    `>= AP2_AUTO_APPROVE_COST_APPROACH_PCT * AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`
+    (the approach floor) AND strictly below
+    `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` (the trip line — handed off to
+    the post-trip `auto_approve_paused` surface) (TB-290).
+
+    Pre-trip companion to the post-trip `auto_approve_paused` detector
+    (TB-289) for the `window_token_cap_exceeded` pause reason. The
+    post-trip surface fires only once dispatch has already halted and
+    the operator must `ap2 ack auto_approve_window_resume` to resume;
+    this detector gives the walk-away operator a budget-spending nudge
+    hours earlier so they can raise the cap or pause proactively. Closes
+    the pre-trip path of goal.md Current focus #3 Progress signal #3
+    "cost or validator-judge anomalies".
+
+    Walk shape matches `auto_approve._auto_approve_check_violations`'s
+    window-cap branch (auto_approve.py L442-463) verbatim — same
+    `_auto_approve_window_resume_idx` reset, same `_auto_approved_task_ids`
+    filter, same `_AUTO_APPROVE_WINDOW_S` 24h roll, same
+    `_event_combined_tokens` sum, same `_parse_event_ts` ts gate. Drift
+    between the approach-check sum and the trip-check sum would mean
+    an Attention bullet that doesn't predict the eventual pause; we
+    reuse the existing helpers to keep that no-drift property
+    structural rather than just commented.
+
+    Singleton (not per-task / per-event): the approach state is a
+    project-wide property of the rolling-24h auto-approved spend,
+    not a per-task condition. One condition per debounce window via
+    the per-(type, key) `should_suppress` check.
+
+    No-op branches (early returns to `[]`):
+      - `cap <= 0` — operator hasn't set `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`,
+        so there's no approach state to surface (parallel to the TB-224
+        trip-check's "operators who haven't budgeted their project don't
+        get a hardcoded cap surprising them" design).
+      - `total < threshold` — below the approach floor, no bullet yet.
+      - `total >= cap` — trip line already crossed; the post-trip
+        `auto_approve_paused` surface fires here and a second
+        "approach" bullet would be double-noise. Explicit hand-off
+        (`>=` not `>`) to keep the boundary clean even though the
+        trip-check uses `>` (at `total == cap` the trip doesn't fire
+        either, but we still hand off — the approach detector's job is
+        to surface BEFORE the cap, not AT it).
+
+    Anchor `ts` = the freshest in-window `task_run_usage` event's `ts`
+    (fall back to `now` on no parseable ts) — same defensive shape the
+    sibling singleton `_detect_validator_judge_noisy` uses.
+    """
+    cap = _window_token_cap()
+    if cap <= 0:
+        return []
+    approach_pct = _cost_approach_pct()
+    # Exact integer-arithmetic threshold check: `total >= pct * cap / 100`
+    # rewritten as `total * 100 >= approach_pct * cap` to avoid
+    # floor-division surprises near the boundary (e.g. cap=1000,
+    # pct=75 → threshold floor 750; sum=750 must fire).
+    if not tail:
+        return []
+    resume_idx = _auto_approve_window_resume_idx(tail)
+    relevant = tail[resume_idx + 1:]
+    if not relevant:
+        return []
+    auto_ids = _auto_approved_task_ids(tail)
+    if not auto_ids:
+        return []
+    now_s = now.timestamp()
+    total = 0
+    freshest_dt: _dt.datetime | None = None
+    freshest_ts: str | None = None
+    for ev in relevant:
+        if ev.get("type") != "task_run_usage":
+            continue
+        tid = str(ev.get("task") or "").strip()
+        if not tid or tid not in auto_ids:
+            continue
+        ts_s = _parse_event_ts(ev.get("ts"))
+        if ts_s is None:
+            continue
+        if now_s - ts_s > _AUTO_APPROVE_WINDOW_S:
+            continue
+        total += _event_combined_tokens(ev)
+        ts_dt = _parse_ts(ev.get("ts"))
+        if ts_dt is not None and (freshest_dt is None or ts_dt > freshest_dt):
+            freshest_dt = ts_dt
+            freshest_ts = ev.get("ts")
+
+    # Threshold check (`total >= pct * cap / 100`) in integer form so
+    # the boundary is exact regardless of rounding.
+    if total * 100 < approach_pct * cap:
+        return []
+    # Hand off to the post-trip surface above the cap.
+    if total >= cap:
+        return []
+
+    pct_used = (total / cap) * 100.0
+    anchor_ts = freshest_ts or now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    summary = (
+        f"auto-approve cost cap approach: {total} tokens used in last 24h, "
+        f"{pct_used:.0f}% of window cap {cap} (threshold {approach_pct}%); "
+        f"consider raising AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP or pausing via "
+        f"ap2 ack auto_approve_window_resume"
+    )
+    return [AttentionCondition(
+        type="cost_cap_approach",
+        key="cost_cap_approach:window",
+        summary=summary,
+        ts=anchor_ts,
+        extras={
+            "total_tokens_24h": total,
+            "window_cap": cap,
+            "approach_pct": approach_pct,
+            "pct_used": pct_used,
+            "window_s": 86400,
+        },
+    )]
+
+
 def detect_attention_conditions(
     cfg: Config,
     *,
@@ -646,6 +816,7 @@ def detect_attention_conditions(
     out.extend(_detect_task_frozen(cfg, tail=tail, now=now))
     out.extend(_detect_validator_judge_noisy(cfg, tail=tail, now=now))
     out.extend(_detect_auto_approve_paused(cfg, tail=tail, now=now))
+    out.extend(_detect_cost_cap_approach(cfg, tail=tail, now=now))
     return out
 
 

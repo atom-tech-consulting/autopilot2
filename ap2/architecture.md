@@ -143,7 +143,11 @@ ap2/
 ├── attention.py          # detect_attention_conditions, _detect_task_stuck (TB-282), _detect_task_frozen
 │                         # (TB-287), _detect_validator_judge_noisy (TB-288), _detect_auto_approve_paused
 │                         # (TB-289 — per-reason `auto_approve_paused:<reason>` surface naming the
-│                         # `ap2 ack <verb>` resume nudge) — proactive attention-detector
+│                         # `ap2 ack <verb>` resume nudge), _detect_cost_cap_approach (TB-290 —
+│                         # singleton `cost_cap_approach:window` pre-trip companion to the post-trip
+│                         # `auto_approve_paused:window_token_cap_exceeded` surface; reuses
+│                         # `auto_approve._auto_approve_check_violations`'s window walk so the
+│                         # approach-sum matches the trip-sum) — proactive attention-detector
 │                         # surface; daemon's `_maybe_emit_attention_events` consumes the AttentionCondition
 │                         # list and emits `attention_raised` events per fresh condition
 ├── automation_stats.py   # /stats aggregation helpers (windows, sparklines, top-N expensive tasks)
