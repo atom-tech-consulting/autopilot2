@@ -1,158 +1,153 @@
 # Ideation State
 
-_Last updated: 2026-05-26T06:05Z by ideation cron_
+_Last updated: 2026-05-26T08:23Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 0B / 0P / 158C / 3F; focus pointer at
-`operator-legible reporting and monitoring (2 of 2)`; `roadmap_complete`
-decisions-needed entry standing since 2026-05-23T03:06:37Z (events.jsonl)
-after TB-280/281/282 closed all three focus-2 Progress signals at the
-first-pass deliverable level. Operator forced `ap2 ideate` at
-2026-05-26T06:04:26Z (operator_log L241) — request to find legitimate
-follow-ups before declaring roadmap fully done. Recent Completes the
-last cycle considered (~96h):
+Cycle entry: board 0A / 0R / 0B / 0P / 161C / 3F; focus pointer at
+`operator-legible reporting and monitoring (2 of 2)`. Last cycle's
+3 proposals (TB-287 / TB-288 / TB-289) all auto-approved + completed
+06:35-06:58Z this morning, closing 3 of the 4 attainable legs of
+focus-2 Progress signal #3. The 5th leg (cost-cap approach) was
+deferred 6:05Z on a faulty premise — see correction below. Recent
+Completes the current cycle considered (~3h):
 
-- TB-280 (`39bdf77` 2026-05-23T01:57Z; state `5990aa9`) — Config.project_name
-  + AP2_PROJECT_NAME knob + bracketed `[<project_name>]` headline +
-  daemon-rendered `## Recent task activity` digest with title-bearing
-  `**TB-N** — <title>: <outcome>` lines. Closes focus-2 Progress signal #1.
-- TB-281 (`33f946e` 2026-05-23T02:20Z; state `1943166`) — content-fingerprint
-  dedup gate (`compute_status_report_fingerprint` + `cron_state.json`
-  sibling-key); emits `cron_skipped reason=duplicate_content`. Closes
-  focus-2 Progress signal #2. Live fire confirmed: events.jsonl
-  `cron_skipped` entries at 2026-05-25T11:59Z, 13:59Z, 15:59Z, 20:01Z,
-  2026-05-26T00:03Z, 02:03Z, 04:03Z.
-- TB-282 (`15e77e9` 2026-05-23T02:38Z; state `b2efb99`) — new
-  `ap2/attention.py` with `detect_attention_conditions` + `task_stuck`
-  detector + per-(type,key) debounce + status-report verbatim-forward of
-  the `## Attention needed` block. Seeded the surface but only one of
-  Progress signal #3's enumerated condition kinds.
-- TB-283/284 (`496774d`/`fc96085`) — operator-added: empty-cycles
-  sole-signal for focus-advance + ideation_scrub. Touches focus
-  rotation (axis-4), not the active focus-2 surface.
-- TB-285/286 (`ac4f861`/`b22b8d0`) — operator-added: `Done when:`→
-  `Progress signals:` rename + howto.md rewrite. Format/doc cleanup,
-  not new focus-2 deliverables.
+- TB-287 (`b7b42b0` 2026-05-26T06:35Z) — `_detect_task_frozen` in
+  `ap2/attention.py` (`AP2_TASK_FROZEN_RECENCY_S` default 24h,
+  per-task `task_frozen:<id>` key, intervening
+  `task_unfrozen`/`task_deleted` abort). Closes Progress signal #3
+  "frozen tasks" leg.
+- TB-288 (`c7fdf76` 2026-05-26T06:47Z) — `_detect_validator_judge_noisy`
+  (singleton, 24h fail+timeout window vs
+  `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`). Closes Progress signal #3
+  "validator-judge anomalies" leg.
+- TB-289 (`c9962fe` 2026-05-26T06:58Z) — `_detect_auto_approve_paused`
+  (per-reason key, reads `collect_auto_approve_state.pause_reason`,
+  forwards `_PAUSE_REASON_ACK_VERB`). Closes Progress signal #3
+  "pending decision" leg via the pause-reason surface; TRIPPED
+  cost-cap states (`per_task_token_cap_exceeded` /
+  `window_token_cap_exceeded` / `task_error`) flow through this
+  detector since their ack-verb is registered.
 
 ## Current focus assessment
 
 - **Current focus: operator-legible reporting and monitoring**
   - Progress so far:
-    - Progress signal #1 (title + project_name): TB-280 closed —
-      `grep "<project_name>" ap2/status_report.py` confirms substitution
-      token; bracketed headline live.
+    - Progress signal #1 (title + project_name): TB-280 closed.
     - Progress signal #2 (significance-gated + dedup): TB-281 closed —
-      `cron_skipped reason=duplicate_content` events firing in the last
-      24h prove the dedup is active.
-    - Progress signal #3 (proactive attention surface): TB-282 closed
-      the SURFACE (`ap2/attention.py` + daemon wire-up + status-report
-      verbatim forwarding) but seeded only `task_stuck` (1 of 5
-      enumerated condition kinds named in the Progress-signals bullet:
-      "stuck / failed / frozen tasks, decisions-needed, cost or
-      validator-judge anomalies"). TB-282's own Out-of-scope clause
-      names `validator_judge_noisy`, `cost_cap_approach`,
-      `decisions_needed_new`, `frozen_task_recency` as obvious
-      follow-ups (`ap2/attention.py` L29-32).
+      live-fire `cron_skipped reason=duplicate_content` events at
+      `11:59Z` / `13:59Z` / `15:59Z` / `20:01Z` 2026-05-25 + 4 more
+      since.
+    - Progress signal #3 (proactive attention surface): TB-282 +
+      TB-287 + TB-288 + TB-289 cover 4 of 5 enumerated condition
+      kinds (stuck / frozen / validator-judge anomalies / pending
+      decision via pause-reason). The 5th — cost anomalies pre-trip
+      — is the last clean leg.
   - Gaps:
-    1. **Frozen-task attention** — Progress signal #3 names "frozen
-       tasks" verbatim. Today the 3 Frozen tasks (TB-119 / TB-120 /
-       TB-133) surface only as `3F` aggregate count in `ap2 status`
-       headline; no proactive Attention bullet; no `ap2 unfreeze`
-       nudge in the Mattermost report.
-    2. **Validator-judge noisy attention** — TB-243 added the 24h count
-       to `ap2 status` + web automation card; TB-245 forwards a
-       bottom-of-digest sub-block; TB-272 added an auto-approve
-       pause_reason. But no detector promotes the noisy state into
-       the proactive Attention block — buried at digest bottom with
-       routine activity, contrary to "distinct from routine progress".
-    3. **Auto-approve pause attention** — `pause_reason` (today
-       `consecutive_freezes` / `validator_judge_noisy`; future
-       siblings will land here too) appears only in the TB-228
-       automation-digest sub-block. Operator must `ap2 ack
-       auto_approve_unfreeze` to resume; no proactive nudge in the
-       Attention block — exact "pending decision … buried" failure
-       mode goal.md L207-209 names.
+    1. **Cost-cap approach (pre-trip)** — Progress signal #3 names
+       "cost or validator-judge anomalies" verbatim. Validator-judge
+       anomalies got TB-288's noisy detector (a pre-trip / pre-trip-
+       paired signal). Cost anomalies got only the TRIPPED state via
+       TB-289 (`per_task_token_cap_exceeded` / `window_token_cap_
+       exceeded` flow through `auto_approve_paused`). No detector
+       fires at e.g. 75% of the configured window cap so the
+       operator can intervene BEFORE auto-approve halts — the
+       cost analog of TB-288's noisy threshold. Last cycle deferred
+       this on a faulty grep — `grep cost_cap` returned only
+       Out-of-scope mentions, but the actual knobs are
+       `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` /
+       `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` (TB-224 / `auto_approve.py`
+       L251-285). Cap infrastructure exists; only the pre-trip
+       approach detector is missing.
   - Status: `in-progress`
-  - Reasoning: focus-2 has 3 explicit Progress signals; #1/#2 closed
-    cleanly; #3's surface exists but covers 1 of 5 named conditions —
-    each remaining condition is a narrow detector under the
-    established `_detect_*` shape. Not exhausted.
+  - Reasoning: focus-2 PS#3 has one remaining leg with concrete
+    upstream infrastructure to build against; ranking + proposing
+    a single tight detector this cycle (TB-290). Other gaps below
+    are deferred or not aligned.
 
 ## Non-goal risk check
 
-None of the 3 proposals introduces cross-project aggregation, goal.md
-auto-rotation, or unconditional automation. Each respects the focus-2
-scope guard (goal.md L227-229 "per-project legibility, NOT cross-project
-aggregation") and adds opt-in surfaces (detectors read state and
-surface a bullet; operator-action remains operator-CLI).
+The single proposal stays within the `ap2/attention.py` detector
+shape established by TB-282/287/288/289 — adds no cross-project
+aggregation, no goal.md auto-rotation, no unconditional automation.
+The threshold knob (`AP2_AUTO_APPROVE_COST_APPROACH_PCT`) defaults
+to 75 and the detector no-ops unless `AP2_AUTO_APPROVE_WINDOW_TOKEN_
+CAP > 0` (TB-224 caps are 0/disabled by default). Pure additive
+surface.
 
 ## Considered & deferred this cycle
 
-- **`cost_cap_approach` attention detector** (Progress signal #3 fifth
-  leg) — no upstream cost-ceiling knob exists yet (no
-  `AP2_AUTO_APPROVE_DAILY_COST_CAP`; no pause_reason; `grep cost_cap
-  ap2/` returns only TB-282 Out-of-scope mentions and a janitor test).
-  Detector without a threshold has nothing to detect. Defer until
-  the cost-tracking infrastructure declares its operating envelope.
-- **Event-triggered status_report cadence** (Progress signal #2's
-  "fires on report-worthy events" sub-clause) — TB-281's
-  fingerprint-dedup approach is the operator-blessed shape (TB-281
-  shipped via dispatch; no operator pushback). Shifting from
-  interval-driven to event-triggered cron is a bigger design that
-  goal.md doesn't explicitly require given the dedup gate already
-  suppresses the "no two consecutive reports repeat" failure mode.
-- **`decisions_needed_new` attention detector** — overlaps with the
-  existing `- Decisions needed from operator (N): ...` line that
-  TB-173/TB-191 already forward verbatim into the status-report.
-  Promoting to Attention is marginal vs the line-forward, and
-  duplicates the `auto_approve_paused` detector (proposal 3) which
-  catches the most actionable subset of decisions-needed.
+- **`task_failing_repeated` detector** — goal.md PS#3 says
+  "stuck / failed / frozen tasks". TB-282 covers stuck, TB-287
+  covers frozen; "failed" could mean repeated `verification_failed`
+  pre-retry-exhaustion. But verification_failed events are auto-
+  recovered via the retry budget (3 attempts before Frozen) — the
+  operator's actionable signal lands at `retry_exhausted` which
+  TB-287 already surfaces. A mid-retry warning would either be
+  premature (the retry might succeed) or duplicate the eventual
+  task_frozen bullet. Defer; the "failed tasks" wording in goal.md
+  is operationally covered by task_frozen.
+- **`decisions_needed_new` detector** — goal.md PS#3's
+  "decisions-needed" leg. TB-289's auto_approve_paused already
+  covers the actionable subset (pause_reasons with registered ack
+  verbs). Broader decisions-needed entries (`roadmap_complete`,
+  janitor findings, future entries) already flow through the
+  line-forwarded `## Decisions needed from operator` block at the
+  top of the status-report (TB-173 / TB-191). Promoting these to
+  Attention is purely visual rather than adding signal, and risks
+  duplication with the line-forward. Defer; line-forward is the
+  right surface.
+- **Web `/attention` pull page** — listed in TB-282's Out-of-scope
+  as a follow-up "once the event vocabulary lands AND accrues
+  data." The first 4 detectors literally just landed today; ~24h
+  of attention_raised events is insufficient to validate a page
+  design. Defer 1-2 weeks for data accrual.
+- **Immediate-Mattermost-push on attention_raised** — listed in
+  TB-282's Out-of-scope; bypasses the cron schedule. TB-281's
+  content-fingerprint dedup already closes the "clock-driven
+  repetition" failure mode (goal.md L196-204) — an immediate-push
+  surface is a different architecture goal.md doesn't explicitly
+  require. Defer.
 - **TB-175-shape ideation-acceptance-rate aggregator** — operator
   parked it 2026-05-07T01:57Z pending ≥3 cycles of TB-188 records;
   still gated.
-- **Rejection-pattern check (carried, re-justified)**: TB-172 /
-  TB-240 vetoed whack-a-mole validator expansions; TB-185 / TB-184
-  vetoed ap2-meta-polish unconnected to current focus; TB-175 /
-  TB-231 vetoed premature aggregators / symptom-patching. All three
-  proposals this cycle follow TB-282's established `_detect_<name>`
-  shape and each closes one literal item from Progress signal #3's
-  enumerated condition list — not validator-expansion, not
-  meta-polish, not premature aggregation. Pattern clears.
+- **Rejection-pattern check (carried, re-justified)**: TB-185 /
+  TB-184 vetoed ap2-meta-polish; TB-231 vetoed symptom-patching;
+  TB-175 vetoed premature aggregation; TB-240 vetoed validator
+  whack-a-mole. This cycle's single proposal follows TB-282's
+  `_detect_<name>` shape and closes the last literal item from
+  Progress signal #3's enumerated condition list — not meta-polish,
+  not aggregation, not symptom-patching. Pattern clears.
 
 ## Cycle observations
 
-- Surface concentration: all 3 proposals land in `ap2/attention.py`
-  with `_DETECTORS`-style extension. ~80% of net new code is one new
-  detector function per task + matching test module + howto.md /
-  architecture.md inventory line. No daemon-loop changes; the
-  existing `_maybe_emit_attention_events` debounce+emit path covers
-  all detectors uniformly.
-- Sequencing: proposal 1 (`task_frozen`) is the highest-action-needed
-  kind (Frozen requires `ap2 unfreeze` or operator delete); proposal
-  2 (`validator_judge_noisy`) elevates an existing-but-buried signal
-  to the Attention surface; proposal 3 (`auto_approve_paused`)
-  surfaces meta-state requiring `ap2 ack`. Operator can approve in
-  any order — they share `ap2/attention.py` but never edit the same
-  function, so concurrent dispatch should not contend.
+- Cap infrastructure clarification (correction): last cycle's
+  Considered-deferred bullet said "no `AP2_AUTO_APPROVE_DAILY_COST_CAP`
+  exists" and grepped only for the substring `cost_cap`. The actual
+  TB-224 knobs are spelled `AP2_AUTO_APPROVE_{PER_TASK,WINDOW}_TOKEN_CAP`
+  with corresponding `per_task_token_cap_exceeded` / `window_token_cap_
+  exceeded` pause_reasons in `_PAUSE_REASON_ACK_VERB`. The substring
+  miss is the only reason cost_cap_approach was deferred; this cycle
+  corrects.
+- Sequencing: TB-290 is the only proposal this cycle. After it
+  lands, focus-2 PS#3's 5 enumerated condition kinds are all
+  detector-backed (with web /attention + immediate-push as later
+  pull/push polish), and the focus is structurally close to
+  exhausted on the empty-cycles signal — anticipate the next 1-2
+  ideation cycles producing 0 proposals and tripping
+  `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` since focus-2 is also the last
+  focus (operator's roadmap-complete state).
 
 ## Decisions needed from operator
 
-(none this cycle — the active focus has 3 explicit Progress signals
-of which #1 and #2 are closed and #3 is partially closed; this cycle
-proposes the 3 cleanest follow-up detectors to close 3 of the
-remaining 4 enumerated condition kinds. The 5th — cost-cap approach —
-is deferred above pending the upstream cost-cap threshold itself.
-The standing `roadmap_complete` decisions-needed entry from
-2026-05-23T03:06Z is operator-owned and not for ideation to revisit.)
+(none this cycle — the active focus has one identifiable remaining
+leg this cycle addresses; the standing `roadmap_complete` decisions-
+needed entry from 2026-05-23T03:06Z is operator-owned and not for
+ideation to revisit.)
 
 ## Proposals this cycle
 
-3 proposals queued behind `@blocked:review`, each mapping to one
-named-in-goal.md condition from Progress signal #3:
+1 proposal queued behind `@blocked:review`:
 
-- TB-287 — `task_frozen` attention detector (closes "frozen tasks").
-- TB-288 — `validator_judge_noisy` attention detector (closes
-  "validator-judge anomalies").
-- TB-289 — `auto_approve_paused` attention detector (closes "pending
-  decision" leg via the pause_reason surface).
+- TB-290 — `cost_cap_approach` attention detector (closes "cost
+  anomalies" pre-trip leg of Progress signal #3).
