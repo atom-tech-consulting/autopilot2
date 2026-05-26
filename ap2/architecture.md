@@ -141,9 +141,9 @@ ap2/
 ├── auto_unfreeze.py      # _maybe_auto_unfreeze, _auto_unfreeze_allowlist, _apply_auto_unfreeze_patch
 │                         # (TB-225 — sweep that consumes `BriefingFix:` lines from blocked summaries)
 ├── attention.py          # detect_attention_conditions, _detect_task_stuck (TB-282), _detect_task_frozen
-│                         # (TB-287) — proactive attention-detector surface; daemon's
-│                         # `_maybe_emit_attention_events` consumes the AttentionCondition list and emits
-│                         # `attention_raised` events per fresh condition
+│                         # (TB-287), _detect_validator_judge_noisy (TB-288) — proactive attention-detector
+│                         # surface; daemon's `_maybe_emit_attention_events` consumes the AttentionCondition
+│                         # list and emits `attention_raised` events per fresh condition
 ├── automation_stats.py   # /stats aggregation helpers (windows, sparklines, top-N expensive tasks)
 ├── automation_status.py  # collect_auto_approve_state, status-line composer for ap2 status / web home
 ├── backfill.py           # ap2 backfill-proposals — historical proposal-record reconstruction (TB-195)

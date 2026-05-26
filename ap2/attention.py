@@ -25,13 +25,17 @@ Design split (axis-by-axis, mirrors TB-263):
 
 Seeded with `task_stuck`; TB-287 added `task_frozen` (a fresh entry
 into the Frozen section within `AP2_TASK_FROZEN_RECENCY_S` and no
-intervening operator-driven `task_unfrozen` / `task_deleted` event).
-Future detectors land here as new functions following the same shape
-(`def _detect_<name>(cfg, *, tail, now) -> list[AttentionCondition]`)
-and are added to `detect_attention_conditions`'s `out.extend(...)`
-list. The briefing's Out-of-scope clause names the remaining obvious
-follow-ups (validator-judge noisy, cost-cap approach, decisions-
-needed-new) — each its own focused task to keep this module landable.
+intervening operator-driven `task_unfrozen` / `task_deleted` event);
+TB-288 added `validator_judge_noisy` (rolling 24h sum of
+`validator_judge_fail` + `validator_judge_timeout` events ≥
+`AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` — singleton condition, not
+per-task). Future detectors land here as new functions following the
+same shape (`def _detect_<name>(cfg, *, tail, now) ->
+list[AttentionCondition]`) and are added to
+`detect_attention_conditions`'s `out.extend(...)` list. The briefing's
+Out-of-scope clause names the remaining obvious follow-ups (cost-cap
+approach, decisions-needed-new) — each its own focused task to keep
+this module landable.
 """
 from __future__ import annotations
 
@@ -41,6 +45,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import events
+from .automation_status import (
+    _count_events_24h as _automation_count_events_24h,
+    validator_judge_noisy_threshold,
+)
 from .board import Board
 from .config import (
     Config,
@@ -387,6 +395,114 @@ def _detect_task_frozen(
     return out
 
 
+def _detect_validator_judge_noisy(
+    cfg: Config,  # noqa: ARG001 — accepted for parity with sibling detectors
+    *,
+    tail: list[dict],
+    now: _dt.datetime,
+) -> list[AttentionCondition]:
+    """Return a SINGLETON `AttentionCondition` (zero or one element) when
+    the rolling 24h sum
+    `validator_judge_fail_count + validator_judge_timeout_count >=
+    AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (TB-288).
+
+    Closes the "validator-judge anomalies" leg of goal.md Current
+    focus #3's Progress signal #3 — pre-TB-288 the noisy state
+    surfaced ONLY as a pull-surface badge in `ap2 status`
+    (`[noisy]` suffix; TB-243), as a bottom-of-digest sub-block in
+    the status-report (TB-245), and as a warn-tint row in the web
+    automation card (TB-243). Promoting it to a `## Attention
+    needed` bullet at the TOP of the status-report post closes the
+    visual-hierarchy gap — the operator-legible attention surface
+    must be distinct from routine progress updates.
+
+    Singleton (not per-task / per-event): the noisy state is a
+    project-wide property of the gate's recent reliability, not a
+    per-task condition. One `attention_raised` event per debounce
+    window is the right cadence — a sustained noisy window stays
+    suppressed via the per-(type, key) debounce in `should_suppress`
+    until the next `AP2_ATTENTION_DEBOUNCE_S` boundary, mirroring
+    `task_stuck` / `task_frozen` cadence.
+
+    The count uses the same 24h-window walker
+    (`automation_status._count_events_24h`) and the same threshold
+    resolver (`automation_status.validator_judge_noisy_threshold`)
+    that the `ap2 status` text/JSON, web automation card, and
+    status-report sub-block already consult — drift between
+    surfaces would mean the operator sees `[noisy]` in `ap2 status`
+    but no Attention bullet (or vice versa). The briefing's
+    "shared count logic" contract pins this no-drift property.
+
+    Independent of TB-272's auto-approve `pause_reason` — a noisy
+    state can fire here even when `AP2_AUTO_APPROVE` is OFF (the
+    Attention surface is purely informational; pause behavior is
+    an orthogonal axis-3 safety floor). And independent of the
+    TB-243 / TB-245 surfaces — this addition is purely additive.
+    """
+    threshold = validator_judge_noisy_threshold()
+    if threshold <= 0:
+        # Defensive: the resolver normalizes non-positive values
+        # back to the default (5), so this branch is effectively
+        # unreachable. Kept as a belt-and-braces guard in case the
+        # resolver's contract ever loosens.
+        return []
+
+    now_s = now.timestamp()
+    fail_count = _automation_count_events_24h(
+        tail, event_type="validator_judge_fail",
+        now_s=now_s, window_s=86400,
+    )
+    timeout_count = _automation_count_events_24h(
+        tail, event_type="validator_judge_timeout",
+        now_s=now_s, window_s=86400,
+    )
+    total = fail_count + timeout_count
+    if total < threshold:
+        return []
+
+    # Anchor timestamp = the freshest fail/timeout event in the
+    # window. Same logic as the count walker but tracks the
+    # most-recent `ts` so the renderer can show "noisy since <ts>"
+    # if it ever extends the bullet shape. Best-effort — if no
+    # in-window event has a parseable `ts` we fall back to `now`,
+    # so the bullet still surfaces.
+    anchor_dt: _dt.datetime | None = None
+    for ev in tail:
+        typ = ev.get("type")
+        if typ != "validator_judge_fail" and typ != "validator_judge_timeout":
+            continue
+        ts_dt = _parse_ts(ev.get("ts"))
+        if ts_dt is None:
+            continue
+        if (now - ts_dt).total_seconds() > 86400:
+            continue
+        if anchor_dt is None or ts_dt > anchor_dt:
+            anchor_dt = ts_dt
+    anchor_ts = (
+        anchor_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if anchor_dt is not None
+        else now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+
+    summary = (
+        f"validator-judge noisy: {fail_count}+{timeout_count}={total} "
+        f"fails+timeouts in last 24h (threshold {threshold}); "
+        "see `ap2 status` or /usage"
+    )
+    return [AttentionCondition(
+        type="validator_judge_noisy",
+        key="validator_judge_noisy",
+        summary=summary,
+        ts=anchor_ts,
+        extras={
+            "fail_count_24h": fail_count,
+            "timeout_count_24h": timeout_count,
+            "threshold": threshold,
+            "window_s": 86400,
+        },
+    )]
+
+
 def detect_attention_conditions(
     cfg: Config,
     *,
@@ -416,6 +532,7 @@ def detect_attention_conditions(
     out: list[AttentionCondition] = []
     out.extend(_detect_task_stuck(cfg, tail=tail, now=now))
     out.extend(_detect_task_frozen(cfg, tail=tail, now=now))
+    out.extend(_detect_validator_judge_noisy(cfg, tail=tail, now=now))
     return out
 
 

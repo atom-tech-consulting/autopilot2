@@ -1049,7 +1049,7 @@ skip-gate from firing — operator never misses a degradation
 signal because the 2h post coincided with an otherwise-quiet
 window.
 
-**Proactive attention surface (TB-282; TB-287 extended).**
+**Proactive attention surface (TB-282; TB-287, TB-288 extended).**
 `attention_raised` is the distinct push-surface event for conditions
 that warrant immediate operator attention. Detector inventory:
 `task_stuck` (TB-282) flags an Active task whose most recent
@@ -1061,22 +1061,34 @@ freeze-entry event (`retry_exhausted` / `task_failed`) is within
 intervening operator-driven `task_unfrozen` / `task_deleted` event,
 so a walk-away operator returning after a day sees an
 `ap2 unfreeze` nudge per fresh freeze instead of just a `3F`
-aggregate count tick. The daemon's `_tick` calls
+aggregate count tick; `validator_judge_noisy` (TB-288) flags when
+the rolling 24h sum of `validator_judge_fail` +
+`validator_judge_timeout` events is ≥
+`AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` (default 5) — singleton
+project-wide condition (key `validator_judge_noisy`, NOT per-event)
+that promotes the noisy state from the bottom-of-digest TB-245
+sub-block and `[noisy]` suffix in `ap2 status` to a top-of-post
+`## Attention needed` bullet, additive to (not a replacement for)
+those existing pull-surfaces. The daemon's `_tick` calls
 `ap2.attention.detect_attention_conditions(cfg)`, debounces each
 candidate against any prior matching fire within
 `AP2_ATTENTION_DEBOUNCE_S` (default 21600s / 6h), and emits one
 `attention_raised` event per fresh condition. Per-(attention_type,
 key) debounce so a second stuck/frozen task doesn't get suppressed
 because a first one fired recently. Payload: `attention_type`
-(detector kind — `task_stuck` and `task_frozen` are the seeds today;
-future detectors land alongside as `validator_judge_noisy` /
-`cost_cap_approach` / etc.), `key` (per-condition dedup key — e.g.
-`task_stuck:TB-N` or `task_frozen:TB-N`), `summary`
-(operator-legible one-line string the status-report renderer
-surfaces), plus a detector-specific extras blob (`task_stuck`
-carries `task`, `title`, `age_s`, `start_ts`, `threshold_s`;
-`task_frozen` carries `task`, `title`, `age_s`, `freeze_ts`,
-`recency_s`). The
+(detector kind — `task_stuck`, `task_frozen`, and
+`validator_judge_noisy` are the seeds today; future detectors land
+alongside as `cost_cap_approach` / `decisions_needed_new` / etc.),
+`key` (per-condition dedup key — e.g. `task_stuck:TB-N` /
+`task_frozen:TB-N` for per-task detectors, or
+`validator_judge_noisy` (singleton) for the noisy-window detector),
+`summary` (operator-legible one-line string the status-report
+renderer surfaces), plus a detector-specific extras blob
+(`task_stuck` carries `task`, `title`, `age_s`, `start_ts`,
+`threshold_s`; `task_frozen` carries `task`, `title`, `age_s`,
+`freeze_ts`, `recency_s`; `validator_judge_noisy` carries
+`fail_count_24h`, `timeout_count_24h`, `threshold`, `window_s`).
+The
 status-report cron's `render_attention_section` reads the still-
 active conditions per tick and emits one bullet per condition under
 a distinct `## Attention needed` section the agent forwards
