@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-290** **`cost_cap_approach` attention detector — pre-trip window-cap-approach surface (TB-282 follow-up closing Progress signal #3 "cost anomalies" leg pre-trip path)** `#autopilot` `#attention` `#operator-legible` `#monitoring` `#auto-approve` `#cost` `#axis-3` `#status-report` `#regression-pin` — Add `_detect_cost_cap_approach` to `ap2/attention.py`: when the rolling 24h auto-approved token sum (same walk as `auto_approve._auto_approve_check_violations` window-cap branch) is ≥ `AP2_AUTO_APPROVE_COST_APPROACH_PCT * AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` AND below the cap, surface a single `## Attention needed` bullet so the operator gets a pre-trip nudge before the post-trip pause-reason bullet fires. Pre-trip companion to the post-trip pause surface; closes the "cost anomalies" leg of focus-2 Progress signal #3. [→ brief](.cc-autopilot/tasks/cost-cap-approach-attention-detector-pre.md)
 
 ## Pipeline Pending
 
@@ -178,6 +177,7 @@
 - [x] **TB-289** **`auto_approve_paused` attention detector — proactive surface for any active `pause_reason` (TB-282 follow-up closing Progress signal #3 "pending decision" leg)** `#autopilot` `#attention` `#operator-legible` `#monitoring` `#auto-approve` `#axis-3` `#status-report` `#regression-pin` `@blocked:TB-282` — Add `_detect_auto_approve_paused` to `ap2/attention.py`: when `collect_auto_approve_state(cfg).pause_reason` is non-None (today: `consecutive_freezes` / `validator_judge_noisy`), surface a single `## Attention needed` bullet naming the reason + the `ap2 ack <verb>` resume nudge. Closes the "pending decision" leg of Current focus: operator-legible reporting and monitoring Progress signal #3. [→ brief](.cc-autopilot/tasks/auto-approve-paused-attention-detector-p.md)
 - [x] **TB-291** **Fence ideation toolset to board_edit only; remove operator_queue_append** `#autopilot` `#ideation` `#tools` `#empty-cycles` `#regression-pin` `#bug` [→ brief](.cc-autopilot/tasks/fence-ideation-toolset-to-board-edit-onl.md)
 - [x] **TB-292** **Restructure empty-cycles counter to cycle-grouped semantics** `#autopilot` `#empty-cycles` `#focus-advance` `#counter` `#bug` `#regression-pin` [→ brief](.cc-autopilot/tasks/restructure-empty-cycles-counter-to-cycl.md)
+- [x] **TB-290** **`cost_cap_approach` attention detector — pre-trip window-cap-approach surface (TB-282 follow-up closing Progress signal #3 "cost anomalies" leg pre-trip path)** `#autopilot` `#attention` `#operator-legible` `#monitoring` `#auto-approve` `#cost` `#axis-3` `#status-report` `#regression-pin` — Add `_detect_cost_cap_approach` to `ap2/attention.py`: when the rolling 24h auto-approved token sum (same walk as `auto_approve._auto_approve_check_violations` window-cap branch) is ≥ `AP2_AUTO_APPROVE_COST_APPROACH_PCT * AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` AND below the cap, surface a single `## Attention needed` bullet so the operator gets a pre-trip nudge before the post-trip pause-reason bullet fires. Pre-trip companion to the post-trip pause surface; closes the "cost anomalies" leg of focus-2 Progress signal #3. [→ brief](.cc-autopilot/tasks/cost-cap-approach-attention-detector-pre.md)
 
 ## Frozen
 
