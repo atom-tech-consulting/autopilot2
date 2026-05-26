@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-282",
+  "briefing_path": ".cc-autopilot/tasks/task-frozen-attention-detector-proactive.md",
+  "focus_anchor": "current focus operator legible reporting and monitoring",
+  "proposed_at": "2026-05-26T06:14:11Z",
+  "tb_id": "TB-287",
+  "why_now": "today the 3 Frozen tasks (TB-119 / TB-120 / TB-133) surface only as the `3F` aggregate count in `ap2 status` and the status-report headline. A walk-away operator returning after a day where a new task froze sees the count tick up but gets no proactive nudge to run `ap2 unfreeze TB-N` \u2014 exactly the \"operator must poll each project to find problems\" failure mode goal.md L210-213 names. The detector wraps an existing event-tail walk plus board read; mechanical cost is one function and one test module, mirroring TB-282's `_detect_task_stuck` shape."
+}

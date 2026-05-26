@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-282",
+  "briefing_path": ".cc-autopilot/tasks/auto-approve-paused-attention-detector-p.md",
+  "focus_anchor": "current focus operator legible reporting and monitoring",
+  "proposed_at": "2026-05-26T06:20:49Z",
+  "tb_id": "TB-289",
+  "why_now": "today an active auto-approve pause appears only as one line in the TB-228 automation-digest sub-block (`auto-approve: disabled (paused: <reason>)`) positioned AFTER the body bullets in the status-report, and as `auto-approve: disabled (paused: ...)` text in `ap2 status`. The operator must scroll past the headline + 4-8 routine bullets + automation digest header to find the pause line \u2014 and must already know to run `ap2 ack auto_approve_unfreeze` to resume. The Progress signal explicitly contrasts \"distinct from routine progress updates\" \u2014 a paused auto-approve IS a pending decision (the operator's `ack` is the only path back to dispatch). This is exactly the \"buried in periodic report\" failure mode goal.md L207-209 names."
+}
