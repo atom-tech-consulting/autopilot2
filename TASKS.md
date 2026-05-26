@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-293** **Queue-drain `add_backlog` handler must run auto-approve gate (closes review-token stranding)** `#autopilot` `#auto-approve` `#operator-queue` `#regression-pin` `#bug` `@blocked:TB-232,TB-188` [→ brief](.cc-autopilot/tasks/queue-drain-add-backlog-handler-must-run.md)
 
 ## Pipeline Pending
 
