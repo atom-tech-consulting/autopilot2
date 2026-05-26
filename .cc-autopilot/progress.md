@@ -958,3 +958,9 @@
 - **Summary:** Added _detect_validator_judge_noisy to ap2/attention.py (singleton condition, fires when 24h validator_judge_fail+timeout >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD, default 5), 13-test regression module pinning the five briefing arcs + render-verbatim + union dispatcher + source-anchor greps, and inventory updates in howto.md / architecture.md. Reuses automation_status._count_events_24h + validator_judge_noisy_threshold for no-drift with TB-243/TB-245 surfaces. Full pytest suite 2024 passed.
 - **Files:** ap2/attention.py, ap2/tests/test_tb288_attention_validator_judge_noisy.py, ap2/howto.md, ap2/architecture.md
 - **Tests:** pass
+
+## [2026-05-26] TB-289: `auto_approve_paused` attention detector — proactive surface for any active `pause_reason` (TB-282 follow-up closing Progress signal #3 "pending decision" leg)
+- **Commit:** `c9962fe`
+- **Summary:** Added `_detect_auto_approve_paused` to ap2/attention.py — surfaces a single `## Attention needed` bullet (per-reason key `auto_approve_paused:<reason>`, ack-verb via `_PAUSE_REASON_ACK_VERB`) whenever `collect_auto_approve_state(cfg).pause_reason` is non-None; wired into `detect_attention_conditions` as the 4th `out.extend`. Howto + architecture inventories updated. 12 new tests cover no-fire/none, consecutive_freezes, validator_judge_noisy, per-reason dedup, disabled vs paused distinction, debounce within/past window, noisy-pause opt-out, union dispatcher symmetry, render-section path, and source-anchor greps. Full suite 2036 passed.
+- **Files:** ap2/attention.py, ap2/howto.md, ap2/architecture.md, ap2/tests/test_tb289_attention_auto_approve_paused.py
+- **Tests:** pass
