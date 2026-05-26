@@ -68,6 +68,19 @@ DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S = 21600  # 6h — re-fire spam guard
 # tune detection sensitivity, not lifecycle.
 DEFAULT_TASK_STUCK_THRESHOLD_S = 14400  # 4h
 DEFAULT_ATTENTION_DEBOUNCE_S = 21600  # 6h
+# TB-287: `task_frozen` attention detector recency window. A Frozen task
+# whose most-recent `retry_exhausted` / `task_failed` event is within
+# `AP2_TASK_FROZEN_RECENCY_S` (default 86400 / 24h) AND has no
+# intervening operator-driven `task_unfrozen` / `task_deleted` event
+# surfaces as an `attention_raised type=task_frozen` condition so the
+# walk-away operator returning after a day sees an `ap2 unfreeze`
+# nudge per fresh freeze instead of just a `3F` aggregate count tick.
+# Read fresh from `os.environ` at detection-time inside
+# `ap2/attention.py` (`_task_frozen_recency_s`) and listed in
+# `env_reload.HOT_RELOADABLE_KNOBS` so the operator tuning the recency
+# floor takes effect on the next tick without a daemon restart —
+# tunes detection sensitivity, not lifecycle.
+DEFAULT_TASK_FROZEN_RECENCY_S = 86400  # 24h
 
 # TB-278: max-turn caps promoted to named constants alongside the
 # DEFAULT_*_TIMEOUT_S family above so every battle-tested default sits in

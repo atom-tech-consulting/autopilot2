@@ -211,14 +211,17 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     (default 21600 / 6h) and emitted this event for each fresh
     condition. Per-(attention_type, key) debounce so a second stuck
     task doesn't get suppressed because a first one fired recently.
-    Payload: `attention_type` (detector identifier — `task_stuck` is
-    the only one seeded today; future detectors land alongside as
-    `validator_judge_noisy` / `cost_cap_approach` / etc.), `key`
-    (per-condition dedup key — e.g. `task_stuck:TB-N`), `summary`
-    (one-line operator-legible string the status-report renderer
-    surfaces), plus a detector-specific extras blob inlined into the
-    payload (`task_stuck` carries `task`, `title`, `age_s`,
-    `start_ts`, `threshold_s`). The status-report renderer
+    Payload: `attention_type` (detector identifier — `task_stuck` +
+    `task_frozen` are the seeds today; future detectors land
+    alongside as `validator_judge_noisy` / `cost_cap_approach` /
+    etc.), `key` (per-condition dedup key — e.g. `task_stuck:TB-N`
+    or `task_frozen:TB-N`), `summary` (one-line operator-legible
+    string the status-report renderer surfaces), plus a detector-
+    specific extras blob inlined into the payload (`task_stuck`
+    carries `task`, `title`, `age_s`, `start_ts`, `threshold_s`;
+    `task_frozen` (TB-287) carries `task`, `title`, `age_s`,
+    `freeze_ts`, `recency_s` — surfaces a Frozen task within the
+    `AP2_TASK_FROZEN_RECENCY_S` window with an `ap2 unfreeze` nudge). The status-report renderer
     (`render_attention_section` in `ap2/status_report.py`) reads the
     still-active conditions on each cron tick and emits one bullet
     per condition under a distinct `## Attention needed` section the

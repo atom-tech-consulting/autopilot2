@@ -140,6 +140,11 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     # from 4h to 2h should not require a daemon restart.
     "AP2_TASK_STUCK_THRESHOLD_S",
     "AP2_ATTENTION_DEBOUNCE_S",
+    # TB-287: `task_frozen` detector recency window — read fresh from
+    # `os.environ` at detection-time inside
+    # `ap2/attention.py` (`_task_frozen_recency_s`), same shape as the
+    # TB-282 pair above.
+    "AP2_TASK_FROZEN_RECENCY_S",
 })
 
 # Lifecycle knobs that CAN'T hot-reload. Each configures a stateful

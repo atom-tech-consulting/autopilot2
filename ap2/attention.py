@@ -23,13 +23,15 @@ Design split (axis-by-axis, mirrors TB-263):
     keeps the side-effects in one place where the surrounding
     operator-queue / focus-advance / cron pipeline already lives.
 
-Seeded with ONE detector: `task_stuck`. Future detectors land here as
-new functions following the same shape (`def _detect_<name>(cfg, tail)
--> list[AttentionCondition]`) and are added to
-`_DETECTORS`. The briefing's Out-of-scope clause names the obvious
-follow-ups (validator-judge noisy, cost-cap approach, decisions-needed-
-new, frozen-task recency) — each its own focused task to keep this one
-landable.
+Seeded with `task_stuck`; TB-287 added `task_frozen` (a fresh entry
+into the Frozen section within `AP2_TASK_FROZEN_RECENCY_S` and no
+intervening operator-driven `task_unfrozen` / `task_deleted` event).
+Future detectors land here as new functions following the same shape
+(`def _detect_<name>(cfg, *, tail, now) -> list[AttentionCondition]`)
+and are added to `detect_attention_conditions`'s `out.extend(...)`
+list. The briefing's Out-of-scope clause names the remaining obvious
+follow-ups (validator-judge noisy, cost-cap approach, decisions-
+needed-new) — each its own focused task to keep this module landable.
 """
 from __future__ import annotations
 
@@ -43,6 +45,7 @@ from .board import Board
 from .config import (
     Config,
     DEFAULT_ATTENTION_DEBOUNCE_S,
+    DEFAULT_TASK_FROZEN_RECENCY_S,
     DEFAULT_TASK_STUCK_THRESHOLD_S,
 )
 
@@ -56,6 +59,33 @@ _TERMINAL_TASK_EVENT_TYPES: frozenset[str] = frozenset({
     "task_failed",
     "verification_failed",
     "retry_exhausted",
+})
+
+# TB-287: events that mark a task's *entry* into the Frozen section.
+# `retry_exhausted` is the daemon's `_handle_failure` route after
+# `AP2_MAX_RETRIES` attempts; `task_failed` covers the manual-route
+# freezes. The `task_frozen` detector identifies the most-recent
+# freeze-entry event for each Frozen task and times its recency
+# against `AP2_TASK_FROZEN_RECENCY_S` — distinct from
+# `_TERMINAL_TASK_EVENT_TYPES` above which is `task_stuck`'s
+# closed-run guard (task_complete + verification_failed belong there
+# but NOT to freeze-entry).
+_FREEZE_ENTRY_EVENT_TYPES: frozenset[str] = frozenset({
+    "retry_exhausted",
+    "task_failed",
+})
+
+# TB-287: operator-driven events that close out a freeze-recency
+# window. A `task_frozen` candidate stops being a candidate as soon as
+# the operator unfreezes or deletes the task — even before the next
+# tick rewrites the board section. The walk in `_detect_task_frozen`
+# aborts early when either event lands AFTER the freeze-entry event
+# (chronologically later) so a still-Frozen board row with a stale
+# `retry_exhausted` event doesn't surface during the brief window
+# before the daemon's operator-queue drain moves it.
+_FREEZE_RESOLVED_EVENT_TYPES: frozenset[str] = frozenset({
+    "task_unfrozen",
+    "task_deleted",
 })
 
 
@@ -107,6 +137,24 @@ def _task_stuck_threshold_s() -> int:
         return DEFAULT_TASK_STUCK_THRESHOLD_S
     if val <= 0:
         return DEFAULT_TASK_STUCK_THRESHOLD_S
+    return val
+
+
+def _task_frozen_recency_s() -> int:
+    """Resolve `AP2_TASK_FROZEN_RECENCY_S` with the documented default
+    + invalid-value fallback (TB-287). Mirrors `_task_stuck_threshold_s`
+    — fresh-read-each-call so env-reload propagates without re-
+    threading state.
+    """
+    raw = os.environ.get("AP2_TASK_FROZEN_RECENCY_S", "")
+    if not raw:
+        return DEFAULT_TASK_FROZEN_RECENCY_S
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_TASK_FROZEN_RECENCY_S
+    if val <= 0:
+        return DEFAULT_TASK_FROZEN_RECENCY_S
     return val
 
 
@@ -236,6 +284,109 @@ def _detect_task_stuck(
     return out
 
 
+def _detect_task_frozen(
+    cfg: Config,
+    *,
+    tail: list[dict],
+    now: _dt.datetime,
+) -> list[AttentionCondition]:
+    """Return one `AttentionCondition` per Frozen task whose entry-into-
+    Frozen timestamp (the most-recent `retry_exhausted` / `task_failed`
+    event for that task) is within `AP2_TASK_FROZEN_RECENCY_S`
+    AND has no intervening operator-driven `task_unfrozen` /
+    `task_deleted` event (TB-287).
+
+    Frozen section is the source-of-truth for "currently parked";
+    we read the board fresh per call so a task that the operator just
+    unfroze (queue ack pending drain) doesn't false-fire — the
+    intervening-unfreeze guard catches the same race the
+    `task_stuck` detector handles with `_TERMINAL_TASK_EVENT_TYPES`.
+
+    Closes the "frozen tasks" leg of goal.md's Current focus #3:
+    pre-TB-287 the only Frozen surface was the `3F` aggregate count
+    on `ap2 status` / status-report headline; a walk-away operator
+    saw the count tick up but got no proactive `ap2 unfreeze` nudge.
+    """
+    if not cfg.tasks_file.exists():
+        return []
+    try:
+        board = Board.load(cfg.tasks_file)
+    except Exception:  # noqa: BLE001
+        return []
+
+    frozen_ids = [t.id for t in board.iter_tasks("Frozen")]
+    if not frozen_ids:
+        return []
+
+    recency_s = _task_frozen_recency_s()
+    out: list[AttentionCondition] = []
+    for task_id in frozen_ids:
+        # Walk the tail in reverse looking for either an operator-
+        # driven resolution event (→ NOT a candidate — operator
+        # already acted) or a freeze-entry event (→ candidate). The
+        # resolution-first stop semantics catches the brief window
+        # between an `ap2 unfreeze` queue-ack landing and the drain
+        # actually moving the row out of the Frozen section.
+        freeze_ts: str | None = None
+        for ev in reversed(tail):
+            if (ev.get("task") or "").strip() != task_id:
+                continue
+            typ = ev.get("type", "")
+            if typ in _FREEZE_RESOLVED_EVENT_TYPES:
+                # Operator already acted — not a fresh-freeze candidate.
+                freeze_ts = None
+                break
+            if typ in _FREEZE_ENTRY_EVENT_TYPES:
+                freeze_ts = ev.get("ts") or ""
+                break
+
+        if not freeze_ts:
+            continue
+        freeze_dt = _parse_ts(freeze_ts)
+        if freeze_dt is None:
+            continue
+        age_s = (now - freeze_dt).total_seconds()
+        if age_s >= recency_s:
+            # Old freeze — outside the recency window. Operator either
+            # saw it on a prior tick or has been off long enough that
+            # a fresh ping won't change the priority. Skip to keep the
+            # walk-away-operator-friendly surface focused on freezes
+            # that landed in the named window.
+            continue
+        if age_s < 0:
+            # Clock skew or test-only future-dated event — treat as
+            # "not yet a candidate" rather than raising.
+            continue
+
+        # Title resolution mirrors `_detect_task_stuck`'s best-effort
+        # pattern: empty string on a board parse miss, renderer
+        # substitutes a stable placeholder.
+        title = ""
+        task_obj = board.get(task_id)
+        if task_obj is not None:
+            title = task_obj.title or ""
+
+        age_h = age_s / 3600.0
+        summary = (
+            f"{task_id} Frozen for {age_h:.1f}h since {freeze_ts}; "
+            f"resume via `ap2 unfreeze {task_id}`"
+        )
+        out.append(AttentionCondition(
+            type="task_frozen",
+            key=f"task_frozen:{task_id}",
+            summary=summary,
+            ts=freeze_ts,
+            extras={
+                "task": task_id,
+                "title": title,
+                "age_s": int(age_s),
+                "freeze_ts": freeze_ts,
+                "recency_s": recency_s,
+            },
+        ))
+    return out
+
+
 def detect_attention_conditions(
     cfg: Config,
     *,
@@ -264,6 +415,7 @@ def detect_attention_conditions(
 
     out: list[AttentionCondition] = []
     out.extend(_detect_task_stuck(cfg, tail=tail, now=now))
+    out.extend(_detect_task_frozen(cfg, tail=tail, now=now))
     return out
 
 
