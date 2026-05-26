@@ -946,3 +946,9 @@
 - **Summary:** Rewrote ap2/howto.md focus-advancement section as empty-cycles-sole-signal (dropped two-path framing + done_when_judge trigger), added Optional Progress signals: sub-block paragraph to Current focus authoring guidance, added Operator advancement workflow paragraph (ap2 update-goal / ap2 ack roadmap_complete / AP2_FOCUS_AUTO_ADVANCE_DISABLED kill-switch), rewrote focus_advanced event description and AP2_FOCUS_ADVANCE_EMPTY_CYCLES knob doc, audited+fixed two stale per-focus Done-when references in classify-verdicts and cron_skipped sections. All 6 briefing verification bullets pass; 1997 tests pass.
 - **Files:** ap2/howto.md
 - **Tests:** pass
+
+## [2026-05-26] TB-287: `task_frozen` attention detector — proactive Frozen-task surface (TB-282 follow-up closing Progress signal #3 "frozen tasks" leg)
+- **Commit:** `b7b42b0`
+- **Summary:** Added `_detect_task_frozen` to ap2/attention.py (per-task `task_frozen:<id>` debounce key, walks tail for most-recent `retry_exhausted`/`task_failed` and aborts on intervening `task_unfrozen`/`task_deleted`, recency-gated by `AP2_TASK_FROZEN_RECENCY_S` default 86400s/24h, hot-reloadable via env_reload). Wired into `detect_attention_conditions` alongside `_detect_task_stuck`, extended howto.md + architecture.md + events.py docstring, and landed 14 new pins in test_tb287_attention_task_frozen.py covering happy-path / dormancy / intervening-unfreeze / per-key dedup / env-knob override plus default + invalid fallback. Full suite `uv run pytest -q ap2/tests/` — 2011 passed.
+- **Files:** ap2/attention.py, ap2/config.py, ap2/env_reload.py, ap2/events.py, ap2/howto.md, ap2/architecture.md, ap2/tests/test_tb287_attention_task_frozen.py
+- **Tests:** pass
