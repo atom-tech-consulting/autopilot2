@@ -151,7 +151,7 @@ def test_TB121_descriptive_prose_yields_empty_blocked_on():
 # ---------------------------------------------------------------------------
 # Bullet 6 — `ap2 add --blocked` writes the codespan, not the description.
 
-def test_ap2_add_blocked_csv_writes_codespan_not_description(tmp_path):
+def test_ap2_add_blocked_csv_writes_codespan_not_description(tmp_path, monkeypatch):
     """`ap2 add --blocked TB-5,review "title" --briefing-file ...` writes
     the codespan in the rendered task line and not into the description.
 
@@ -159,6 +159,12 @@ def test_ap2_add_blocked_csv_writes_codespan_not_description(tmp_path):
     ``test_cli.test_add_with_blocked_writes_codespan_not_description``
     (TB-131): ``cmd_add`` queues; the test drains exactly as the daemon
     tick would; assertions then run against the post-drain board.
+
+    TB-293: `AP2_AUTO_APPROVE` is unset for this test so the queue-drain
+    auto-approve gate (now mirrored from the direct path) doesn't
+    strip the `review` token. The codespan-rendering behavior under
+    test is the pre-auto-approve baseline; the auto-approve interaction
+    is pinned separately in `test_queue_drain_auto_approve.py`.
     """
     from argparse import Namespace
 
@@ -167,6 +173,8 @@ def test_ap2_add_blocked_csv_writes_codespan_not_description(tmp_path):
     from ap2.config import Config
     from ap2.init import init_project
 
+    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
     init_project(tmp_path)
     cfg = Config.load(tmp_path)
     cfg.ensure_dirs()

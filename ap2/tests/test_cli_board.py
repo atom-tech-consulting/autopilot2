@@ -596,11 +596,21 @@ def test_add_extends_briefing_tags_with_flag(tmp_path: Path):
     assert found.tags.count("#cli") == 1
 
 
-def test_add_with_blocked_writes_codespan_not_description(tmp_path: Path):
+def test_add_with_blocked_writes_codespan_not_description(
+    tmp_path: Path, monkeypatch,
+):
     """TB-132: `ap2 add --blocked TB-5,review` writes a `@blocked:` codespan
     on the rendered task line and leaves the description prose untouched.
     The legacy `(blocked on: ...)` description-injection path is gone.
+
+    TB-293: `AP2_AUTO_APPROVE` is unset here so the queue-drain auto-
+    approve gate (now mirrored from the direct path) doesn't strip the
+    `review` token mid-test. The codespan-writing behavior under test
+    is the pre-auto-approve baseline; the auto-approve interaction is
+    pinned separately in `test_queue_drain_auto_approve.py`.
     """
+    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
     cfg = _project(tmp_path)
     brief = tmp_path / "briefing.md"
     brief.write_text(_GOOD_BRIEFING)
@@ -965,7 +975,7 @@ def test_add_with_explicit_frozen_routes_through_add_frozen(tmp_path: Path):
 
 
 def test_add_default_with_blocked_review_surfaces_in_status(
-    tmp_path: Path, capsys,
+    tmp_path: Path, capsys, monkeypatch,
 ):
     """TB-167's motivating UX gap: `ap2 add --briefing-file <path>
     --blocked review` (no `-s`) used to land in Ready and stay
@@ -973,7 +983,16 @@ def test_add_default_with_blocked_review_surfaces_in_status(
     review-pending counter only walks Backlog tasks. The default-to-
     Backlog change closes that gap — the new task lands in Backlog
     AND `ap2 status` (text + JSON) names its TB-N in the
-    pending-review list."""
+    pending-review list.
+
+    TB-293: `AP2_AUTO_APPROVE` is unset so the queue-drain auto-approve
+    gate (now mirrored from the direct path) doesn't strip the
+    `review` token. The pending-review surface assumes the codespan
+    is preserved — the auto-approve-on shape is covered separately by
+    `test_queue_drain_auto_approve.py`.
+    """
+    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
     import json as _json
     from ap2.cli import cmd_status
 

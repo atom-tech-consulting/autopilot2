@@ -52,10 +52,16 @@ from .briefing_validators import (
 )
 from .config import Config, bump_next_task_id
 # `_ok` / `_err` / `slugify` live in `ap2/tools.py`; that module imports
-# this one for re-export, so the cross-reference works via Python's
-# standard partial-import resolution (tools.py defines the helpers
-# BEFORE importing this module).
-from .tools import _err, _ok, slugify
+# many symbols back from operator_queue, so we resolve the cycle by
+# deferring the tools import to module-bottom (see the matching
+# `from .tools import` below). Both load orders (`import ap2.tools`
+# first OR `import ap2.operator_queue` first) now succeed: tools.py's
+# `_err` / `_ok` / `slugify` are defined before its `from
+# .operator_queue import ...` line, and operator_queue's top-level
+# definitions are all set before we trigger the tools load at module
+# bottom. TB-293: the inspect-based verifier bullet
+# (`uv run python -c "import ap2.operator_queue; ..."`) needs the
+# direct-import path to work without an external tools-prime step.
 
 
 def _allocate_id(board: Board, cfg: Config) -> str:
@@ -1283,6 +1289,8 @@ def drain_operator_queue(cfg: Config) -> dict:
 
 
 def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
+    import os
+
     op = rec.get("op", "")
     args = rec.get("args") or {}
     add_map = {
@@ -1293,11 +1301,13 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
     if op in add_map:
         if not args.get("task_id") or not args.get("title"):
             raise RuntimeError("add op missing task_id or title")
+        tags = list(args.get("tags") or [])
+        task_id = args["task_id"]
         board.add(
             add_map[op],
-            task_id=args["task_id"],
+            task_id=task_id,
             title=args["title"],
-            tags=list(args.get("tags") or []),
+            tags=tags,
             # TB-132: meta dict carries the `@blocked:...` codespan (and
             # any future `@<key>:<value>` structured fields). Defaults
             # to {} for queued ops authored before TB-132 landed.
@@ -1305,6 +1315,99 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             description=args.get("description") or "",
             briefing=args.get("briefing_path"),
         )
+        # TB-293: queue-drain `add_backlog` must run the same auto-approve
+        # gate chain that the direct path (`board_edits.do_board_edit`'s
+        # `add_backlog` branch) already runs. Without this mirror, a
+        # review-bearing proposal queued via `operator_queue_append
+        # op=add_backlog` lands with `@blocked:review` intact and is
+        # stranded indefinitely — no `auto_approved` event fires, so the
+        # per-tick auto-promote gate never sees the task as eligible.
+        # The 2026-05-26 TB-290 incident (proposal stranded ~10h despite
+        # `AP2_AUTO_APPROVE=1`) traced to this asymmetry.
+        #
+        # Scope is narrow: `add_backlog` only. `add_ready` / `add_frozen`
+        # don't carry review blockers in any current code path (Ready is
+        # already-approved by definition; Frozen is retry-exhausted).
+        if op == "add_backlog":
+            meta = dict(args.get("meta") or {})
+            blocked_csv = meta.get("blocked", "") or ""
+            tokens = [
+                tok.strip() for tok in blocked_csv.split(",") if tok.strip()
+            ]
+            review_present = any(tok.lower() == "review" for tok in tokens)
+            if review_present:
+                # Lazy-import `daemon.evaluate_auto_approve_decision` from
+                # inside the branch (not at module top) — same pattern
+                # `do_board_edit` uses (`from . import daemon as _daemon`)
+                # to avoid the operator_queue ⇄ daemon load-time cycle.
+                from . import daemon as _daemon
+                decision = _daemon.evaluate_auto_approve_decision(
+                    cfg, tags=tags,
+                )
+                if decision == "strip":
+                    # Real auto-approve: strip the review token via the
+                    # `_approve_review_token` helper so the codespan
+                    # rewrite logic stays single-source-of-truth with
+                    # the direct path. Then emit `auto_approved` with
+                    # the same payload shape `do_board_edit` uses.
+                    _approve_review_token(board, task_id)
+                    events.append(
+                        cfg.events_file,
+                        "auto_approved",
+                        task=task_id,
+                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                    )
+                elif decision == "dry_run":
+                    # TB-232 monitor-only on-ramp: all four gates passed
+                    # but `AP2_AUTO_APPROVE_DRY_RUN=1` redirects the
+                    # WRITE step. The `@blocked:review` codespan
+                    # survives so the task still requires operator
+                    # `ap2 approve`. Mirrors the direct-path payload
+                    # (`dry_run=True` discriminator).
+                    events.append(
+                        cfg.events_file,
+                        "would_auto_approve",
+                        task=task_id,
+                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                        dry_run=True,
+                    )
+                # decision == "noop": at least one gate failed
+                # (tags / freeze-threshold / per-task / window). The
+                # proposal lands with `@blocked:review` intact and no
+                # audit event — same surface an operator-driven
+                # `ap2 add` would produce.
+
+            # TB-188: seed a per-proposal record for queue-routed
+            # ideation-authored `add_backlog` (`blocked` carries the
+            # `review` token, raw or as part of a `review,TB-N` mix).
+            # Mirrors the direct-path call at
+            # `board_edits.do_board_edit:278-288`. Failures swallowed
+            # so a bad write to the records dir doesn't unwind a
+            # successful drain; events.jsonl still carries the
+            # canonical audit trail.
+            if blocked_csv:
+                try:
+                    briefing_rel = args.get("briefing_path") or ""
+                    briefing_text = ""
+                    if briefing_rel:
+                        bpath = cfg.project_root / briefing_rel
+                        if bpath.exists():
+                            try:
+                                briefing_text = bpath.read_text()
+                            except OSError:
+                                briefing_text = ""
+                    from .briefing_validators import (
+                        write_ideation_proposal_record,
+                    )
+                    write_ideation_proposal_record(
+                        cfg,
+                        tb_id=task_id,
+                        blocked_on=blocked_csv,
+                        briefing_text=briefing_text,
+                        briefing_rel=briefing_rel or None,
+                    )
+                except OSError:
+                    pass
         return
     if op == "move_to_backlog":
         try:
@@ -1792,3 +1895,11 @@ def _compact_operator_queue(queue_path: Path, applied: set[str]) -> None:
         queue_path.write_text("\n".join(pending_lines) + "\n")
     else:
         queue_path.write_text("")
+
+
+# TB-293: deferred tools import. See the matching comment block near the
+# top-of-module import section for the cycle-break rationale. This must
+# stay at module bottom so `OPERATOR_QUEUE_OPS` and all the helper
+# symbols tools.py re-exports are defined before tools.py's
+# `from .operator_queue import ...` line runs.
+from .tools import _err, _ok, slugify  # noqa: E402,F401
