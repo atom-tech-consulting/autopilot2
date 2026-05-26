@@ -9,6 +9,7 @@
 ## Backlog
 
 - [ ] **TB-290** **`cost_cap_approach` attention detector — pre-trip window-cap-approach surface (TB-282 follow-up closing Progress signal #3 "cost anomalies" leg pre-trip path)** `#autopilot` `#attention` `#operator-legible` `#monitoring` `#auto-approve` `#cost` `#axis-3` `#status-report` `#regression-pin` `@blocked:review` — Add `_detect_cost_cap_approach` to `ap2/attention.py`: when the rolling 24h auto-approved token sum (same walk as `auto_approve._auto_approve_check_violations` window-cap branch) is ≥ `AP2_AUTO_APPROVE_COST_APPROACH_PCT * AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` AND below the cap, surface a single `## Attention needed` bullet so the operator gets a pre-trip nudge before the post-trip pause-reason bullet fires. Pre-trip companion to the post-trip pause surface; closes the "cost anomalies" leg of focus-2 Progress signal #3. [→ brief](.cc-autopilot/tasks/cost-cap-approach-attention-detector-pre.md)
+- [ ] **TB-291** **Fence ideation toolset to board_edit only; remove operator_queue_append** `#autopilot` `#ideation` `#tools` `#empty-cycles` `#regression-pin` `#bug` [→ brief](.cc-autopilot/tasks/fence-ideation-toolset-to-board-edit-onl.md)
 
 ## Pipeline Pending
 
