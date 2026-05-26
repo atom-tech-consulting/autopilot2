@@ -29,13 +29,18 @@ intervening operator-driven `task_unfrozen` / `task_deleted` event);
 TB-288 added `validator_judge_noisy` (rolling 24h sum of
 `validator_judge_fail` + `validator_judge_timeout` events ≥
 `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD` — singleton condition, not
-per-task). Future detectors land here as new functions following the
-same shape (`def _detect_<name>(cfg, *, tail, now) ->
-list[AttentionCondition]`) and are added to
-`detect_attention_conditions`'s `out.extend(...)` list. The briefing's
-Out-of-scope clause names the remaining obvious follow-ups (cost-cap
-approach, decisions-needed-new) — each its own focused task to keep
-this module landable.
+per-task); TB-289 added `auto_approve_paused` (any non-None
+`pause_reason` from `collect_auto_approve_state` — per-reason
+condition keyed `auto_approve_paused:<reason>`, surfaces the
+`ap2 ack <verb>` resume nudge so the operator's first-touch
+walk-away channel carries the pending decision proactively rather
+than only as a TB-228 automation-digest sub-block line). Future
+detectors land here as new functions following the same shape
+(`def _detect_<name>(cfg, *, tail, now) -> list[AttentionCondition]`)
+and are added to `detect_attention_conditions`'s `out.extend(...)`
+list. The briefing's Out-of-scope clause names the remaining obvious
+follow-ups (cost-cap approach, decisions-needed-new) — each its own
+focused task to keep this module landable.
 """
 from __future__ import annotations
 
@@ -46,7 +51,9 @@ from typing import Any
 
 from . import events
 from .automation_status import (
+    _PAUSE_REASON_ACK_VERB,
     _count_events_24h as _automation_count_events_24h,
+    collect_auto_approve_state,
     validator_judge_noisy_threshold,
 )
 from .board import Board
@@ -503,6 +510,111 @@ def _detect_validator_judge_noisy(
     )]
 
 
+def _detect_auto_approve_paused(
+    cfg: Config,
+    *,
+    tail: list[dict],  # noqa: ARG001 — accepted for parity with sibling detectors
+    now: _dt.datetime,
+) -> list[AttentionCondition]:
+    """Return a SINGLE `AttentionCondition` (zero or one element) when
+    `collect_auto_approve_state(cfg).pause_reason` is non-None (TB-289).
+
+    Today's pause reasons: `consecutive_freezes` (TB-223 cumulative-
+    freeze trip) and `validator_judge_noisy` (TB-272 safety-floor
+    failure); future reasons registered via `_PAUSE_REASON_ACK_VERB`
+    in `ap2/automation_status.py` (e.g. `per_task_token_cap_exceeded`
+    / `window_token_cap_exceeded` / `task_error` from TB-224's
+    cost/blast-radius halts) flow through here without code changes
+    on this side — the detector reads the discriminator the
+    aggregator already computes.
+
+    Closes the "pending decision" leg of goal.md Current focus #3
+    Progress signal #3: pre-TB-289 an active auto-approve pause
+    surfaced ONLY as a TB-228 automation-digest sub-block line near
+    the bottom of the status-report (`auto-approve: disabled
+    (paused: <reason>)`) and as a single line in `ap2 status` text/
+    JSON / the web automation card. The operator must scroll past the
+    headline + 4-8 routine bullets + automation digest header to find
+    the pause line — and must already know to run
+    `ap2 ack auto_approve_unfreeze` (or `auto_approve_window_resume`
+    for the cost halts) to resume. Promoting it to a `## Attention
+    needed` bullet at the TOP of the status-report post closes the
+    visual-hierarchy gap: a paused auto-approve IS a pending decision
+    (the operator's `ack` is the only path back to dispatch) so it
+    belongs in the proactive surface "distinct from routine progress
+    updates", as goal.md L207-209 names.
+
+    Per-reason dedup (`key=f"auto_approve_paused:{pause_reason}"`) so a
+    sequential reason transition (e.g. `consecutive_freezes` → operator
+    acks → `validator_judge_noisy` fires later) surfaces both
+    bullets — they are distinct conditions with distinct ack verbs in
+    the general case. The `should_suppress` check is per-(type, key),
+    so a recently-fired `consecutive_freezes` pause won't suppress a
+    fresh `validator_judge_noisy` pause.
+
+    Independent of (and additive to) TB-272's pause logic and TB-228's
+    automation-digest line — both remain. Read-only against
+    `automation_status.collect_auto_approve_state`; the daemon's
+    pause-state machinery is untouched.
+
+    The detector is a no-op when `pause_reason is None`. A pause
+    reason without a registered ack verb (defensive: unreachable
+    today, every reason in `_PAUSE_REASON_ACK_VERB` resolves) skips
+    the bullet rather than rendering with a missing verb — the
+    bottom-of-digest TB-228 line + `ap2 status` pause text still
+    surface the state so the operator isn't left without a signal.
+
+    The anchor `ts` is `now` formatted as ISO-8601 — pause state is a
+    point-in-time fact about the current aggregator output, not a
+    timestamped event, so there's no upstream `ts` field to inherit.
+    Renderers (`render_attention_section`) consume the pre-rendered
+    `summary` verbatim via the generic fallback path; no per-detector
+    branch is needed in the renderer.
+    """
+    try:
+        state = collect_auto_approve_state(cfg)
+    except Exception:  # noqa: BLE001 — never break the detector loop
+        return []
+
+    pause_reason = state.get("pause_reason")
+    if not pause_reason:
+        return []
+
+    ack_verb = _PAUSE_REASON_ACK_VERB.get(pause_reason)
+    if not ack_verb:
+        # Defensive: a future pause_reason that landed in
+        # `collect_auto_approve_state` without a corresponding
+        # `_PAUSE_REASON_ACK_VERB` entry would render with a missing
+        # verb. Skip the bullet rather than mislead the operator;
+        # the TB-228 sub-block + `ap2 status` still carry the state.
+        return []
+
+    anchor_ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    summary = (
+        f"auto-approve paused: {pause_reason}; "
+        f"resume via `ap2 ack {ack_verb}`"
+    )
+    return [AttentionCondition(
+        type="auto_approve_paused",
+        key=f"auto_approve_paused:{pause_reason}",
+        summary=summary,
+        ts=anchor_ts,
+        extras={
+            "pause_reason": pause_reason,
+            "ack_verb": ack_verb,
+            "consecutive_freezes": int(
+                state.get("consecutive_freezes") or 0,
+            ),
+            "validator_judge_fail_count_24h": int(
+                state.get("validator_judge_fail_count_24h") or 0,
+            ),
+            "validator_judge_timeout_count_24h": int(
+                state.get("validator_judge_timeout_count_24h") or 0,
+            ),
+        },
+    )]
+
+
 def detect_attention_conditions(
     cfg: Config,
     *,
@@ -533,6 +645,7 @@ def detect_attention_conditions(
     out.extend(_detect_task_stuck(cfg, tail=tail, now=now))
     out.extend(_detect_task_frozen(cfg, tail=tail, now=now))
     out.extend(_detect_validator_judge_noisy(cfg, tail=tail, now=now))
+    out.extend(_detect_auto_approve_paused(cfg, tail=tail, now=now))
     return out
 
 

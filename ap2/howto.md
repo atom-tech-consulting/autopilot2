@@ -1049,7 +1049,7 @@ skip-gate from firing — operator never misses a degradation
 signal because the 2h post coincided with an otherwise-quiet
 window.
 
-**Proactive attention surface (TB-282; TB-287, TB-288 extended).**
+**Proactive attention surface (TB-282; TB-287, TB-288, TB-289 extended).**
 `attention_raised` is the distinct push-surface event for conditions
 that warrant immediate operator attention. Detector inventory:
 `task_stuck` (TB-282) flags an Active task whose most recent
@@ -1069,25 +1069,41 @@ project-wide condition (key `validator_judge_noisy`, NOT per-event)
 that promotes the noisy state from the bottom-of-digest TB-245
 sub-block and `[noisy]` suffix in `ap2 status` to a top-of-post
 `## Attention needed` bullet, additive to (not a replacement for)
-those existing pull-surfaces. The daemon's `_tick` calls
+those existing pull-surfaces; `auto_approve_paused` (TB-289) flags
+when `collect_auto_approve_state(cfg).pause_reason` is non-None
+(today: `consecutive_freezes` / `validator_judge_noisy`; future:
+`per_task_token_cap_exceeded` / `window_token_cap_exceeded` /
+`task_error` from the TB-224 cost halts), keyed per-reason
+(`auto_approve_paused:<reason>`) so a sequential reason transition
+surfaces both bullets — closes Progress signal #3's "pending
+decision" leg by promoting the pause state from the bottom-of-
+digest TB-228 automation-digest sub-block + `ap2 status` line to a
+top-of-post `## Attention needed` bullet naming the
+`ap2 ack <verb>` resume nudge (verb resolves via
+`_PAUSE_REASON_ACK_VERB` in `ap2/automation_status.py`). The
+daemon's `_tick` calls
 `ap2.attention.detect_attention_conditions(cfg)`, debounces each
 candidate against any prior matching fire within
 `AP2_ATTENTION_DEBOUNCE_S` (default 21600s / 6h), and emits one
 `attention_raised` event per fresh condition. Per-(attention_type,
 key) debounce so a second stuck/frozen task doesn't get suppressed
 because a first one fired recently. Payload: `attention_type`
-(detector kind — `task_stuck`, `task_frozen`, and
-`validator_judge_noisy` are the seeds today; future detectors land
-alongside as `cost_cap_approach` / `decisions_needed_new` / etc.),
-`key` (per-condition dedup key — e.g. `task_stuck:TB-N` /
-`task_frozen:TB-N` for per-task detectors, or
-`validator_judge_noisy` (singleton) for the noisy-window detector),
-`summary` (operator-legible one-line string the status-report
-renderer surfaces), plus a detector-specific extras blob
-(`task_stuck` carries `task`, `title`, `age_s`, `start_ts`,
+(detector kind — `task_stuck`, `task_frozen`,
+`validator_judge_noisy`, and `auto_approve_paused` are the seeds
+today; future detectors land alongside as `cost_cap_approach` /
+`decisions_needed_new` / etc.), `key` (per-condition dedup key —
+e.g. `task_stuck:TB-N` / `task_frozen:TB-N` for per-task detectors,
+`validator_judge_noisy` (singleton) for the noisy-window detector,
+or `auto_approve_paused:<reason>` for the per-reason pause
+detector), `summary` (operator-legible one-line string the
+status-report renderer surfaces), plus a detector-specific extras
+blob (`task_stuck` carries `task`, `title`, `age_s`, `start_ts`,
 `threshold_s`; `task_frozen` carries `task`, `title`, `age_s`,
 `freeze_ts`, `recency_s`; `validator_judge_noisy` carries
-`fail_count_24h`, `timeout_count_24h`, `threshold`, `window_s`).
+`fail_count_24h`, `timeout_count_24h`, `threshold`, `window_s`;
+`auto_approve_paused` carries `pause_reason`, `ack_verb`,
+`consecutive_freezes`, `validator_judge_fail_count_24h`,
+`validator_judge_timeout_count_24h`).
 The
 status-report cron's `render_attention_section` reads the still-
 active conditions per tick and emits one bullet per condition under
