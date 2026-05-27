@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-282",
+  "briefing_path": ".cc-autopilot/tasks/attention-web-page-pull-surface-for-curr.md",
+  "focus_anchor": "current focus operator legible reporting and monitoring",
+  "proposed_at": "2026-05-27T06:46:28Z",
+  "tb_id": "TB-296",
+  "why_now": "the upstream attention vocabulary fully landed (5\ndetectors shipped: task_stuck, task_frozen, validator_judge_noisy,\nauto_approve_paused, cost_cap_approach). The operator named \"web\n/attention page\" verbatim as a remaining axis in the\n2026-05-27T06:33:52Z rewind reason on focus-2. Without this page,\nthe operator must run `ap2 status` (CLI-pull, no rendering of the\nattention summaries) or wait up to 2h for the next status-report\npost to see currently-active attention conditions \u2014 turning what\nshould be a glance-able pull surface into a poll-or-wait\ninteraction."
+}

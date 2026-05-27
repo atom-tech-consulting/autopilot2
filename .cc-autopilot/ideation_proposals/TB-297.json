@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-282,TB-280",
+  "briefing_path": ".cc-autopilot/tasks/immediate-mattermost-push-on-attention-r.md",
+  "focus_anchor": "current focus operator legible reporting and monitoring",
+  "proposed_at": "2026-05-27T06:49:28Z",
+  "tb_id": "TB-297",
+  "why_now": "the upstream attention vocabulary fully landed (5\ndetectors shipped: task_stuck, task_frozen, validator_judge_noisy,\nauto_approve_paused, cost_cap_approach). Several of those\nconditions are time-sensitive \u2014 `auto_approve_paused` fires only\nafter dispatch has already halted, and `cost_cap_approach` is\nexplicitly a pre-trip nudge that loses utility if delayed by 2h.\nThe operator named \"immediate-MM push\" verbatim as a remaining\naxis in the 2026-05-27T06:33:52Z rewind reason on focus-2.\nWithout this, the time-from-condition to operator-glance is\nbounded below by the status-report cron interval \u2014 defeating the\n\"proactively surfaced\" claim of Progress signal #3 for the\npost-trip / time-sensitive conditions."
+}
