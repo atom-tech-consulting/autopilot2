@@ -1,118 +1,109 @@
 # Ideation State
 
-_Last updated: 2026-05-27T13:02:35Z by ideation cron_
+_Last updated: 2026-05-27T15:06:03Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 0B / 0P / 171C / 3F (Frozen unchanged:
-TB-119 / TB-120 / TB-133 — operator-classified preventive,
-thaw-on-demand). Focus pointer (2 of 2) on `operator-legible
-reporting and monitoring`. No completes landed between the prior
-cycle (10:59Z) and now (13:02Z); the 3 most recent Completes
-remain TB-297 (`b5178ea` 07:15Z — immediate-MM push knob),
-TB-298 (`b66b177` 09:11Z — CLI attention line) and TB-299
-(`0f58fd6` 09:23Z — web home attention card). Mission-vs-goal:
-all 4 operator-named "remaining axes" from the 2026-05-27T06:33:52Z
-rewind ("web /attention page, immediate-MM push, etc.") plus both
-prior-cycle gaps (CLI line, home card) shipped in a single ~4h arc;
-focus-2 Progress signal #3's 5-condition × 4-surface matrix is
-complete and operating off one shared detector entrypoint
-(`detect_attention_conditions(cfg)`).
+Cycle entry: board 0A / 0R / 0B / 0P / 173C / 3F (Frozen unchanged:
+TB-119 / TB-120 / TB-133 — operator-classified preventive). Focus
+pointer still on `operator-legible reporting and monitoring` (2 of
+2). Since the 13:02Z prior cycle, two operator-queued bug-fix tasks
+landed — TB-300 (`6b0f268` 13:59Z — empty-cycles counter recognizes
+`ideation_cycle_summary` exit-marker, aligning the daemon's
+empty-cycles vocabulary with the agent's no-proposal exit name) and
+TB-301 (`9c77bff` 13:53Z — `now=` injection seam through
+`render_attention_section` plus `_detect_auto_approve_paused` /
+`_auto_approve_check_violations` to repair 5 wall-clock-drift
+time-bombs). Both are infrastructure / regression-pin repairs to the
+focus-2 surface (counter alignment + test-fixture hygiene), NOT new
+Progress-signal work. The 3 most-recent substantive focus-2
+completes remain TB-297 / TB-298 / TB-299 (immediate-MM push, CLI
+attention line, web home attention card) — the 4-surface
+detector-driven matrix called out in prior-cycle assessment still
+holds.
 
 ## Current focus assessment
 
 - **Current focus: operator-legible reporting and monitoring**
   - Progress so far:
-    - Progress signal #1 (title + project-name headline): TB-280
-      closed `Config.project_name` + `[<project>]` headline prefix
-      + pre-rendered `## Recent task activity` digest.
+    - Progress signal #1 (titled + project-named reports): TB-280
+      closed `Config.project_name` + `[<project>]` headline +
+      pre-rendered `## Recent task activity` digest.
     - Progress signal #2 (significance-gated + dedup): TB-281
-      closed content-fingerprint dedup; complemented by event-driven
-      immediate-MM push (TB-297) so push surface is no longer purely
-      clock-driven.
+      content-fingerprint dedup; TB-297 event-driven immediate-MM
+      push (push surface no longer purely clock-driven).
     - Progress signal #3 (proactive attention surface): all 5
-      enumerated condition kinds detector-backed (TB-282 stuck-Active
-      seed + TB-287 task_frozen + TB-288 validator-judge-noisy +
-      TB-289 auto-approve-paused + TB-290 cost-cap-approach); operator
-      surfaces complete across 4 entry-points sharing one detector
-      contract — cron status-report push (TB-282), immediate-MM push
-      (TB-297), web `/attention` pull (TB-296), web home card
-      (TB-299), and `ap2 status` CLI line (TB-298).
+      detector kinds shipped (TB-282 stuck-Active + TB-287
+      task_frozen + TB-288 validator-judge-noisy + TB-289
+      auto-approve-paused + TB-290 cost-cap-approach); 4 operator
+      entry-points sharing one detector contract — cron push
+      (TB-282), immediate-MM push (TB-297), web `/attention` pull
+      (TB-296), web home card (TB-299), `ap2 status` CLI line
+      (TB-298).
+    - Infrastructure repairs since: TB-300 (counter-vocabulary
+      alignment to agent exit-name `ideation_cycle_summary`),
+      TB-301 (`now=` injection seam closing 5 time-bombed tests).
   - Gaps:
-    - None new since prior cycle. The 4 operator-named "remaining
-      axes" (web /attention, immediate-MM push, plus the "etc."
-      suffix's CLI line and home card) shipped within ~4h of the
-      rewind; subsequent ~3.5h of daemon quiet (no new completes,
-      no new operator queue ops between 09:23Z and 13:02Z) confirms
-      operator has not surfaced additional axes for focus-2.
+    - Two completes between 13:02Z and 15:06Z were both infrastructure / regression-pin repairs
+      (TB-300 + TB-301), not focus-2 axis work. The 5h59m
+      stretch (13:07Z queue ack → now) confirms no fresh axis
+      surfaced from operator side.
+  - Status: `exhausted-needs-operator`
 
 ## Non-goal risk check
 
-None. All 11 focus-2 completes stayed within per-project legibility
-scope (goal.md L227-228 scope guard); no cross-project aggregation,
-no new event types invented this cycle, no daemon-side mutation, no
-new detector kinds beyond the 5 enumerated in Progress signal #3.
+None. TB-300 + TB-301 stayed inside the existing detector /
+counter / test-fixture surface — no new event types, no
+cross-project aggregation, no daemon-side mutation of goal.md.
+Scope guard L227-228 (per-project legibility, not cross-project
+aggregation) still respected.
 
 ## Considered & deferred this cycle
 
-- **`/events?type=attention_raised` quick filter** — small UX
-  polish; reverse-navigation from /events rows to /attention
-  already mediated by TB-296's per-row link-through. Doesn't move
-  the Progress-signal-#3 needle; rejection-pattern-shape match for
-  the TB-185/240 ap2-meta-polish class.
-- **Attention threshold calibration evaluation** — 0 production
-  `attention_raised` events have fired since detectors landed ~2
-  days live; threshold-too-high vs project-healthy is unfalsifiable
+- **`/events?type=attention_raised` quick filter** — UX polish;
+  reverse-navigation already mediated by TB-296's per-row
+  link-through. Rejection-pattern shape: TB-185/240 ap2-meta-polish.
+- **Attention threshold calibration evaluation** — still 0
+  production `attention_raised` events fired (~2 days live with 6
+  detectors); threshold-too-high vs project-healthy unfalsifiable
   until at least one fires. Re-evaluate once firing signal
-  accumulates. Adjacent to TB-175 rejection class (premature
-  aggregation).
+  accumulates. Same TB-175 rejection class (premature aggregation).
 - **`attention_cleared` event class** — carried; still no concrete
   consumer asking for "what just resolved?" data.
-- **JSON sub-endpoint `/attention.json`** — no external monitoring
-  ask; Non-goal L227-228 (no cross-project aggregation) still
-  applies.
 - **TB-175-shape ideation-acceptance-rate aggregator** — operator
   parked it 2026-05-07T01:57Z pending ≥3 cycles of TB-188 records;
   still gated.
 - **Rejection-pattern check (carried, re-justified)**: TB-185 /
   TB-184 vetoed ap2-meta-polish; TB-231 vetoed symptom-patching;
   TB-175 vetoed premature aggregation; TB-240 vetoed validator
-  whack-a-mole. Two consecutive empty-cycle abstentions (10:59Z + this
-  one) honor that cluster — any focus-2 polish proposal this cycle
-  would land squarely in the TB-185/240 shape.
+  whack-a-mole. Three consecutive empty-cycle abstentions (10:59Z
+  + 13:02Z + this one) honor that cluster.
 
 ## Cycle observations
 
-- Sibling-fan-out template held: focus-2 closed with 4 surfaces
-  (cron push / immediate-MM push / CLI line / web pull / web home
-  card) sharing one detector contract — that shape is now
-  load-bearing for focus-2 and is worth carrying forward as the
-  reference pattern for any future detector-surface work, NOT as a
-  new task this cycle.
-- 0 production `attention_raised` events fired in ~2 days with 6
-  detectors live. Either thresholds are well-calibrated (project
-  healthy) or they're too conservative. Without firing signal,
-  evaluation work cannot distinguish the cases, so calibration
-  stays deferred above rather than getting proposed.
+- Bug-fix cadence in the 13:02Z→15:06Z stretch (TB-300 + TB-301)
+  validates the 4-surface detector-driven matrix is the right
+  shape — both repairs were local (one counter-vocabulary line +
+  one `now=` kwarg seam), not structural. Carrying as the
+  reference pattern for any future detector-surface work, not as
+  a new proposal.
+- 0 production `attention_raised` events still — ~2.5 days live, 6
+  detectors. Threshold-vs-health unfalsifiable until at least one
+  fires; calibration deferred above rather than proposed.
 
 ## Decisions needed from operator
 
 - Decision needed: extend the roadmap (add a new
   `## Current focus:` heading via `ap2 update-goal`) OR ack the
-  empty-cycle signal. Without operator action, this second
-  consecutive 0-proposal cycle (10:59Z + 13:02Z) further advances
-  the empty-cycles counter; once `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
-  elapses, the daemon emits `roadmap_complete` and halts
-  auto-approve until the roadmap is extended. Unblock-condition:
-  next ideation cycle has a fresh focus to derive proposals from
-  (or an explicit operator ack acknowledging the halt is intended).
+  empty-cycle signal. This is the THIRD consecutive 0-proposal
+  cycle (10:59Z + 13:02Z + 15:06Z); the empty-cycles counter is
+  now within one cycle of the `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+  threshold, after which the daemon emits `roadmap_complete` and
+  halts auto-approve. Unblock-condition: next ideation cycle has
+  a fresh focus to derive proposals from (or an explicit operator
+  ack acknowledging the halt is intended). Carried from prior
+  cycle with re-articulated action + unblock-condition.
 
 ## Proposals this cycle
 
-0 proposals — second consecutive empty-cycle abstention. Per
-goal.md L34-36, ideation must "stop proposing when … criteria
-are all met" rather than fill 5 slots with marginal polish; the
-recurring operator-rejection cluster (TB-185/184/175/231/240) is
-the precise anti-pattern abstention prevents. Empty-cycles signal
-will continue to advance focus-2 toward `roadmap_complete` unless
-the operator extends the roadmap first.
+0 proposals — third consecutive empty-cycle abstention.
