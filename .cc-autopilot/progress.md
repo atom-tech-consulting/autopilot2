@@ -1060,3 +1060,9 @@
 - **Summary:** Added docs-drift gate for `.cc-autopilot/env` template: extended `ENV_TEMPLATE` with three commented entries (`AP2_ATTENTION_IMMEDIATE_PUSH`, `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`, `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`), declared `_TEMPLATE_EXEMPT_KNOBS` frozenset with 38 entries each carrying a `# reason:` comment, and added `test_every_env_knob_in_template_or_exempt` to `ap2/tests/test_docs_drift.py`. Full test suite 2176 passes.
 - **Files:** ap2/init.py, ap2/tests/test_docs_drift.py
 - **Tests:** pass
+
+## [2026-05-27] TB-308: Reject briefings that list TASK_AGENT_FENCED_PATHS in `## Scope`
+- **Commit:** `5a29e2f`
+- **Summary:** Added _validate_no_fenced_paths_in_scope as briefing-validator check #7 (after TB-171 manual-bullet, before TB-235 dep-coherence); rejects briefings whose `## Scope` codespans a TASK_AGENT_FENCED_PATHS entry, with per-path operator-CLI hints (ap2 cron edit / ap2 update-goal / operator queue / etc.). Also narrowed the TB-170 skip_goal_alignment early-return so structural-soundness checks (manual-bullet, fenced-paths, dep-coherence) run regardless, matching the docstring's documented intent. Ten new pin tests cover positive reject, agent-writable pass, Out-of-scope tolerance, leading-slash normalization, directory-fence prefix matching, fix-hint map entries, skip_goal_alignment interaction, false-positive guard, helper-direct unit, and an end-to-end queue-append no-leak boundary test. `uv run pytest -q ap2/tests/` passes (2187 tests).
+- **Files:** ap2/briefing_validators.py, ap2/tests/test_briefing_validators.py
+- **Tests:** pass
