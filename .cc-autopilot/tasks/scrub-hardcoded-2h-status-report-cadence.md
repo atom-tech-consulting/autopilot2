@@ -182,3 +182,10 @@ Test docstrings (8 mentions):
 
 - Bumping the cadence further (e.g. 8h → 12h) is a separate operator
   decision; this task only closes the existing 2h→8h gap.
+## Attempts
+
+### 2026-05-27 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `! grep -rqE "\\b2h status[ -]report\\b" ap2/` — phrase "2hstatus-report" (with space or hyphen variant) no longer appea; [fail] `! grep -rqE "\\b(per|next|every)[- ]2h\\b" ap2/` — phrasevariants "per-2h", "next 2h", "every 2h", "every-2h" no longer
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260527T210715Z-TB-307.prompt.md`, `stream: .cc-autopilot/debug/20260527T210715Z-TB-307.stream.jsonl`, `messages: .cc-autopilot/debug/20260527T210715Z-TB-307.messages.jsonl`
