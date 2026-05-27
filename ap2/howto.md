@@ -916,7 +916,20 @@ asserting sentences from `ideation_state.md` after the agent finished
 writing; payload `removed_chars=<N>` byte-length delta; fires only
 when the scrubbed text differs from the agent's original — already-
 clean files are the steady-state silent no-op; the scrub is fail-safe
-by returning the input unchanged on any SDK error), `web_start`, `web_stop`,
+by returning the input unchanged on any SDK error),
+`ideation_state_scrub_error` (TB-294 — `_maybe_scrub_ideation_state`
+caught a typed `ideation_scrub.ScrubError` subclass and preserved
+the original file on disk; payload `reason=timeout|sdk_error|empty_output`
++ `duration_s` (wall-clock to the exception catch) + `error` (the
+exception message — `<ExceptionType>: <message>` for `sdk_error`,
+worker-grace message for `timeout`, fixed sentinel for `empty_output`);
+fail-open audit closes the silent-timeout blind spot the original
+TB-284 design left when the scrub SDK call hit the 60s budget on every
+production cycle — see `ap2/ideation_scrub.py` for the typed
+exception classes and the `thinking={"type": "disabled"}` SDK-options
+companion fix that eliminates the Haiku-4.5 extended-thinking
+auto-engagement that was the silent-timeout root cause),
+`web_start`, `web_stop`,
 `env_reloaded` (TB-271 — daemon `_tick` re-sourced `.cc-autopilot/env`
 at tick-top and detected at least one knob whose value changed; payload
 `changed` / `hot` / `fixed` / `other` knob lists; mutates the tunable

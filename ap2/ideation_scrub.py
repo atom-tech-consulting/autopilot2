@@ -67,6 +67,51 @@ _SCRUB_TIMEOUT_S = 60.0
 _SCRUB_MAX_TURNS = 2
 
 
+# TB-294: typed exception classes raised by ``scrub_exhaustion_language``
+# on the three failure modes the caller distinguishes for the
+# ``ideation_state_scrub_error`` audit event. Coarser-grained than a
+# single ``ScrubError`` with a ``reason`` attribute because the test
+# seam is cleaner (each path is patched + asserted in isolation) and the
+# operator-facing payload field ``reason`` mirrors the exception type
+# 1:1 (``ScrubTimeoutError`` → ``reason=timeout``, etc.). The
+# fail-safe semantics are preserved at the caller layer
+# (``_maybe_scrub_ideation_state``): on exception the original
+# ``ideation_state.md`` content is NOT overwritten, just an audit
+# event fires so the operator sees the broken scrub instead of the
+# pre-TB-294 silent fail-open.
+class ScrubError(Exception):
+    """Base class for scrub failure modes (TB-294)."""
+
+
+class ScrubTimeoutError(ScrubError):
+    """SDK call exceeded ``_SCRUB_TIMEOUT_S`` (or the worker-join grace).
+
+    Distinguishes the timeout-specific failure mode from generic SDK
+    errors so the ``ideation_state_scrub_error reason=timeout`` audit
+    event payload accurately names the latency-class issue (separate
+    operator triage from a network / model-availability blip).
+    """
+
+
+class ScrubSDKError(ScrubError):
+    """Any non-timeout SDK / network / parse exception during the scrub call.
+
+    Wraps the underlying exception so the audit event carries the
+    failure-type name (``error=<ExceptionType>``) without exposing the
+    SDK exception hierarchy upstream.
+    """
+
+
+class ScrubEmptyOutputError(ScrubError):
+    """SDK returned an empty / whitespace-only response.
+
+    Treated as a failure (not a no-op) because preserving the original
+    is correct, but the operator needs the audit event — an empty SDK
+    response is a model-side bug or a prompt-shape regression, not the
+    intended happy path.
+    """
+
+
 _SCRUB_SYSTEM_PROMPT = (
     "You are a markdown sentence filter for an autopilot's per-cycle "
     "assessment file. Your single job: remove sentences that assert "
@@ -134,16 +179,32 @@ def scrub_exhaustion_language(text: str, *, sdk) -> str:
     ``daemon._run_control_agent`` so test paths can stub without
     monkey-patching the import.
 
-    Fail-safe by construction: on ANY exception during the SDK call —
-    timeout, network error, SDK exception, parse error, model
-    unavailable — the original ``text`` is returned unchanged. The
-    breadcrumb-vs-verdict trade-off favours structure: losing the
-    surrounding axis context to a transient API hiccup would be a
+    TB-294: raises typed exceptions on failure so the caller
+    (``ideation._maybe_scrub_ideation_state``) can distinguish the
+    three failure modes and emit the ``ideation_state_scrub_error``
+    audit event with an accurate ``reason`` field:
+
+      * ``ScrubTimeoutError`` — SDK call exceeded the inner
+        ``asyncio.wait_for`` budget or the outer worker-join grace.
+      * ``ScrubSDKError`` — any non-timeout exception during the SDK
+        call (network, parse, model unavailable, etc.). Wraps the
+        original exception's ``type(e).__name__`` in the message.
+      * ``ScrubEmptyOutputError`` — SDK returned an empty / whitespace-
+        only response. Distinct from a clean-input no-op (which
+        returns the input verbatim).
+
+    The caller catches these and writes nothing back to the file on
+    exception (fail-safe semantics preserved at the file layer — the
+    pre-TB-294 design that silently swallowed errors here moved one
+    layer up so the audit event has somewhere to fire from). The
+    breadcrumb-vs-verdict trade-off still favours structure: losing
+    the surrounding axis context to a transient API hiccup would be a
     worse outcome than failing to scrub one cycle's verdict sentences.
 
     Empty / whitespace-only input returns unchanged with NO SDK call
     (saves a roundtrip on the first-ever ideation cycle where
-    ``ideation_state.md`` may not exist yet).
+    ``ideation_state.md`` may not exist yet). This is a true happy-path
+    no-op — no exception raised.
 
     Idempotent: an already-clean input is returned byte-identical
     (well-prompted Haiku returns the input verbatim when no sentence
@@ -158,14 +219,28 @@ def scrub_exhaustion_language(text: str, *, sdk) -> str:
     prompt = _build_scrub_prompt(text)
     try:
         scrubbed = _run_scrub(sdk=sdk, prompt=prompt, model=model)
-    except Exception:  # noqa: BLE001
-        # Fail-safe: any error returns input unchanged. Never lose
-        # breadcrumbs to a transient SDK hiccup.
-        return text
+    except TimeoutError as exc:
+        # Re-raise as the typed scrub timeout so the caller can
+        # discriminate this from a generic SDK error without
+        # introspecting the exception hierarchy.
+        raise ScrubTimeoutError(str(exc)) from exc
+    except ScrubError:
+        # Already a typed scrub error (defensive — no current path
+        # raises one inside ``_run_scrub``, but if a future refactor
+        # does, pass it through unmodified rather than re-wrapping
+        # it as a generic SDK error).
+        raise
+    except Exception as exc:  # noqa: BLE001
+        # Any other exception (SDK, network, parse, model
+        # unavailable, etc.) is a generic SDK error. The audit event
+        # payload's ``error`` field carries the exception type name
+        # for operator triage.
+        raise ScrubSDKError(f"{type(exc).__name__}: {exc}") from exc
     if not scrubbed or not scrubbed.strip():
-        # Model returned nothing usable. Treat as failure: preserve
-        # the original rather than zeroing the file.
-        return text
+        # Model returned nothing usable. Treat as failure: the caller
+        # preserves the original (doesn't write the empty string back)
+        # AND fires the audit event so the operator notices.
+        raise ScrubEmptyOutputError("SDK returned empty / whitespace-only output")
     return scrubbed
 
 
@@ -198,10 +273,25 @@ def _run_scrub(*, sdk, prompt: str, model: str) -> str:
     """
 
     async def _ask() -> str:
+        # TB-294: Haiku 4.5 auto-engages extended thinking on the scrub's
+        # per-sentence DELETE/KEEP classification prompt, producing a
+        # multi-thousand-character internal reasoning trace that pushes
+        # total latency past the 60s ``_SCRUB_TIMEOUT_S`` budget (real-
+        # content 8KB input measured at 110s end-to-end). Disabling
+        # thinking yields identical output (same sentences removed,
+        # same structure preserved) at ~24s wall-clock — ~40% headroom
+        # under the existing budget. The classification task is
+        # mechanical pattern-matching against concrete rules in the
+        # system prompt; extended thinking doesn't improve verdict
+        # quality, it just spends tokens + latency on unobservable
+        # internal monologue. ``{"type": "disabled"}`` is the
+        # canonical SDK shape (matches the Anthropic API's
+        # ``thinking`` config object).
         options = sdk.ClaudeAgentOptions(
             permission_mode="bypassPermissions",
             max_turns=_SCRUB_MAX_TURNS,
             model=model,
+            thinking={"type": "disabled"},
         )
         text = ""
         async for msg in sdk.query(prompt=prompt, options=options):

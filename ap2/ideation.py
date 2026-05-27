@@ -461,7 +461,7 @@ def load_prompt(cfg: Config) -> str:
 
 
 def _maybe_scrub_ideation_state(cfg: Config, sdk) -> None:
-    """TB-284: scrub exhaustion language from ``ideation_state.md``.
+    """TB-284 / TB-294: scrub exhaustion language from ``ideation_state.md``.
 
     Reads the file the ideation control-agent just wrote, runs it
     through ``ideation_scrub.scrub_exhaustion_language``, and overwrites
@@ -471,14 +471,24 @@ def _maybe_scrub_ideation_state(cfg: Config, sdk) -> None:
     (an already-clean file is the steady-state happy path once the
     scrub has trained the file's content shape).
 
+    TB-294: catches the typed scrub failure exceptions
+    (``ScrubTimeoutError`` / ``ScrubSDKError`` /
+    ``ScrubEmptyOutputError``) and emits ``ideation_state_scrub_error``
+    so the operator sees a broken scrub instead of the pre-TB-294
+    silent fail-open. The file is NOT overwritten on the error path —
+    fail-safe semantics from TB-284 are preserved at this layer.
+
     Fail-safe at every layer:
       - File missing (first-ever cycle / agent skipped the write) →
         silent return.
       - File unreadable / unwritable → silent return (the next cycle
         will retry against the next agent write).
-      - SDK error inside ``scrub_exhaustion_language`` → that helper
-        returns the input unchanged; we observe no diff and emit
-        nothing.
+      - Typed scrub exception (``ScrubError`` subclass) → emit
+        ``ideation_state_scrub_error`` with the matching ``reason``
+        (``timeout`` / ``sdk_error`` / ``empty_output``) + wall-clock
+        ``duration_s`` and (for the non-timeout paths) ``error``
+        carrying the exception type name. Original file preserved on
+        disk.
 
     Lazy import of ``ideation_scrub`` mirrors the lazy-import pattern
     used elsewhere in this module (`from . import daemon as _daemon`,
@@ -496,7 +506,36 @@ def _maybe_scrub_ideation_state(cfg: Config, sdk) -> None:
     if not original.strip():
         return
     from . import ideation_scrub
-    scrubbed = ideation_scrub.scrub_exhaustion_language(original, sdk=sdk)
+    started = time.monotonic()
+    try:
+        scrubbed = ideation_scrub.scrub_exhaustion_language(original, sdk=sdk)
+    except ideation_scrub.ScrubTimeoutError as exc:
+        events.append(
+            cfg.events_file,
+            "ideation_state_scrub_error",
+            reason="timeout",
+            duration_s=round(time.monotonic() - started, 3),
+            error=str(exc),
+        )
+        return
+    except ideation_scrub.ScrubSDKError as exc:
+        events.append(
+            cfg.events_file,
+            "ideation_state_scrub_error",
+            reason="sdk_error",
+            duration_s=round(time.monotonic() - started, 3),
+            error=str(exc),
+        )
+        return
+    except ideation_scrub.ScrubEmptyOutputError as exc:
+        events.append(
+            cfg.events_file,
+            "ideation_state_scrub_error",
+            reason="empty_output",
+            duration_s=round(time.monotonic() - started, 3),
+            error=str(exc),
+        )
+        return
     if scrubbed == original:
         # Steady-state happy path: the file was already clean (or the
         # SDK returned the input verbatim because no sentence matched

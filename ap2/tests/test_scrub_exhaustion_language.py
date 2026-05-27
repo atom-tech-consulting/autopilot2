@@ -1,15 +1,21 @@
-"""TB-284: post-write scrub strips exhaustion language from ideation_state.md.
+"""TB-284 / TB-294: post-write scrub strips exhaustion language from ideation_state.md.
 
 Pins:
 
 - ``scrub_exhaustion_language(text, *, sdk)`` returns the SDK's
-  scrubbed text on success, the input verbatim on a clean file, and
-  the input unchanged on any SDK error (fail-safe).
+  scrubbed text on success. On failure it raises a typed
+  ``ideation_scrub.ScrubError`` subclass (``ScrubTimeoutError`` /
+  ``ScrubSDKError`` / ``ScrubEmptyOutputError``) — TB-294 surfaced
+  the silent fail-open the prior return-input-unchanged contract
+  introduced. The caller layer (``_maybe_scrub_ideation_state``)
+  preserves the original file on disk in every exception path.
 - The integration helper ``ideation._maybe_scrub_ideation_state``
   reads the file the agent just wrote, runs the scrub, overwrites
   only when the scrubbed text differs, and emits
   ``ideation_state_scrubbed removed_chars=<N>`` on a successful
-  modification.
+  modification. On any typed scrub failure it emits
+  ``ideation_state_scrub_error`` (TB-294) with the matching
+  ``reason``.
 - The ``focus_exhausted`` self-skip predicate in
   ``ap2/ideation.py`` is fully gone — the only ``ideation_skipped``
   reason ``_maybe_ideate`` emits today is ``roadmap_complete``;
@@ -18,6 +24,11 @@ Pins:
 - The ``AP2_IDEATION_SCRUB_MODEL`` env knob overrides
   ``DEFAULT_SCRUB_MODEL`` and threads through into the
   ``ClaudeAgentOptions(model=...)`` call.
+- TB-294: ``thinking={"type": "disabled"}`` is wired into the
+  ``ClaudeAgentOptions(...)`` call so Haiku 4.5 does not
+  auto-engage extended thinking on the scrub's per-sentence
+  classification prompt (the root cause of the 60s-timeout silent
+  fail-open observed in production cycles).
 """
 from __future__ import annotations
 
@@ -35,6 +46,9 @@ from ap2.config import Config
 from ap2.cron import save_state
 from ap2.ideation_scrub import (
     DEFAULT_SCRUB_MODEL,
+    ScrubEmptyOutputError,
+    ScrubSDKError,
+    ScrubTimeoutError,
     scrub_exhaustion_language,
 )
 
@@ -140,17 +154,23 @@ def test_scrub_clean_state_is_byte_identical_noop():
     assert out == clean
 
 
-def test_scrub_llm_error_returns_input_unchanged():
-    """LLM-error path → returns input unchanged (fail-safe).
+def test_scrub_llm_error_raises_typed_sdk_error():
+    """TB-294: LLM-error path → raises ``ScrubSDKError``.
 
-    Structure (axis breadcrumbs, proposed-task lists, factual
-    observations) is more valuable to keep than verdict sentences are
-    to remove on any single cycle.
+    Pre-TB-294 this returned the input unchanged silently. The new
+    contract surfaces a typed exception so the caller
+    (``_maybe_scrub_ideation_state``) can emit the
+    ``ideation_state_scrub_error reason=sdk_error`` audit event.
+    The file-layer fail-safe (original preserved on disk) lives at
+    the caller, not inside ``scrub_exhaustion_language``.
     """
     original = "## Current focus assessment\n\nany content here."
     sdk = _make_failing_sdk(RuntimeError("network blew up"))
-    out = scrub_exhaustion_language(original, sdk=sdk)
-    assert out == original
+    with pytest.raises(ScrubSDKError) as excinfo:
+        scrub_exhaustion_language(original, sdk=sdk)
+    # Exception type name appears in the wrapped message — used by
+    # the audit event's `error` payload field for operator triage.
+    assert "RuntimeError" in str(excinfo.value)
 
 
 def test_scrub_empty_input_returns_empty_without_calling_sdk():
@@ -167,16 +187,18 @@ def test_scrub_empty_input_returns_empty_without_calling_sdk():
     assert calls == [], "SDK should not have been called on empty input"
 
 
-def test_scrub_empty_sdk_response_returns_input_unchanged():
-    """If the SDK returns an empty / whitespace response, fall back to input.
+def test_scrub_empty_sdk_response_raises_typed_empty_output_error():
+    """TB-294: empty / whitespace SDK response → raises ``ScrubEmptyOutputError``.
 
     A model that returned nothing usable would otherwise zero the
-    state file — worst possible outcome. Preserve the original.
+    state file — worst possible outcome. The caller layer preserves
+    the original on disk; this test pins the typed exception so the
+    audit event fires with ``reason=empty_output``.
     """
     original = "## Current focus assessment\n\n- **Focus A**\n  - Gaps: x.\n"
     sdk = _make_fake_sdk("   \n\n  ")
-    out = scrub_exhaustion_language(original, sdk=sdk)
-    assert out == original
+    with pytest.raises(ScrubEmptyOutputError):
+        scrub_exhaustion_language(original, sdk=sdk)
 
 
 def test_scrub_threads_default_model_into_options():
@@ -210,6 +232,25 @@ def test_scrub_model_env_knob_empty_falls_back_to_default(monkeypatch):
     sdk = _make_fake_sdk("scrubbed", calls=calls)
     scrub_exhaustion_language("some text\n", sdk=sdk)
     assert calls[0]["options"].kwargs["model"] == DEFAULT_SCRUB_MODEL
+
+
+def test_scrub_threads_thinking_disabled_into_options():
+    """TB-294: `thinking={"type": "disabled"}` flows into ClaudeAgentOptions.
+
+    Disabling extended thinking on the Haiku-4.5 scrub call is the
+    load-bearing fix for the production silent-timeout failure mode:
+    Haiku auto-engages thinking on the per-sentence classification
+    prompt and produces a multi-thousand-character internal reasoning
+    trace, blowing past the 60s `_SCRUB_TIMEOUT_S` budget. Pin the
+    kwarg here so a future SDK-options refactor that drops it trips
+    this test, not a production cycle.
+    """
+    calls: list = []
+    sdk = _make_fake_sdk("scrubbed", calls=calls)
+    scrub_exhaustion_language("some text\n", sdk=sdk)
+    assert len(calls) == 1
+    opts = calls[0]["options"]
+    assert opts.kwargs["thinking"] == {"type": "disabled"}
 
 
 # ---------------------------------------------------------------------------
@@ -289,8 +330,17 @@ def test_maybe_scrub_no_event_when_scrub_is_noop(tmp_path):
     assert "ideation_state_scrubbed" not in kinds
 
 
-def test_maybe_scrub_no_event_when_sdk_errors(tmp_path):
-    """Integration: SDK error → scrub returns input unchanged, no event."""
+def test_maybe_scrub_emits_scrub_error_event_when_sdk_errors(tmp_path):
+    """TB-294: SDK error → file preserved, `ideation_state_scrub_error` fires.
+
+    Pre-TB-294 the integration test asserted no event fired (silent
+    fail-open). The new contract fires
+    `ideation_state_scrub_error reason=sdk_error` with the wrapped
+    exception type in the `error` payload field so the operator can
+    see broken scrub cycles in the events.jsonl stream / status report.
+    The fail-safe semantics from TB-284 are preserved: the original
+    file content is NOT overwritten.
+    """
     cfg = _make_cfg(tmp_path)
     target = cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     original = "## Current focus assessment\n\n- **Focus A**\n  - Gaps: x.\n"
@@ -302,6 +352,15 @@ def test_maybe_scrub_no_event_when_sdk_errors(tmp_path):
     assert target.read_text() == original
     kinds = [e["type"] for e in events_module.tail(cfg.events_file, 20)]
     assert "ideation_state_scrubbed" not in kinds
+    assert "ideation_state_scrub_error" in kinds
+    err_evt = next(
+        e for e in events_module.tail(cfg.events_file, 20)
+        if e["type"] == "ideation_state_scrub_error"
+    )
+    assert err_evt["reason"] == "sdk_error"
+    assert "RuntimeError" in err_evt["error"]
+    assert "duration_s" in err_evt
+    assert isinstance(err_evt["duration_s"], (int, float))
 
 
 def test_maybe_scrub_missing_file_is_silent_noop(tmp_path):

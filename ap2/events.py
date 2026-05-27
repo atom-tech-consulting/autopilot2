@@ -251,6 +251,34 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     that primed the next cycle toward repeating "we're nearly done"
     framing. See `ap2/ideation_scrub.py` for the prompt contract and
     the fail-safe-by-returning-input-unchanged design.
+  - `ideation_state_scrub_error` (TB-294) — fail-open audit event
+    fired when `_maybe_scrub_ideation_state` catches a typed
+    `ideation_scrub.ScrubError` subclass and preserves the original
+    `ideation_state.md` content on disk. Closes the silent fail-open
+    blind spot the TB-284 design left behind: the scrub had been
+    timing out on every production cycle without surfacing any
+    signal, allowing exhaustion-asserting sentences to persist
+    across cycles and prime ideation toward declaring the focus
+    done. Payload: `reason` (one of `timeout` — `ScrubTimeoutError`
+    from the SDK exceeding `_SCRUB_TIMEOUT_S` / worker-join grace;
+    `sdk_error` — `ScrubSDKError` wrapping any other exception
+    raised inside the scrub call; `empty_output` —
+    `ScrubEmptyOutputError` from the SDK returning a blank /
+    whitespace-only response), `duration_s` (wall-clock seconds
+    from the scrub call's start to the exception catch — sizes the
+    `_SCRUB_TIMEOUT_S` knob against observed failure latency the
+    same way `validator_judge_timeout` sizes its own budget), and
+    `error` (the exception's stringified message — for `timeout`
+    this is the worker-grace message; for `sdk_error` this is
+    `<ExceptionType>: <message>` from the wrapped underlying
+    exception; for `empty_output` this is a fixed sentinel string).
+    No counterpart `auto_unfreeze` / `operator_ack` resolution —
+    the audit event is purely informational, the scrub itself is
+    fail-safe by preserving the input. Companion to the
+    `thinking={"type": "disabled"}` SDK-options fix in
+    `ap2/ideation_scrub.py::_run_scrub` that eliminates the
+    Haiku-4.5 extended-thinking auto-engagement that was the root
+    cause of the silent timeouts.
   - `cron_skipped` (TB-128 + TB-281) — status-report cron run was
     suppressed pre-flight. Carries `job="status-report"`, `trigger`
     (`cron` or `chat`), and a `reason` field naming which gate
