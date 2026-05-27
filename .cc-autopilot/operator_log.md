@@ -250,3 +250,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-27T06:33:52Z — operator rewound focus pointer ((unknown) → operator-legible reporting and monitoring): arc complete; re-engaging to verify post-fix behavior + let ideation propose remaining axes (web /attention page, immediate-MM push, etc.)
 - 2026-05-27T13:07:09Z — applied operator-queued add_backlog → TB-300
 - 2026-05-27T13:30:06Z — applied operator-queued add_backlog → TB-301
+- 2026-05-27T13:52:44Z — applied operator-queued unfreeze → TB-300
