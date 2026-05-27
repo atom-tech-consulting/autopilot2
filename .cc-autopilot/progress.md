@@ -1042,3 +1042,9 @@
 - **Summary:** Removed `_append_decisions_needed_bullet` call from the roadmap-complete branch of `ap2/focus_advance.py:_maybe_advance_focus`; kept the `roadmap_complete` event emission + `pointer['roadmap_complete_emitted']=True` mutation. Updated module + function docstrings to document the TB-302 behavior change (no bullet write; pointer-driven `ap2 status` focus line is canonical). Added regression-pin module `ap2/tests/test_roadmap_complete_no_bullet_append.py` covering event-still-fires, no-create / no-modify invariants on ideation_state.md, subsequent-tick short-circuit, kill-switch-still-writes-bullet invariant, and source-level grep pins. Updated existing `test_roadmap_complete_event_on_exhaustion` to assert absence rather than presence of the bullet. Full `uv run pytest -q ap2/tests/` passes (2175 tests, 91s).
 - **Files:** ap2/focus_advance.py, ap2/tests/test_tb226_focus_rotation.py, ap2/tests/test_roadmap_complete_no_bullet_append.py
 - **Tests:** pass
+
+## [2026-05-27] TB-303: Documentation sweep: README.md + architecture.md + howto.md updates for today's arc
+- **Commit:** `05143c7`
+- **Summary:** Closed 9 surgical doc-staleness gaps across ap2/README.md (CLI row for ap2 rewind-focus, lifecycle + state-observability event additions, IDEATION_TOOLS narrative), ap2/architecture.md (Ideation Tools cell, IDEATION_TOOLS code-block definition, roadmap-exhaustion ap2 rewind-focus recovery note, ~349 tests → 2000+), and ap2/howto.md (counter-semantics paragraph rewrite naming both ideation_complete/ideation_cycle_summary exit markers; trigger-field comment updated to the two-value vocabulary). All 9 grep verifications pass; full suite 2175 tests pass.
+- **Files:** ap2/README.md, ap2/architecture.md, ap2/howto.md
+- **Tests:** pass

@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-303** **Documentation sweep: README.md + architecture.md + howto.md updates for today's arc** `#autopilot` `#docs` `#regression-pin` [→ brief](.cc-autopilot/tasks/documentation-sweep-readme-md-architectu.md)
 
 ## Pipeline Pending
 
@@ -189,5 +188,6 @@
 - [x] **TB-301** **Fix time-bombed render_attention_section test via now= injection seam** `#autopilot` `#attention` `#status-report` `#testing` `#regression-pin` `#bug` `@blocked:TB-282` [→ brief](.cc-autopilot/tasks/fix-time-bombed-render-attention-section.md)
 - [x] **TB-300** **Empty-cycles counter must recognize `ideation_cycle_summary` as exit marker** `#autopilot` `#empty-cycles` `#focus-advance` `#counter` `#bug` `#regression-pin` `@blocked:TB-292` [→ brief](.cc-autopilot/tasks/empty-cycles-counter-must-recognize-idea.md)
 - [x] **TB-302** **Stop appending roadmap_complete bullet to ideation_state.md (focus line is already redundant)** `#autopilot` `#focus-advance` `#ideation-state` `#priming` `#commit-hygiene` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/stop-appending-roadmap-complete-bullet-t.md)
+- [x] **TB-303** **Documentation sweep: README.md + architecture.md + howto.md updates for today's arc** `#autopilot` `#docs` `#regression-pin` [→ brief](.cc-autopilot/tasks/documentation-sweep-readme-md-architectu.md)
 
 ## Frozen
