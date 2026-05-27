@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-305** **Docs-drift gate for `.cc-autopilot/env` template + exemption set** `#autopilot` `#docs` `#ci` `#regression-pin` [→ brief](.cc-autopilot/tasks/docs-drift-gate-for-cc-autopilot-env-tem.md)
 
 ## Pipeline Pending
 
@@ -191,5 +190,6 @@
 - [x] **TB-302** **Stop appending roadmap_complete bullet to ideation_state.md (focus line is already redundant)** `#autopilot` `#focus-advance` `#ideation-state` `#priming` `#commit-hygiene` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/stop-appending-roadmap-complete-bullet-t.md)
 - [x] **TB-303** **Documentation sweep: README.md + architecture.md + howto.md updates for today's arc** `#autopilot` `#docs` `#regression-pin` [→ brief](.cc-autopilot/tasks/documentation-sweep-readme-md-architectu.md)
 - [x] **TB-304** **Document scripts/monitor_events.py in ap2/howto.md** `#autopilot` `#docs` `#monitoring` `#regression-pin` [→ brief](.cc-autopilot/tasks/document-scripts-monitor-events-py-in-ap.md)
+- [x] **TB-305** **Docs-drift gate for `.cc-autopilot/env` template + exemption set** `#autopilot` `#docs` `#ci` `#regression-pin` [→ brief](.cc-autopilot/tasks/docs-drift-gate-for-cc-autopilot-env-tem.md)
 
 ## Frozen

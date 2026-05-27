@@ -1054,3 +1054,9 @@
 - **Summary:** Added a 28-line "Live event tail — scripts/monitor_events.py" subsection to ap2/howto.md between the `ap2 logs --json` one-shot tail and the `ap2 web` visual dashboard in the Operator-question playbook; covers what the script does, when to use it (complements `ap2 logs -n` and `ap2 status`), three usage examples mirroring the script docstring, output line shape, and the KEEP-allowlist edit note. Both grep verification bullets pass and uv run pytest -q is green (2175 passed).
 - **Files:** ap2/howto.md
 - **Tests:** pass
+
+## [2026-05-27] TB-305: Docs-drift gate for `.cc-autopilot/env` template + exemption set
+- **Commit:** `71ee002`
+- **Summary:** Added docs-drift gate for `.cc-autopilot/env` template: extended `ENV_TEMPLATE` with three commented entries (`AP2_ATTENTION_IMMEDIATE_PUSH`, `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`, `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`), declared `_TEMPLATE_EXEMPT_KNOBS` frozenset with 38 entries each carrying a `# reason:` comment, and added `test_every_env_knob_in_template_or_exempt` to `ap2/tests/test_docs_drift.py`. Full test suite 2176 passes.
+- **Files:** ap2/init.py, ap2/tests/test_docs_drift.py
+- **Tests:** pass
