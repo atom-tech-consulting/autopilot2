@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-301** **Fix time-bombed render_attention_section test via now= injection seam** `#autopilot` `#attention` `#status-report` `#testing` `#regression-pin` `#bug` `@blocked:TB-282` [→ brief](.cc-autopilot/tasks/fix-time-bombed-render-attention-section.md)
 
 ## Pipeline Pending
 
@@ -186,6 +185,7 @@
 - [x] **TB-297** **Immediate Mattermost push on `attention_raised` emission (opt-in, conservative-default, reuses TB-282 debounce) — TB-282 Out-of-scope L119-122 closure** `#autopilot` `#mattermost` `#attention` `#operator-legible` `#monitoring` `#push-surface` `#opt-in` `@blocked:TB-282,TB-280` — Add opt-in `AP2_ATTENTION_IMMEDIATE_PUSH` env knob (default off) that posts a one-line Mattermost message to `AP2_MM_CHANNELS[0]` when `_maybe_emit_attention_events` emits an `attention_raised` event. Per-(type, key) debounce reuses TB-282 contract; `attention_pushed` event audits each post; missing-destination handled like the watchdog. Closes TB-282 Out-of-scope L119-122; operator-named axis in 2026-05-27T06:33:52Z rewind reason. [→ brief](.cc-autopilot/tasks/immediate-mattermost-push-on-attention-r.md)
 - [x] **TB-298** **`ap2 status` CLI: surface active attention conditions (text + JSON parity with /attention pull page)** `#autopilot` `#cli` `#status` `#attention` `#operator-legible` `#monitoring` `#regression-pin` — Add a CLI-side surface for current `detect_attention_conditions(cfg)` output to `ap2 status` so the walk-away operator polling via terminal sees active attention conditions without browser or chat — mirrors the TB-296 `/attention` web pull page on the CLI side. [→ brief](.cc-autopilot/tasks/ap2-status-cli-surface-active-attention.md)
 - [x] **TB-299** **Web home page: `_render_attention_card` sibling — surface active attention conditions alongside focus/automation cards** `#autopilot` `#web` `#attention` `#operator-legible` `#monitoring` `#observability` `#regression-pin` — Add a home-page `## Attention` summary card that mirrors the TB-296 `/attention` pull page (per-condition bullets + link-through) so an operator landing on `/` sees active attention conditions at-a-glance without first discovering the nav link — closes the home-page entry-point side of focus-2 Progress signal #3. [→ brief](.cc-autopilot/tasks/web-home-page-render-attention-card-sibl.md)
+- [x] **TB-301** **Fix time-bombed render_attention_section test via now= injection seam** `#autopilot` `#attention` `#status-report` `#testing` `#regression-pin` `#bug` `@blocked:TB-282` [→ brief](.cc-autopilot/tasks/fix-time-bombed-render-attention-section.md)
 
 ## Frozen
 

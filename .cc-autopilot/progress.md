@@ -1024,3 +1024,9 @@
 - **Summary:** Added _render_attention_card sibling to ap2/web_home.py (warn-glyph + bold TB-N + em-dash + summary shape; per-task TB-N wraps a /task/<TB-N> link; 3-bullet inline cap with `(+M more — see /attention)` link-tail; omit-on-empty discipline mirrors focus/automation siblings; detector-exception swallow renders a tinted attention-card-error notice). Wired into _render_home directly between focus and automation cards (operator-attention urgency ordering); re-exported from ap2/web.py. Regression-pinned in ap2/tests/test_tb299_web_home_attention.py (7 tests covering all 6 briefing scope checks); full ap2/tests/ suite 2158 passed.
 - **Files:** ap2/web_home.py, ap2/web.py, ap2/tests/test_tb299_web_home_attention.py
 - **Tests:** pass
+
+## [2026-05-27] TB-301: Fix time-bombed render_attention_section test via now= injection seam
+- **Commit:** `9c77bff`
+- **Summary:** TB-301 prior commit e3ba0ac threaded `now=` through `render_attention_section` (briefing scope items 1-5: kwarg, three updated test calls, docstring, regression-pin module). Verification gate exposed 5 further wall-clock-drift time-bombs in detector-internal code paths not named in scope; extended the same seam in 9c77bff to `_detect_auto_approve_paused` (thread `now=now` into `collect_auto_approve_state`) and `_auto_approve_check_violations` (new optional `now=` kwarg, default-None preserves prod). All 2167 ap2/tests pass (was 2162 + 5 fail).
+- **Files:** ap2/status_report.py, ap2/attention.py, ap2/auto_approve.py, ap2/tests/test_render_attention_section_now_injection.py, ap2/tests/test_tb288_attention_validator_judge_noisy.py, ap2/tests/test_tb289_attention_auto_approve_paused.py, ap2/tests/test_tb290_attention_cost_cap_approach.py
+- **Tests:** pass
