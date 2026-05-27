@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-294** **Disable extended thinking in ideation_state scrub; emit error/timeout audit event** `#autopilot` `#ideation` `#scrub` `#latency` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/disable-extended-thinking-in-ideation-st.md)
 
 ## Pipeline Pending
 
@@ -180,6 +179,7 @@
 - [x] **TB-292** **Restructure empty-cycles counter to cycle-grouped semantics** `#autopilot` `#empty-cycles` `#focus-advance` `#counter` `#bug` `#regression-pin` [→ brief](.cc-autopilot/tasks/restructure-empty-cycles-counter-to-cycl.md)
 - [x] **TB-290** **`cost_cap_approach` attention detector — pre-trip window-cap-approach surface (TB-282 follow-up closing Progress signal #3 "cost anomalies" leg pre-trip path)** `#autopilot` `#attention` `#operator-legible` `#monitoring` `#auto-approve` `#cost` `#axis-3` `#status-report` `#regression-pin` — Add `_detect_cost_cap_approach` to `ap2/attention.py`: when the rolling 24h auto-approved token sum (same walk as `auto_approve._auto_approve_check_violations` window-cap branch) is ≥ `AP2_AUTO_APPROVE_COST_APPROACH_PCT * AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` AND below the cap, surface a single `## Attention needed` bullet so the operator gets a pre-trip nudge before the post-trip pause-reason bullet fires. Pre-trip companion to the post-trip pause surface; closes the "cost anomalies" leg of focus-2 Progress signal #3. [→ brief](.cc-autopilot/tasks/cost-cap-approach-attention-detector-pre.md)
 - [x] **TB-293** **Queue-drain `add_backlog` handler must run auto-approve gate (closes review-token stranding)** `#autopilot` `#auto-approve` `#operator-queue` `#regression-pin` `#bug` `@blocked:TB-232,TB-188` [→ brief](.cc-autopilot/tasks/queue-drain-add-backlog-handler-must-run.md)
+- [x] **TB-294** **Disable extended thinking in ideation_state scrub; emit error/timeout audit event** `#autopilot` `#ideation` `#scrub` `#latency` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/disable-extended-thinking-in-ideation-st.md)
 
 ## Frozen
 
