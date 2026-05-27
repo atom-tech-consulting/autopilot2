@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-301** **Fix time-bombed render_attention_section test via now= injection seam** `#autopilot` `#attention` `#status-report` `#testing` `#regression-pin` `#bug` `@blocked:TB-282` [→ brief](.cc-autopilot/tasks/fix-time-bombed-render-attention-section.md)
 
 ## Pipeline Pending
 
