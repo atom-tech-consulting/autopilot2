@@ -277,6 +277,163 @@ _MANUAL_BULLET_RE = re.compile(
 )
 
 
+# TB-308: codespan extraction pattern. Matches either a double-backtick
+# fence (`` `path` ``) or a single-backtick fence (`` `path` ``); the
+# alternation order matters so the double-fence form binds before the
+# single-fence form on inputs like `` `foo` ``. Captures the body
+# (without backticks) for substring-matching against
+# TASK_AGENT_FENCED_PATHS. Path tokens may have a leading slash
+# (`/.cc-autopilot/cron.yaml`); the validator strips it before
+# comparing.
+_CODESPAN_RE = re.compile(r"``([^`]+)``|`([^`]+)`")
+
+
+# TB-308: operator-CLI alternatives for each fenced path that has one.
+# A briefing whose `## Scope` lists one of these gets a tailored hint
+# pointing at the right CLI surface; paths absent from this map fall
+# back to "move to `## Out of scope`" (the default suggested-fix).
+# Co-located with the helper rather than module-level so the map is
+# trivially traceable from the rejection-site comment to the entry.
+_FENCED_PATH_FIX_HINTS: dict[str, str] = {
+    ".cc-autopilot/cron.yaml": (
+        "use `ap2 cron edit <action> <name> [...]` (operator-CLI-only "
+        "surface for cron.yaml; no agent toolset carries `cron_edit` "
+        "post-TB-146)"
+    ),
+    "goal.md": (
+        "use `ap2 update-goal --file <path>` (the operator-CLI surface "
+        "for goal.md edits; ideation reads goal.md for grounding so a "
+        "task can't rewrite its own constraints)"
+    ),
+    "TASKS.md": (
+        "use the operator queue (`ap2 add` / `ap2 unfreeze` / "
+        "`ap2 approve` / `ap2 delete` / etc.); TASKS.md is rendered "
+        "from board state, not hand-edited"
+    ),
+    "CLAUDE.md": (
+        "edit manually as the operator — there's no CLI surface "
+        "(project-owned scratch file; the daemon only bumps "
+        "`Next task ID`)"
+    ),
+    ".cc-autopilot/operator_log.md": (
+        "the operator owns this via `ap2 ack` and the Mattermost handler "
+        "appends via `operator_log_append`; agents cannot author entries"
+    ),
+}
+
+
+def _matches_fenced_path(token: str, fenced: str) -> bool:
+    """TB-308: does `token` (a backtick-stripped path codespan) reference
+    the fenced entry `fenced` (a `TASK_AGENT_FENCED_PATHS` element)?
+
+    Exact match always counts. Directory entries (last path segment has
+    no `.` extension — `.cc-autopilot/tasks`,
+    `.cc-autopilot/ideation_proposals`) additionally match any path
+    inside them (e.g. a Scope bullet listing
+    `.cc-autopilot/tasks/foo.md` flags the directory fence). Exact-match
+    is the conservative default per the briefing's Design note
+    ("Start with exact-codespan match; a fuzzier follow-up can land if
+    false-negatives surface").
+    """
+    if token == fenced:
+        return True
+    last_seg = fenced.rsplit("/", 1)[-1]
+    if "." not in last_seg:
+        # `fenced` names a directory — anything under it counts too.
+        if token.startswith(fenced.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def _validate_no_fenced_paths_in_scope(briefing_text: str) -> str | None:
+    """TB-308: reject a briefing whose `## Scope` body backticks a
+    `TASK_AGENT_FENCED_PATHS` entry.
+
+    A task agent's SDK call wires `Edit(<path>)` + `Write(<path>)` into
+    `--disallowedTools` for every entry in `TASK_AGENT_FENCED_PATHS`
+    (`ap2/daemon.py::_task_disallowed_tools`). A Scope bullet that lists
+    a fenced path is structurally unsatisfiable: the agent cannot edit
+    the file, the unattended verifier marks the bullet as fail, and the
+    daemon's retry-then-freeze loop burns dispatches until
+    `retry_exhausted`. Hit live on TB-306 (which listed
+    `.cc-autopilot/cron.yaml` in Scope and burned ~5 dispatches +
+    ~$7 in tokens before the operator manually closed the task). This
+    check pre-empts the failure mode at queue-append time, mirroring
+    TB-171's manual-bullet rejection shape.
+
+    Scan is scoped to `## Scope` only — mentions of fenced paths in
+    `## Design`, `## Verification`, or `## Why now` prose are
+    legitimate ("the daemon's cron.yaml ticks every N seconds" /
+    "grep cron.yaml content"), the agent reads but doesn't edit those.
+    `## Out of scope` is also unscanned by design — that's exactly
+    where fenced-path work belongs.
+
+    Returns the first match's error string (so the operator sees one
+    concrete fix at a time), or None if Scope is clean. The error
+    message names the offending path verbatim, references
+    `TASK_AGENT_FENCED_PATHS` (the audit anchor), and includes an
+    operator-CLI suggestion from `_FENCED_PATH_FIX_HINTS` when one
+    exists; paths without a CLI alternative get the default
+    "move to `## Out of scope`" hint.
+    """
+    # Lazy import — `tools.py` loads this module part-way through its
+    # own import block (`tools.py:86`), so a module-scope
+    # `from .tools import TASK_AGENT_FENCED_PATHS` would resolve against
+    # a partially-loaded tools module and ImportError on first load.
+    # The function-scope import binds at call time, by which point
+    # tools.py has finished loading. The grep-bullet pin
+    # (`grep -q "TASK_AGENT_FENCED_PATHS" ap2/briefing_validators.py`)
+    # is satisfied either way; correctness drives the placement choice.
+    from .tools import TASK_AGENT_FENCED_PATHS
+
+    # Walk the text line-by-line to delimit `## Scope` rather than
+    # use `_briefing_section_body` — the same rationale as the TB-171
+    # manual-bullet check: the body extractor's heading regex has a
+    # trailing `\s*$` that can greedy-consume the newline + first
+    # body character on some inputs. Line-by-line walking is exact.
+    _scope_heading = re.compile(r"^##[ \t]+Scope\b", re.IGNORECASE)
+    _next_heading = re.compile(r"^##[ \t]+")
+    in_scope = False
+    scope_lines: list[str] = []
+    for line in briefing_text.splitlines():
+        if _scope_heading.match(line):
+            in_scope = True
+            continue
+        if in_scope and _next_heading.match(line):
+            break
+        if in_scope:
+            scope_lines.append(line)
+    if not scope_lines:
+        return None
+    scope_body = "\n".join(scope_lines)
+
+    for m in _CODESPAN_RE.finditer(scope_body):
+        token_raw = (m.group(1) or m.group(2) or "").strip()
+        if not token_raw:
+            continue
+        # Strip a leading slash so `/.cc-autopilot/cron.yaml` matches
+        # `.cc-autopilot/cron.yaml` in the canonical list (operators
+        # sometimes write paths as absolute-from-repo-root for clarity).
+        normalized = token_raw.lstrip("/")
+        for fenced in TASK_AGENT_FENCED_PATHS:
+            if _matches_fenced_path(normalized, fenced):
+                hint = _FENCED_PATH_FIX_HINTS.get(
+                    fenced,
+                    "move this work to `## Out of scope` and let the "
+                    "operator handle the fenced path manually — no "
+                    "CLI alternative exists for this entry",
+                )
+                return (
+                    "briefing structure invalid: `## Scope` references "
+                    f"`{token_raw}` which is in TASK_AGENT_FENCED_PATHS "
+                    "(the task agent's SDK --disallowedTools includes "
+                    f"Edit/Write on this path). {hint}. Move the "
+                    "agent-uncoverable work to `## Out of scope` "
+                    "(TB-308)."
+                )
+    return None
+
+
 def _why_now_paragraph(goal_body: str) -> str | None:
     """Return the trailing paragraph attached to a line-anchored
     "Why now" marker inside `goal_body`, or None when no marker matches.
@@ -659,8 +816,8 @@ def _validate_briefing_structure(
     events_file: "Path | None" = None,
     dep_judge_fn=None,
 ) -> str | None:
-    """TB-154 + TB-161 + TB-164 + TB-171 + TB-235: structural gate for a
-    freshly-authored briefing.
+    """TB-154 + TB-161 + TB-164 + TB-171 + TB-308 + TB-235: structural
+    gate for a freshly-authored briefing.
 
     A briefing is structurally valid when:
       1. It contains every section in `BRIEFING_REQUIRED_SECTIONS` at
@@ -710,7 +867,28 @@ def _validate_briefing_structure(
          Out-of-scope bullets are unaffected — only the `## Verification`
          body is scanned. Match is case-insensitive (covers `Manual:`,
          `manual:`, `[Manual]`, `[manual]`, etc.).
-      7. (TB-235) When `blocked_csv` is supplied (the caller is a real
+      7. (TB-308) The `## Scope` body must NOT codespan any path in
+         `TASK_AGENT_FENCED_PATHS`. A Scope bullet that lists a fenced
+         path is structurally unsatisfiable: the task agent's SDK call
+         wires `Edit(<path>)` + `Write(<path>)` into `--disallowedTools`
+         for every fenced entry (see `daemon._task_disallowed_tools`),
+         so the agent cannot do the work and the unattended verifier
+         marks the bullet as fail — the daemon's retry-then-freeze loop
+         then burns dispatches until `retry_exhausted`. TB-306 hit this
+         live: a Scope bullet listing `.cc-autopilot/cron.yaml` burned
+         ~5 dispatches + ~$7 in tokens before the operator manually
+         closed. The error message names the offending path verbatim,
+         references `TASK_AGENT_FENCED_PATHS` (the audit anchor), and
+         suggests the operator-CLI alternative when one exists
+         (`ap2 cron edit` for `.cc-autopilot/cron.yaml`,
+         `ap2 update-goal` for `goal.md`, the operator queue for
+         `TASKS.md`, etc.). Only `## Scope` is scanned — mentions in
+         `## Design` / `## Verification` / `## Out of scope` are
+         legitimate (the agent reads but doesn't edit those). Runs
+         regardless of `skip_goal_alignment` — there's no legitimate
+         operator scenario where the task agent SHOULD edit a fenced
+         path.
+      8. (TB-235) When `blocked_csv` is supplied (the caller is a real
          queue-append / board-edit surface, not a unit test that only
          exercises the deterministic checks), a Haiku-4.5 LLM judge is
          asked to identify any hard predecessors named implicitly in
@@ -804,62 +982,68 @@ def _validate_briefing_structure(
     # the TB-161 goal-anchor and TB-164 Why-now checks are skipped while
     # every other gate above (TB-154 canonical sections, TB-138 verifiable
     # bullets via `parse_verification_section`, TB-135 non-empty
-    # Verification) keeps firing. The bypass is opt-in at the operator
-    # CLI surface only; ideation / MM handler / other control agents do
-    # NOT pass this kwarg, so autonomous proposals always go through the
-    # full goal-alignment gate.
-    if skip_goal_alignment:
-        return None
-    # TB-161: goal-anchor check. Runs only when goal.md is parseable and
-    # contributes derivable anchors — a fresh project whose goal.md is
-    # still the all-placeholder template short-circuits to "skip" so we
-    # don't reject every proposal on day-one of a new project.
-    goal_anchors = _goal_md_anchors(goal_md_path)
-    goal_body = _briefing_section_body(briefing_text, "Goal")
-    if goal_anchors:
-        goal_norm = _normalize_anchor(goal_body)
-        if not any(a in goal_norm for a in goal_anchors):
-            preview = sorted(goal_anchors)[:5]
-            preview_str = ", ".join(f"`{a}`" for a in preview)
+    # Verification) AND every gate below (TB-171 manual-bullet, TB-308
+    # fenced-paths-in-Scope, TB-235 dep-coherence) keep firing. The
+    # bypass is opt-in at the operator CLI surface only; ideation / MM
+    # handler / other control agents do NOT pass this kwarg, so
+    # autonomous proposals always go through the full goal-alignment
+    # gate. TB-308 narrowed the bypass: pre-TB-308 the function
+    # short-circuited with `return None` here, which silently skipped
+    # the manual-bullet / fenced-paths / dep-coherence checks too
+    # (inconsistent with this comment's intent). The narrower wrap
+    # below is the load-bearing fix.
+    if not skip_goal_alignment:
+        # TB-161: goal-anchor check. Runs only when goal.md is parseable
+        # and contributes derivable anchors — a fresh project whose
+        # goal.md is still the all-placeholder template short-circuits
+        # to "skip" so we don't reject every proposal on day-one of a
+        # new project.
+        goal_anchors = _goal_md_anchors(goal_md_path)
+        goal_body = _briefing_section_body(briefing_text, "Goal")
+        if goal_anchors:
+            goal_norm = _normalize_anchor(goal_body)
+            if not any(a in goal_norm for a in goal_anchors):
+                preview = sorted(goal_anchors)[:5]
+                preview_str = ", ".join(f"`{a}`" for a in preview)
+                return (
+                    "briefing structure invalid: `## Goal` body cites no "
+                    "anchor from goal.md — every proposal must reduce to "
+                    "a visible step toward the declared project goal "
+                    "(reject-ap2-meta-polish-drift, TB-161). Reword the "
+                    "Goal section to quote or reference one of "
+                    "`goal.md`'s `## Current focus` / `## Done when` "
+                    "headings or a Done-when bullet. Available anchors "
+                    f"include: {preview_str}."
+                )
+        # TB-164: "Why now" rationale check. Line-anchored marker plus a
+        # minimum-length rationale so the author articulates goal.md's
+        # delete-test ("if we delete this and the goal still ships, was
+        # it useful?") in writing. Runs even when goal.md is missing /
+        # all-placeholder — the delete-test is intrinsic to the briefing
+        # contract, not a goal-relevance check, so it doesn't share the
+        # TB-161 anchor-skip fallback.
+        rationale = _why_now_paragraph(goal_body)
+        if rationale is None:
             return (
-                "briefing structure invalid: `## Goal` body cites no "
-                "anchor from goal.md — every proposal must reduce to a "
-                "visible step toward the declared project goal "
-                "(reject-ap2-meta-polish-drift, TB-161). Reword the "
-                "Goal section to quote or reference one of `goal.md`'s "
-                "`## Current focus` / `## Done when` headings or a "
-                "Done-when bullet. Available anchors include: "
-                f"{preview_str}."
+                "## Goal section must include a non-empty 'Why now' "
+                "rationale (goal.md's delete-test). Add a line beginning "
+                "with `Why now` (e.g. `Why now: <one sentence answering "
+                "\"if we delete this and the goal still ships, was it "
+                "useful?\">`) inside the `## Goal` body. The marker must "
+                "start a line — mid-sentence \"why now\" inside "
+                "arbitrary prose doesn't count. Min "
+                f"{WHY_NOW_MIN_CHARS} chars after the marker (TB-164)."
             )
-    # TB-164: "Why now" rationale check. Line-anchored marker plus a
-    # minimum-length rationale so the author articulates goal.md's
-    # delete-test ("if we delete this and the goal still ships, was
-    # it useful?") in writing. Runs even when goal.md is missing /
-    # all-placeholder — the delete-test is intrinsic to the briefing
-    # contract, not a goal-relevance check, so it doesn't share the
-    # TB-161 anchor-skip fallback.
-    rationale = _why_now_paragraph(goal_body)
-    if rationale is None:
-        return (
-            "## Goal section must include a non-empty 'Why now' "
-            "rationale (goal.md's delete-test). Add a line beginning "
-            "with `Why now` (e.g. `Why now: <one sentence answering "
-            "\"if we delete this and the goal still ships, was it "
-            "useful?\">`) inside the `## Goal` body. The marker must "
-            "start a line — mid-sentence \"why now\" inside arbitrary "
-            f"prose doesn't count. Min {WHY_NOW_MIN_CHARS} chars after "
-            "the marker (TB-164)."
-        )
-    if len(rationale) < WHY_NOW_MIN_CHARS:
-        return (
-            "## Goal section must include a non-empty 'Why now' "
-            "rationale (goal.md's delete-test). The `Why now` "
-            f"paragraph is only {len(rationale)} chars after the "
-            f"marker; minimum is {WHY_NOW_MIN_CHARS}. Articulate the "
-            "delete-test answer in writing — name the failure mode "
-            "this closes or the gap it fills, not just \"this would "
-            "be nice to have\" (TB-164)."
-        )
+        if len(rationale) < WHY_NOW_MIN_CHARS:
+            return (
+                "## Goal section must include a non-empty 'Why now' "
+                "rationale (goal.md's delete-test). The `Why now` "
+                f"paragraph is only {len(rationale)} chars after the "
+                f"marker; minimum is {WHY_NOW_MIN_CHARS}. Articulate "
+                "the delete-test answer in writing — name the failure "
+                "mode this closes or the gap it fills, not just \"this "
+                "would be nice to have\" (TB-164)."
+            )
     # TB-171: reject `Manual:` / `[manual]` bullets in `## Verification`.
     # The per-task verifier is unattended — it has the diff, the working
     # tree, and a shell, but no live operator. TB-122 hit `retry_exhausted`
@@ -901,7 +1085,24 @@ def _validate_briefing_structure(
                 "move the bullet to `## Out of scope` if the behavior "
                 "genuinely cannot be auto-verified (TB-171)."
             )
-    # TB-235 check #7: LLM-driven dependency-coherence judge. Runs
+    # TB-308 check #7: reject `## Scope` bullets that codespan a
+    # `TASK_AGENT_FENCED_PATHS` entry. The task agent's SDK call wires
+    # `Edit(<path>)` + `Write(<path>)` into `--disallowedTools` for
+    # every fenced entry; a Scope bullet listing such a path is
+    # structurally unsatisfiable and burns dispatches in the
+    # retry-then-freeze loop (TB-306 hit ~5 dispatches + ~$7 in
+    # tokens before manual close). Runs unconditionally — the TB-170
+    # `skip_goal_alignment` escape hatch bypasses goal-anchor +
+    # Why-now only; there's no legitimate operator scenario where the
+    # task agent SHOULD edit a fenced path (the path lives in the
+    # fence precisely because the daemon owns it). Mirrors TB-171's
+    # shape: queue-append-time mechanical gate against a structural
+    # error that already cost a TB-N + a task-agent run before
+    # author-side prose alone caught it.
+    fenced_err = _validate_no_fenced_paths_in_scope(briefing_text)
+    if fenced_err is not None:
+        return fenced_err
+    # TB-235 check #8: LLM-driven dependency-coherence judge. Runs
     # AFTER every deterministic check above passes (so the judge never
     # sees structurally-malformed input — cheaper, and a malformed
     # briefing already has a clearer rejection reason). The caller

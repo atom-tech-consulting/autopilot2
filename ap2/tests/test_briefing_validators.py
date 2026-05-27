@@ -1213,3 +1213,222 @@ def test_tb171_manual_bullet_check_in_sync_with_check_py():
     for s in samples_skip:
         assert not tools._MANUAL_BULLET_RE.match(s), s
         assert not check._MANUAL_BULLET_RE.match(s), s
+
+
+# ---------------------------------------------------------------------------
+# TB-308: reject briefings whose `## Scope` body codespans a path that
+# lives in `TASK_AGENT_FENCED_PATHS`. Hit live on TB-306: a Scope bullet
+# listing `.cc-autopilot/cron.yaml` (operator-CLI-only via `ap2 cron
+# edit`) burned ~5 dispatches + ~$7 in tokens before manual close. This
+# gate pre-empts the failure mode at queue-append time, mirroring the
+# TB-171 manual-bullet rejection shape.
+
+_TB308_CANONICAL_GOAL = (
+    "## Goal\n\nCloses a structural enforcement gap in the briefing "
+    "validator that costs TB-N + dispatches when an operator/ideation "
+    "briefing lists a fenced path in `## Scope`.\n\n"
+    "Why now: closes the preventable structural error that TB-306 just "
+    "demonstrated — a fenced-path-in-Scope briefing routed through "
+    "retries-exhaust + manual-close instead of being refused at "
+    "queue-append time (TB-308).\n\n"
+)
+
+
+def _tb308_brief_with_scope(scope_body: str,
+                            out_of_scope: str = "- nothing\n") -> str:
+    """Assemble a canonical-shape briefing whose `## Scope` body is the
+    caller-supplied string. Other sections are minimum-viable so the
+    only validator gate that can fire is the TB-308 fenced-path check
+    (modulo the always-on canonical-sections / Why-now / etc. gates,
+    which the canonical scaffold above satisfies).
+    """
+    return (
+        "# TB-308 fenced-path-in-scope test\n\n"
+        + _TB308_CANONICAL_GOAL
+        + "## Scope\n\n" + scope_body + "\n"
+        + "## Design\n\nstub\n\n"
+        + "## Verification\n\n- `uv run pytest -q` — gates pass\n\n"
+        + "## Out of scope\n\n" + out_of_scope
+    )
+
+
+def test_validate_briefing_rejects_fenced_path_in_scope():
+    """TB-308 positive: a `## Scope` bullet that backticks
+    `.cc-autopilot/cron.yaml` is rejected with an error that names the
+    path verbatim, references TASK_AGENT_FENCED_PATHS, and suggests
+    `ap2 cron edit`."""
+    body = _tb308_brief_with_scope(
+        "- `.cc-autopilot/cron.yaml` — change `interval: 2h` → `8h`\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None, "expected non-None error for fenced-path Scope bullet"
+    assert ".cc-autopilot/cron.yaml" in err, err
+    assert "TASK_AGENT_FENCED_PATHS" in err, err
+    # Operator-CLI hint is included for paths in the fix-hint map.
+    assert "ap2 cron edit" in err, err
+    assert "TB-308" in err, err
+
+
+def test_validate_briefing_accepts_agent_writable_paths_in_scope():
+    """TB-308 negative: a `## Scope` listing only agent-writable paths
+    (`ap2/foo.py`, etc.) passes the check. Pins that we didn't flip the
+    validator into "always rejects on backticks"."""
+    body = _tb308_brief_with_scope(
+        "- `ap2/briefing_validators.py` — add the new helper\n"
+        "- `ap2/tests/test_briefing_validators.py` — add the pin tests\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is None, f"expected None for agent-writable Scope paths, got: {err!r}"
+
+
+def test_validate_briefing_accepts_fenced_path_in_out_of_scope():
+    """TB-308 scope-pin: the validator only scans `## Scope`. A fenced
+    path codespanned under `## Out of scope` does NOT trip the check —
+    that's exactly where the briefing rule says fenced-path work belongs.
+    Mirrors `test_validate_briefing_structure_accepts_manual_bullet_in_out_of_scope`."""
+    body = _tb308_brief_with_scope(
+        "- `ap2/briefing_validators.py` — agent-side edit\n",
+        out_of_scope=(
+            "- `.cc-autopilot/cron.yaml` — operator-only via `ap2 cron edit`\n"
+        ),
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is None, f"expected None for fenced path in Out of scope, got: {err!r}"
+
+
+def test_validate_briefing_rejects_fenced_path_with_leading_slash():
+    """TB-308 normalization pin: operators sometimes write paths as
+    absolute-from-repo-root (`/.cc-autopilot/cron.yaml`). The validator
+    strips the leading slash before substring-matching against
+    TASK_AGENT_FENCED_PATHS so this shape still rejects."""
+    body = _tb308_brief_with_scope(
+        "- `/.cc-autopilot/cron.yaml` — change the cadence\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None, "expected non-None error for leading-slash fenced path"
+    assert ".cc-autopilot/cron.yaml" in err, err
+
+
+def test_validate_briefing_rejects_fenced_directory_path_in_scope():
+    """TB-308 directory-entry pin: `.cc-autopilot/tasks` is a directory
+    fence; a `## Scope` bullet codespanning a path inside it
+    (`.cc-autopilot/tasks/foo.md`) trips the gate too."""
+    body = _tb308_brief_with_scope(
+        "- `.cc-autopilot/tasks/foo.md` — edit a briefing file\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None, "expected non-None error for fenced-dir path"
+    assert ".cc-autopilot/tasks/foo.md" in err, err
+    assert "TASK_AGENT_FENCED_PATHS" in err, err
+
+
+def test_validate_briefing_fenced_path_suggested_fix_for_goal_md():
+    """TB-308 fix-hint pin: a `## Scope` listing `goal.md` is rejected
+    with a hint pointing at `ap2 update-goal`. Tests the
+    `_FENCED_PATH_FIX_HINTS` map's entry for `goal.md`."""
+    body = _tb308_brief_with_scope(
+        "- `goal.md` — rewrite the project mission\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None
+    assert "goal.md" in err
+    assert "ap2 update-goal" in err, err
+
+
+def test_validate_briefing_fenced_path_default_fix_for_unmapped_path():
+    """TB-308 fallback-fix pin: a fenced path WITHOUT an entry in
+    `_FENCED_PATH_FIX_HINTS` (e.g. `.cc-autopilot/events.jsonl`) gets
+    the default "move to Out of scope" suggestion. Pins that the
+    fallback hint fires for daemon-owned paths with no CLI alternative.
+    """
+    body = _tb308_brief_with_scope(
+        "- `.cc-autopilot/events.jsonl` — append a marker line\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is not None
+    assert ".cc-autopilot/events.jsonl" in err
+    # No CLI alternative — falls back to the "move to Out of scope" hint.
+    assert "Out of scope" in err
+    assert "no CLI alternative" in err, err
+
+
+def test_validate_briefing_fenced_path_check_runs_under_skip_goal_alignment():
+    """TB-308 escape-hatch interaction: the TB-170
+    `skip_goal_alignment=True` bypass skips goal-anchor + Why-now only;
+    the fenced-path check still fires. There's no legitimate operator
+    scenario where the task agent SHOULD edit a fenced path."""
+    body = _tb308_brief_with_scope(
+        "- `.cc-autopilot/cron.yaml` — change the cadence\n"
+    )
+    err = tools._validate_briefing_structure(body, skip_goal_alignment=True)
+    assert err is not None, (
+        "expected fenced-path check to fire even under skip_goal_alignment"
+    )
+    assert ".cc-autopilot/cron.yaml" in err
+    assert "TASK_AGENT_FENCED_PATHS" in err
+
+
+def test_validate_briefing_unfenced_codespan_in_scope_is_fine():
+    """TB-308 false-positive guard: codespans that look path-like but
+    don't match any TASK_AGENT_FENCED_PATHS entry (e.g. `ap2/cron.py`,
+    `interval: 2h`) pass the check. Pins that we substring-match the
+    fence list, not "any codespan that contains `cron`"."""
+    body = _tb308_brief_with_scope(
+        "- `ap2/cron.py` — extend the parser\n"
+        "- `ap2/cron.default.yaml` — bump the default interval\n"
+        "- update `interval: 2h` → `8h`\n"
+    )
+    err = tools._validate_briefing_structure(body)
+    assert err is None, f"expected None for non-fenced codespans, got: {err!r}"
+
+
+def test_validate_no_fenced_paths_helper_returns_none_on_clean_briefing():
+    """TB-308 helper-level unit: `_validate_no_fenced_paths_in_scope`
+    returns None when the briefing has no `## Scope` section or when
+    Scope contains no fenced codespans. Cheap direct-call exercise so a
+    future caller adding the helper to a new surface gets a fast
+    docstring-test signal."""
+    from ap2.briefing_validators import _validate_no_fenced_paths_in_scope
+    # No Scope section at all.
+    assert _validate_no_fenced_paths_in_scope(
+        "## Goal\n\nfoo\n\n## Design\n\nbar\n"
+    ) is None
+    # Scope section with no codespans.
+    assert _validate_no_fenced_paths_in_scope(
+        "## Scope\n\n- plain prose\n\n## Design\n\nbar\n"
+    ) is None
+    # Scope section with non-fenced codespan.
+    assert _validate_no_fenced_paths_in_scope(
+        "## Scope\n\n- `ap2/foo.py`\n\n## Design\n\nbar\n"
+    ) is None
+
+
+def test_tb308_validate_briefing_fenced_path_fires_via_queue_append(
+    cfg, tmp_path,
+):
+    """End-to-end at the queue-append boundary: a fenced-path-in-Scope
+    briefing routed through `do_operator_queue_append` is rejected, no
+    TB-N is leaked into CLAUDE.md, and no queue line / briefing file is
+    written. Mirrors the TB-171 "no leak on reject" pin."""
+    before_claude = (tmp_path / "CLAUDE.md").read_text()
+    body = _tb308_brief_with_scope(
+        "- `.cc-autopilot/cron.yaml` — change the cadence\n"
+    )
+    pre_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    res = tools.do_operator_queue_append(
+        cfg,
+        {"op": "add_backlog", "title": "fenced path", "briefing": body},
+    )
+    assert res.get("isError"), res
+    text = res["content"][0]["text"]
+    assert "TB-308" in text, text
+    assert ".cc-autopilot/cron.yaml" in text, text
+    assert "TASK_AGENT_FENCED_PATHS" in text, text
+    # CLAUDE.md untouched — no TB-N leaked.
+    assert (tmp_path / "CLAUDE.md").read_text() == before_claude
+    # No briefing file leaked to disk.
+    post_tasks_dir = sorted(p.name for p in cfg.tasks_dir.glob("*.md"))
+    assert post_tasks_dir == pre_tasks_dir
+    # No queue line written.
+    qpath = tools.operator_queue_path(cfg)
+    assert not qpath.exists() or qpath.read_text() == ""
