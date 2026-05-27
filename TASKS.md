@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-306** **Bump default status-report cron interval from 2h to 8h** `#autopilot` `#cron` `#status-report` `#defaults` [→ brief](.cc-autopilot/tasks/bump-default-status-report-cron-interval.md)
 
 ## Pipeline Pending
 
@@ -194,3 +193,5 @@
 - [x] **TB-305** **Docs-drift gate for `.cc-autopilot/env` template + exemption set** `#autopilot` `#docs` `#ci` `#regression-pin` [→ brief](.cc-autopilot/tasks/docs-drift-gate-for-cc-autopilot-env-tem.md)
 
 ## Frozen
+
+- [ ] **TB-306** **Bump default status-report cron interval from 2h to 8h** `#autopilot` `#cron` `#status-report` `#defaults` [→ brief](.cc-autopilot/tasks/bump-default-status-report-cron-interval.md)
