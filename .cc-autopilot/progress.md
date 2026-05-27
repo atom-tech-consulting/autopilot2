@@ -1036,3 +1036,9 @@
 - **Summary:** Previously committed in 6b0f268; verified completeness — all 5 briefing scope items present (focus_advance.py:141 exit-marker extension, lines 70-119 docstrings, events.py:360-389 vocabulary entry, test_empty_cycles_counter.py 20 tests including the 5 new TB-300 cases, ideation.default.md `End-of-cycle summary event (TB-300)` section); all 3 briefing Python invariants pass; `uv run pytest -q ap2/tests/test_empty_cycles_counter.py` → 20 passed; full `uv run pytest -q ap2/tests/` → 2167 passed (prior blocker — attention-detector fixtures — was resolved by TB-301's now= seam landing in 9c77bff/e3ba0ac).
 - **Files:** ap2/focus_advance.py, ap2/events.py, ap2/tests/test_empty_cycles_counter.py, ap2/ideation.default.md
 - **Tests:** pass
+
+## [2026-05-27] TB-302: Stop appending roadmap_complete bullet to ideation_state.md (focus line is already redundant)
+- **Commit:** `8e91ee9`
+- **Summary:** Removed `_append_decisions_needed_bullet` call from the roadmap-complete branch of `ap2/focus_advance.py:_maybe_advance_focus`; kept the `roadmap_complete` event emission + `pointer['roadmap_complete_emitted']=True` mutation. Updated module + function docstrings to document the TB-302 behavior change (no bullet write; pointer-driven `ap2 status` focus line is canonical). Added regression-pin module `ap2/tests/test_roadmap_complete_no_bullet_append.py` covering event-still-fires, no-create / no-modify invariants on ideation_state.md, subsequent-tick short-circuit, kill-switch-still-writes-bullet invariant, and source-level grep pins. Updated existing `test_roadmap_complete_event_on_exhaustion` to assert absence rather than presence of the bullet. Full `uv run pytest -q ap2/tests/` passes (2175 tests, 91s).
+- **Files:** ap2/focus_advance.py, ap2/tests/test_tb226_focus_rotation.py, ap2/tests/test_roadmap_complete_no_bullet_append.py
+- **Tests:** pass

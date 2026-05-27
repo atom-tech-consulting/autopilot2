@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-302** **Stop appending roadmap_complete bullet to ideation_state.md (focus line is already redundant)** `#autopilot` `#focus-advance` `#ideation-state` `#priming` `#commit-hygiene` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/stop-appending-roadmap-complete-bullet-t.md)
 
 ## Pipeline Pending
 
@@ -188,6 +187,7 @@
 - [x] **TB-299** **Web home page: `_render_attention_card` sibling — surface active attention conditions alongside focus/automation cards** `#autopilot` `#web` `#attention` `#operator-legible` `#monitoring` `#observability` `#regression-pin` — Add a home-page `## Attention` summary card that mirrors the TB-296 `/attention` pull page (per-condition bullets + link-through) so an operator landing on `/` sees active attention conditions at-a-glance without first discovering the nav link — closes the home-page entry-point side of focus-2 Progress signal #3. [→ brief](.cc-autopilot/tasks/web-home-page-render-attention-card-sibl.md)
 - [x] **TB-301** **Fix time-bombed render_attention_section test via now= injection seam** `#autopilot` `#attention` `#status-report` `#testing` `#regression-pin` `#bug` `@blocked:TB-282` [→ brief](.cc-autopilot/tasks/fix-time-bombed-render-attention-section.md)
 - [x] **TB-300** **Empty-cycles counter must recognize `ideation_cycle_summary` as exit marker** `#autopilot` `#empty-cycles` `#focus-advance` `#counter` `#bug` `#regression-pin` `@blocked:TB-292` [→ brief](.cc-autopilot/tasks/empty-cycles-counter-must-recognize-idea.md)
+- [x] **TB-302** **Stop appending roadmap_complete bullet to ideation_state.md (focus line is already redundant)** `#autopilot` `#focus-advance` `#ideation-state` `#priming` `#commit-hygiene` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/stop-appending-roadmap-complete-bullet-t.md)
 
 ## Frozen
 
