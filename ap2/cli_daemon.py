@@ -298,7 +298,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # four surfaces share `attention.detect_attention_conditions(cfg)`
     # as their detector entrypoint — drift between them would mean a
     # walk-away operator polling `ap2 status` from a terminal sees
-    # different conditions than the web page / chat post / 2h cron
+    # different conditions than the web page / chat post / status-report cron
     # digest. Pure read-layer (walks the events tail + a small board
     # read); no caching needed. Defensive swallow: a detector exception
     # never takes the status surface down — the cluster line just

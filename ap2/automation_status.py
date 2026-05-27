@@ -880,7 +880,7 @@ def _outcome_breakdown(
 # TB-226 ships `focus_advanced` + `roadmap_complete` events; TB-242 added
 # the pull surfaces (`ap2 status` text/JSON + web home active-focus
 # card). TB-244 closes the push-surface gap by surfacing both event
-# types in the 2h status-report Mattermost post — the operator's primary
+# types in the status-report Mattermost post — the operator's primary
 # walk-away channel. Helper parallels `collect_window_loop_activity`
 # above (since-last-report scoping, pure tail-walk, machine-stable
 # return shape) so the renderer in `status_report.py` can consume both
@@ -975,7 +975,7 @@ def collect_window_focus_rotation(
 # surfaces (`ap2 status` text/JSON + web home automation card). TB-245
 # closes the push-surface gap by exposing the same 24h aggregation
 # through a dedicated collector that the status-report cron renderer
-# consumes — operator's primary walk-away channel (the 2h Mattermost
+# consumes — operator's primary walk-away channel (the status-report Mattermost
 # post) now carries the load-bearing TB-235 dep-coherence judge's
 # fail-open signal without waiting on a manual `ap2 status`.
 #

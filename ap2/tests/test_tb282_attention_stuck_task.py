@@ -8,10 +8,10 @@ operator-legible terms, distinct from routine progress updates").
 Pre-TB-282 there was no `ap2/attention.py` module, no
 `attention_raised` event type in `events.py`'s registry, no
 `## Attention needed` section in `STATUS_REPORT_PROMPT`, and the
-periodic 2h status-report Mattermost post was the ONLY push surface;
+periodic status-report Mattermost cron post was the ONLY push surface;
 attention-needing conditions landed buried inside its routine
-progress bullets, where a stuck Active task at minute 5 of a 2h
-window waited up to 2h to surface.
+progress bullets, where a stuck Active task at minute 5 of a
+cron-interval window waited up to the next tick to surface.
 
 This module pins eight arcs (briefing scope item 6):
 

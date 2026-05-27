@@ -5,7 +5,7 @@ event-type allowlist extension on `_status_report_should_skip`.
 TB-243 (`647b771`) shipped the pull surfaces for axis-1 validator-judge
 fail-open state (`ap2 status` text/JSON + web home automation card).
 TB-245 closes the push-surface gap: the operator's primary walk-away
-channel — the 2h status-report Mattermost post — was silent on
+channel — the status-report Mattermost post — was silent on
 `validator_judge_fail` / `validator_judge_timeout`, which directly
 weakens the goal.md L82-85 auto-approve safety claim ("upstream gates
 already make this safe in practice"). The dep-coherence judge IS one
@@ -13,7 +13,7 @@ of those upstream gates, and a fail-open gate without push-channel
 observability is functionally invisible during the walk-away window
 goal.md L57-59 promises. A judge silently degrading at 03:00Z used to
 wait for the operator's next manual `ap2 status` to surface; now it
-lands in the next 2h cron post.
+lands in the next status-report cron post.
 
 This module pins six arcs (briefing scope item 5):
 

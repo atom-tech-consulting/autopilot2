@@ -274,13 +274,13 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `cond.summary` the renderer surfaces in `## Attention needed`).
     Listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a
     fresh push un-skips the status-report cron's dedup/idle gate,
-    parallel to `attention_raised` itself — the next 2h post
+    parallel to `attention_raised` itself — the next status-report post
     acknowledges the immediate-push happened so the operator's two
     surfaces (this push and the next routine post) stay coherent.
     Closes the TB-282 Out-of-scope axis the briefing's L119-122
     named (time-to-glance for post-trip / pre-trip / time-sensitive
     conditions like `auto_approve_paused` and `cost_cap_approach`,
-    which lose utility if delayed by the 2h status-report cadence).
+    which lose utility if delayed by the status-report cron cadence).
   - `attention_push_error` (TB-297) — `tools._mm_post` raised during
     the immediate-push attempt. Fires from
     `daemon._maybe_push_attention` after the catch; the helper then

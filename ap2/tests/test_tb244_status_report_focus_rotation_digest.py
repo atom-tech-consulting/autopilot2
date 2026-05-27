@@ -5,12 +5,12 @@ allowlist extension on `_status_report_should_skip`.
 TB-242 (`6704ed52`) shipped the pull surfaces for axis-4
 focus-rotation state (`ap2 status` text/JSON + web home). TB-244
 closes the push-surface gap: the operator's primary walk-away
-channel — the 2h status-report Mattermost post — was silent on
+channel — the status-report Mattermost post — was silent on
 `focus_advanced` / `roadmap_complete`, which contradicts axis 4's
 own framing ("walk-away time scales with the operator-declared
 roadmap length", goal.md L137-138). A `roadmap_complete` halt at
 03:00Z used to wait for the operator's next manual `ap2 status` to
-surface; now it lands in the next 2h cron post.
+surface; now it lands in the next status-report cron post.
 
 This module pins six arcs (briefing scope item 5):
 

@@ -659,7 +659,7 @@ never the operator.
 | `ap2 delete TB-N [-f]` | Permanently remove a task from the board (row + briefing file) — emits `task_deleted` for audit. | Refuses Active/Ready without `--force`. Use `ap2 reject` instead for ideation proposals still gated by `@blocked:review`, so the rejection reason feeds ideation Step 0's "don't re-propose" learning. |
 | `ap2 reject TB-N [--reason TEXT]` | Reject an ideation-proposed Backlog task (TB-152): drops the row + briefing AND logs the reason. | Writes `rejected ideation proposal → TB-N (<title>): <reason>` to `operator_log.md`; the reason becomes a learnable signal for the next ideation cycle, and `(no reason given)` is itself a (weak) signal. |
 | `ap2 classify TB-N --impact VERDICT [--reason TEXT]` | Record the operator's retrospective impact verdict (`advanced-goal` / `pro-forma` / `negative` / `unclear`) on a shipped proposal (TB-189 / TB-251). | Captures whether the task substantively moved the goal forward, merely satisfied validators (goal.md L66-76's failure mode), or actively regressed the codebase; reasons feed TB-188 per-proposal records and `operator_log.md` so future ideation cycles can learn which proposal shapes actually pay off (and which to strongly avoid). See `## Classify verdicts` below for the `pro-forma` vs `negative` distinction. |
-| `ap2 audit [--interactive] [--json] [--since ISO] [--frozen-only \| --auto-approved-only]` | Retrospective walk through unreviewed Complete + Frozen tasks since the last `ap2 audit` cursor (TB-248). | The "I just came back from a week away" verb under `AP2_AUTO_APPROVE=1` — closes the retrospective review surface gap auto-approve opens. State derivation is grep over `operator_log.md` (no new state file); `--interactive` walks one task at a time with `[c]lassify / [s]kip / [n]ext / [q]uit` prompts. See `## Retrospective audit workflow` below. TB-258 wires the unreviewed-count onto the natural-cadence return surfaces: `ap2 status` carries an `audit: N unreviewed since <ts>` line (text, omitted when N=0) + an always-present `audit` block in `--json`; the 2h cron status-report Mattermost post carries a `*Retrospective audit (unreviewed shipped):*` sub-block (omitted when N=0). Walk-away operators see the count without running `ap2 audit` first. |
+| `ap2 audit [--interactive] [--json] [--since ISO] [--frozen-only \| --auto-approved-only]` | Retrospective walk through unreviewed Complete + Frozen tasks since the last `ap2 audit` cursor (TB-248). | The "I just came back from a week away" verb under `AP2_AUTO_APPROVE=1` — closes the retrospective review surface gap auto-approve opens. State derivation is grep over `operator_log.md` (no new state file); `--interactive` walks one task at a time with `[c]lassify / [s]kip / [n]ext / [q]uit` prompts. See `## Retrospective audit workflow` below. TB-258 wires the unreviewed-count onto the natural-cadence return surfaces: `ap2 status` carries an `audit: N unreviewed since <ts>` line (text, omitted when N=0) + an always-present `audit` block in `--json`; the status-report Mattermost cron post carries a `*Retrospective audit (unreviewed shipped):*` sub-block (omitted when N=0). Walk-away operators see the count without running `ap2 audit` first. |
 | `ap2 ack NOTE [-t TB-N]` | Record an out-of-band operator decision in `operator_log.md` so ideation stops re-proposing actions whose effects aren't filesystem-visible (TB-106). | Use for "I already decided X out-of-band" announcements and for clearing decisions-needed nudges the daemon keeps surfacing. |
 | `ap2 approve TB-N` | Approve an ideation-proposed task (TB-121) — strips its `@blocked:review` codespan so the next tick auto-promotes it out of Backlog. | The thumbs-up half of the `approve` / `reject` pair on freshly-ideated proposals; refuses if the task isn't on the board at all. |
 | `ap2 unfreeze TB-N` | Move a Frozen task back to Backlog and clear its retry counter. | Run after fixing the underlying blocker (flaky test, missing dep); refuses if the task isn't currently Frozen so you can't accidentally reset a healthy task. |
@@ -818,7 +818,7 @@ line in the operator-attention cluster (after `decisions needed`,
 before `auto-approve:`); omit-on-empty so fresh / fully-reviewed
 projects stay silent; (b) `ap2 status --json` ALWAYS carries an
 `audit: {unreviewed_count, cursor_ts}` block (parser-stability
-mirror of the `auto_approve` block); (c) the 2h status-report
+mirror of the `auto_approve` block); (c) the status-report
 Mattermost cron post carries a `*Retrospective audit (unreviewed
 shipped):*` sub-block with the count + cursor + `ap2 audit` nudge;
 also omit-on-empty so quiet windows stay byte-identical to the
@@ -1042,12 +1042,12 @@ counts are zero, warn-tinted amber when
 `(fail + timeout) >= AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`, default
 5). Closes the silent-degradation hazard the fail-open design
 otherwise left for an operator with `AP2_AUTO_APPROVE=1`: 10
-silently-timed-out judge calls used to take ≥2h (the next
-status-report cron tick) to surface — now they appear on the
+silently-timed-out judge calls used to take up to a full
+status-report cron tick to surface — now they appear on the
 on-demand pull surfaces immediately.
 
 TB-245 closes the push-surface half of the same observability gap:
-the 2h status-report Mattermost cron post (operator's primary
+the status-report Mattermost cron post (operator's primary
 walk-away channel) now also carries a
 `*Validator-judge fail-open window (24h):*` sub-block listing the
 same two 24h counts, with the same `[noisy]` suffix when
@@ -1060,7 +1060,7 @@ byte-identical to the pre-TB-245 baseline); both event types are
 also listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` in
 `ap2/status_report.py` so a lone fresh fail-open event keeps the
 skip-gate from firing — operator never misses a degradation
-signal because the 2h post coincided with an otherwise-quiet
+signal because the status-report cron post coincided with an otherwise-quiet
 window.
 
 **Proactive attention surface (TB-282; TB-287, TB-288, TB-289, TB-290 extended).**
@@ -1292,7 +1292,7 @@ without breaking scripted consumers. Top-level shape:
 }
 ```
 
-**Status-report push surface (TB-259).** The 2h status-report
+**Status-report push surface (TB-259).** The status-report
 Mattermost cron post (operator's primary walk-away channel) also
 carries a top-line digest of the same aggregates as a
 `*Stats window aggregates (<window>):*` sub-block — three bullets
@@ -1861,11 +1861,11 @@ each read fresh from `os.environ` at detection time — see
 `AP2_TASK_STUCK_THRESHOLD_S` / `AP2_ATTENTION_DEBOUNCE_S` /
 `AP2_TASK_FROZEN_RECENCY_S` / `AP2_AUTO_APPROVE_COST_APPROACH_PCT`
 described in the "Proactive attention surface" section above. The
-knob below controls the push-side cadence (immediate vs every-2h
-status-report cron):
+knob below controls the push-side cadence (immediate vs the
+status-report cron's tick rate):
 - `AP2_ATTENTION_IMMEDIATE_PUSH` — TB-297 opt-in immediate-Mattermost-
   push on `attention_raised` emission. **Unset by default → push
-  OFF** so the per-2h status-report cron remains the routine push
+  OFF** so the status-report cron remains the routine push
   surface (TB-282's `## Attention needed` section already carries
   the same conditions there). Set to a truthy value
   (`1` / `true` / `yes` / `on`, case-insensitive) to enable. With
@@ -1886,7 +1886,7 @@ status-report cron):
   opt-in once they've sampled their own detector cadence — set
   this when the post-trip `auto_approve_paused` /
   `cost_cap_approach` / time-sensitive conditions in your project
-  warrant inside-one-tick visibility rather than up-to-2h-wait
+  warrant inside-one-tick visibility rather than up-to-the-next-cron-tick-wait
   visibility. Hot-reloadable (TB-271) so an operator flipping the
   knob takes effect on the next tick without a daemon restart.
 
@@ -2096,7 +2096,7 @@ shape TB-223's `auto_approve_unfreeze` / TB-224's
 
 **Status-report push surface (TB-244).**
 Axis-4 events (`focus_advanced` / `roadmap_complete`) also
-surface in the 2h status-report Mattermost cron post — the
+surface in the status-report Mattermost cron post — the
 operator's primary walk-away channel. The routine renders a
 `## Focus rotation activity` sub-block (parallel to TB-228's
 `## Automation loop activity` digest) listing one bullet per
@@ -2107,7 +2107,7 @@ the push-surface gap TB-242 left open: the pull surfaces
 (`ap2 status` text/JSON + web home) showed the active focus +
 position + halt state on-demand, but a `roadmap_complete` halt
 at 03:00Z used to wait for the operator's next manual `ap2
-status` to surface. Now the next 2h cron post carries it.
+status` to surface. Now the next status-report cron post carries it.
 Omit-on-empty: the sub-block is suppressed when no axis-4
 events landed in the window, so quiet windows stay
 byte-identical to the pre-TB-244 baseline. The
@@ -2115,7 +2115,7 @@ byte-identical to the pre-TB-244 baseline. The
 `ap2/status_report.py` also lists both event types so a lone
 axis-4 event keeps the routine's skip-gate from firing —
 operator never misses a rotation-state change because the
-2h post coincided with an otherwise-quiet window.
+status-report cron post coincided with an otherwise-quiet window.
 
 **Why never auto-mutate goal.md.**
 Goal.md L187-191 names goal.md auto-rotation as a Non-goal. The

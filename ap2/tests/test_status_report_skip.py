@@ -863,8 +863,8 @@ def test_run_status_report_does_not_leak_cycle_observations(
 # TB-N references.
 #
 # The decisions-needed snapshot line forwards bullets the ideator wrote
-# at the last `ideation_state_updated` event. Up to ~2h of staleness can
-# bleed through (the gap between ideation cycles). The status-report
+# at the last `ideation_state_updated` event. Up to one ideation interval
+# of staleness can bleed through (the gap between ideation cycles). The status-report
 # agent's prompt body must instruct it to cross-check forwarded TB-N
 # references against events.jsonl for any superseding `task_complete`,
 # `task_deleted`, `task_updated`, or `verification_failed` event AFTER

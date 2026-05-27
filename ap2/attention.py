@@ -4,10 +4,10 @@ Closes goal.md focus-1's Done-when bullet on shallow monitoring
 ("Attention-needing conditions ... are surfaced proactively in
 operator-legible terms, distinct from routine progress updates").
 
-Pre-TB-282 the periodic 2h status-report cron post was the ONLY push
-surface; a stuck Active task at minute 5 of a 2h window waited up to
-2h to surface, and routine progress bullets visually outweighed the
-embedded attention signal when it did. The shipped pull-surfaces
+Pre-TB-282 the periodic status-report cron post was the ONLY push
+surface; a stuck Active task at minute 5 of a cron-interval window
+waited up to the next tick to surface, and routine progress bullets
+visually outweighed the embedded attention signal when it did. The shipped pull-surfaces
 (`ap2 status`'s `[noisy]` badge, web `/automation` card) required the
 operator to remember to look — contradicting a walk-away monitoring
 promise.

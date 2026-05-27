@@ -383,13 +383,13 @@ def render_automation_loop_activity_section(
 # expectations stay byte-identical (the briefing's option B).
 #
 # Closes TB-228 / TB-238's surface-parity gap on the push channel: the
-# operator's primary walk-away surface (the 2h status-report Mattermost
+# operator's primary walk-away surface (the status-report Mattermost
 # post) was silent on axis-4 (`focus_advanced` / `roadmap_complete`),
 # which contradicts axis 4's own framing ("walk-away time scales with
 # the operator-declared roadmap length", goal.md L137-138). A
 # `roadmap_complete` halt at 03:00Z used to wait for the operator's
 # next manual `ap2 status` to surface; now it lands in the very next
-# 2h cron post.
+# status-report cron post.
 
 _FOCUS_ROTATION_HEADING = "## Focus rotation activity"
 
@@ -488,7 +488,7 @@ def render_focus_rotation_activity_section(
 # judge counts between pull and push surfaces).
 #
 # Closes TB-243's push-surface gap on axis 1: the operator's primary
-# walk-away surface (the 2h status-report Mattermost post) was silent
+# walk-away surface (the status-report Mattermost post) was silent
 # on `validator_judge_fail` / `validator_judge_timeout`, which weakens
 # goal.md L82-85 ("upstream gates already make this safe in practice")
 # because the TB-235 dep-coherence judge IS one of those upstream gates
@@ -496,8 +496,8 @@ def render_focus_rotation_activity_section(
 # functionally invisible during the walk-away window goal.md L57-59
 # promises ("walk away for a week without intervention"). A judge
 # silently degrading at 03:00Z used to wait for the operator's next
-# manual `ap2 status` to surface; now it lands in the very next 2h
-# cron post.
+# manual `ap2 status` to surface; now it lands in the very next
+# status-report cron post.
 
 _VALIDATOR_JUDGE_HEADING = "*Validator-judge fail-open window (24h):*"
 
@@ -567,7 +567,7 @@ def render_validator_judge_activity_section(
 # the boundary).
 #
 # Closes TB-248's push-surface gap: the operator's primary walk-away
-# channel (the 2h status-report Mattermost post) carried no audit-pile
+# channel (the status-report Mattermost post) carried no audit-pile
 # digest. Under `AP2_AUTO_APPROVE=1` the auto-approved tasks ship
 # without operator-in-the-loop review at dispatch time; retrospective
 # review is the operator's only judgment surface. Without this digest,
@@ -1485,8 +1485,8 @@ Body shape (when posting):
   TB-N reference its bullets carry) into the post, validate
   against events.jsonl that the references are still current. The
   bullets were written by the ideator at the most recent
-  `ideation_state_updated` event in the tail; up to the ideation
-  interval (~2h) of staleness can bleed through into the
+  `ideation_state_updated` event in the tail; up to one ideation
+  interval of staleness can bleed through into the
   decisions-needed snapshot. Procedure:
     1. Note the `ts` of the most recent `ideation_state_updated`
        event in `events.jsonl`. That's when the decisions-needed
@@ -1642,7 +1642,7 @@ _STATUS_REPORT_BORING_TYPES = frozenset(
 # (`validator_judge_fail`, `validator_judge_timeout`) so a fresh
 # fail-open event on the TB-235 dep-coherence judge un-skips the
 # status-report digest and surfaces on the operator's primary
-# walk-away channel within 2h. Without this, the silent-degradation
+# walk-away channel by the next status-report cron tick. Without this, the silent-degradation
 # hazard TB-235's fail-open design carries (judge skips a briefing
 # on a transient API hiccup; briefing is admitted regardless) had
 # zero push-channel observability — directly weakened the goal.md
@@ -1675,7 +1675,7 @@ _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
     # `AP2_MM_CHANNELS[0]`) must un-skip the dedup/idle gate so the
     # next routine status-report cron acknowledges the immediate
     # push happened — keeps the two surfaces coherent (operator
-    # reading the next 2h post sees the same condition rather than
+    # reading the next status-report post sees the same condition rather than
     # the cron silently skipping because nothing else moved).
     # Mirrors the `attention_raised` entry just above; both event
     # classes can fire in the same tick so listing both is

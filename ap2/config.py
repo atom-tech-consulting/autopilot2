@@ -58,7 +58,7 @@ DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S = 21600  # 6h — re-fire spam guard
 # long-but-healthy task agent (TB-122/TB-255 pattern: real-world tasks
 # at xhigh effort can sit 30-60 min inside `sdk.query` without being
 # stuck), short enough that an actually-hung dispatch surfaces well
-# before the next 2h status-report cron tick. `AP2_ATTENTION_DEBOUNCE_S`
+# before the next status-report cron tick. `AP2_ATTENTION_DEBOUNCE_S`
 # defaults to 6h so a still-stuck task re-fires roughly once per
 # operator workday rather than every tick. Both knobs are read fresh
 # from `os.environ` at detection-time inside `ap2/attention.py`
@@ -102,14 +102,14 @@ DEFAULT_TASK_FROZEN_RECENCY_S = 86400  # 24h
 DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT = 75
 
 # TB-297: opt-in immediate-Mattermost-push on `attention_raised` emission.
-# Default OFF so the per-2h status-report cron stays the routine push
+# Default OFF so the status-report cron stays the routine push
 # surface for fresh projects (TB-282's `## Attention needed` section
 # already carries the same conditions there). Operators flip
 # `AP2_ATTENTION_IMMEDIATE_PUSH=1` once they've sampled their own
 # detector cadence and confirmed it's low enough not to noise the
 # channel — the post-trip `auto_approve_paused` and pre-trip
 # `cost_cap_approach` conditions are explicitly time-sensitive
-# (waiting up to 2h for the next status-report defeats the
+# (waiting for the next status-report cron tick defeats the
 # "proactively surfaced" claim), but `task_stuck` / `task_frozen` /
 # `validator_judge_noisy` cadence is project-dependent. Bool parse
 # mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED` style

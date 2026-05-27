@@ -328,7 +328,7 @@ ENV_TEMPLATE = f"""\
 # AP2_MM_CHANNELS=
 
 # Opt-in immediate Mattermost push when the attention detector emits a
-# fresh `attention_raised` (TB-297). Default OFF — the per-2h
+# fresh `attention_raised` (TB-297). Default OFF — the
 # status-report cron stays the routine push channel for fresh projects.
 # Flip to `1` once you've sampled the detector cadence (`ap2 attention`
 # / `ap2 logs --type attention_raised`) and confirmed the rate is low

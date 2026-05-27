@@ -11,7 +11,7 @@ sub-block to the status-report cron, but `ap2/cli.py:cmd_status` and
 real-mode TB-227 counters. An operator flipping `AP2_AUTO_APPROVE_DRY_RUN=1`
 and running `ap2 status` saw a byte-identical auto-approve summary —
 zero evidence the knob changed anything until the next status-report
-cron tick (~2h cadence).
+cron tick.
 
 Four behavioral cases pinned here:
 

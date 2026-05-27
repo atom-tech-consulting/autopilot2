@@ -3,8 +3,8 @@ on `attention_raised` emission.
 
 Closes the TB-282 Out-of-scope axis the briefing's L119-122 named:
 the post-trip `auto_approve_paused` and pre-trip
-`cost_cap_approach` conditions are time-sensitive — waiting up to
-2h for the next status-report cron defeats the "proactively
+`cost_cap_approach` conditions are time-sensitive — waiting for
+the next status-report cron defeats the "proactively
 surfaced" claim. Operators opt into immediate-push once they've
 sampled their detector cadence.
 

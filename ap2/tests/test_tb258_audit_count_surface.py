@@ -5,7 +5,7 @@ digest).
 TB-248 ships the PULL surface (`ap2 audit` operator verb). TB-258
 closes the push-vs-pull surface-parity gap: the walk-away operator's
 two natural-cadence return surfaces — `ap2 status` (text + JSON) and
-the 2h cron status-report Mattermost post — were silent on the
+the status-report Mattermost cron post — were silent on the
 unreviewed-count, forcing the operator to KNOW to run `ap2 audit`
 explicitly to learn how many shipped tasks bypassed their per-task
 review.

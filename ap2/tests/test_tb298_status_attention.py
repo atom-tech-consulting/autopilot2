@@ -6,8 +6,8 @@ cron push), TB-296 (`web_attention._render_attention` for the
 `/attention` pull page), and TB-297 (immediate-MM push). All four
 surfaces consume the same `attention.detect_attention_conditions(cfg)`
 detector entrypoint so a walk-away operator polling `ap2 status` from
-a terminal sees the same conditions the web page / chat post / 2h
-status-report digest carry.
+a terminal sees the same conditions the web page / chat post /
+status-report cron digest carry.
 
 Pinned shape (mirrors the cross-surface contract):
 

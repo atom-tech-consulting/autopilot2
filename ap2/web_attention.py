@@ -6,7 +6,7 @@ Sibling to the status-report cron's push-surface render of
 shipped in TB-282 / TB-287 / TB-288 / TB-289 / TB-290): both consume
 the SAME `attention.detect_attention_conditions(cfg)` entrypoint so
 the push and pull surfaces can never disagree about what's currently
-active. The status-report cron forwards its render verbatim every 2h;
+active. The status-report cron forwards its render verbatim each tick;
 this page renders on every request so a walk-away operator returning
 mid-cycle doesn't have to wait for the next post (or `ap2 status`
 text-pull) to see currently-active conditions.

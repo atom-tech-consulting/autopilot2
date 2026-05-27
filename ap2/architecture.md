@@ -215,7 +215,7 @@ ap2/
 ├── sandbox.py            # claude-agent setup, project-clone, MM creds, statusline
 ├── state_commit.py       # _commit_state_files (TB-263 split out of daemon.py), _filter_state_paths,
 │                         # _snapshot_state_paths — the "state: TB-N → <section>" commit author
-├── status_report.py      # status-report cron-job body (the 2h Mattermost digest)
+├── status_report.py      # status-report cron-job body (the Mattermost digest)
 ├── tools.py              # MCP server build_mcp_server + the handlers that did NOT move out in TB-262:
 │                         # do_pipeline_task_start, do_cron_edit (operator-CLI only — TB-146),
 │                         # do_task_complete, do_cron_propose, do_git_log_grep, do_ideation_state_write,

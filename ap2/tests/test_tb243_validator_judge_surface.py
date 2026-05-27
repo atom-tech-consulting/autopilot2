@@ -12,7 +12,7 @@ on-demand pull surfaces, leaving the auto-approve safety claim
 (goal.md L82-85: "upstream gates already make this safe in practice")
 silently-degradable: an operator with `AP2_AUTO_APPROVE=1` whose
 judge had been quietly timing out for 10 consecutive briefings had
-to wait for the next status-report cron tick (~2h cadence) to find
+to wait for the next status-report cron tick to find
 out.
 
 This module pins five behavioral cases across three surfaces:
