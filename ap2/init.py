@@ -326,7 +326,98 @@ ENV_TEMPLATE = f"""\
 # (FIXED_KNOBS) — changing it requires `ap2 stop && ap2 start` to
 # re-subscribe.
 # AP2_MM_CHANNELS=
+
+# Opt-in immediate Mattermost push when the attention detector emits a
+# fresh `attention_raised` (TB-297). Default OFF — the per-2h
+# status-report cron stays the routine push channel for fresh projects.
+# Flip to `1` once you've sampled the detector cadence (`ap2 attention`
+# / `ap2 logs --type attention_raised`) and confirmed the rate is low
+# enough not to noise the channel. Requires `AP2_MM_CHANNELS` above to
+# be set; debounce piggybacks on `AP2_ATTENTION_DEBOUNCE_S` (default 6h).
+# AP2_ATTENTION_IMMEDIATE_PUSH=0
+
+# Per-task token ceiling for auto-approved tasks (TB-224). Unset / 0 =
+# cap disabled (operators who haven't budgeted their project don't get
+# a hardcoded ceiling surprising them). When set, an auto-approved
+# task whose `task_run_usage` reports input+output tokens above this
+# value trips `auto_approve_paused:per_task_cap` — dispatch halts until
+# `ap2 ack auto_approve_window_resume`.
+# AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP=
+
+# 24h-rolling cumulative token ceiling across all auto-approved tasks
+# (TB-224). Unset / 0 = cap disabled. When set, the sum of input+output
+# tokens across auto-approved tasks in the last 24h crossing this value
+# trips `auto_approve_paused:window_token_cap_exceeded`. The pre-trip
+# nudge (`cost_cap_approach`, TB-290) fires at
+# `AP2_AUTO_APPROVE_COST_APPROACH_PCT` (default 75)% of this cap so the
+# walk-away operator gets a budget-spending heads-up before the halt.
+# AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP=
 """
+
+
+# TB-305: knobs intentionally absent from `ENV_TEMPLATE` above. Each
+# entry carries a `# reason: ...` comment on the same line categorizing
+# why operators don't need it in the per-project scaffold — debug /
+# test only, an internal default rarely tuned, an integration secret
+# set via shell export, covered by a sibling global, etc. The
+# `test_every_env_knob_in_template_or_exempt` CI gate
+# (`ap2/tests/test_docs_drift.py`) asserts every `AP2_*` knob in
+# source is EITHER a substring of `ENV_TEMPLATE` above OR a member of
+# this set; a future knob-adder's PR fails the gate until one of those
+# is true. The `# reason:` comment is the audit trail for a future
+# reader asking "should this graduate to the template?" — the gate
+# forces the decision at knob-add time instead of letting drift
+# compound silently the way it did between TB-278 (which authored the
+# template) and TB-305 (which added this gate after ~40 knobs
+# accumulated outside it).
+#
+# Pattern parallels `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` in
+# `ap2/tests/test_docs_drift.py` (which exempts private-constant
+# look-alikes from the howto-mention gate) and
+# `HOT_RELOADABLE_KNOBS` / `FIXED_KNOBS` in `ap2/env_reload.py` (which
+# split the same source-of-truth knob universe along the
+# can-hot-reload axis). Living next to `ENV_TEMPLATE` keeps the
+# template-vs-exempt decision a one-file edit for the knob-adder.
+_TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
+    "AP2_ATTENTION_DEBOUNCE_S",              # reason: detector-sensitivity tuning, default 6h rarely tuned
+    "AP2_AUTO_APPROVE",                      # reason: opt-in main toggle; operators flip via shell export after sampling the dry-run audit surface
+    "AP2_AUTO_APPROVE_COST_APPROACH_PCT",    # reason: internal default (75%), rarely tuned
+    "AP2_AUTO_APPROVE_DRY_RUN",              # reason: debug/test only
+    "AP2_AUTO_APPROVE_FREEZE_THRESHOLD",     # reason: internal default, rarely tuned
+    "AP2_AUTO_APPROVE_GATE_TAGS",            # reason: internal default, rarely tuned
+    "AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", # reason: debug/test only
+    "AP2_AUTO_DIAGNOSE_COOLDOWN_S",          # reason: internal default, rarely tuned
+    "AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S",    # reason: internal default, rarely tuned
+    "AP2_AUTO_UNFREEZE_DRY_RUN",             # reason: debug/test only
+    "AP2_AUTO_UNFREEZE_FIX_SHAPES",          # reason: operator opt-in allowlist; set via shell export so a per-project template doesn't broaden the auto-patch surface by default
+    "AP2_AUTO_UNFREEZE_MAX_PER_DAY",         # reason: internal default, rarely tuned
+    "AP2_AUTO_UNFREEZE_MAX_PER_TASK",        # reason: internal default, rarely tuned
+    "AP2_CONTROL_MAX_TURNS",                 # reason: internal default, rarely tuned
+    "AP2_EVENT_CONTEXT",                     # reason: internal default, rarely tuned
+    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",        # reason: internal default, rarely tuned
+    "AP2_FOCUS_AUTO_ADVANCE_DISABLED",       # reason: debug/test only
+    "AP2_IDEATION_COOLDOWN_S",               # reason: internal default, rarely tuned
+    "AP2_IDEATION_DISABLED",                 # reason: debug/test only
+    "AP2_IDEATION_SCRUB_MODEL",              # reason: covered by global AP2_AGENT_MODEL for most projects
+    "AP2_JANITOR_JUDGE_MAX_TURNS",           # reason: internal default, rarely tuned
+    "AP2_JANITOR_MAX_FINDINGS_LLM",          # reason: internal default, rarely tuned
+    "AP2_MAX_RETRIES",                       # reason: internal default, rarely tuned
+    "AP2_MM_BOT_USER_ID",                    # reason: integration secret; set via shell export alongside AP2_MM_CHANNELS
+    "AP2_MM_MENTION",                        # reason: integration default, rarely tuned
+    "AP2_MM_REPORT_CHANNEL",                 # reason: integration secret; set via shell export alongside AP2_MM_CHANNELS
+    "AP2_MM_TEAM_ID",                        # reason: integration secret; set via shell export alongside AP2_MM_CHANNELS
+    "AP2_MM_TICK_S",                         # reason: internal default, rarely tuned
+    "AP2_PROJECT_NAME",                      # reason: defaults to project_root.name; operator renames via shell export
+    "AP2_TASK_FROZEN_RECENCY_S",             # reason: internal default, rarely tuned
+    "AP2_TASK_STUCK_THRESHOLD_S",            # reason: internal default, rarely tuned
+    "AP2_TICK_S",                            # reason: internal default, rarely tuned
+    "AP2_VALIDATOR_JUDGE_DISABLED",          # reason: debug/test only
+    "AP2_VALIDATOR_JUDGE_MAX_TOKENS",        # reason: internal default, rarely tuned
+    "AP2_VALIDATOR_JUDGE_MAX_TURNS",         # reason: internal default, rarely tuned
+    "AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD",   # reason: internal default, rarely tuned
+    "AP2_VALIDATOR_JUDGE_TIMEOUT_S",         # reason: internal default, rarely tuned
+    "AP2_VERIFY_JUDGE_MAX_TURNS",            # reason: internal default, rarely tuned
+})
 
 
 # Lines that go into <project>/.cc-autopilot/.gitignore. Grouped by purpose so

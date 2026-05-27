@@ -200,6 +200,56 @@ def test_every_env_knob_documented():
     )
 
 
+def test_every_env_knob_in_template_or_exempt():
+    """Every `AP2_*` env knob referenced in ap2 source is EITHER mentioned
+    (substring) in `ap2.init.ENV_TEMPLATE` — the `.cc-autopilot/env`
+    scaffold `ap2 init` writes into fresh projects — OR listed in
+    `ap2.init._TEMPLATE_EXEMPT_KNOBS` with an inline `# reason:` comment
+    explaining why operators don't need it in the template (TB-305).
+
+    Parallel to `test_every_env_knob_documented` (which gates howto.md),
+    but pinned against the scaffold operators actually paste into their
+    project. Forces the operator-facing-vs-internal decision at the same
+    PR that adds a knob, instead of letting drift compound silently the
+    way it did between TB-278 (which authored the template at 10 knobs)
+    and TB-305 (which added this gate after ~40 knobs had accumulated
+    outside the template).
+
+    Substring-matching against `ENV_TEMPLATE` is safe: the f-string
+    default-value interpolations resolve to constant values (numbers,
+    strings like `"claude-opus-4-7"`), not knob names, so a literal
+    `AP2_FOO` substring scan cannot false-positive on a default.
+    """
+    from ap2.init import ENV_TEMPLATE, _TEMPLATE_EXEMPT_KNOBS
+    knobs = _collect_env_knobs()
+    assert knobs, "no env knobs found in source — regex or walk regressed"
+    missing = sorted(
+        knob for knob in knobs
+        if knob not in ENV_TEMPLATE and knob not in _TEMPLATE_EXEMPT_KNOBS
+    )
+    assert not missing, (
+        f"env knob(s) referenced in source but NEITHER documented in "
+        f"`ap2.init.ENV_TEMPLATE` (the `.cc-autopilot/env` scaffold) NOR "
+        f"listed in `ap2.init._TEMPLATE_EXEMPT_KNOBS`: {missing}.\n\n"
+        f"To make the gate pass, EITHER:\n\n"
+        f"(1) Add a commented `# AP2_FOO=<default>` block to "
+        f"`ENV_TEMPLATE` following the existing format — a block "
+        f"comment explaining what the knob does + a commented-out "
+        f"KEY=VALUE line. Reference a `config.DEFAULT_*` constant via "
+        f"f-string interpolation where one exists; inline a literal "
+        f"otherwise. Use this path when the knob is operator-facing — "
+        f"something a fresh-project operator should discover from the "
+        f"scaffold alone.\n\n"
+        f"(2) Add the knob to `_TEMPLATE_EXEMPT_KNOBS` (next to "
+        f"`ENV_TEMPLATE` in `ap2/init.py`) with a `# reason: ...` "
+        f"comment categorizing why it's not template-worthy — "
+        f"debug/test only, internal default rarely tuned, integration "
+        f"secret set via shell export, covered by a sibling global, "
+        f"etc. The `# reason:` comment IS the audit trail for a future "
+        f"reader asking \"should this graduate to the template?\""
+    )
+
+
 def test_every_event_type_documented():
     """Every event type emitted via `events.append(events_file, "<type>", ...)`
     in ap2 source is mentioned in `ap2/howto.md`. Substring check (not
