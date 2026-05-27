@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-295** **Add `ap2 rewind-focus` CLI verb; emit synthetic `focus_advanced` event for counter cutoff** `#autopilot` `#operator-cli` `#focus-advance` `#empty-cycles` `#recovery` `#regression-pin` `#bug` [→ brief](.cc-autopilot/tasks/add-ap2-rewind-focus-cli-verb-emit-synth.md)
 
 ## Pipeline Pending
 
