@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-307** **Scrub hardcoded `2h` status-report cadence references (TB-306 follow-up)** `#autopilot` `#docs` `#cleanup` `#status-report` `#regression-pin` [→ brief](.cc-autopilot/tasks/scrub-hardcoded-2h-status-report-cadence.md)
 
 ## Pipeline Pending
 
