@@ -8,10 +8,16 @@ module owns the pointer-advance policy itself:
     heuristic "N consecutive 0-proposal cycles against the active
     focus" path. Each ideation cycle is bounded by
     `ideation_empty_board` (entry) and one of `ideation_complete` /
-    `ideation_timeout` / `ideation_error` (exit); per-cycle accounting
-    avoids the pre-TB-292 double-count where one cycle bumped the
-    counter by 2 (entry + exit events both counted) and one productive
-    cycle netted +1 (reset zeroed only between the two increments).
+    `ideation_cycle_summary` / `ideation_timeout` / `ideation_error`
+    (exit); per-cycle accounting avoids the pre-TB-292 double-count
+    where one cycle bumped the counter by 2 (entry + exit events both
+    counted) and one productive cycle netted +1 (reset zeroed only
+    between the two increments). TB-300 added `ideation_cycle_summary`
+    to the exit-marker set: the agent emits it (not `ideation_complete`)
+    on the 0-proposal path, so under the prior single-name predicate
+    every natural empty cycle slipped past the counter and the
+    `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` threshold was structurally
+    unreachable.
   - `_maybe_advance_focus`: the orchestrator entry point. Reads goal.md's
     focus list + `focus_pointer.json`, advances the in-memory pointer
     when criteria are met, emits `roadmap_complete` when all foci are
@@ -66,13 +72,21 @@ def _ideation_empty_against_focus(tail: list[dict], focus_title: str) -> int:
     recording a proposal against `focus_title`. Cycle-grouped: each
     ideation cycle is bounded by `ideation_empty_board` (daemon-emitted
     entry marker at `ideation._run_ideation`) and one of
-    `ideation_complete` / `ideation_timeout` / `ideation_error` (exit).
+    `ideation_complete` / `ideation_cycle_summary` / `ideation_timeout`
+    / `ideation_error` (exit). The agent's two-event vocabulary is
+    intentional: `ideation_complete` carries a proposal summary (used
+    when ≥1 proposal landed this cycle), `ideation_cycle_summary`
+    carries a no-proposal-reasoning summary (used when 0 proposals
+    landed). Either name closes the cycle the same way from the
+    counter's perspective.
+
     Per cycle:
 
-      - Exited via `ideation_complete` AND no `ideation_proposal_recorded`
-        fired within the cycle → increment count by 1.
+      - Exited via `ideation_complete` OR `ideation_cycle_summary`
+        AND no `ideation_proposal_recorded` fired within the cycle →
+        increment count by 1.
       - Any `ideation_proposal_recorded` fired within the cycle → on
-        `ideation_complete`, reset count to 0 (a fresh proposal landed
+        either exit marker, reset count to 0 (a fresh proposal landed
         against the active focus; the focus isn't exhausted).
       - Exited via `ideation_timeout` / `ideation_error` → leave count
         unchanged. These are infrastructure failures (SDK budget
@@ -95,6 +109,13 @@ def _ideation_empty_against_focus(tail: list[dict], focus_title: str) -> int:
     cycle netted +1 because the reset only zeroed between increments)
     to the cycle-grouped semantic that the `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
     env-knob name advertises ("3 consecutive empty cycles to trip").
+    TB-300 then extended the exit-marker set from `ideation_complete`
+    alone to also include `ideation_cycle_summary`: the agent emits
+    the latter (not the former) on every 0-proposal cycle, so under
+    the prior single-name predicate every natural empty cycle was
+    invisible to the counter and the threshold was structurally
+    unreachable — auto-advance never fired regardless of how many
+    consecutive 0-proposal cycles ran.
     """
     # Reset cutoff: the most recent `focus_advanced to=<focus_title>`
     # event marks the start of the current focus's window.
@@ -117,7 +138,11 @@ def _ideation_empty_against_focus(tail: list[dict], focus_title: str) -> int:
             cycle_had_proposal = False
         elif typ == "ideation_proposal_recorded" and in_cycle:
             cycle_had_proposal = True
-        elif typ == "ideation_complete" and in_cycle:
+        elif typ in ("ideation_complete", "ideation_cycle_summary") and in_cycle:
+            # TB-300: either name closes the cycle. The agent emits
+            # `ideation_complete` when proposals landed and
+            # `ideation_cycle_summary` when none did; both arrive via
+            # the same `log_event` MCP path at end-of-cycle.
             count = 0 if cycle_had_proposal else count + 1
             in_cycle = False
         elif typ in ("ideation_timeout", "ideation_error") and in_cycle:

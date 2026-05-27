@@ -357,6 +357,37 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `ap2/ideation_scrub.py::_run_scrub` that eliminates the
     Haiku-4.5 extended-thinking auto-engagement that was the root
     cause of the silent timeouts.
+  - `ideation_complete` / `ideation_cycle_summary` (agent-emitted,
+    via the `log_event` MCP tool at end-of-cycle) — the ideation
+    control-agent's per-cycle wrap-up summary. Two-event vocabulary
+    is intentional: `ideation_complete` carries a PROPOSAL summary
+    (used when ≥1 proposal landed this cycle — e.g. "TB-298 + TB-299
+    against focus-2"); `ideation_cycle_summary` carries a
+    NO-PROPOSAL-REASONING summary (used when 0 proposals landed this
+    cycle — e.g. "0 proposals; focus-2 marked exhausted-needs-
+    operator"). Both close the cycle from the empty-cycles counter's
+    perspective: `focus_advance._ideation_empty_against_focus` (TB-292
+    cycle-grouped accounting, TB-300 dual-name exit-marker set)
+    treats either name as the cycle-end signal — increment if no
+    `ideation_proposal_recorded` fired within the cycle, reset to 0
+    if any did. Payload: `summary` (one-paragraph string).
+    Discriminator is the event name itself rather than a payload
+    field, so downstream consumers (status report digests, web UI
+    rendering, audit tooling) key off `type` to pick the right
+    rendering shape. Both are emitted via the `log_event` MCP tool
+    (the agent has no direct `events.append` access) and so don't
+    show up in the `events.append(events_file, "<type>", ...)` source
+    walk that `test_every_event_type_documented` enumerates — they're
+    documented here purely for vocabulary-completeness so an operator
+    reading events.jsonl can map either name back to "ideation
+    finished a cycle." TB-300 closes the goal.md `## Done when`
+    failure mode "Ideation reliably proposes goal-aligned next steps
+    that substantively advance the goal (not just goal-shaped pro-
+    forma compliance)": under the prior single-name exit predicate,
+    the auto-advance threshold (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`,
+    default 3) was structurally unreachable because the agent never
+    emitted the event the counter was looking for on the 0-proposal
+    path.
   - `cron_skipped` (TB-128 + TB-281) — status-report cron run was
     suppressed pre-flight. Carries `job="status-report"`, `trigger`
     (`cron` or `chat`), and a `reason` field naming which gate

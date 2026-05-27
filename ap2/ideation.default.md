@@ -161,6 +161,31 @@ Citation rule: every "Progress so far" / "Gaps" bullet MUST cite
 at least one TB-N (`TB-79`, `TB-85`). Vague claims without TB-N
 citations are forbidden — they hide hallucination.
 
+## End-of-cycle summary event (TB-300)
+At the end of every cycle, emit ONE summary event via the
+`log_event` MCP tool naming what this cycle produced. Two event
+names are valid and the choice between them encodes the cycle's
+outcome — downstream consumers key off the event `type` to pick the
+right rendering shape, so use the right name:
+
+  - `ideation_complete` — emit when ≥1 proposal landed this cycle.
+    The `summary` field describes the proposals (e.g. "TB-298 +
+    TB-299 against focus-2").
+  - `ideation_cycle_summary` — emit when 0 proposals landed this
+    cycle. The `summary` field carries the no-proposal reasoning
+    (e.g. "0 proposals; focus-2 marked exhausted-needs-operator —
+    all 3 Progress signals addressed").
+
+Both names close the cycle from the empty-cycles counter's
+perspective (`ap2/focus_advance.py::_ideation_empty_against_focus`,
+TB-292 cycle-grouped accounting + TB-300 dual-name exit-marker set):
+each cycle exits via exactly ONE of these markers. Don't emit both
+in the same cycle. The `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` auto-advance
+threshold counts consecutive cycles whose exit marker (either name)
+fired with no `ideation_proposal_recorded` in the cycle, so picking
+the right name is what makes the empty-cycles signal legible to the
+daemon.
+
 ## Cron proposals from task agents (TB-146)
 Task agents emit `cron_proposed` events via the `cron_propose` MCP
 tool when they spot work that should fire on a schedule. Per TB-146,

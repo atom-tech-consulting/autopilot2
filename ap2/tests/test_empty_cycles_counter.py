@@ -1,5 +1,7 @@
 """TB-292: regression-pin for `_ideation_empty_against_focus`'s
-cycle-grouped semantics.
+cycle-grouped semantics. TB-300 extended the exit-marker set from
+`ideation_complete` alone to also include `ideation_cycle_summary`;
+the new cases below pin that.
 
 The pre-TB-292 implementation walked events as flat evidence: any
 event in the increment set bumped the counter, any reset event zeroed
@@ -11,20 +13,33 @@ one productive cycle netted +1 (the reset only zeroed between the two
 increments). At threshold 3, ~1.5 truly-empty cycles tripped the focus
 advance — half the cadence the env-knob name advertised.
 
-The new implementation groups events into cycles bounded by entry
-(`ideation_empty_board`) and exit (`ideation_complete` / `_timeout` /
-`_error`) markers. Per cycle = at most one count-change:
+The TB-292 implementation groups events into cycles bounded by entry
+(`ideation_empty_board`) and exit (`ideation_complete` /
+`ideation_cycle_summary` / `_timeout` / `_error`) markers. Per cycle =
+at most one count-change:
 
-  - Empty cycle (entry + complete, no proposal) → count += 1.
-  - Productive cycle (entry + proposal_recorded + complete) → count = 0.
+  - Empty cycle (entry + complete/cycle_summary, no proposal)
+    → count += 1.
+  - Productive cycle (entry + proposal_recorded + complete/cycle_summary)
+    → count = 0.
   - Timeout cycle (entry + timeout) → count unchanged.
   - Error cycle (entry + error) → count unchanged.
+
+TB-300 specifically pins `ideation_cycle_summary` as a valid exit
+marker: the agent's two-event vocabulary is intentional —
+`ideation_complete` for cycles that produced proposals,
+`ideation_cycle_summary` for cycles that produced none — and under
+the pre-TB-300 single-name predicate the auto-advance threshold was
+structurally unreachable because every natural 0-proposal cycle
+arrived through the `ideation_cycle_summary` branch the counter
+ignored.
 
 These tests pin the policy decisions explicitly so a future refactor
 can't silently regress to the old double-count shape — or, just as
 importantly, can't accidentally start counting timeouts/errors as
 empty (which would let transient SDK slowness falsely trip focus
-advance).
+advance) or drop `ideation_cycle_summary` from the exit-marker set
+(which would re-introduce the TB-300 unreachable-threshold bug).
 
 This module is a pure unit test against
 `ap2.focus_advance._ideation_empty_against_focus` — no fixtures, no
@@ -51,16 +66,45 @@ def _evt(type_: str, **fields) -> dict:
 
 
 def _empty_cycle() -> list[dict]:
-    """One empty ideation cycle: entry + exit, no proposal."""
+    """One empty ideation cycle: entry + `ideation_complete` exit, no
+    proposal. This is the canonical pre-TB-300 empty-cycle shape — the
+    agent CAN emit `ideation_complete` on a 0-proposal cycle when its
+    summary still describes proposals it ALMOST emitted (rare in
+    production today; the `_empty_cycle_via_summary` shape below is
+    the natural emission)."""
     return [_evt("ideation_empty_board"), _evt("ideation_complete")]
 
 
+def _empty_cycle_via_summary() -> list[dict]:
+    """One empty ideation cycle: entry + `ideation_cycle_summary` exit,
+    no proposal. TB-300: this is the natural 0-proposal emission
+    shape — the agent uses `ideation_cycle_summary` (not
+    `ideation_complete`) when summarizing a cycle in which it reasoned
+    its way to no proposals. Both exit markers must close the cycle
+    the same way; the counter is name-agnostic from TB-300 onward."""
+    return [_evt("ideation_empty_board"), _evt("ideation_cycle_summary")]
+
+
 def _productive_cycle(task: str = "TB-1") -> list[dict]:
-    """One productive cycle: entry + proposal + exit."""
+    """One productive cycle: entry + proposal + `ideation_complete`
+    exit."""
     return [
         _evt("ideation_empty_board"),
         _evt("ideation_proposal_recorded", task=task),
         _evt("ideation_complete"),
+    ]
+
+
+def _productive_cycle_via_summary(task: str = "TB-1") -> list[dict]:
+    """One productive cycle but exiting via `ideation_cycle_summary`.
+    Symmetric to `_productive_cycle` for TB-300 coverage of the new
+    exit marker on the reset path: a proposal landed AND the summary
+    name fired → counter resets to 0 the same way as via
+    `ideation_complete`."""
+    return [
+        _evt("ideation_empty_board"),
+        _evt("ideation_proposal_recorded", task=task),
+        _evt("ideation_cycle_summary"),
     ]
 
 
@@ -107,6 +151,75 @@ def test_error_cycle_does_not_count():
     failure, not 'ideation reasoned and found nothing.' Don't count."""
     tail = _error_cycle()
     assert _ideation_empty_against_focus(tail, "alpha") == 0
+
+
+# ===========================================================================
+# TB-300: `ideation_cycle_summary` as exit marker (the agent's natural
+# 0-proposal emission name; the counter MUST recognize it the same way
+# it recognizes `ideation_complete`)
+# ===========================================================================
+
+
+def test_empty_cycle_via_cycle_summary_contributes_one():
+    """An empty cycle that exits via `ideation_cycle_summary` (the
+    agent's natural 0-proposal emission shape) bumps the counter by 1.
+    Pins the TB-300 invariant — the pre-TB-300 single-name predicate
+    silently dropped this shape on the floor, leaving the
+    auto-advance threshold structurally unreachable."""
+    tail = _empty_cycle_via_summary()
+    assert _ideation_empty_against_focus(tail, "alpha") == 1
+
+
+def test_three_empty_cycles_via_cycle_summary_reach_threshold():
+    """Three consecutive empty cycles each exited via
+    `ideation_cycle_summary` → count = 3. This is the canonical
+    threshold-3 trip path under the agent's natural emission shape;
+    pre-TB-300 this stayed at 0 forever no matter how many cycles ran."""
+    tail = (
+        _empty_cycle_via_summary()
+        + _empty_cycle_via_summary()
+        + _empty_cycle_via_summary()
+    )
+    assert _ideation_empty_against_focus(tail, "alpha") == 3
+
+
+def test_productive_cycle_via_cycle_summary_resets():
+    """A productive cycle that exits via `ideation_cycle_summary` (a
+    proposal landed AND the summary name fired — the rare-but-valid
+    cross-shape; the counter must still reset to 0). Pins TB-300's
+    'cycle_had_proposal flag semantics unchanged' invariant for the
+    new exit marker."""
+    tail = _productive_cycle_via_summary()
+    assert _ideation_empty_against_focus(tail, "alpha") == 0
+
+
+def test_mixed_complete_then_cycle_summary_empties_count():
+    """Mixed sequence: one productive cycle (exits via
+    `ideation_complete`) followed by two empty cycles (exit via
+    `ideation_cycle_summary`). The productive cycle resets, the two
+    empties accumulate via the new exit marker → count = 2."""
+    tail = (
+        _productive_cycle()  # exits via ideation_complete; resets
+        + _empty_cycle_via_summary()
+        + _empty_cycle_via_summary()
+    )
+    assert _ideation_empty_against_focus(tail, "alpha") == 2
+
+
+def test_interleaved_exit_marker_names_count_uniformly():
+    """Cycles exiting via either `ideation_complete` OR
+    `ideation_cycle_summary` all count toward the same counter — pin
+    that the counter is name-agnostic across both valid exit markers
+    so a real-world tail that mixes both shapes (e.g. one productive
+    cycle that proposed + summarized followed by 0-proposal cycles
+    summarizing reasoning) accumulates cleanly."""
+    tail = (
+        _empty_cycle()                 # exits via ideation_complete
+        + _empty_cycle_via_summary()   # exits via ideation_cycle_summary
+        + _empty_cycle()
+        + _empty_cycle_via_summary()
+    )
+    assert _ideation_empty_against_focus(tail, "alpha") == 4
 
 
 # ===========================================================================
