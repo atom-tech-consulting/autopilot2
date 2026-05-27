@@ -149,7 +149,13 @@ ap2/
 │                         # `auto_approve._auto_approve_check_violations`'s window walk so the
 │                         # approach-sum matches the trip-sum) — proactive attention-detector
 │                         # surface; daemon's `_maybe_emit_attention_events` consumes the AttentionCondition
-│                         # list and emits `attention_raised` events per fresh condition
+│                         # list and emits `attention_raised` events per fresh condition; TB-297
+│                         # adds an opt-in `_maybe_push_attention` companion that posts a one-line
+│                         # `[<project>] ⚠ <summary>` to AP2_MM_CHANNELS[0] (gated on
+│                         # AP2_ATTENTION_IMMEDIATE_PUSH; debounce reuses AP2_ATTENTION_DEBOUNCE_S
+│                         # structurally — push runs only after a fresh attention_raised appends —
+│                         # emits attention_pushed / attention_push_error / attention_push_no_destination
+│                         # audit events parallel to the watchdog's no-destination sticky-warn pattern)
 ├── automation_stats.py   # /stats aggregation helpers (windows, sparklines, top-N expensive tasks)
 ├── automation_status.py  # collect_auto_approve_state, status-line composer for ap2 status / web home
 ├── backfill.py           # ap2 backfill-proposals — historical proposal-record reconstruction (TB-195)

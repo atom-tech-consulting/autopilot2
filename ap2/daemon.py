@@ -1777,6 +1777,189 @@ def _maybe_emit_attention_events(cfg: Config) -> None:
             # An events-emit failure on one candidate must not block
             # the others — keep iterating.
             continue
+        # TB-297: opt-in immediate-Mattermost-push. Runs AFTER the
+        # `attention_raised` event has been appended so the push
+        # piggybacks structurally on the existing per-(type, key)
+        # debounce — a still-active condition that just got its
+        # `attention_raised` fire will not get a second push until
+        # the next debounce-window-elapsed fresh `attention_raised`
+        # emits. Best-effort: a push hiccup must not abort the tick
+        # or the rest of the candidate iteration.
+        try:
+            _maybe_push_attention(cfg, cond)
+        except Exception:  # noqa: BLE001
+            # Defensive — the helper already catches `_mm_post`
+            # failures and emits `attention_push_error`; this outer
+            # guard catches a surprise in the helper's own plumbing
+            # (state-file write, environ read). The rest of the
+            # candidate loop must continue regardless.
+            continue
+
+
+def _attention_push_state_path(cfg: Config) -> Path:
+    """Return the per-project `attention_push_state.json` path (TB-297).
+
+    Inline-computed (mirroring `goal._focus_pointer_path` /
+    `focus_pointer.json`'s home) rather than threaded through `Config`
+    — the state is a single sticky boolean (`warned_no_destination`)
+    that no other module reads, so a Config field would be paperwork
+    for a one-key file. Gitignored via
+    `init.NESTED_GITIGNORE_BLOCKS`'s runtime-state block: an
+    `ap2 rollback` should NOT resurrect a stale "we already warned"
+    flag — a fresh daemon should re-warn against a freshly-misconfigured
+    env file.
+    """
+    return cfg.project_root / ".cc-autopilot" / "attention_push_state.json"
+
+
+def _load_attention_push_state(cfg: Config) -> dict:
+    """Load the TB-297 push state file. Returns `{}` on missing /
+    corrupt — defensive parse mirrors `_load_diagnose_state`.
+    """
+    path = _attention_push_state_path(cfg)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_attention_push_state(cfg: Config, state: dict) -> None:
+    path = _attention_push_state_path(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True))
+
+
+def _is_attention_immediate_push_enabled() -> bool:
+    """Parse `AP2_ATTENTION_IMMEDIATE_PUSH` fresh from `os.environ`.
+
+    Read at push-decision time (NOT cached on `Config`) so a hot-reload
+    of the env file flips the knob on the very next tick. Truthy set
+    mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED` style:
+    `1` / `true` / `yes` / `on` (case-insensitive). Anything else,
+    including the unset case, is false (conservative default per
+    goal.md Non-goals L253-256).
+    """
+    raw = os.environ.get("AP2_ATTENTION_IMMEDIATE_PUSH", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _maybe_push_attention(cfg: Config, cond) -> None:
+    """Post a one-line Mattermost message for a freshly-emitted
+    `attention_raised` condition (TB-297).
+
+    Called from `_maybe_emit_attention_events` AFTER the
+    `attention_raised` event has been appended for `cond`. Per-(type,
+    key) debounce piggybacks structurally on the existing
+    `attention_raised` debounce (the push runs only when a fresh event
+    appended, which already honors `AP2_ATTENTION_DEBOUNCE_S`) — no
+    new state file is needed for push-debounce bookkeeping.
+
+    Conservative-default opt-in via `AP2_ATTENTION_IMMEDIATE_PUSH`:
+    when unset / falsy, returns without posting. Operators flip the
+    knob once they've sampled their own detector cadence and confirmed
+    it's low enough not to noise the channel.
+
+    Missing-destination handling mirrors the watchdog's
+    `warned_no_destination` pattern: when `AP2_MM_CHANNELS` is unset
+    so `_first_mm_channel()` returns "", emit ONE
+    `attention_push_no_destination` audit event then sticky-suppress
+    further such audits via a state-file flag — the sticky flag resets
+    to `False` on a successful post so a destination that returns can
+    re-warn on its next gap.
+
+    Best-effort by design: on `_mm_post` failure emit an
+    `attention_push_error` audit event and return (caller's outer
+    try/except wraps this so an unexpected helper-plumbing failure
+    also doesn't abort the tick). Success emits an
+    `attention_pushed` audit event the status-report skip-gate
+    consults (the event is in
+    `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a fresh push
+    un-skips the dedup/idle gate).
+    """
+    if not _is_attention_immediate_push_enabled():
+        return
+
+    channel = _first_mm_channel()
+    if not channel:
+        # No destination configured. Emit one sticky audit event then
+        # suppress further such audits via the state-file flag, parity
+        # with the watchdog's no-destination short-circuit.
+        state = _load_attention_push_state(cfg)
+        if not state.get("warned_no_destination"):
+            try:
+                events.append(
+                    cfg.events_file,
+                    "attention_push_no_destination",
+                    reason="AP2_MM_CHANNELS unset",
+                    attention_type=cond.type,
+                    key=cond.key,
+                )
+            except Exception:  # noqa: BLE001
+                # Events-append plumbing surprise must not break the
+                # tick. Skip the state-file flip too so the warning
+                # can re-fire on the next push attempt.
+                return
+            state["warned_no_destination"] = True
+            try:
+                _save_attention_push_state(cfg, state)
+            except OSError:
+                # Best-effort: a state-write hiccup is acceptable; the
+                # event already went to events.jsonl which is the
+                # operator's primary audit surface.
+                pass
+        return
+
+    # Compose the one-line post. Project-name prefix is looked up at
+    # call-time from `cfg.project_name` (the existing helper the
+    # status-report cron uses — TB-280) so a project rename
+    # propagates immediately without duplicating that helper here.
+    text = f"[{cfg.project_name}] ⚠ {cond.summary}"
+    try:
+        post_id = tools._mm_post(channel, text)
+    except Exception as e:  # noqa: BLE001
+        try:
+            events.append(
+                cfg.events_file,
+                "attention_push_error",
+                channel=channel,
+                attention_type=cond.type,
+                key=cond.key,
+                error=f"{type(e).__name__}: {e}",
+            )
+        except Exception:  # noqa: BLE001
+            # Defensive — if even the audit-event append fails, swallow
+            # so the tick continues.
+            pass
+        return
+
+    try:
+        events.append(
+            cfg.events_file,
+            "attention_pushed",
+            attention_type=cond.type,
+            key=cond.key,
+            channel=channel,
+            post_id=post_id,
+            summary=cond.summary,
+        )
+    except Exception:  # noqa: BLE001
+        # The post DID happen; the audit-event append failed. The
+        # operator already received the Mattermost line so the
+        # observable behavior is intact — silently continue.
+        pass
+    # Destination is back — reset the sticky no-destination flag so
+    # a future env-config gap re-warns. Matches the watchdog's
+    # `state["warned_no_destination"] = False` post-success reset.
+    state = _load_attention_push_state(cfg)
+    if state.get("warned_no_destination"):
+        state["warned_no_destination"] = False
+        try:
+            _save_attention_push_state(cfg, state)
+        except OSError:
+            pass
 
 
 async def _tick(cfg: Config, sdk, mcp_server) -> None:

@@ -152,6 +152,12 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     # tightening the threshold (e.g. 75 → 50 for an earlier nudge)
     # takes effect on the next tick without a daemon restart.
     "AP2_AUTO_APPROVE_COST_APPROACH_PCT",
+    # TB-297: opt-in immediate-Mattermost-push on `attention_raised`
+    # emission. Read fresh from `os.environ` at push-decision time
+    # inside `daemon._maybe_push_attention` so an operator toggling
+    # the knob on/off takes effect on the next tick without a daemon
+    # restart — symmetric with the detector-sensitivity knobs above.
+    "AP2_ATTENTION_IMMEDIATE_PUSH",
 })
 
 # Lifecycle knobs that CAN'T hot-reload. Each configures a stateful

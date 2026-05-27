@@ -101,6 +101,27 @@ DEFAULT_TASK_FROZEN_RECENCY_S = 86400  # 24h
 # no-op (same operator-friendly default as the TB-224 trip surface).
 DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT = 75
 
+# TB-297: opt-in immediate-Mattermost-push on `attention_raised` emission.
+# Default OFF so the per-2h status-report cron stays the routine push
+# surface for fresh projects (TB-282's `## Attention needed` section
+# already carries the same conditions there). Operators flip
+# `AP2_ATTENTION_IMMEDIATE_PUSH=1` once they've sampled their own
+# detector cadence and confirmed it's low enough not to noise the
+# channel — the post-trip `auto_approve_paused` and pre-trip
+# `cost_cap_approach` conditions are explicitly time-sensitive
+# (waiting up to 2h for the next status-report defeats the
+# "proactively surfaced" claim), but `task_stuck` / `task_frozen` /
+# `validator_judge_noisy` cadence is project-dependent. Bool parse
+# mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED` style
+# (`1` / `true` / `yes` / `on` truthy, case-insensitive; anything
+# else false). Read fresh from `os.environ` at push-decision time
+# inside `daemon._maybe_push_attention` and listed in
+# `env_reload.HOT_RELOADABLE_KNOBS` so an operator toggling the knob
+# takes effect on the next tick without a daemon restart. Closes the
+# TB-282 Out-of-scope axis the briefing's L119-122 named (the
+# walk-away operator's time-to-glance for time-sensitive conditions).
+DEFAULT_ATTENTION_IMMEDIATE_PUSH = False
+
 # TB-278: max-turn caps promoted to named constants alongside the
 # DEFAULT_*_TIMEOUT_S family above so every battle-tested default sits in
 # one discoverable place. Defaults raised from the old inline literals

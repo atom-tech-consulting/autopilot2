@@ -378,6 +378,14 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
         # bump. Runtime-only, like its `cron_state.json` /
         # `operator_queue_state.json` neighbors above.
         "daemon_state.json",
+        # TB-297: sticky `warned_no_destination` flag for the opt-in
+        # immediate-MM-push surface (`daemon._maybe_push_attention`).
+        # Same runtime-state semantics as `auto_diagnose_state.json` —
+        # an `ap2 rollback` should not resurrect a stale "we already
+        # warned about a missing AP2_MM_CHANNELS" flag, and a fresh
+        # daemon process should re-warn against a freshly-misconfigured
+        # env file.
+        "attention_push_state.json",
     ]),
     ("Per-run prompt + stream dumps for failure diagnosis (kept only on failure)", [
         "debug/",

@@ -1826,6 +1826,42 @@ for the architecture + the `ap2 ack roadmap_complete` resume verb.
 - `AP2_AUTO_DIAGNOSE_COOLDOWN_S` (21600 = 6h) — minimum gap between
   watchdog posts (re-fire spam guard).
 
+**Attention surface (TB-282 / TB-287 / TB-288 / TB-289 / TB-290 / TB-297).**
+The five attention detectors (`task_stuck`, `task_frozen`,
+`validator_judge_noisy`, `auto_approve_paused`, `cost_cap_approach`)
+each read fresh from `os.environ` at detection time — see
+`AP2_TASK_STUCK_THRESHOLD_S` / `AP2_ATTENTION_DEBOUNCE_S` /
+`AP2_TASK_FROZEN_RECENCY_S` / `AP2_AUTO_APPROVE_COST_APPROACH_PCT`
+described in the "Proactive attention surface" section above. The
+knob below controls the push-side cadence (immediate vs every-2h
+status-report cron):
+- `AP2_ATTENTION_IMMEDIATE_PUSH` — TB-297 opt-in immediate-Mattermost-
+  push on `attention_raised` emission. **Unset by default → push
+  OFF** so the per-2h status-report cron remains the routine push
+  surface (TB-282's `## Attention needed` section already carries
+  the same conditions there). Set to a truthy value
+  (`1` / `true` / `yes` / `on`, case-insensitive) to enable. With
+  the knob ON, the daemon's `_maybe_push_attention` helper posts a
+  one-line `[<project_name>] ⚠ <summary>` message to
+  `AP2_MM_CHANNELS[0]` AFTER each fresh `attention_raised` event
+  appends — per-(type, key) push debounce reuses the
+  `AP2_ATTENTION_DEBOUNCE_S` window structurally (the push runs
+  only when a fresh event emits, which already honors the
+  detector-debounce). Missing-destination handling mirrors the
+  watchdog: one sticky `attention_push_no_destination` audit event
+  per state-file lifetime when `AP2_MM_CHANNELS` is unset (flag
+  lives in `.cc-autopilot/attention_push_state.json`, gitignored;
+  resets to false on the next successful push). Audit events:
+  `attention_pushed` on success; `attention_push_error` on
+  `_mm_post` failure; `attention_push_no_destination` on the
+  missing-channel sticky-warn path. The push knob is operator
+  opt-in once they've sampled their own detector cadence — set
+  this when the post-trip `auto_approve_paused` /
+  `cost_cap_approach` / time-sensitive conditions in your project
+  warrant inside-one-tick visibility rather than up-to-2h-wait
+  visibility. Hot-reloadable (TB-271) so an operator flipping the
+  knob takes effect on the next tick without a daemon restart.
+
 **Janitor (chore-judge, TB-178).**
 - `AP2_JANITOR_MAX_FINDINGS_LLM` (10) — cap on per-cycle findings sent
   to the SDK judge. `0` disables the judge call entirely (the janitor

@@ -1582,6 +1582,18 @@ _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
     # pattern of extending this set as new push-surface event
     # classes ship.
     "attention_raised",
+    # TB-297: opt-in immediate-Mattermost-push audit event. A fresh
+    # `attention_pushed` (the daemon's `_maybe_push_attention`
+    # helper posted a one-line condition message to
+    # `AP2_MM_CHANNELS[0]`) must un-skip the dedup/idle gate so the
+    # next routine status-report cron acknowledges the immediate
+    # push happened — keeps the two surfaces coherent (operator
+    # reading the next 2h post sees the same condition rather than
+    # the cron silently skipping because nothing else moved).
+    # Mirrors the `attention_raised` entry just above; both event
+    # classes can fire in the same tick so listing both is
+    # symmetric.
+    "attention_pushed",
 })
 
 

@@ -251,6 +251,67 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     fresh fire un-skips the dedup/idle gate, parallel to the
     TB-244 / TB-245 pattern). Closes goal.md focus-1's Done-when
     bullet on shallow monitoring.
+  - `attention_pushed` (TB-297) — opt-in immediate-Mattermost-push
+    audit event. Fires from `daemon._maybe_push_attention` after a
+    successful `tools._mm_post` call posted the per-condition
+    one-line message for a freshly-emitted `attention_raised`. Push
+    is gated on `AP2_ATTENTION_IMMEDIATE_PUSH` (default off,
+    operator opt-in) and runs only after a fresh `attention_raised`
+    appends, so the push debounce piggybacks structurally on the
+    existing `AP2_ATTENTION_DEBOUNCE_S` (default 6h) per-(type, key)
+    window — a still-active condition that pushed once does not get
+    a second push until that window elapses. Payload:
+    `attention_type` (the source detector's type, e.g.
+    `task_stuck` / `task_frozen` / `validator_judge_noisy` /
+    `auto_approve_paused` / `cost_cap_approach`), `key` (the
+    matching per-condition dedup key — same value the
+    `attention_raised` event carries), `channel`
+    (`AP2_MM_CHANNELS[0]` — the single per-project channel the
+    watchdog / status-report cron already use; cross-project
+    routing remains out-of-scope per goal.md focus-2 L227-228),
+    `post_id` (the Mattermost post id returned by `_mm_post`,
+    empty when the SDK omitted it), `summary` (the same one-line
+    `cond.summary` the renderer surfaces in `## Attention needed`).
+    Listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a
+    fresh push un-skips the status-report cron's dedup/idle gate,
+    parallel to `attention_raised` itself — the next 2h post
+    acknowledges the immediate-push happened so the operator's two
+    surfaces (this push and the next routine post) stay coherent.
+    Closes the TB-282 Out-of-scope axis the briefing's L119-122
+    named (time-to-glance for post-trip / pre-trip / time-sensitive
+    conditions like `auto_approve_paused` and `cost_cap_approach`,
+    which lose utility if delayed by the 2h status-report cadence).
+  - `attention_push_error` (TB-297) — `tools._mm_post` raised during
+    the immediate-push attempt. Fires from
+    `daemon._maybe_push_attention` after the catch; the helper then
+    continues without retrying (a push hiccup must not abort the
+    tick or the rest of the candidate iteration). Payload:
+    `channel` (the resolved `AP2_MM_CHANNELS[0]`), `attention_type`
+    (source detector's type), `key` (per-condition dedup key —
+    same value the matching `attention_raised` event carries),
+    `error` (`<ExceptionType>: <message>` from the wrapped
+    `_mm_post` failure). No counterpart `attention_pushed` for
+    the same `(type, key)` lands on the same tick; the next tick's
+    detection pass will re-evaluate (debounce-suppressed for the
+    next `AP2_ATTENTION_DEBOUNCE_S` window since the
+    `attention_raised` event DID append before the push attempt).
+  - `attention_push_no_destination` (TB-297) — `AP2_MM_CHANNELS` is
+    unset so `_first_mm_channel()` returns "" and there is no
+    push destination. Sticky — fires ONCE per daemon process /
+    state-file lifetime until the destination is configured (and a
+    successful `attention_pushed` resets the flag), mirroring the
+    watchdog's `warned_no_destination` pattern. The flag lives in
+    `.cc-autopilot/attention_push_state.json` (gitignored runtime
+    state — an `ap2 rollback` should not resurrect a stale "we
+    already warned" flag). Payload: `reason`
+    (`"AP2_MM_CHANNELS unset"` — fixed sentinel), `attention_type`
+    (the first source detector's type that tried to push without
+    a destination), `key` (its per-condition dedup key). The
+    audit-event-of-record for the
+    `AP2_ATTENTION_IMMEDIATE_PUSH=1 && AP2_MM_CHANNELS=""`
+    misconfiguration — operators sampling their cadence with the
+    immediate-push knob on but the channel set unset see this
+    bullet on `ap2 logs` rather than a silent no-op.
   - `ideation_state_scrubbed` (TB-284) — `_run_ideation`'s post-write
     scrub stripped exhaustion-asserting sentences from
     `ideation_state.md` after the ideation control-agent finished
