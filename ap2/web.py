@@ -23,19 +23,25 @@ Pages:
   /usage                  TB-181 token / cost dashboard (cost-over-time, model split, etc.)
   /stats                  TB-255 stats dashboard (task / verifier / ideation / cron aggregates)
   /stats.json             TB-255 JSON contract for /stats (scripting-friendly)
+  /attention              TB-296 pull-surface for current attention conditions
+                          (per-condition bullets from detect_attention_conditions)
 
 TB-265: This module is the FastAPI-style app construction + middleware +
 router composition + HTTP dispatcher only. The route-group siblings own
 their renderers:
 
-  - `ap2/web_chrome.py`   — shared CSS/layout/events_table chrome.
-  - `ap2/web_home.py`     — `/` home page + cards (TB-162/173/197/227/242).
-  - `ap2/web_events.py`   — `/events`, `/tasks`, `/task/<id>`, `/pipelines`,
-                            `/ideation_state`, `/commits`.
-  - `ap2/web_tasks.py`    — `/task-run/<id>` live view + stream JSON (TB-129).
-  - `ap2/web_stats.py`    — `/stats` + `/stats.json` (TB-255).
-  - `ap2/web_insights.py` — `/insights` + `/insight/<name>`.
-  - `ap2/web_usage.py`    — `/usage` token-cost dashboard (TB-181).
+  - `ap2/web_chrome.py`    — shared CSS/layout/events_table chrome.
+  - `ap2/web_home.py`      — `/` home page + cards (TB-162/173/197/227/242).
+  - `ap2/web_events.py`    — `/events`, `/tasks`, `/task/<id>`, `/pipelines`,
+                             `/ideation_state`, `/commits`.
+  - `ap2/web_tasks.py`     — `/task-run/<id>` live view + stream JSON (TB-129).
+  - `ap2/web_stats.py`     — `/stats` + `/stats.json` (TB-255).
+  - `ap2/web_insights.py`  — `/insights` + `/insight/<name>`.
+  - `ap2/web_usage.py`     — `/usage` token-cost dashboard (TB-181).
+  - `ap2/web_attention.py` — `/attention` pull-surface for current attention
+                             conditions (TB-296 — pull counterpart to the
+                             status-report cron's push of TB-282's
+                             `## Attention needed` bullets).
 
 Each sibling exports its own `router` (a `_WebRouter` instance). `make_app()`
 composes them via `include_router`, producing a tiny FastAPI-compatible
@@ -150,6 +156,7 @@ from .web_stats import (
     _stats_window_chips,
 )
 from .web_insights import _render_insight, _render_insights
+from .web_attention import _render_attention
 from .web_usage import (
     _DEFAULT_USAGE_STACK,
     _DEFAULT_USAGE_WINDOW,
@@ -255,7 +262,15 @@ def make_app() -> _App:
     use `serve` / `serve_async` directly; `make_app()` is for
     introspection + tooling.
     """
-    from . import web_events, web_home, web_insights, web_stats, web_tasks, web_usage
+    from . import (
+        web_attention,
+        web_events,
+        web_home,
+        web_insights,
+        web_stats,
+        web_tasks,
+        web_usage,
+    )
 
     app = _App()
     app.include_router(web_home.router)
@@ -264,6 +279,7 @@ def make_app() -> _App:
     app.include_router(web_insights.router)
     app.include_router(web_stats.router)
     app.include_router(web_usage.router)
+    app.include_router(web_attention.router)
     return app
 
 
@@ -334,6 +350,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 body = _render_task_run(self.cfg, rest)
             elif path == "/pipelines":
                 body = _render_pipelines(self.cfg)
+            elif path == "/attention":
+                # TB-296: pull-surface for current attention conditions.
+                # Companion to the status-report cron's push of TB-282's
+                # `## Attention needed` bullets — same detector
+                # entrypoint, always-available rendering.
+                body = _render_attention(self.cfg)
             elif path == "/insights":
                 body = _render_insights(self.cfg)
             elif path.startswith("/insight/"):

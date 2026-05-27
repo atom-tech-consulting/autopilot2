@@ -228,7 +228,10 @@ ap2/
 │                         # MM-post watchdog)
 ├── web.py                # local read-only web UI router (TB-99 + TB-93 thaw): /, /events, /tasks,
 │                         # /task/<TB-N>, /pipelines, /insights, /insight/<name>, /ideation_state,
-│                         # /commits, /stats, /usage. Page renderers live in the web_* siblings below.
+│                         # /commits, /stats, /usage, /attention. Page renderers live in the web_* siblings below.
+├── web_attention.py      # /attention pull-surface — operator-legible per-condition bullets from
+│                         # attention.detect_attention_conditions (TB-296 — pull counterpart to the
+│                         # status-report cron's push of TB-282's `## Attention needed` bullets)
 ├── web_chrome.py         # _layout / _row_class / _events_table — shared HTML chrome + the events-table
 │                         # renderer the home + events pages compose into (TB-265 split out of web.py)
 ├── web_events.py         # /events page + the per-run debug-dump viewers (_render_task_run, run-stream JSON)

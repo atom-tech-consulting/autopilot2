@@ -534,6 +534,7 @@ def _layout(title: str, body: str) -> str:
         '<nav><a href="/">overview</a> '
         '<a href="/events">events</a> '
         '<a href="/tasks">tasks</a> '
+        '<a href="/attention">attention</a> '
         '<a href="/pipelines">pipelines</a> '
         '<a href="/insights">insights</a> '
         '<a href="/ideation_state">ideation_state</a> '
@@ -847,6 +848,52 @@ def _latest_verification_failed_for_task(
     return found
 
 
+def _attention_raised_row_summary(e: dict) -> str:
+    """TB-296: inline `<td class="summary">` content for an
+    `attention_raised` row on `/events`.
+
+    Renders the event's TB-N (from the daemon's spread of
+    `cond.extras["task"]` into the payload — see
+    `daemon._maybe_emit_attention_events`) as a link to
+    `/attention` so an operator clicking through from the event log
+    lands on the current-state surface. Singleton detectors
+    (`validator_judge_noisy`, `auto_approve_paused`,
+    `cost_cap_approach`) have no `task` field; their row renders a
+    bare `[type=<attention_type>] → /attention` link instead so the
+    pull-surface entry-point is still one click away.
+
+    The `summary` and other detector fields stay visible inline
+    after the link via the standard field dump; the full payload
+    remains in the row's `<details>raw json</details>` toggle.
+    """
+    task_id = str(e.get("task") or "").strip()
+    attention_type = str(e.get("attention_type") or "").strip()
+    summary = str(e.get("summary") or "").strip()
+    parts: list[str] = []
+    if task_id:
+        parts.append(
+            f'<strong><a href="/attention">{html.escape(task_id)}</a></strong>'
+        )
+    else:
+        # Singleton-detector rows have no TB-N — link the
+        # `attention_type` discriminator instead so the pull-surface
+        # entry is still surfaced (otherwise the row would only carry
+        # the raw json toggle).
+        parts.append(
+            f'<a href="/attention">'
+            f'[{html.escape(attention_type or "attention")}]'
+            f'</a>'
+        )
+    if attention_type:
+        parts.append(
+            f'<span class="meta">type=</span>'
+            f'{html.escape(attention_type)}'
+        )
+    if summary:
+        parts.append(html.escape(summary))
+    return " · ".join(parts)
+
+
 def _events_table(
     evts: list[dict],
     *,
@@ -909,6 +956,12 @@ def _events_table(
             compact = _compact_usage_row(e)
             if compact:
                 extra = compact
+        # TB-296: render `attention_raised` rows with a TB-N (or
+        # detector-type) link into `/attention` so clicking through
+        # from the event log lands the operator on the current-state
+        # pull-surface. The detector's `summary` text follows inline.
+        elif typ == "attention_raised":
+            extra = _attention_raised_row_summary(e)
         rows.append(
             f'<tr class="{cls}">'
             f'<td class="ts">{html.escape(ts)}</td>'
