@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-296** **`/attention` web page — pull surface for current attention conditions (TB-282 Out-of-scope L123-125 closure)** `#autopilot` `#web` `#attention` `#operator-legible` `#monitoring` `#observability` `#pull-surface` `@blocked:TB-282` — Add `/attention` web page rendering current `detect_attention_conditions(cfg)` output (operator-legible per-condition bullets + empty-state); nav-link from chrome + link from /events `attention_raised` rows. Closes TB-282 Out-of-scope L123-125; operator-named axis in 2026-05-27T06:33:52Z rewind reason. [→ brief](.cc-autopilot/tasks/attention-web-page-pull-surface-for-curr.md)
 - [ ] **TB-297** **Immediate Mattermost push on `attention_raised` emission (opt-in, conservative-default, reuses TB-282 debounce) — TB-282 Out-of-scope L119-122 closure** `#autopilot` `#mattermost` `#attention` `#operator-legible` `#monitoring` `#push-surface` `#opt-in` `@blocked:TB-282,TB-280` — Add opt-in `AP2_ATTENTION_IMMEDIATE_PUSH` env knob (default off) that posts a one-line Mattermost message to `AP2_MM_CHANNELS[0]` when `_maybe_emit_attention_events` emits an `attention_raised` event. Per-(type, key) debounce reuses TB-282 contract; `attention_pushed` event audits each post; missing-destination handled like the watchdog. Closes TB-282 Out-of-scope L119-122; operator-named axis in 2026-05-27T06:33:52Z rewind reason. [→ brief](.cc-autopilot/tasks/immediate-mattermost-push-on-attention-r.md)
 
 ## Pipeline Pending
@@ -183,6 +182,7 @@
 - [x] **TB-293** **Queue-drain `add_backlog` handler must run auto-approve gate (closes review-token stranding)** `#autopilot` `#auto-approve` `#operator-queue` `#regression-pin` `#bug` `@blocked:TB-232,TB-188` [→ brief](.cc-autopilot/tasks/queue-drain-add-backlog-handler-must-run.md)
 - [x] **TB-294** **Disable extended thinking in ideation_state scrub; emit error/timeout audit event** `#autopilot` `#ideation` `#scrub` `#latency` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/disable-extended-thinking-in-ideation-st.md)
 - [x] **TB-295** **Add `ap2 rewind-focus` CLI verb; emit synthetic `focus_advanced` event for counter cutoff** `#autopilot` `#operator-cli` `#focus-advance` `#empty-cycles` `#recovery` `#regression-pin` `#bug` [→ brief](.cc-autopilot/tasks/add-ap2-rewind-focus-cli-verb-emit-synth.md)
+- [x] **TB-296** **`/attention` web page — pull surface for current attention conditions (TB-282 Out-of-scope L123-125 closure)** `#autopilot` `#web` `#attention` `#operator-legible` `#monitoring` `#observability` `#pull-surface` `@blocked:TB-282` — Add `/attention` web page rendering current `detect_attention_conditions(cfg)` output (operator-legible per-condition bullets + empty-state); nav-link from chrome + link from /events `attention_raised` rows. Closes TB-282 Out-of-scope L123-125; operator-named axis in 2026-05-27T06:33:52Z rewind reason. [→ brief](.cc-autopilot/tasks/attention-web-page-pull-surface-for-curr.md)
 
 ## Frozen
 
