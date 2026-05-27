@@ -1018,3 +1018,9 @@
 - **Summary:** Added `attention:` cluster line to `ap2 status` (text + JSON parity); CLI-pull sibling of the TB-282 status-report cron push, TB-296 web `/attention` pull page, and TB-297 immediate-MM push. All four surfaces share `attention.detect_attention_conditions(cfg)` and the new `_format_attention_status_line` truncation helper in status_report.py (cap 3 inline with `(+M more — ap2 web /attention)` suffix; omit-on-empty for text; full unfiltered list always-present for JSON parser stability). Regression-pin module covers six pinned shapes + a cross-surface no-drift spy; full suite passes (2151 tests).
 - **Files:** ap2/cli_daemon.py, ap2/status_report.py, ap2/tests/test_tb298_status_attention.py, ap2/README.md
 - **Tests:** pass
+
+## [2026-05-27] TB-299: Web home page: `_render_attention_card` sibling — surface active attention conditions alongside focus/automation cards
+- **Commit:** `0f58fd6`
+- **Summary:** Added _render_attention_card sibling to ap2/web_home.py (warn-glyph + bold TB-N + em-dash + summary shape; per-task TB-N wraps a /task/<TB-N> link; 3-bullet inline cap with `(+M more — see /attention)` link-tail; omit-on-empty discipline mirrors focus/automation siblings; detector-exception swallow renders a tinted attention-card-error notice). Wired into _render_home directly between focus and automation cards (operator-attention urgency ordering); re-exported from ap2/web.py. Regression-pinned in ap2/tests/test_tb299_web_home_attention.py (7 tests covering all 6 briefing scope checks); full ap2/tests/ suite 2158 passed.
+- **Files:** ap2/web_home.py, ap2/web.py, ap2/tests/test_tb299_web_home_attention.py
+- **Tests:** pass
