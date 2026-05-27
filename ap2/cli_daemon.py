@@ -142,6 +142,33 @@ def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
+    """At-a-glance daemon + board + automation snapshot for the operator.
+
+    Text-render line order (each line is omitted-on-empty unless noted):
+
+      daemon:       — liveness + pid + paused-flag (always)
+      version:      — running CLI version string (always)
+      tick:         — `cfg.tick_interval_s` (always)
+      focus:        — TB-242 axis-4 focus-rotation surface
+      board:        — A/R/B/P/C/F counts (always)
+      cron:         — registered cron jobs (always)
+      tasks: / events: / web: / pending: / review: / classifications: /
+      janitor: / decisions needed: / audit: — operator-attention cluster
+      WARN:         — TB-260 env-staleness banner
+      attention:    — TB-298 active attention conditions (CLI-pull sibling
+                       of the TB-282 status-report cron push and the
+                       TB-296 web `/attention` page; all three surfaces
+                       share `attention.detect_attention_conditions(cfg)`
+                       and the `_format_attention_status_line` truncation
+                       helper in `status_report.py` so they can never
+                       disagree about what's currently active)
+      auto-approve: / dry-run: / validator-judge: — TB-227 / TB-241 / TB-243
+      next:         — board.next_ready (always when present)
+
+    JSON branch is a superset — every read above carries a stable key
+    (zero-state included) for parser stability so machine consumers see
+    a stable shape regardless of activity.
+    """
     # TB-264: refuse to render a synthetic-empty status against a project
     # root that doesn't exist on disk. Pre-TB-264 cmd_status silently
     # printed "daemon: stopped (pid -) / board: 0A / 0R / ..." for a
@@ -264,6 +291,24 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # parser-stability promise). Pure read-layer: no I/O beyond two
     # small stat / json reads via `collect_env_staleness`.
     env_staleness = automation_status.collect_env_staleness(cfg)
+    # TB-298: active attention conditions surface — CLI-pull sibling
+    # of the TB-282 status-report cron push (`render_attention_section`),
+    # the TB-296 web `/attention` pull page (`web_attention._render_attention`),
+    # and the TB-297 immediate-MM push (`_maybe_push_attention`). All
+    # four surfaces share `attention.detect_attention_conditions(cfg)`
+    # as their detector entrypoint — drift between them would mean a
+    # walk-away operator polling `ap2 status` from a terminal sees
+    # different conditions than the web page / chat post / 2h cron
+    # digest. Pure read-layer (walks the events tail + a small board
+    # read); no caching needed. Defensive swallow: a detector exception
+    # never takes the status surface down — the cluster line just
+    # omits, mirroring `render_attention_section`'s swallow-on-error
+    # contract.
+    from . import attention as _attention_mod
+    try:
+        attention_conditions = _attention_mod.detect_attention_conditions(cfg)
+    except Exception:  # noqa: BLE001 — never break the status surface
+        attention_conditions = []
     # TB-242: axis-4 focus-rotation surface — read the focus list +
     # active focus + halt state once so both the text and JSON branches
     # can render them. Pure read-layer composition over TB-226's
@@ -416,6 +461,33 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             "env_file_mtime_at_start": env_staleness[
                 "env_file_mtime_at_start"
             ],
+            # TB-298: active attention conditions. ALWAYS present
+            # (zero-state included) for parser stability — mirrors the
+            # `auto_approve` / `audit` / `env_stale` parser-stability
+            # promise so machine consumers see a stable shape regardless
+            # of detector activity. `conditions` is the FULL unfiltered
+            # detector output (no truncation here — the text branch's
+            # cap is a render concern only); each entry carries the
+            # detector's `type` / `key` / `summary` plus `task` (or
+            # `null` for singleton detectors: `validator_judge_noisy`,
+            # `auto_approve_paused`, `cost_cap_approach`). Mirror of
+            # the TB-296 web `/attention` and TB-282 status-report
+            # cron surfaces.
+            "attention": {
+                "count": len(attention_conditions),
+                "conditions": [
+                    {
+                        "task": (
+                            (c.extras.get("task") or None)
+                            if isinstance(c.extras, dict) else None
+                        ),
+                        "type": c.type,
+                        "key": c.key,
+                        "summary": c.summary,
+                    }
+                    for c in attention_conditions
+                ],
+            },
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -587,6 +659,27 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             f"{env_staleness['env_file_mtime']} (after daemon start at "
             f"{env_staleness['env_file_mtime_at_start']}) — "
             f"restart with `ap2 stop && ap2 start` to apply changes"
+        )
+    # TB-298: surface the count + a capped per-bullet preview of currently
+    # active attention conditions in the operator-attention cluster (after
+    # `audit:` / env stale, before the `auto-approve:` block). CLI-pull
+    # sibling of the TB-282 status-report cron push and the TB-296 web
+    # `/attention` pull page — all four surfaces consume
+    # `detect_attention_conditions(cfg)` so they can never disagree about
+    # what's currently active. Omit-on-empty (zero conditions → no line)
+    # so a quiet project doesn't grow a zero-noise row, mirroring the
+    # TB-258 `audit:` / TB-260 `env stale` / TB-177 `janitor:` discipline;
+    # the JSON branch above always carries the `attention` block for
+    # parser stability. The shared truncation helper
+    # `_format_attention_status_line` in `status_report.py` keeps the
+    # bullet shape in lockstep with the cron status-report
+    # `render_attention_section` and the web `/attention` renderer.
+    if attention_conditions:
+        from .status_report import _format_attention_status_line
+        n = len(attention_conditions)
+        body = _format_attention_status_line(attention_conditions)
+        print(
+            f"attention:  {n} condition{'s' if n != 1 else ''} — {body}"
         )
     # TB-227: surface the auto-approve / auto-unfreeze loop state. Two
     # rendering shapes — healthy (knob on, no halt) vs. paused (halt

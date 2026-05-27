@@ -58,7 +58,7 @@ TASKS.md                       # 5-section board, daemon-owned
 | `ap2 check` | One-shot data-integrity check — `TASKS.md` shape, briefing-link resolution, `cron.yaml` schema, JSON state parseability, insights front matter. `--json` for machine-readable. Exit 1 on errors, warnings don't fail. |
 | `ap2 start` | Start the daemon backgrounded. `--foreground` runs in-shell. |
 | `ap2 stop` | SIGTERM the daemon. `-f` for SIGKILL. |
-| `ap2 status` | Daemon liveness, board counts, cron jobs, pending operator queue ops, pending-review TB-Ns (TB-151), and the latest "Open questions for operator" from `ideation_state.md` (TB-173). `--json`. |
+| `ap2 status` | Daemon liveness, board counts, cron jobs, pending operator queue ops, pending-review TB-Ns (TB-151), the latest "Open questions for operator" from `ideation_state.md` (TB-173), and currently-active attention conditions (TB-298 — CLI-pull sibling of the TB-282 status-report cron post and the TB-296 web `/attention` page; all three share `attention.detect_attention_conditions(cfg)` so the surfaces can't disagree). `--json`. |
 | `ap2 logs -n 40` | Tail recent events. `--json`. |
 | `ap2 add "<title>"` | Append a task. `-s Ready\|Backlog\|Frozen` (default: `Backlog` — TB-167; operator-filed tasks land in triage alongside ideation proposals and the daemon auto-promotes when capacity opens), `-t #tag`, `-d <desc>`, `--briefing-file <path>`, `--no-verify`. |
 | `ap2 backlog <TB-N>` | Move any task to Backlog. |

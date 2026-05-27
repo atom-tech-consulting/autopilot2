@@ -74,6 +74,82 @@ def _format_pending_review_line(ids: list[str]) -> str:
     return f"{head} (+{len(ids) - _PENDING_REVIEW_TRUNCATE_AT} more)"
 
 
+# TB-298: shared truncation rule for the `ap2 status` text-render
+# `attention:` cluster line — the CLI-pull sibling of the TB-282
+# status-report cron push surface (`render_attention_section`) and
+# the TB-296 web `/attention` pull page (`web_attention._render_attention`).
+# All four surfaces share `attention.detect_attention_conditions(cfg)`
+# as their detector entrypoint; this helper owns the text-render
+# truncation contract so the CLI cluster line stays compact alongside
+# its peer cluster entries (review:, janitor:, classifications:,
+# decisions needed:, audit:). The cap is 3 (not 5 like
+# `_format_pending_review_line`) because attention bullets carry
+# longer prose-summary text — three of them already saturate one
+# terminal row, where TB-N lists pack five comfortably. JSON
+# consumers always see the full unfiltered list (parser stability
+# mirror of the `auto_approve` / `audit` / `env_stale` contracts);
+# truncation is a text-render concern only.
+_ATTENTION_STATUS_LINE_CAP = 3
+
+
+def _format_attention_status_line(
+    conditions: list,
+    *,
+    cap: int = _ATTENTION_STATUS_LINE_CAP,
+) -> str:
+    """Format active attention conditions into the `ap2 status` cluster
+    line body (the segment AFTER the `attention:  N condition(s) — `
+    prefix the caller renders).
+
+    Bullets are joined by `; ` and capped at `cap` with a
+    `(+M more — ap2 web /attention)` suffix when the input list is
+    longer. Each bullet renders as `TB-N <summary>` when the
+    condition's `extras['task']` is set (per-task detectors:
+    `task_stuck`, `task_frozen`), or as the bare `<summary>` for
+    singleton detectors (`validator_judge_noisy`,
+    `auto_approve_paused`, `cost_cap_approach`). Matches the
+    `render_attention_section` / `web_attention._render_attention`
+    contract that the four operator-facing surfaces share — drift
+    between them would mean a `task_stuck` bullet showing one TB-N
+    label on the web page and a different label here.
+
+    Returns the empty string for an empty list — the caller decides
+    whether to suppress the wrapping `attention:` prefix when
+    N=0 (the CLI text branch omits the entire line; mirrors the
+    TB-258 `audit:` / TB-260 `env stale` / TB-177 `janitor:`
+    omit-on-empty discipline so quiet projects don't grow a
+    zero-noise cluster row).
+
+    Pure / no I/O so the CLI render path can call it without
+    re-walking the detector entrypoint. Defined here (and imported
+    by `cli_daemon.py`) so the verification grep
+    `_format_attention_status_line` lands in both files (TB-298).
+    """
+    if not conditions:
+        return ""
+    rendered: list[str] = []
+    for cond in conditions[:cap]:
+        # `cond.extras` is the AttentionCondition dataclass field; the
+        # `.get` falls through cleanly when `extras` is empty (singleton
+        # detectors leave `task` unset). Strip whitespace so an upstream
+        # detector that ever emits a padded string doesn't break the
+        # bullet spacing.
+        task_id = ""
+        extras = getattr(cond, "extras", None) or {}
+        if isinstance(extras, dict):
+            task_id = (extras.get("task") or "").strip()
+        summary = getattr(cond, "summary", "") or ""
+        if task_id:
+            rendered.append(f"{task_id} {summary}".strip())
+        else:
+            rendered.append(summary.strip())
+    if len(conditions) > cap:
+        rendered.append(
+            f"(+{len(conditions) - cap} more — ap2 web /attention)"
+        )
+    return "; ".join(rendered)
+
+
 def _pending_review_ids(cfg: Config) -> list[str]:
     """Return TB-Ns of Backlog tasks with the `review` blocker scheme.
 
