@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-300** **Empty-cycles counter must recognize `ideation_cycle_summary` as exit marker** `#autopilot` `#empty-cycles` `#focus-advance` `#counter` `#bug` `#regression-pin` `@blocked:TB-292` [→ brief](.cc-autopilot/tasks/empty-cycles-counter-must-recognize-idea.md)
 
 ## Pipeline Pending
 
@@ -187,6 +186,7 @@
 - [x] **TB-298** **`ap2 status` CLI: surface active attention conditions (text + JSON parity with /attention pull page)** `#autopilot` `#cli` `#status` `#attention` `#operator-legible` `#monitoring` `#regression-pin` — Add a CLI-side surface for current `detect_attention_conditions(cfg)` output to `ap2 status` so the walk-away operator polling via terminal sees active attention conditions without browser or chat — mirrors the TB-296 `/attention` web pull page on the CLI side. [→ brief](.cc-autopilot/tasks/ap2-status-cli-surface-active-attention.md)
 - [x] **TB-299** **Web home page: `_render_attention_card` sibling — surface active attention conditions alongside focus/automation cards** `#autopilot` `#web` `#attention` `#operator-legible` `#monitoring` `#observability` `#regression-pin` — Add a home-page `## Attention` summary card that mirrors the TB-296 `/attention` pull page (per-condition bullets + link-through) so an operator landing on `/` sees active attention conditions at-a-glance without first discovering the nav link — closes the home-page entry-point side of focus-2 Progress signal #3. [→ brief](.cc-autopilot/tasks/web-home-page-render-attention-card-sibl.md)
 - [x] **TB-301** **Fix time-bombed render_attention_section test via now= injection seam** `#autopilot` `#attention` `#status-report` `#testing` `#regression-pin` `#bug` `@blocked:TB-282` [→ brief](.cc-autopilot/tasks/fix-time-bombed-render-attention-section.md)
+- [x] **TB-300** **Empty-cycles counter must recognize `ideation_cycle_summary` as exit marker** `#autopilot` `#empty-cycles` `#focus-advance` `#counter` `#bug` `#regression-pin` `@blocked:TB-292` [→ brief](.cc-autopilot/tasks/empty-cycles-counter-must-recognize-idea.md)
 
 ## Frozen
 

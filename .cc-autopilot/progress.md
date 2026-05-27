@@ -1030,3 +1030,9 @@
 - **Summary:** TB-301 prior commit e3ba0ac threaded `now=` through `render_attention_section` (briefing scope items 1-5: kwarg, three updated test calls, docstring, regression-pin module). Verification gate exposed 5 further wall-clock-drift time-bombs in detector-internal code paths not named in scope; extended the same seam in 9c77bff to `_detect_auto_approve_paused` (thread `now=now` into `collect_auto_approve_state`) and `_auto_approve_check_violations` (new optional `now=` kwarg, default-None preserves prod). All 2167 ap2/tests pass (was 2162 + 5 fail).
 - **Files:** ap2/status_report.py, ap2/attention.py, ap2/auto_approve.py, ap2/tests/test_render_attention_section_now_injection.py, ap2/tests/test_tb288_attention_validator_judge_noisy.py, ap2/tests/test_tb289_attention_auto_approve_paused.py, ap2/tests/test_tb290_attention_cost_cap_approach.py
 - **Tests:** pass
+
+## [2026-05-27] TB-300: Empty-cycles counter must recognize `ideation_cycle_summary` as exit marker
+- **Commit:** `6b0f268`
+- **Summary:** Previously committed in 6b0f268; verified completeness — all 5 briefing scope items present (focus_advance.py:141 exit-marker extension, lines 70-119 docstrings, events.py:360-389 vocabulary entry, test_empty_cycles_counter.py 20 tests including the 5 new TB-300 cases, ideation.default.md `End-of-cycle summary event (TB-300)` section); all 3 briefing Python invariants pass; `uv run pytest -q ap2/tests/test_empty_cycles_counter.py` → 20 passed; full `uv run pytest -q ap2/tests/` → 2167 passed (prior blocker — attention-detector fixtures — was resolved by TB-301's now= seam landing in 9c77bff/e3ba0ac).
+- **Files:** ap2/focus_advance.py, ap2/events.py, ap2/tests/test_empty_cycles_counter.py, ap2/ideation.default.md
+- **Tests:** pass
