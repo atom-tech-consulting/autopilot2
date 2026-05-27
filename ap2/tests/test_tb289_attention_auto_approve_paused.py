@@ -476,7 +476,7 @@ def test_render_attention_section_includes_auto_approve_paused(
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_consecutive_freezes(cfg, count=3, now=now)
 
-    rendered = render_attention_section(cfg, since_event_idx=0)
+    rendered = render_attention_section(cfg, since_event_idx=0, now=now)
     assert "## Attention needed" in rendered
     assert "auto-approve paused: consecutive_freezes" in rendered
     assert "ap2 ack auto_approve_unfreeze" in rendered

@@ -992,6 +992,7 @@ def render_attention_section(
     *,
     since_event_idx: int,  # noqa: ARG001 — accepted for parity with sibling helpers
     tail: list[dict] | None = None,
+    now: _dt.datetime | None = None,
 ) -> str:
     """Return the Markdown `## Attention needed` section the cron
     agent forwards verbatim into the Mattermost post, or "" when no
@@ -1005,6 +1006,14 @@ def render_attention_section(
     still-stuck task that crossed the threshold BEFORE the previous
     `cron_complete` is still stuck NOW and the operator still needs
     to see it.
+
+    `now` (TB-301): optional reference time threaded into the underlying
+    `detect_attention_conditions` call. Defaults to None — production
+    cron-push callers leave it unset and the detector uses actual UTC
+    (`_dt.datetime.now(_dt.timezone.utc)`). Tests pass a deterministic
+    reference so an event seeded relative to a hardcoded timestamp does
+    not silently fall outside the detector's 24h recency window on a
+    later calendar day, time-bombing the test.
 
     Shape (when rendered):
 
@@ -1031,7 +1040,9 @@ def render_attention_section(
     a status-report run down.
     """
     try:
-        conditions = _attention.detect_attention_conditions(cfg, tail=tail)
+        conditions = _attention.detect_attention_conditions(
+            cfg, tail=tail, now=now,
+        )
     except Exception:  # noqa: BLE001 — never break the status-report run
         return ""
     if not conditions:

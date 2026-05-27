@@ -661,7 +661,7 @@ def test_render_attention_section_includes_cost_cap_approach(
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=800, now=now)
 
-    rendered = render_attention_section(cfg, since_event_idx=0)
+    rendered = render_attention_section(cfg, since_event_idx=0, now=now)
     assert "## Attention needed" in rendered
     assert "auto-approve cost cap approach" in rendered
     assert "ap2 ack auto_approve_window_resume" in rendered

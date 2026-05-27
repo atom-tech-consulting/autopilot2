@@ -426,7 +426,7 @@ def test_render_attention_section_includes_validator_judge_noisy(cfg: Config):
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_judge_events(cfg, fail_count=5, timeout_count=0, now=now)
 
-    rendered = render_attention_section(cfg, since_event_idx=0)
+    rendered = render_attention_section(cfg, since_event_idx=0, now=now)
     assert "## Attention needed" in rendered
     assert "validator-judge noisy" in rendered
     assert "5+0=5" in rendered
