@@ -100,3 +100,12 @@ correct for production.
   `ap2 unfreeze TB-300` invocation after this lands.
 - Production callers explicitly passing `now=` — default-None
   fall-through to actual UTC is correct for production.
+## Attempts
+
+### 2026-05-27 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260527T133018Z-TB-301.prompt.md`, `stream: .cc-autopilot/debug/20260527T133018Z-TB-301.stream.jsonl`, `messages: .cc-autopilot/debug/20260527T133018Z-TB-301.messages.jsonl`
