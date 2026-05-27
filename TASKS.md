@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-305** **Docs-drift gate for `.cc-autopilot/env` template + exemption set** `#autopilot` `#docs` `#ci` `#regression-pin` [→ brief](.cc-autopilot/tasks/docs-drift-gate-for-cc-autopilot-env-tem.md)
 
 ## Pipeline Pending
 
