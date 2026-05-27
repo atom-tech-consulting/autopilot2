@@ -37,15 +37,38 @@ TB-285 renamed the per-focus sub-block from `Done when:` to
 bullets remain in goal.md as ideation-prompt context but no longer
 gate advancement.
 
-When all foci exhaust, emit `roadmap_complete` (once) + a
-`## Decisions needed from operator` bullet so `ap2 status` and the web
-home page surface the parked-ideation state. TB-275: this is an
+When all foci exhaust, emit `roadmap_complete` (once) and set the
+pointer's `roadmap_complete_emitted` flag so `ap2 status`'s focus
+line (`focus: ROADMAP_COMPLETE — ideation parked; `ap2 update-goal`
+to resume or `ap2 ack roadmap_complete` to dismiss`, derived from
+`focus_pointer.json` via `goal.roadmap_exhausted`) and the web home
+page surface the parked-ideation state. TB-275: this is an
 ideation-trigger gate only — `_maybe_ideate` skips with
 `reason=roadmap_complete` until the operator extends the roadmap
 (`ap2 update-goal`) or dismisses the notice (`ap2 ack
 roadmap_complete`). Task dispatch is NOT affected; already-queued
 Backlog tasks continue to drain. Use `ap2 pause` for an explicit
 full-stop.
+
+TB-302: the daemon no longer appends a `Roadmap complete: ...`
+bullet to `.cc-autopilot/ideation_state.md` on first detection.
+The roadmap-complete signal is redundantly available via the
+`roadmap_complete` event in `events.jsonl`, the pointer file, the
+`ap2 status` focus line, the web home page, and the TB-244
+focus-rotation digest in the cron status-report. The previous
+bullet write (1) bypassed the post-cycle scrub of exhaustion-
+asserting sentences in `ideation_state.md` (the scrub runs inside
+`_run_ideation`; the advance pass runs after it returns), feeding
+verdict-language priming back into the next ideation cycle after
+the operator extends the roadmap; and (2) wrote to
+`ideation_state.md` outside the `_run_ideation` snapshot window,
+leaving uncommitted working-tree drift the state-commit pipeline
+could not capture. Post-fix `ideation_state.md` is single-writer
+(only the ideation agent writes it via `ideation_state_write`).
+The `_append_decisions_needed_bullet` helper remains in use for
+the kill-switch branch below and for halt-style callers
+(`auto_unfreeze.py`'s daily-cap halt, `daemon.py`'s TB-224
+task_error halt) that lack a dedicated focus-line surface.
 
 Goal.md itself is NEVER mutated (goal.md L187-191 Non-goal). The
 pointer file lives at `.cc-autopilot/focus_pointer.json`; it's both
@@ -156,16 +179,27 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
 
     Reads goal.md's focus list + the pointer state file. If the active
     focus is exhausted, advance to the next; if all foci are exhausted,
-    emit `roadmap_complete` + a decisions-needed bullet (once) so the
-    ideation-trigger gate (`_maybe_ideate` in `ap2/ideation.py`) parks
-    on subsequent ticks until the operator extends the roadmap + acks.
-    TB-275: task dispatch is NOT affected — only the ideation trigger.
+    emit `roadmap_complete` (once) and set the pointer's
+    `roadmap_complete_emitted` flag so the ideation-trigger gate
+    (`_maybe_ideate` in `ap2/ideation.py`) parks on subsequent ticks
+    until the operator extends the roadmap + acks. TB-275: task
+    dispatch is NOT affected — only the ideation trigger.
+
+    TB-302: the roadmap-complete branch no longer appends a
+    `Roadmap complete: ...` bullet to
+    `.cc-autopilot/ideation_state.md` — the pointer-driven
+    `ap2 status` focus line is the canonical operator-facing
+    surface (see module docstring for the redundant-signal audit and
+    the two bugs the bullet write caused). The kill-switch branch
+    further down still writes a decisions-needed bullet because
+    operator-killed-but-criteria-met has no equivalent
+    naturally-observable focus-line surface.
 
     Pure / side-effect-bounded: writes events + the pointer file +
-    (rarely) one decisions-needed bullet. Does NOT mutate goal.md
-    itself. Tolerates a missing goal.md / empty focus list gracefully
-    (early return; the daemon's other gates handle the pre-focus-list
-    state).
+    (rarely, only on the kill-switch path) one decisions-needed
+    bullet. Does NOT mutate goal.md itself. Tolerates a missing
+    goal.md / empty focus list gracefully (early return; the daemon's
+    other gates handle the pre-focus-list state).
 
     TB-283: the empty-cycles heuristic is the sole advance signal —
     used for every focus regardless of whether it carries a
@@ -193,38 +227,44 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
         # Pointer already past the last focus.
         if not pointer.get("roadmap_complete_emitted"):
             # First detection of exhaustion → emit the audit event +
-            # decisions-needed bullet. Subsequent ticks short-circuit
-            # here. TB-275: the bullet is purely informational — the
-            # ideation trigger is parked (`_maybe_ideate` skips with
+            # set the pointer's `roadmap_complete_emitted` flag.
+            # Subsequent ticks short-circuit here. TB-275: ideation is
+            # parked (`_maybe_ideate` skips with
             # `reason=roadmap_complete`) but task dispatch is NOT
             # affected. Already-queued Backlog tasks (operator-added
             # via `ap2 add`, operator-approved via `ap2 approve`, or
             # previously auto-approved by ideation) continue to
             # auto-promote and dispatch normally.
+            #
+            # TB-302: the daemon no longer appends a
+            # `Roadmap complete: ...` bullet to
+            # `.cc-autopilot/ideation_state.md` here. The signal is
+            # already surfaced redundantly via (a) this
+            # `roadmap_complete` event in `events.jsonl`,
+            # (b) `focus_pointer.json` (`active_index past end`,
+            # `exhausted_titles`, `roadmap_complete_emitted=true`,
+            # empty `active_title`), (c) `ap2 status`'s focus line
+            # (`focus: ROADMAP_COMPLETE — ideation parked;
+            # `ap2 update-goal` to resume or `ap2 ack
+            # roadmap_complete` to dismiss`, derived from the
+            # pointer), and (d) the TB-244 focus-rotation digest in
+            # the cron status-report. The bullet was a fifth,
+            # daemon-written surface that (1) bypassed the
+            # ideation-cycle scrub of exhaustion-asserting sentences
+            # — feeding verdict-language priming back into the next
+            # ideation cycle after operator extends the roadmap —
+            # and (2) wrote to `ideation_state.md` outside the
+            # `_run_ideation` snapshot window, leaving uncommitted
+            # working-tree drift the state-commit pipeline could not
+            # capture. Post-fix `ideation_state.md` is single-writer
+            # (only the ideation agent writes it via
+            # `ideation_state_write`).
             events.append(
                 cfg.events_file,
                 "roadmap_complete",
                 exhausted_count=len(foci),
                 trigger="pointer_past_last",
             )
-            try:
-                _append_decisions_needed_bullet(
-                    cfg,
-                    (
-                        f"Roadmap complete: all {len(foci)} `## Current "
-                        f"focus:` heading(s) in `goal.md` are exhausted. "
-                        f"Ideation is parked (no active focus); extend "
-                        f"the roadmap (add new `## Current focus:` "
-                        f"headings via `ap2 update-goal`) to resume "
-                        f"ideation, or `ap2 ack roadmap_complete` to "
-                        f"dismiss this notice. Task dispatch is NOT "
-                        f"affected — already-queued Backlog tasks "
-                        f"continue to drain. Use `ap2 pause` for a "
-                        f"full stop."
-                    ),
-                )
-            except OSError:
-                pass
             pointer["roadmap_complete_emitted"] = True
             try:
                 goal.save_pointer(cfg, pointer)

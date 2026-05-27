@@ -632,8 +632,15 @@ def test_auto_advance_disabled_short_circuits(cfg, monkeypatch):
 
 def test_roadmap_complete_event_on_exhaustion(cfg, monkeypatch):
     """When the pointer crosses the last focus, the next advance
-    pass emits `roadmap_complete` once + a decisions-needed bullet,
-    and `goal.roadmap_exhausted` returns True."""
+    pass emits `roadmap_complete` once, sets the pointer's
+    `roadmap_complete_emitted` flag, and `goal.roadmap_exhausted`
+    returns True. TB-302: the daemon no longer appends a
+    `Roadmap complete: ...` bullet to `ideation_state.md` — the
+    pointer-driven `ap2 status` focus line carries the operator-
+    facing signal. The `_append_decisions_needed_bullet` helper is
+    reserved for halt-style callers that lack a dedicated
+    surface (kill-switch, auto-unfreeze daily cap, TB-224
+    task_error)."""
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha")
     # Pre-position pointer past the single focus.
@@ -650,12 +657,19 @@ def test_roadmap_complete_event_on_exhaustion(cfg, monkeypatch):
     assert rc[0]["exhausted_count"] == 1
     assert rc[0]["trigger"] == "pointer_past_last"
 
-    # Decisions-needed bullet appended.
+    # TB-302: ideation_state.md MUST NOT receive a `Roadmap
+    # complete: ...` bullet from the advance pass. The detailed
+    # regression-pin module
+    # (`test_roadmap_complete_no_bullet_append.py`) carries the
+    # full audit; this assertion is the local guard.
     ideation_state = (
         cfg.project_root / ".cc-autopilot" / "ideation_state.md"
     )
-    assert ideation_state.exists()
-    assert "Roadmap complete" in ideation_state.read_text()
+    if ideation_state.exists():
+        assert "Roadmap complete" not in ideation_state.read_text(), (
+            "TB-302: the roadmap-complete branch must not append a "
+            "`Roadmap complete: ...` bullet to ideation_state.md."
+        )
 
     # Halt active.
     assert goal.roadmap_exhausted(cfg) is True
