@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-300** **Empty-cycles counter must recognize `ideation_cycle_summary` as exit marker** `#autopilot` `#empty-cycles` `#focus-advance` `#counter` `#bug` `#regression-pin` `@blocked:TB-292` [→ brief](.cc-autopilot/tasks/empty-cycles-counter-must-recognize-idea.md)
 
 ## Pipeline Pending
 
