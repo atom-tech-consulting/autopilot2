@@ -104,6 +104,7 @@ from .web_home import (
     _hourly_sparkline_buckets,
     _ideation_gate_state,
     _load_pending_queue_entries,
+    _render_attention_card,
     _render_automation_card,
     _render_env_stale_warning,
     _render_focus_card,

@@ -13,6 +13,7 @@ Cards owned by this module:
   - `_render_operator_decisions`    (TB-173 / TB-191 — ideator decisions card).
   - `_render_ideation_status_block` (TB-197 — ideation gate-state card).
   - `_render_focus_card`            (TB-242 — axis-4 focus rotation card).
+  - `_render_attention_card`        (TB-299 — active attention-conditions summary card).
   - `_render_automation_card`       (TB-227 — auto-approve/auto-unfreeze card).
   - `_render_env_stale_warning`     (TB-260 — env-staleness WARN line).
 
@@ -641,6 +642,126 @@ def _render_focus_card(cfg: Config) -> str:
     )
 
 
+# ------------- TB-299: active-attention-conditions card on / -------------
+
+
+# Inline cap mirrors `cli_daemon.cmd_status`'s text-render cap (TB-298)
+# so an operator switching between `ap2 status` and the browser home
+# page sees consistent shape across both summary surfaces. The full
+# list lives on the dedicated `/attention` page (TB-296).
+_ATTENTION_CARD_MAX_BULLETS = 3
+
+
+def _render_attention_card(cfg: Config) -> str:
+    """Render the active-attention-conditions summary card for the home
+    page (TB-299).
+
+    Sibling to `_render_focus_card` (TB-242) and `_render_automation_card`
+    (TB-227) — all three render compact at-a-glance state for the
+    operator-attention cluster. The attention card sits BETWEEN focus
+    and automation in the composition order: attention conditions are
+    the most actionable signal (they name a specific condition needing
+    eyes), focus and automation are state.
+
+    Consumes the SAME `attention.detect_attention_conditions(cfg)`
+    entrypoint as `/attention` (TB-296), the status-report cron's
+    `## Attention needed` push (TB-282), the immediate-Mattermost
+    push (TB-297), and the `ap2 status` text/JSON render (TB-298) —
+    one detector layer, five operator-facing consumer surfaces, no
+    drift.
+
+    Bullet shape mirrors `web_attention._render_attention` (warn-glyph
+    `⚠`, bold TB-N when `extras['task']` is set, em-dash, detector-
+    supplied `summary`); per-task bullets additionally wrap the TB-N
+    in an anchor to `/task/<TB-N>` so the operator can click through
+    to the detail page in one step. Singleton bullets (no
+    `extras['task']`) render as bare `⚠ <summary>` — no orphaned
+    `<strong>` markup.
+
+    Inline cap: at most `_ATTENTION_CARD_MAX_BULLETS` (3) bullets, with
+    a `(+M more — see /attention)` link-tail when more conditions are
+    active. Mirrors TB-298's CLI cap so the cross-surface shape stays
+    consistent for an operator alternating between `ap2 status` and
+    the home page.
+
+    Empty-state discipline: OMIT THE ENTIRE CARD when zero conditions
+    fire (no heading, no body, no zero-noise) so a quiet project's
+    home page stays clean. Mirrors `_render_focus_card` /
+    `_render_automation_card` omit-on-empty discipline.
+
+    Defensive fallback: a detector exception is swallowed and
+    rendered as a tinted notice — the home page must never 500
+    because one detector errored. Mirrors `web_attention._render_attention`'s
+    swallow-on-error contract.
+    """
+    from . import attention as _attention
+
+    try:
+        conditions = _attention.detect_attention_conditions(cfg)
+    except Exception as e:  # noqa: BLE001 — never break the page
+        # Tinted notice — reuse the `automation-status is-paused`
+        # palette so the operator's eye picks up the surface error
+        # as part of the same "needs attention" visual cluster.
+        return (
+            '<div class="automation-status is-paused attention-card-error">'
+            '<span class="as-header">Attention</span>'
+            '<span class="as-body">'
+            f'detector error: {html.escape(type(e).__name__)}: '
+            f'{html.escape(str(e))}'
+            '</span>'
+            '</div>'
+        )
+
+    if not conditions:
+        return ""
+
+    total = len(conditions)
+    visible = conditions[:_ATTENTION_CARD_MAX_BULLETS]
+    items: list[str] = []
+    for cond in visible:
+        task_id = (cond.extras.get("task") or "").strip()
+        if task_id:
+            # Per-task bullet: bold TB-N wrapped in a `/task/<TB-N>`
+            # link so the operator can click through to the detail
+            # page from the home summary in one step.
+            items.append(
+                "<li>"
+                '<span class="att-glyph">⚠</span> '
+                f'<strong><a href="/task/{html.escape(task_id)}">'
+                f'{html.escape(task_id)}</a></strong> — '
+                f"{html.escape(cond.summary)}"
+                "</li>"
+            )
+        else:
+            # Singleton detector (e.g. `validator_judge_noisy`,
+            # `auto_approve_paused`, `cost_cap_approach`): no TB-N
+            # anchor, no orphaned `<strong>` — bare `⚠ <summary>`.
+            items.append(
+                "<li>"
+                '<span class="att-glyph">⚠</span> '
+                f"{html.escape(cond.summary)}"
+                "</li>"
+            )
+    if total > _ATTENTION_CARD_MAX_BULLETS:
+        more = total - _ATTENTION_CARD_MAX_BULLETS
+        # Link-tail rendered as one more <li> so it shares the bullet
+        # column with the visible conditions; the explicit "+M more"
+        # makes the truncation visible (rather than silently dropping
+        # tail conditions) and the `/attention` link is the
+        # detail-view destination.
+        items.append(
+            '<li class="att-more">'
+            f'(+{more} more — see <a href="/attention">/attention</a>)'
+            '</li>'
+        )
+    return (
+        '<div class="attention-card">'
+        f'<h2>Attention <span class="meta">({total})</span></h2>'
+        f'<ul class="attention-conditions">{"".join(items)}</ul>'
+        '</div>'
+    )
+
+
 def _render_automation_card(cfg: Config) -> str:
     """Render the auto-approve / auto-unfreeze state card for the home
     page (TB-227).
@@ -955,6 +1076,15 @@ def _render_home(cfg: Config) -> str:
     # (fresh / pre-pivot projects); see `_render_focus_card` for the
     # contract.
     focus_html = _render_focus_card(cfg)
+    # TB-299: active-attention-conditions summary card. Sits directly
+    # BETWEEN the focus card (TB-242) and the automation card (TB-227)
+    # so the operator-attention cluster orders by urgency — attention
+    # conditions are the most actionable signal (they name a specific
+    # condition needing eyes); focus and automation are state. Omitted
+    # entirely when `attention.detect_attention_conditions(cfg)`
+    # returns [] (quiet project's home page stays clean); see
+    # `_render_attention_card` for the contract.
+    attention_html = _render_attention_card(cfg)
     # TB-227: auto-approve / auto-unfreeze loop state card. Sits
     # alongside the ideation gate-state card (visual sibling — both
     # are "what's the daemon's automation doing right now?" surfaces).
@@ -987,6 +1117,7 @@ def _render_home(cfg: Config) -> str:
         f"{pending_html}"
         f"{ideation_status_html}"
         f"{focus_html}"
+        f"{attention_html}"
         f"{automation_html}"
         f'<h2>events <span class="meta">— last 30, newest first '
         f'(<a href="/events">all</a>)</span></h2>'
