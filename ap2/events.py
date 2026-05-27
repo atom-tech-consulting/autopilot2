@@ -116,18 +116,35 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     the check is bypassed entirely and neither event fires).
   - `focus_advanced` (TB-226) — daemon advanced its in-memory focus
     pointer past an exhausted `## Current focus:` heading in
-    goal.md. TB-283: triggered solely by the empty-cycles
+    goal.md. TB-283: the natural advance signal is the empty-cycles
     heuristic (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive
     0-proposal ideation cycles against the active focus). The
     prior LLM-judge path against per-focus bullets was deleted
     because it collapsed multi-week foci into ~3-task cycles by
     diff-reading commit shape; TB-285 renamed the sub-block from
     `Done when:` to `Progress signals:` to reflect the new
-    advisory semantics. Payload: `from` (old focus title), `to`
-    (new focus title, empty string when the advance crossed the
-    last focus into roadmap-exhausted state), `trigger`
-    (`empty_cycles_heuristic`), `new_index` (the pointer's new
-    `active_index`), `total_foci` (current foci-list length).
+    advisory semantics. TB-295: a synthetic variant of this same
+    event also fires from the operator-CLI `ap2 rewind-focus`
+    drain branch (with `trigger=operator_rewind`) so the empty-
+    cycles counter's cutoff scan
+    (`focus_advance._ideation_empty_against_focus`'s most-recent
+    `focus_advanced to=<focus_title>` lookup) anchors at the
+    rewind — without the synthetic emit, pre-rewind empty cycles
+    would keep counting against the rewound focus's counter
+    (`cutoff_idx = -1` walks the whole tail). Payload: `from`
+    (old focus title — the previously-active focus the pointer
+    just moved off; for the rewind variant, this is the pointer's
+    prior `active_title`), `to` (new focus title — for the natural
+    path an empty string when the advance crossed the last focus
+    into roadmap-exhausted state; for the rewind variant always
+    the target focus title), `trigger` (one of
+    `empty_cycles_heuristic` / `pointer_past_last` /
+    `operator_rewind` — the recovery-path discriminator that lets
+    downstream consumers tell natural advances from operator
+    interventions), `new_index` (the pointer's new
+    `active_index`), `total_foci` (current foci-list length),
+    plus (rewind variant only) `reason` (the operator's free-form
+    intent, possibly empty).
   - `roadmap_complete` (TB-226) — focus pointer has advanced past
     the last `## Current focus:` heading in goal.md. TB-275:
     ideation parks on subsequent ticks (`_maybe_ideate` skips with

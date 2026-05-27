@@ -665,6 +665,7 @@ never the operator.
 | `ap2 unfreeze TB-N` | Move a Frozen task back to Backlog and clear its retry counter. | Run after fixing the underlying blocker (flaky test, missing dep); refuses if the task isn't currently Frozen so you can't accidentally reset a healthy task. |
 | `ap2 ideate [--force]` | Manually trigger an ideation pass (TB-159), bypassing the natural empty-board / cooldown / `AP2_IDEATION_DISABLED` gates. | Routed through the operator queue; the daemon runs ideation on its next tick (≤30s). Use to refill a thin Ready/Backlog when waiting on cooldown is impractical; the cooldown clock still advances after the forced run. |
 | `ap2 update-goal --file PATH [--reason TEXT]` | Refresh `goal.md` via the operator queue (TB-193) — full-file replacement applied at the next tick under `board_file_lock`. | Symmetric to `ap2 add --briefing-file`; operator-CLI-only by design — the MM handler has no path to mutate `goal.md`. The `--reason` line feeds future ideation cycles as a goal-drift signal. |
+| `ap2 rewind-focus TITLE [--reason TEXT]` | Re-engage an exhausted `## Current focus:` heading (TB-295) — atomically updates `focus_pointer.json`, emits a synthetic `focus_advanced trigger=operator_rewind` event so the empty-cycles counter respects the rewind, and logs an audit line. | Canonical recovery path for a falsely-advanced focus; routed through the operator queue so the mutation lands at a tick boundary. Direct edits of `.cc-autopilot/focus_pointer.json` are now a "don't" — they produce no event and leave pre-rewind empty cycles counting against the rewound focus's counter (the counter scans for the most recent `focus_advanced to=<title>` event to set its cutoff, so no event = no cutoff). Title-as-key (resolved to index at drain time), so an operator-edited goal.md between invocation and drain produces a clean rejection rather than a silent rewind to the wrong focus. |
 | `ap2 rollback [-n N \| --task TB-N \| --to SHA] [-y] [--force]` | Linear rollback (TB-111): walk back from HEAD by N tasks (or to a specific TB-N / sha) and `git reset --hard`. | Restores TASKS.md + every committed state file coherently in one shot. Refuses a dirty working tree by default; use when a sequence of recent task-completions needs to be undone together rather than one-by-one. |
 | `ap2 backfill-proposals [--dry-run]` | Backfill historical ideation proposal records (TB-195) for every ideation-authored TB-N that lacks one. | Scans `operator_log.md` + briefing files + `events.jsonl` and writes per-proposal records. Idempotent; safe to re-run. Operator-driven one-off, NOT routed through the operator queue or daemon ticks. |
 | `ap2 pause [--reason TEXT]` | Pause the daemon by setting a flag file — in-flight tasks finish but no new ones dispatch. | Use for short maintenance windows; pair with `ap2 resume` to re-enable. The reason is recorded in events for the operator audit trail. |
@@ -1942,6 +1943,41 @@ dedicated `ap2 advance` command exists or is needed:
   arms ideation against the new focus — or by dismissing the
   notice (`ap2 ack roadmap_complete --reason "..."`) when the
   walk is genuinely over.
+- *Rewind to an exhausted focus* — `ap2 rewind-focus <title>
+  [--reason TEXT]` (TB-295). Use to recover from a falsely-
+  advanced focus (the empty-cycles heuristic tripped for non-
+  exhaustion reasons — e.g. an attention-grabbing cross-cut task
+  diverted ideation off the active focus for a few cycles, or
+  a compound bug let the counter trip prematurely). The verb
+  atomically (a) updates `focus_pointer.json` so `active_index`
+  + `active_title` re-engage the named focus, (b) drops the
+  title from `exhausted_titles`, (c) resets `empty_cycles=0`
+  and `roadmap_complete_emitted=False`, (d) emits a synthetic
+  `focus_advanced trigger=operator_rewind` event so the empty-
+  cycles counter's cutoff scan (`focus_advance._ideation_empty_
+  against_focus` looks for the most recent `focus_advanced
+  to=<focus_title>` event regardless of trigger) anchors at the
+  rewind — without this event, pre-rewind empty cycles would
+  keep counting against the rewound focus's counter, and a
+  single truly-empty post-rewind cycle could re-trip the false
+  advance. Routed through the operator queue so the write lands
+  at a tick boundary under `board_file_lock`. Title-as-key
+  (resolved to index at drain time) means an operator-edited
+  goal.md between invocation and drain produces a clean
+  rejection rather than a silent rewind to the wrong focus.
+  Does NOT auto-ack the `roadmap_complete` decisions-needed
+  bullet — pair with `ap2 ack roadmap_complete` separately if
+  the rewind happened while the roadmap was complete.
+- **Do NOT direct-edit `.cc-autopilot/focus_pointer.json`.** The
+  file is gitignored runtime state, and a manual edit (even
+  with the daemon paused) emits no event — leaving the empty-
+  cycles counter's cutoff scan at `cutoff_idx = -1` so it walks
+  the whole event tail, treating pre-edit empty cycles as if
+  they belonged to the rewound focus. Use `ap2 rewind-focus`
+  instead; it's the only legitimate operator mutation on the
+  pointer and preserves both the audit trail AND the counter-
+  window semantics. Other pointer fields aren't operator-tunable
+  by design.
 - *Pause the whole loop* — `ap2 pause` for full stop (in-flight
   tasks finish, no new dispatch). Distinct from roadmap-complete:
   the parked-ideation state still dispatches operator-added
