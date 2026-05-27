@@ -194,3 +194,9 @@ Test docstrings (8 mentions):
 - **fenced_files:** TASKS.md
 - **pre_run_head:** 72476d84
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260527T212257Z-TB-307.prompt.md`, `stream: .cc-autopilot/debug/20260527T212257Z-TB-307.stream.jsonl`, `messages: .cc-autopilot/debug/20260527T212257Z-TB-307.messages.jsonl`
+### 2026-05-27 — error
+(no summary)
+- **error:** Exception: Command failed with exit code 143 (exit code: 143)
+Error output: Check stderr output for details
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260527T212641Z-TB-307.prompt.md`, `stream: .cc-autopilot/debug/20260527T212641Z-TB-307.stream.jsonl`, `messages: .cc-autopilot/debug/20260527T212641Z-TB-307.messages.jsonl`
