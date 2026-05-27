@@ -1920,12 +1920,19 @@ Each tick, `_maybe_advance_focus(cfg, sdk)` runs as step 0.6 of
 dispatch / ideation). One signal drives advancement, applied to
 every focus regardless of whether it carries a `Progress signals:`
 sub-block: the daemon counts consecutive recent ideation cycles
-that produced 0 proposals against the active focus
-(`ideation_empty_board` + `ideation_complete` events with zero
-recorded proposals, reset by `ideation_proposal_recorded`). When
-the count reaches `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default `3`,
-clamped to `[1, 20]`), the pointer advances and the empty-cycles
-counter resets against the new focus.
+that produced 0 proposals against the active focus. Each cycle is
+delimited by an `ideation_empty_board` entry marker (daemon-emitted
+at cycle start regardless of outcome) and one of `ideation_complete`
+or `ideation_cycle_summary` (agent-emitted exit marker —
+`_complete` when the cycle proposed at least one task,
+`_cycle_summary` when no proposals). The counter increments at the
+exit marker if no `ideation_proposal_recorded` fired within the
+cycle; resets to 0 if any proposal fired. `ideation_timeout` /
+`ideation_error` exits don't count (infrastructure failure ≠
+"ideation reasoned and found nothing"). When the count reaches
+`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default `3`, clamped to
+`[1, 20]`), the pointer advances and the empty-cycles counter
+resets against the new focus.
 
 The intuition: ideation reads the full goal.md + the recent task
 arc every cycle. If multiple consecutive cycles can find nothing
@@ -1949,10 +1956,14 @@ carried.
 
 On advance, the daemon emits `focus_advanced from=<old_title>
 to=<new_title> trigger=empty_cycles_heuristic new_index=<i>
-total_foci=<n>` and writes the updated pointer. (The `trigger`
-field is single-valued post-TB-283 — kept on the event so
-downstream consumers stay schema-stable even though the value no
-longer discriminates.)
+total_foci=<n>` and writes the updated pointer. The `trigger`
+field carries two values today: `empty_cycles_heuristic` (natural
+auto-advance after N consecutive empty cycles) and
+`operator_rewind` (synthetic event emitted by `ap2 rewind-focus`
+so the counter's cutoff scan recognizes the rewind boundary;
+TB-295). A third value, `pointer_past_last`, appears on the
+`roadmap_complete` event (not `focus_advanced`) when the pointer
+crosses past the final focus heading.
 
 **Kill-switch.**
 `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits the advance even

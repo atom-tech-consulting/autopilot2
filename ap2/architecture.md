@@ -58,7 +58,7 @@ There are four kinds of SDK queries, each with its own prompt builder, tool allo
 | **Task** | `run_task` (step 3) | `prompts.build_task_prompt` | `TASK_AGENT_TOOLS` (Read/Edit/Write/Bash + `pipeline_task_start`) | `AP2_TASK_TIMEOUT_S` (1200s) |
 | **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/mm/log_event/daemon_control/ideation_state_write — `cron_edit` dropped TB-146) | `AP2_CONTROL_TIMEOUT_S` (1200s) |
 | **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS` (CONTROL_AGENT_TOOLS minus ideation_state_write/board_edit — TB-145, was TB-122's RESTRICTED; `cron_edit` separately dropped from CONTROL_AGENT_TOOLS in TB-146) | `AP2_CONTROL_TIMEOUT_S` |
-| **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `CONTROL_AGENT_TOOLS` | `AP2_CONTROL_TIMEOUT_S` |
+| **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `IDEATION_TOOLS` (CONTROL_AGENT_TOOLS minus operator_queue_append; TB-291) | `AP2_CONTROL_TIMEOUT_S` |
 
 Task agents are the only kind that gets `Write`/`Edit`. They commit code; everything else mutates state through MCP tools.
 
@@ -289,6 +289,12 @@ CONTROL_AGENT_TOOLS = [
 # (TB-149) — cron / ideation have no thread to read so it's never
 # widened into CONTROL_AGENT_TOOLS.
 
+# IDEATION_TOOLS = CONTROL_AGENT_TOOLS minus { operator_queue_append }
+# (TB-291). Ideation only fires when Active == 0, so the queue-path
+# TOCTOU defense is unnecessary; fencing keeps the proposal-path
+# event vocabulary single-channel (ideation_proposal_recorded) for
+# the empty-cycles counter's reset signal.
+
 TASK_AGENT_TOOLS = [
     "Read", "Glob", "Grep", "Bash", "Edit", "Write",
     "mcp__autopilot__pipeline_task_start",
@@ -341,7 +347,7 @@ Pre-TB-115's two-task split (launch + auto-created Backlog validation with `(blo
 
 **Stuck-blocker** — `Board._is_blocker_satisfied` checks each `(blocked on: ...)` token. `TB-N` blockers are satisfied when the named task is in Complete; unknown schemes fail-safe (including the retired `pid:N@TS` scheme — any straggler from a pre-TB-115 / pre-TB-117 board sits in Backlog until the operator removes the clause). `diagnose.board_health["unsatisfiable_blocks"]` surfaces the corner case where a Backlog task is blocked on a Frozen task (will never auto-promote).
 
-**Roadmap exhaustion** — `_maybe_advance_focus` (TB-226) advances the in-memory focus-list pointer (`.cc-autopilot/focus_pointer.json`) as each `## Current focus:` heading in goal.md exhausts; when the pointer crosses past the last heading, the daemon emits `roadmap_complete` (once). TB-275: this parks the ideation TRIGGER only (`_maybe_ideate` emits `ideation_skipped reason=roadmap_complete`); task dispatch is NOT affected, so already-queued Backlog tasks (operator-added via `ap2 add`, operator-approved via `ap2 approve`, or previously auto-approved) continue to auto-promote and drain. Operator extends the roadmap via `ap2 update-goal` (adds new `## Current focus:` headings, re-arms ideation) or dismisses the notice via `ap2 ack roadmap_complete`. `ap2 pause` remains the explicit full-stop. The two event types — `focus_advanced` and `roadmap_complete` — provide the audit trail.
+**Roadmap exhaustion** — `_maybe_advance_focus` (TB-226) advances the in-memory focus-list pointer (`.cc-autopilot/focus_pointer.json`) as each `## Current focus:` heading in goal.md exhausts; when the pointer crosses past the last heading, the daemon emits `roadmap_complete` (once). TB-275: this parks the ideation TRIGGER only (`_maybe_ideate` emits `ideation_skipped reason=roadmap_complete`); task dispatch is NOT affected, so already-queued Backlog tasks (operator-added via `ap2 add`, operator-approved via `ap2 approve`, or previously auto-approved) continue to auto-promote and drain. Operator extends the roadmap via `ap2 update-goal` (adds new `## Current focus:` headings, re-arms ideation) or dismisses the notice via `ap2 ack roadmap_complete`. `ap2 pause` remains the explicit full-stop. The two event types — `focus_advanced` and `roadmap_complete` — provide the audit trail. Operator can re-engage a previously-exhausted focus via `ap2 rewind-focus TITLE [--reason TEXT]` (TB-295), which atomically resets the pointer + emits a synthetic `focus_advanced trigger=operator_rewind` event so the empty-cycles counter cutoff respects the rewind. Direct `.cc-autopilot/focus_pointer.json` edits are NOT supported — they produce no event and leave pre-rewind empty cycles counting against the rewound focus's window.
 
 **Malformed task line** — `Board._parse` flags any line that doesn't match `TASK_LINE_RE`; the daemon emits a deduped `board_malformed_line` event in step 3 of `_tick`. Without this, an out-of-band edit (e.g. a `(<sha>)` annotation between `**TB-N**` and `**Title**`) silently strands every task that depends on the affected one.
 
@@ -374,7 +380,7 @@ Three tiers, increasing in fidelity and cost.
 
 ### Default — fast, no API cost
 
-`uv run pytest -q ap2/tests` runs the suite (~349 tests). All FakeSDK-based or pure-Python; no network, no API credits. Notable files:
+`uv run pytest -q ap2/tests` runs the full suite (currently 2000+ tests). All FakeSDK-based or pure-Python; no network, no API credits. Notable files:
 - `tests/test_board.py` — TASK_LINE_RE, malformed-line detection, blocked_on parsing.
 - `tests/test_cron.py` / `test_cron_defaults.py` — cron yaml parsing + bootstrapped jobs.
 - `tests/test_ideation_defaults.py` — pins on `ideation.default.md` content (Step 0 / Step 0.5 / Step 1.5 phrases — load-bearing for ideation behavior).
