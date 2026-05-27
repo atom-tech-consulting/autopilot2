@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/ap2-status-cli-surface-active-attention.md",
   "focus_anchor": "current focus operator legible reporting and monitoring",
+  "outcome": {
+    "commit": "b66b177",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-27T09:11:06Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-27T08:56:24Z",
   "tb_id": "TB-298",
   "why_now": "focus-2's push surfaces (status-report cron, optional\nMattermost push) and the browser pull surface (`/attention`)\nshipped (TB-282, TB-287..TB-290, TB-296, TB-297). The remaining\noperator entry point \u2014 `ap2 status` polled from a terminal \u2014\ncollects auto-approve state, audit state, env-staleness, focus\nstate, janitor counts, classifications, and operator decisions\n(see `ap2/cli_daemon.py:cmd_status` lines ~200-580), but never\nimports the `attention` module or calls\n`detect_attention_conditions`. The walk-away operator who polls\nCLI before opening a browser or checking chat has no signal that\nattention is firing \u2014 defeats the per-project legibility\npromise on the most lightweight surface."
