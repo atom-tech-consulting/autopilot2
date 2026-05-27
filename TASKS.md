@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-303** **Documentation sweep: README.md + architecture.md + howto.md updates for today's arc** `#autopilot` `#docs` `#regression-pin` [→ brief](.cc-autopilot/tasks/documentation-sweep-readme-md-architectu.md)
 
 ## Pipeline Pending
 
