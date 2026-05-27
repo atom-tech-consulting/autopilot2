@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/web-home-page-render-attention-card-sibl.md",
+  "focus_anchor": "current focus operator legible reporting and monitoring",
+  "proposed_at": "2026-05-27T08:58:11Z",
+  "tb_id": "TB-299",
+  "why_now": "TB-296 added a `/attention` page reachable from a\nchrome nav link, but the web home (`/`) \u2014 the first surface an\noperator sees when they open the browser \u2014 has no attention\nsummary at all (verified: `grep -i attention ap2/web_home.py` \u2192\nno matches). The home page already composes six sibling cards\nfor the same operator-attention cluster (focus state, auto-\napprove state, pending queue, operator decisions, ideation\nstatus, env staleness); attention is the one operator-attention\naxis missing. An operator landing on `/` who hasn't yet\ninternalized the nav has no visual signal that attention is\nfiring \u2014 they only learn by clicking the nav link or by reading\nthe next Mattermost post. Closes the home-page-as-entry-point\ngap symmetric to TB-242's focus card."
+}

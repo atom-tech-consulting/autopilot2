@@ -1,30 +1,30 @@
 # Ideation State
 
-_Last updated: 2026-05-27T06:40:36Z by ideation cron_
+_Last updated: 2026-05-27T08:50:20Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 0B / 0P / 164C / 3F; focus pointer just
-operator-rewound at 2026-05-27T06:33:52Z back to `operator-legible
-reporting and monitoring` with explicit reason "arc complete;
-re-engaging to verify post-fix behavior + let ideation propose
-remaining axes (web /attention page, immediate-MM push, etc.)". The
-3 ideation_skipped reason=roadmap_complete events between 22:39Z and
-04:40Z confirm last cycle's prediction that focus-2 would exhaust on
-empty-cycles; the operator's response was to rewind rather than
-extend the roadmap, scoping ideation back at TB-282's documented
-Out-of-scope items. Recent Completes considered:
+Cycle entry: board 0A / 0R / 0B / 0P / 169C / 3F (Frozen unchanged:
+TB-119 / TB-120 / TB-133 — all operator-classified preventive,
+thaw-on-demand). Focus pointer (2 of 2) on `operator-legible
+reporting and monitoring`, just rewound by the operator at
+2026-05-27T06:33:52Z. Both operator-named axes in that rewind
+reason — web `/attention` pull page and immediate-Mattermost push
+on attention_raised — landed in the gap:
 
-- TB-293 (`5c6d2a8` 2026-05-26T21:01Z) — mirrored the auto-approve
-  gate into `operator_queue._apply_operator_op` add_backlog branch
-  (closes the review-token stranding regression).
-- TB-294 (`48d3fd1` 2026-05-27T05:06Z) — disabled extended thinking
-  in `_run_scrub`; added typed `Scrub*Error` exceptions and emits
-  `ideation_state_scrub_error` audit events.
-- TB-295 (`6081f96` 2026-05-27T06:33Z) — `ap2 rewind-focus` operator
-  CLI verb + synthetic `focus_advanced trigger=operator_rewind`
-  event for empty-cycles counter cutoff (used by operator
-  immediately after landing to re-engage focus-2).
+- TB-295 (`6081f96` 06:33Z) — `ap2 rewind-focus` CLI + synthetic
+  `focus_advanced trigger=operator_rewind` (used by operator
+  immediately to re-engage focus-2; closed the empty-cycles
+  counter-cutoff hole exposed when the prior false-advance was
+  recovered).
+- TB-296 (`2a2d737` 07:01Z) — `/attention` web page (sibling
+  `web_attention.py`, nav-bar link, `/events` row link-through;
+  shares `detect_attention_conditions(cfg)` with the push surface).
+- TB-297 (`b5178ea` 07:15Z) — opt-in `AP2_ATTENTION_IMMEDIATE_PUSH`
+  knob; daemon helper posts `[<project>] ⚠ <summary>` to
+  `AP2_MM_CHANNELS[0]` with sticky no-destination flag, debounce
+  reuses TB-282 contract, `attention_pushed` event un-skips cron
+  dedup gate.
 
 ## Current focus assessment
 
@@ -33,108 +33,96 @@ Out-of-scope items. Recent Completes considered:
     - Progress signal #1 (title + project_name): TB-280 closed.
     - Progress signal #2 (significance-gated + dedup): TB-281
       closed.
-    - Progress signal #3 (proactive attention surface): TB-282 +
-      TB-287 + TB-288 + TB-289 + TB-290 — all 5 enumerated condition
-      kinds (stuck / frozen / validator-judge anomalies / pending
-      decision / cost approach) now detector-backed; the status-
-      report `## Attention needed` section is the only consumer.
+    - Progress signal #3 (proactive attention surface): all 5
+      enumerated condition kinds detector-backed (TB-282 +
+      TB-287..TB-290); push surfaces are the status-report cron
+      `## Attention needed` section (TB-282), the optional
+      immediate Mattermost push (TB-297); pull surface is the
+      `/attention` web page (TB-296).
   - Gaps:
-    1. **Web `/attention` pull page** — TB-282 Out-of-scope L123-125
-       explicitly deferred this "once the event vocabulary lands AND
-       accrues data". Vocabulary fully landed (5 detectors, TB-282
-       + TB-287...TB-290); production accrual at 0 `attention_raised`
-       events to date (verified via `grep -c '"type":
-       "attention_raised"' .cc-autopilot/events.jsonl` → 0), which
-       is expected for a quiet project — the empty-state page is
-       still the canonical pull surface for "what conditions are
-       currently active". Today the operator must run `ap2 status`
-       OR wait for the next 2h status-report cron to see active
-       attention conditions; the web home page has no parallel
-       surface despite TB-242's automation-status cards covering
-       sibling axes.
-    2. **Immediate Mattermost push on detector fire** — TB-282
-       Out-of-scope L119-122 explicitly deferred this "out-of-band
-       immediate push has its own rate-limit + dedup concerns and
-       belongs in a follow-up". The status-report cron's per-2h
-       cadence means a stuck-Active condition that fires at
-       minute 5 of the window still waits up to 115 minutes to
-       surface in chat. The post-trip `auto_approve_paused`
-       detector (TB-289) is the most acute example: dispatch has
-       already halted by the time the next status-report cron
-       runs. The watchdog's `_first_mm_channel` + `tools._mm_post`
-       chain is the existing reference pattern (per
-       `ap2/watchdog.py` L112-150) — same channel routing,
-       sticky-warning-on-missing-destination, post + audit-event
-       shape — adapted to attention conditions with a strict
-       opt-in env knob (conservative-defaults constraint per
-       goal.md Non-goals L253-256).
+    1. **`ap2 status` CLI does not surface active attention
+       conditions.** Verified by reading
+       `ap2/cli_daemon.py:cmd_status` (lines ~200-580) — it
+       collects `auto_approve_state`, `audit_state`,
+       `env_staleness`, `_focus_item`, `janitor_counts`, and
+       `operator_decisions`, but never imports `attention` or
+       calls `detect_attention_conditions`. Grep confirms: 4
+       call sites for the detector (daemon, status_report,
+       web_attention, web) and none in CLI. The walk-away
+       operator polling via CLI sees board counts + auto-approve
+       state but not what's drawing attention; only the web page
+       (browser required) or the 2h cron post (in chat) surfaces
+       it.
+    2. **Web home page has no attention summary card.** Verified
+       by `grep -i attention ap2/web_home.py` → no matches. The
+       home page composes `_render_focus_card` (TB-242),
+       `_render_automation_card` (TB-227), `_render_pending_queue`,
+       `_render_operator_decisions`, `_render_ideation_status_block`,
+       and `_render_env_stale_warning` — but the attention surface
+       (a sibling axis of focus / automation / decisions) appears
+       only as a nav link to `/attention`. An operator landing on
+       `/` who has not yet learned the nav has no visual cue that
+       attention is firing.
   - Status: `in-progress`
-  - Reasoning: operator just rewound the focus and named both gaps
-    in their rewind reason.
+  - Reasoning: both remaining gaps are concrete one-file
+    additions, both extend the SAME `detect_attention_conditions`
+    detector entrypoint to two operator entry-points where it is
+    currently absent.
 
 ## Non-goal risk check
 
-Both proposals stay within the per-project legibility scope (goal.md
-focus-2 Scope guard L227-228 — "per-project legibility, NOT
-cross-project aggregation"). Web `/attention` is an additive read-
-only page (reuses `attention.detect_attention_conditions` + the
-existing FastAPI `web_*` sibling pattern from TB-263). Immediate-MM
-push defaults OFF (`AP2_ATTENTION_IMMEDIATE_PUSH` opt-in knob),
-honors the same per-(type, key) debounce as the status-report
-surface, and posts to `AP2_MM_CHANNELS[0]` only — no new cross-
-project routing. Both surfaces are operator-curated trust upgrades
-per goal.md Constraints L280-290.
+Both proposals stay strictly within per-project legibility scope
+(goal.md focus-2 L227-228 — "per-project legibility, NOT
+cross-project aggregation"). Both are additive read-only consumers
+of `detect_attention_conditions` (no new detector kinds, no new
+event types, no daemon-side mutation). The CLI surface mirrors
+TB-258's existing `audit:` / TB-260's `env stale` cluster pattern
+(omit-on-empty, JSON parser-stability key always present). The
+home card mirrors TB-242 / TB-227 (omit-on-empty card). Neither
+modifies the detector module.
 
 ## Considered & deferred this cycle
 
-- **`attention_cleared` event class** — would let a future surface
-  report "X resolved since last report" alongside fresh fires.
-  Genuine value but speculative without operator ask AND adds a
-  second event type to maintain. Defer until pull/push surfaces
-  expose a clear gap (e.g. operator asks "what just resolved?" via
-  the new web page).
-- **JSON sub-endpoint at `/attention.json`** — would enable
-  external monitoring tools to poll. Operator hasn't asked, and the
-  per-project legibility scope guard (L227-228) explicitly excludes
-  cross-project aggregation. Defer until a concrete consumer
-  surfaces.
+- **`attention_cleared` event class** — still no concrete consumer
+  asking for "what just resolved?" data. Carried from prior cycle;
+  defer condition unchanged.
+- **JSON sub-endpoint `/attention.json`** — no external monitoring
+  ask; scope-guard L227-228 (no cross-project aggregation) still
+  applies. Defer.
 - **TB-175-shape ideation-acceptance-rate aggregator** — operator
   parked it 2026-05-07T01:57Z pending ≥3 cycles of TB-188 records;
   still gated.
 - **Rejection-pattern check (carried, re-justified)**: TB-185 /
   TB-184 vetoed ap2-meta-polish; TB-231 vetoed symptom-patching;
   TB-175 vetoed premature aggregation; TB-240 vetoed validator
-  whack-a-mole. Both this cycle's proposals are operator-named
-  TB-282 Out-of-scope items closing literal Progress signal #3
-  language — not meta-polish, not aggregation, not symptom-
-  patching, not validator. Pattern clears.
+  whack-a-mole. This cycle's two proposals extend the SAME
+  detector entrypoint (TB-282 contract) to existing
+  operator-facing surfaces (CLI status, web home) — neither is
+  meta-polish, neither invents new detector logic, neither
+  aggregates across projects, neither whack-a-moles a validator
+  gate. Pattern clears.
 
 ## Cycle observations
 
-- 0 production `attention_raised` events have fired despite 5
-  detectors live since 2026-05-23 (TB-282) and yesterday (TB-287..
-  TB-290) — production-quiet project. Informs both briefings: the
-  web page must render an empty-state cleanly; the immediate-push
-  knob must default OFF until volume data accrues, so a future
-  cadence-tuning task has signal.
-- Last cycle's empty-cycles prediction held (3× `ideation_skipped
-  reason=roadmap_complete` in the gap), and the operator chose
-  rewind over roadmap-extension — a useful precedent for future
-  exhaustion cycles: rewind is cheap and reverses cleanly via
-  TB-295's CLI verb.
+- 0 production `attention_raised` events have fired despite 6
+  detectors live; both proposals must render an empty-state
+  cleanly so the quiet-project default is "no attention line"
+  rather than a noisy zero-state.
 
 ## Decisions needed from operator
 
-(none this cycle — focus pointer just rewound, both proposals map
-to operator-named TB-282 Out-of-scope items.)
+(none this cycle — both proposals are concrete one-file
+additions covering operator-poll surfaces the rewind reason's
+"etc." suffix implicitly invites.)
 
 ## Proposals this cycle
 
-Two proposals queued behind `@blocked:review` (operator-named axes
-from the 2026-05-27T06:33:52Z rewind reason):
+Two proposals queued behind `@blocked:review`:
 
-- TB-296 — `/attention` web page (pull surface for current
-  attention conditions; closes TB-282 Out-of-scope L123-125).
-- TB-297 — Immediate Mattermost push on attention_raised emission
-  (opt-in push surface for detector fires; closes TB-282
-  Out-of-scope L119-122).
+- TB-298 — `ap2 status`: surface active attention conditions
+  in the CLI text + JSON output (per-condition bullet line in
+  text, parser-stable `attention` key in JSON; omit-on-empty
+  in text only).
+- TB-299 — Web home page: `_render_attention_card` sibling
+  (operator-legible per-condition bullets with link-through to
+  `/attention`; omit-on-empty card).
