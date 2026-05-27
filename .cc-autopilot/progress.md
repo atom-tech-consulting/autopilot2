@@ -1048,3 +1048,9 @@
 - **Summary:** Closed 9 surgical doc-staleness gaps across ap2/README.md (CLI row for ap2 rewind-focus, lifecycle + state-observability event additions, IDEATION_TOOLS narrative), ap2/architecture.md (Ideation Tools cell, IDEATION_TOOLS code-block definition, roadmap-exhaustion ap2 rewind-focus recovery note, ~349 tests → 2000+), and ap2/howto.md (counter-semantics paragraph rewrite naming both ideation_complete/ideation_cycle_summary exit markers; trigger-field comment updated to the two-value vocabulary). All 9 grep verifications pass; full suite 2175 tests pass.
 - **Files:** ap2/README.md, ap2/architecture.md, ap2/howto.md
 - **Tests:** pass
+
+## [2026-05-27] TB-304: Document scripts/monitor_events.py in ap2/howto.md
+- **Commit:** `00bc46e`
+- **Summary:** Added a 28-line "Live event tail — scripts/monitor_events.py" subsection to ap2/howto.md between the `ap2 logs --json` one-shot tail and the `ap2 web` visual dashboard in the Operator-question playbook; covers what the script does, when to use it (complements `ap2 logs -n` and `ap2 status`), three usage examples mirroring the script docstring, output line shape, and the KEEP-allowlist edit note. Both grep verification bullets pass and uv run pytest -q is green (2175 passed).
+- **Files:** ap2/howto.md
+- **Tests:** pass
