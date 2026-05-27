@@ -307,7 +307,7 @@ def test_cron_default_status_report_prompt_is_stub():
     # places (drift hazard). It lives in STATUS_REPORT_PROMPT only.
     assert "Freshness contract" not in body
     # Cron's interval / max_turns are still meaningful — operator-tunable.
-    assert sr.interval_s == 7200
+    assert sr.interval_s == 28800
     assert sr.max_turns == 10
 
 

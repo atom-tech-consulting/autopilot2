@@ -32,7 +32,7 @@ def test_default_cron_parses_cleanly():
 
 def test_default_cron_intervals_are_sane():
     jobs = {j.name: j for j in load_jobs(DEFAULT)}
-    assert 600 <= jobs["status-report"].interval_s <= 4 * 3600
+    assert 600 <= jobs["status-report"].interval_s <= 8 * 3600
 
 
 def test_bootstrap_copies_default(tmp_path: Path):

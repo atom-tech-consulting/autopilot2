@@ -169,13 +169,13 @@ def test_cron_status_overdue_detection(tmp_path: Path):
 
     fake_now = time.time()
     state = load_state(cfg.cron_state_file)
-    state["status-report"] = fake_now - (5 * 3600)  # 5h > 2h*2 = 4h → overdue
+    state["status-report"] = fake_now - (20 * 3600)  # 20h > 8h*2 = 16h → overdue
     cfg.cron_state_file.write_text(json.dumps(state))
 
     report = diagnose.build_report(cfg, now=fake_now)
     by_name = {c["name"]: c for c in report.cron_status}
     assert "ideation" not in by_name
-    assert by_name["status-report"]["overdue"] is True  # 5h > 4h (2 * 2h)
+    assert by_name["status-report"]["overdue"] is True  # 20h > 16h (2 * 8h)
 
 
 # ---------------------------------------------------------------------------

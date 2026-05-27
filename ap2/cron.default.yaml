@@ -1,6 +1,6 @@
 jobs:
   - name: status-report
-    interval: 2h
+    interval: 8h
     prompt: |
       (TB-144: this prompt body is a stub — the daemon dispatches
       status-report jobs through `ap2.status_report.run_status_report`,
@@ -19,7 +19,7 @@ jobs:
       sub-block when axis-4 `focus_advanced` / `roadmap_complete` events
       landed in the inter-report window; the canonical prompt also
       teaches verbatim-forwarding for that sub-block so a
-      roadmap-complete halt at 03:00Z surfaces in the very next 2h cron
+      roadmap-complete halt at 03:00Z surfaces in the very next 8h cron
       post instead of waiting on a manual `ap2 status`.
       TB-245: the routine likewise injects a
       `*Validator-judge fail-open window (24h):*` sub-block when
@@ -28,7 +28,7 @@ jobs:
       crosses `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`); the canonical
       prompt teaches verbatim-forwarding for that sub-block so silent
       degradation of the TB-235 dep-coherence judge surfaces in the
-      very next 2h cron post instead of waiting on a manual
+      very next 8h cron post instead of waiting on a manual
       `ap2 status`.)
     max_turns: 10
     created_by: bootstrap
