@@ -359,6 +359,8 @@ def _auto_approved_task_ids(tail: list[dict]) -> set[str]:
 
 def _auto_approve_check_violations(
     cfg: Config,
+    *,
+    now: datetime | None = None,
 ) -> tuple[str, int, int, str, str] | None:
     """Inspect recent events for TB-224 cost / blast-radius violations.
 
@@ -386,6 +388,17 @@ def _auto_approve_check_violations(
     `auto_approve_window_resume` token resets all three checks to a
     fresh post-ack window. Events before the ack don't count; the
     operator explicitly cleared the halt and we trust that decision.
+
+    `now` (TB-301 extension): optional reference time for the rolling
+    24h `window_cap` slice. Defaults to None — production callers
+    (`daemon._tick`'s auto-promote step) leave it unset and the
+    helper uses actual UTC (`time.time()`). Tests pass a deterministic
+    reference so events seeded relative to a hardcoded timestamp don't
+    silently fall outside the window on a later calendar day, time-
+    bombing the trip-check assertion. Mirrors the same seam the
+    renderer / detector layer carries (TB-301 renderer kwarg,
+    `collect_auto_approve_state(now=)`, `detect_attention_conditions
+    (now=)`).
 
     Pure / events.jsonl tail-read only. Safe to call from `_tick`
     without taking the board lock.
@@ -445,7 +458,7 @@ def _auto_approve_check_violations(
     #    surface uses: tail scan, no new state file, no new
     #    persistence contract.
     if window_cap > 0:
-        now_s = time.time()
+        now_s = now.timestamp() if now is not None else time.time()
         total = 0
         for e in relevant:
             if e.get("type") != "task_run_usage":

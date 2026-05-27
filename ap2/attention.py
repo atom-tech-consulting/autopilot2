@@ -618,7 +618,7 @@ def _detect_auto_approve_paused(
     branch is needed in the renderer.
     """
     try:
-        state = collect_auto_approve_state(cfg)
+        state = collect_auto_approve_state(cfg, now=now)
     except Exception:  # noqa: BLE001 — never break the detector loop
         return []
 

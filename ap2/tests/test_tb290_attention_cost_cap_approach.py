@@ -597,7 +597,7 @@ def test_approach_sum_matches_trip_check_sum(
     assert approach_sum == 900
 
     # The trip-check on this same fixture must NOT fire (sum < cap)...
-    violation = _auto_approve_check_violations(cfg)
+    violation = _auto_approve_check_violations(cfg, now=now)
     assert violation is None, (
         f"trip-check fired unexpectedly at sum={approach_sum} < cap=1000: "
         f"{violation}"
@@ -611,7 +611,7 @@ def test_approach_sum_matches_trip_check_sum(
         input_tokens=100, output_tokens=100,
         seconds_ago=300, now=now,
     )
-    violation = _auto_approve_check_violations(cfg)
+    violation = _auto_approve_check_violations(cfg, now=now)
     assert violation is not None
     reason, total_used, cap, _trigger, _detail = violation
     assert reason == "window_cap"
