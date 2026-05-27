@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-304** **Document scripts/monitor_events.py in ap2/howto.md** `#autopilot` `#docs` `#monitoring` `#regression-pin` [→ brief](.cc-autopilot/tasks/document-scripts-monitor-events-py-in-ap.md)
 
 ## Pipeline Pending
 
