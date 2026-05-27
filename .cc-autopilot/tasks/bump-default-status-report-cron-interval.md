@@ -138,3 +138,9 @@ fresh ap2 project on a noisier-than-needed default.
   cadence on this project. The interval change in `.cc-autopilot/cron.yaml`
   is a FIXED_KNOB-class change wired at daemon-start; the operator
   restarts the daemon when convenient.
+## Attempts
+
+### 2026-05-27 — incomplete
+Bumped ap2/cron.default.yaml status-report interval 2h→8h (incl. two "2h cron post" prose mentions in the stub) and pinned three downstream tests (test_diagnose::test_cron_status_overdue_detection last_fired 5h→20h; test_cron_defaults::test_default_cron_intervals_are_sane upper bound 4*3600→8*3600; test_status_report_skip::test_cron_default_status_report_prompt_is_stub interval_s 7200→28800). Full suite 2176/2176 passes. The briefing's `.cc-autopilot/cron.yaml` bullets cannot be satisfied from inside a task agent — that file is triply fenced (SDK denies Edit on the .cc-autopilot/ dir; CLAUDE.md forbids `sed -i`/`echo >` workarounds; `ap2 cron edit update status-report --interval 8h` CLI refuses while a task is active with `state_violation` rollback warning). Operator follow-up: run `ap2 cron edit update status-report --interval 8h` once this task lands, then `ap2 stop && ap2 start` to pick up the new cadence (the briefing already noted the restart is out-of-scope for the task). The fresh-project default is correct; only the already-initialized project-local cron.yaml needs the operator-side bump.
+- **commit:** e3ca933
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260527T194132Z-TB-306.prompt.md`, `stream: .cc-autopilot/debug/20260527T194132Z-TB-306.stream.jsonl`, `messages: .cc-autopilot/debug/20260527T194132Z-TB-306.messages.jsonl`
