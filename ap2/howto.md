@@ -1210,6 +1210,34 @@ where to look:
 `ap2 logs --json -n 30 \| jq` works too if the CLI is on PATH; defaults
 truncate to 120 chars per field, `--json` gives full payloads.
 
+**Live event tail — `scripts/monitor_events.py`.** Self-contained
+operator helper that tails `.cc-autopilot/events.jsonl` and emits one
+compact line per arc-relevant event from a hard-coded allowlist
+(ideation lifecycle, validation + queue, task lifecycle, focus +
+attention + watchdog + daemon). Complements `ap2 logs -n` (the
+one-shot static tail) and `ap2 status` (the periodic snapshot): reach
+for it when you want to watch an active arc unfold live —
+task-dispatch sequences, ideation cycles, focus advances, attention
+conditions — without manually grepping `events.jsonl` or re-running
+`ap2 logs -n` in a loop. Usage:
+
+```
+# From the project root:
+python3 -u scripts/monitor_events.py
+
+# Explicit project path:
+python3 -u scripts/monitor_events.py /path/to/project
+
+# Explicit events.jsonl path (e.g. comparing two projects):
+python3 -u scripts/monitor_events.py --events /path/to/events.jsonl
+```
+
+Each kept line has the shape
+`HH:MM:SS | <event_type> | key=val ... | summary=<truncated>`. Edits
+to the `KEEP` set at the top of the script widen or narrow coverage;
+the default is intentionally noisy-filtered for arc tracking, not
+exhaustive event logging (which `ap2 logs` covers).
+
 The `ap2 web` command starts a read-only HTTP UI at `127.0.0.1:7820`
 with `/events`, `/tasks`, `/task/<TB-N>`, `/pipelines`, `/insights`,
 `/ideation_state`, `/commits`, `/stats` pages. Useful when you want
