@@ -146,3 +146,10 @@ per TB-292's design). They stay outside the exit-marker set; the
 - **exit_code:** 1
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260527T130717Z-TB-300.prompt.md`, `stream: .cc-autopilot/debug/20260527T130717Z-TB-300.stream.jsonl`, `messages: .cc-autopilot/debug/20260527T130717Z-TB-300.messages.jsonl`
+### 2026-05-27 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260527T131558Z-TB-300.prompt.md`, `stream: .cc-autopilot/debug/20260527T131558Z-TB-300.stream.jsonl`, `messages: .cc-autopilot/debug/20260527T131558Z-TB-300.messages.jsonl`
