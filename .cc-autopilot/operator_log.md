@@ -260,3 +260,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-27T19:31:05Z — applied operator-queued add_backlog → TB-305
 - 2026-05-27T19:33:24Z — applied operator-queued add_backlog → TB-306
 - 2026-05-27T20:24:13Z — applied operator-queued unfreeze → TB-306
+- 2026-05-27T20:42:00Z — operator manually moved TB-306 → Complete (board edit). Substantive work landed in commit e3ca933 (ap2/cron.default.yaml 2h→8h + three test pins) + operator-side `ap2 cron edit update status-report --interval 8h` for .cc-autopilot/cron.yaml. The task agent self-reported `blocked` on attempts 2-5 because the briefing listed .cc-autopilot/cron.yaml as agent scope, but that file is in the SDK's --disallowedTools — only the operator CLI can edit it. Briefing-shape lesson: never put operator-fenced files in a task agent's Scope.

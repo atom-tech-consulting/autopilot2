@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-306** **Bump default status-report cron interval from 2h to 8h** `#autopilot` `#cron` `#status-report` `#defaults` [→ brief](.cc-autopilot/tasks/bump-default-status-report-cron-interval.md)
 
 ## Pipeline Pending
 
@@ -192,5 +191,6 @@
 - [x] **TB-303** **Documentation sweep: README.md + architecture.md + howto.md updates for today's arc** `#autopilot` `#docs` `#regression-pin` [→ brief](.cc-autopilot/tasks/documentation-sweep-readme-md-architectu.md)
 - [x] **TB-304** **Document scripts/monitor_events.py in ap2/howto.md** `#autopilot` `#docs` `#monitoring` `#regression-pin` [→ brief](.cc-autopilot/tasks/document-scripts-monitor-events-py-in-ap.md)
 - [x] **TB-305** **Docs-drift gate for `.cc-autopilot/env` template + exemption set** `#autopilot` `#docs` `#ci` `#regression-pin` [→ brief](.cc-autopilot/tasks/docs-drift-gate-for-cc-autopilot-env-tem.md)
+- [x] **TB-306** **Bump default status-report cron interval from 2h to 8h** `#autopilot` `#cron` `#status-report` `#defaults` [→ brief](.cc-autopilot/tasks/bump-default-status-report-cron-interval.md)
 
 ## Frozen
