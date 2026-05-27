@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-308** **Reject briefings that list TASK_AGENT_FENCED_PATHS in `## Scope`** `#autopilot` `#briefing-validator` `#queue-append` `#regression-pin` `@blocked:TB-171` [→ brief](.cc-autopilot/tasks/reject-briefings-that-list-task-agent-fe.md)
 
 ## Pipeline Pending
 
@@ -195,4 +196,3 @@
 - [x] **TB-307** **Scrub hardcoded `2h` status-report cadence references (TB-306 follow-up)** `#autopilot` `#docs` `#cleanup` `#status-report` `#regression-pin` [→ brief](.cc-autopilot/tasks/scrub-hardcoded-2h-status-report-cadence.md)
 
 ## Frozen
-
