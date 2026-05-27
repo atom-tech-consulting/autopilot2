@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-306** **Bump default status-report cron interval from 2h to 8h** `#autopilot` `#cron` `#status-report` `#defaults` [→ brief](.cc-autopilot/tasks/bump-default-status-report-cron-interval.md)
 
 ## Pipeline Pending
 
