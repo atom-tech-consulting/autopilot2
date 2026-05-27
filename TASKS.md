@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-302** **Stop appending roadmap_complete bullet to ideation_state.md (focus line is already redundant)** `#autopilot` `#focus-advance` `#ideation-state` `#priming` `#commit-hygiene` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/stop-appending-roadmap-complete-bullet-t.md)
 
 ## Pipeline Pending
 
