@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-294** **Disable extended thinking in ideation_state scrub; emit error/timeout audit event** `#autopilot` `#ideation` `#scrub` `#latency` `#regression-pin` `#bug` `@blocked:TB-284` [→ brief](.cc-autopilot/tasks/disable-extended-thinking-in-ideation-st.md)
 
 ## Pipeline Pending
 
