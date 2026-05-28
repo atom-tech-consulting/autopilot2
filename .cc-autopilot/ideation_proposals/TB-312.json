@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/channel-adapter-abstraction-mattermost-c.md",
   "focus_anchor": "current focus refactor features into opt in components",
+  "outcome": {
+    "commit": "860b68a",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T07:29:12Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T06:56:44Z",
   "tb_id": "TB-312",
   "why_now": "without axis 3 + the `mattermost/` migration, \"report to\nanything other than Mattermost\" requires editing `_mm_post` call\nsites by hand (goal.md L160-161 delete-test), and the downstream\n`attention/` migration (goal.md L188) stays blocked \u2014 it publishes\nvia the channel-adapter abstraction so it cannot proceed until this\nlands. The bundling per goal.md L184-186 means deferring one axis\nforces deferring the other."
