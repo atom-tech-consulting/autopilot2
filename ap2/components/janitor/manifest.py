@@ -22,7 +22,7 @@ filesystem-driven so future migrations need zero registry-side edits
 """
 from __future__ import annotations
 
-from ap2.registry import Manifest
+from ap2.registry import Manifest, Phase
 
 from . import recent_finding_counts_by_verdict, run_janitor
 
@@ -44,5 +44,16 @@ MANIFEST = Manifest(
         # `## Current state` section.
         "status_findings_counts": recent_finding_counts_by_verdict,
     },
+    # TB-310 (axis 2): janitor's tick_hook is registered on
+    # `POST_CRON` for the new phase-walked contract. The daemon does
+    # NOT walk POST_CRON from `_tick`; the cron scheduler owns
+    # janitor's invocation cadence (the existing `run_cron` lookup
+    # via `default_registry().hook("tick_hook", component="janitor")`
+    # stays unchanged). The entry here documents the phase the
+    # janitor's tick-callable conceptually belongs to so the
+    # registry's phase-keyed view is complete — load-bearing for the
+    # `Registry.tick_hooks(POST_CRON)` regression-pin in
+    # `ap2/tests/test_tb310_tick_hook_protocol.py`.
+    tick_hooks=[(Phase.POST_CRON, run_janitor)],
     dependencies=[],
 )

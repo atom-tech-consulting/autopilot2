@@ -59,11 +59,12 @@ hook name, and consumers know which name to ask for.
 """
 from __future__ import annotations
 
+import enum
 import importlib
 import os
 import pkgutil
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Any, Awaitable, Callable, Optional, Union
 
 
 # Per-process cached registry built lazily by `default_registry()`. Tests
@@ -71,6 +72,66 @@ from typing import Callable, Optional
 # `_reset_default_registry()` between cases so a per-test monkeypatch
 # doesn't leak across the file.
 _DEFAULT_REGISTRY: "Registry | None" = None
+
+
+# TB-310 (axis 2): typed callable signature for per-tick hooks the
+# daemon dispatches by walking `registry.tick_hooks(phase)` instead of
+# importing each component module directly. The signature is
+# `(cfg, sdk) -> None | Awaitable[None]` — sync hooks return None, async
+# hooks return a coroutine that the daemon awaits. The pattern mirrors
+# the existing direct-call shapes in `daemon._tick` today:
+#   - `_maybe_auto_unfreeze(cfg)`         — sync
+#   - `await _maybe_advance_focus(cfg, sdk)` — async
+#   - `_maybe_emit_attention_events(cfg)` — sync
+# so the registry walk is a uniform iteration over both styles, with the
+# daemon-side dispatch checking `iscoroutine()` on each return value.
+#
+# Each tick hook is expected to self-handle its own exception surface
+# (matching the original per-call try/except blocks in `_tick` whose
+# observable error events the briefing pins as bit-for-bit preserved
+# behavior — e.g. `auto_unfreeze_skipped reason=sweep_error` for
+# auto_unfreeze, stderr-print for focus_advance / attention). Failing to
+# self-handle would surface as an uncaught exception in `_tick`, which
+# already has an outer try/except per stage today; the contract is
+# narrower than that fallback to keep observable behavior identical.
+TickHook = Callable[[Any, Any], Union[None, Awaitable[None]]]
+
+
+class Phase(enum.Enum):
+    """TB-310: canonical tick-hook phases the daemon iterates per tick.
+
+    Order of declaration matches the existing `daemon._tick` body
+    (goal.md L138-141): the registry-walk refactor preserves observable
+    behavior bit-for-bit by walking each phase in the same effective
+    order today's direct calls fire in.
+
+    - PRE_DISPATCH       — fires before the cron / task-dispatch stages
+                           (today: `_maybe_auto_unfreeze`,
+                           `_maybe_advance_focus`).
+    - ATTENTION_EMISSION — proactive `attention_raised` event emission
+                           (today: `_maybe_emit_attention_events`); a
+                           dedicated phase because the status-report
+                           cron's interesting-types skip-gate depends on
+                           it firing before cron in the same tick.
+    - POST_CRON          — fires during / after the cron stage (today:
+                           the janitor cron job dispatches via
+                           `registry.hook("tick_hook", component="janitor")`
+                           inside `run_cron`). Listed here for the
+                           manifest schema's completeness; daemon._tick
+                           does not iterate POST_CRON itself — the cron
+                           scheduler owns that invocation cadence.
+    - POST_DISPATCH      — fires after task dispatch. Reserved for the
+                           auto_approve gate logic when axis (5)
+                           extracts it from the inline dispatch block;
+                           today's stub-manifest registers a no-op on
+                           this phase so the walk-everything contract
+                           is uniform.
+    """
+
+    PRE_DISPATCH = "pre_dispatch"
+    POST_DISPATCH = "post_dispatch"
+    POST_CRON = "post_cron"
+    ATTENTION_EMISSION = "attention_emission"
 
 
 @dataclass(frozen=True)
@@ -81,6 +142,18 @@ class Manifest:
     manifest after discovery; the mutable surface is `hook_points`
     (a plain dict, intentionally — tests monkeypatch entries to swap a
     hook for a stub without rebuilding the whole registry).
+
+    TB-310 (axis 2) adds the `tick_hooks` field: a list of
+    `(Phase, TickHook)` pairs declaring which phase(s) this component
+    participates in. Multiple entries per phase are allowed (a
+    component might register one PRE_DISPATCH hook and one POST_DISPATCH
+    hook). The registry's `tick_hooks(phase)` method assembles the
+    ordered list across all manifests for that phase — name-sorted by
+    component, deterministic for tests. The TB-309-pinned
+    `hook_points["tick_hook"]` lookup pattern is preserved alongside —
+    `hook_points` indexes hooks by name regardless of phase, used by
+    `run_cron`'s direct janitor lookup; `tick_hooks` indexes hooks by
+    phase, used by `_tick`'s walk.
     """
 
     name: str
@@ -88,6 +161,7 @@ class Manifest:
     default_enabled: bool
     hook_points: dict[str, Callable]
     dependencies: list[str] = field(default_factory=list)
+    tick_hooks: list[tuple[Phase, TickHook]] = field(default_factory=list)
 
 
 class Registry:
@@ -156,6 +230,36 @@ class Registry:
         """
         manifest = self._by_name[component]
         return manifest.hook_points[name]
+
+    def tick_hooks(self, phase: Phase) -> list[TickHook]:
+        """Ordered list of tick hooks registered on `phase` (TB-310 axis 2).
+
+        Walks every discovered manifest's `tick_hooks` field, filters
+        entries whose phase matches, and returns the resulting hook
+        callables in deterministic order: name-sorted by component name
+        first, then by the registration order within a single manifest
+        (a component may register multiple hooks on the same phase —
+        rare, but the schema allows it).
+
+        Determinism is load-bearing for the briefing's verification
+        regression-pin (`uv run pytest -q
+        ap2/tests/test_tb310_tick_hook_protocol.py`) and for
+        observable-behavior preservation: today's `daemon._tick` fires
+        `auto_unfreeze` (step 0.5) then `focus_advance` (step 0.6) on
+        PRE_DISPATCH, and the alphabetical sort (`a` < `f`) preserves
+        that order without an explicit ordering directive. Future
+        components that need a non-alphabetical order will declare a
+        `depends_on`-style constraint on the manifest (axis (2) leaves
+        the topological-sort path as a stub — the `dependencies` field
+        on Manifest is reserved for it; this method does not consult
+        it yet because no current component needs it).
+        """
+        out: list[TickHook] = []
+        for manifest in self.components:  # name-sorted iteration
+            for entry_phase, hook in manifest.tick_hooks:
+                if entry_phase is phase:
+                    out.append(hook)
+        return out
 
     @classmethod
     def discover(cls, *, components_pkg_name: str = "ap2.components") -> "Registry":

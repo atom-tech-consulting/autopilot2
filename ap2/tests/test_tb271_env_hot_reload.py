@@ -103,14 +103,22 @@ def test_tick_calls_env_reload_before_other_stages():
     """`daemon._tick`'s body, read as source, calls
     `env_reload.maybe_reload_env(cfg)` BEFORE any of:
       - the operator-queue drain (`tools.drain_operator_queue`)
-      - the auto-unfreeze sweep (`_maybe_auto_unfreeze`)
-      - focus advance (`_maybe_advance_focus`)
+      - the PRE_DISPATCH tick-hook phase walk (TB-310 axis 2 — covers
+        the pre-TB-310 `_maybe_auto_unfreeze` + `_maybe_advance_focus`
+        direct calls)
       - cron / pipeline / dispatch / ideation
 
     Pin the ordering at the source level so a refactor that moves the
     reload below any of these stages (and therefore reads a stale
     knob before the reload fires on the same tick) trips here. Mirrors
     the TB-226 axis-4 ordering test for `_maybe_advance_focus`.
+
+    TB-310 (axis 2): the pre-existing literal sentinels
+    (`_maybe_auto_unfreeze`, `_maybe_advance_focus`) no longer appear
+    in `_tick`'s body — they're dispatched via
+    `default_registry().tick_hooks(Phase.PRE_DISPATCH)`. The
+    `Phase.PRE_DISPATCH` sentinel covers both pre-TB-310 stages with
+    a single source-level pin.
     """
     import inspect
 
@@ -119,18 +127,23 @@ def test_tick_calls_env_reload_before_other_stages():
     src = inspect.getsource(daemon._tick)
     reload_pos = src.find("env_reload.maybe_reload_env")
     drain_pos = src.find("drain_operator_queue")
-    unfreeze_pos = src.find("_maybe_auto_unfreeze")
-    focus_pos = src.find("_maybe_advance_focus")
+    pre_dispatch_pos = src.find("Phase.PRE_DISPATCH")
     assert reload_pos >= 0, "env_reload.maybe_reload_env(cfg) must be called in _tick"
     assert drain_pos > 0
-    assert unfreeze_pos > 0
-    assert focus_pos > 0
+    assert pre_dispatch_pos > 0, (
+        "TB-310: _tick must walk Phase.PRE_DISPATCH (registry tick "
+        "hooks replace the pre-TB-310 _maybe_auto_unfreeze + "
+        "_maybe_advance_focus direct calls)"
+    )
     assert reload_pos < drain_pos, (
         "env_reload must run before operator-queue drain so a knob bump "
         "is visible to the queue's downstream consumers on the same tick"
     )
-    assert reload_pos < unfreeze_pos
-    assert reload_pos < focus_pos
+    assert reload_pos < pre_dispatch_pos, (
+        "env_reload must run before the PRE_DISPATCH hook walk so a "
+        "knob bump is visible to auto_unfreeze / focus_advance on the "
+        "same tick"
+    )
 
 
 # ===========================================================================

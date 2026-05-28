@@ -25,9 +25,12 @@ from pathlib import Path
 
 from . import (
     attention,
+    auto_approve,
+    auto_unfreeze,
     diagnose,
     env_reload,
     events,
+    focus_advance,
     ideation,
     prompts,
     retry,
@@ -36,6 +39,7 @@ from . import (
     verify,
     web,
 )
+from .registry import Phase, default_registry
 from .board import Board, board_file_lock
 from .config import Config, DEFAULT_TASK_MAX_TURNS
 from .cron import (
@@ -1664,72 +1668,59 @@ async def _interruptible_sleep(total_s: int) -> None:
         slept += 1
 
 
-# TB-263: TB-223 cumulative-regression circuit-breaker + TB-224 cost /
-# blast-radius caps + TB-232 dispatch-time decision helper live in
-# `ap2.auto_approve`. Re-exported here so existing test paths
-# (`daemon._auto_approve_paused`, `daemon._was_auto_approved`, ...) and
-# the orchestrator's own internal call sites in `_tick` resolve through
-# one name. The new module owns the gate-evaluation logic; the
-# orchestrator below decides when to consult it.
-from .auto_approve import (
-    _AUTO_APPROVE_FAILURE_STATUSES,
-    _AUTO_APPROVE_UNFREEZE_TOKEN,
-    _AUTO_APPROVE_WINDOW_RESUME_TOKEN,
-    _AUTO_APPROVE_WINDOW_S,
-    _append_decisions_needed_bullet,
-    _auto_approve_already_halted,
-    _auto_approve_check_violations,
-    _auto_approve_freeze_threshold,
-    _auto_approve_paused,
-    _auto_approve_window_resume_idx,
-    _auto_approved_task_ids,
-    _event_combined_tokens,
-    _parse_event_ts,
-    _per_task_token_cap,
-    _validator_judge_noisy_paused,
-    _was_auto_approved,
-    _window_token_cap,
-    evaluate_auto_approve_decision,
-)
+# TB-310 (axis 2): the registry-walked tick-hook contract replaces the
+# pre-TB-310 `from .auto_approve import (...)` / `from .auto_unfreeze
+# import (...)` / `from .focus_advance import (...)` re-export blocks
+# that lived here. Daemon._tick now walks `registry.tick_hooks(phase)`
+# instead of importing each module by relative-dotted path; the
+# component manifests under `ap2/components/<name>/` register the
+# tick-callable hooks the daemon dispatches by phase.
+#
+# Test back-compat: existing test paths
+# (`daemon._maybe_auto_unfreeze`, `daemon._auto_approve_paused`, ...)
+# resolve through module-level aliases below. Each alias points at the
+# canonical implementation in `ap2.<flat_module>`; tests can still
+# write `daemon.<name>` without churn. The aliases live in this single
+# block (not scattered across imports) so the test-compat surface is
+# obvious at a glance — when axis (5) relocates each flat module into
+# its component subpackage, the aliases retarget and tests stay
+# unchanged.
+_AUTO_APPROVE_FAILURE_STATUSES = auto_approve._AUTO_APPROVE_FAILURE_STATUSES
+_AUTO_APPROVE_UNFREEZE_TOKEN = auto_approve._AUTO_APPROVE_UNFREEZE_TOKEN
+_AUTO_APPROVE_WINDOW_RESUME_TOKEN = auto_approve._AUTO_APPROVE_WINDOW_RESUME_TOKEN
+_AUTO_APPROVE_WINDOW_S = auto_approve._AUTO_APPROVE_WINDOW_S
+_append_decisions_needed_bullet = auto_approve._append_decisions_needed_bullet
+_auto_approve_already_halted = auto_approve._auto_approve_already_halted
+_auto_approve_check_violations = auto_approve._auto_approve_check_violations
+_auto_approve_freeze_threshold = auto_approve._auto_approve_freeze_threshold
+_auto_approve_paused = auto_approve._auto_approve_paused
+_auto_approve_window_resume_idx = auto_approve._auto_approve_window_resume_idx
+_auto_approved_task_ids = auto_approve._auto_approved_task_ids
+_event_combined_tokens = auto_approve._event_combined_tokens
+_parse_event_ts = auto_approve._parse_event_ts
+_per_task_token_cap = auto_approve._per_task_token_cap
+_validator_judge_noisy_paused = auto_approve._validator_judge_noisy_paused
+_was_auto_approved = auto_approve._was_auto_approved
+_window_token_cap = auto_approve._window_token_cap
+evaluate_auto_approve_decision = auto_approve.evaluate_auto_approve_decision
 
+_AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT = auto_unfreeze._AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT
+_AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT = auto_unfreeze._AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT
+_AUTO_UNFREEZE_WINDOW_S = auto_unfreeze._AUTO_UNFREEZE_WINDOW_S
+_apply_auto_unfreeze_patch = auto_unfreeze._apply_auto_unfreeze_patch
+_auto_unfreeze_allowlist = auto_unfreeze._auto_unfreeze_allowlist
+_auto_unfreeze_dry_run = auto_unfreeze._auto_unfreeze_dry_run
+_auto_unfreeze_max_per_day = auto_unfreeze._auto_unfreeze_max_per_day
+_auto_unfreeze_max_per_task = auto_unfreeze._auto_unfreeze_max_per_task
+_count_auto_unfreeze_applied_for_task = auto_unfreeze._count_auto_unfreeze_applied_for_task
+_count_auto_unfreeze_applied_in_window = auto_unfreeze._count_auto_unfreeze_applied_in_window
+_maybe_auto_unfreeze = auto_unfreeze._maybe_auto_unfreeze
+_most_recent_blocked_complete_for = auto_unfreeze._most_recent_blocked_complete_for
+_shared_parse = auto_unfreeze._shared_parse
 
-
-# TB-263: TB-225 auto-unfreeze briefing-shape fix sweep + TB-233 dry-run
-# live in `ap2.auto_unfreeze`. Re-exported here so existing test paths
-# (`daemon._maybe_auto_unfreeze`, `daemon._auto_unfreeze_allowlist`, ...)
-# and the orchestrator's own internal call sites in `_tick` resolve
-# through one name. The new module owns the parsing + guard chain +
-# patch-application logic; the orchestrator below decides when to sweep.
-from .auto_unfreeze import (
-    _AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT,
-    _AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT,
-    _AUTO_UNFREEZE_WINDOW_S,
-    _apply_auto_unfreeze_patch,
-    _auto_unfreeze_allowlist,
-    _auto_unfreeze_dry_run,
-    _auto_unfreeze_max_per_day,
-    _auto_unfreeze_max_per_task,
-    _count_auto_unfreeze_applied_for_task,
-    _count_auto_unfreeze_applied_in_window,
-    _maybe_auto_unfreeze,
-    _most_recent_blocked_complete_for,
-    _shared_parse,
-)
-
-
-# TB-263: TB-226 focus-list pointer advance lives in `ap2.focus_advance`.
-# Re-exported here so existing test paths (`daemon._maybe_advance_focus`,
-# `daemon._ideation_empty_against_focus`) and the orchestrator's
-# tick-loop call in `_tick` resolve through one name. The new module
-# owns the pointer-advance policy; the orchestrator below decides when
-# to consult it. TB-283: the prior LLM-judge re-export was dropped when
-# the Done-when judge path was deleted in favor of an empty-cycles-only
-# advance signal — see `ap2/focus_advance.py` module docstring.
-from .focus_advance import (
-    _FOCUS_RECENT_TAIL_N,
-    _ideation_empty_against_focus,
-    _maybe_advance_focus,
-)
+_FOCUS_RECENT_TAIL_N = focus_advance._FOCUS_RECENT_TAIL_N
+_ideation_empty_against_focus = focus_advance._ideation_empty_against_focus
+_maybe_advance_focus = focus_advance._maybe_advance_focus
 
 
 def _maybe_emit_attention_events(cfg: Config) -> None:
@@ -2023,80 +2014,69 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             error=f"{type(e).__name__}: {e}",
         )
 
-    # 0.5. Auto-apply agent-diagnosed briefing-shape fixes to Frozen
-    # tasks (TB-225). Runs AFTER the drain so we see the latest
-    # operator-applied state of TASKS.md + briefings before deciding
-    # whether to attempt an auto-unfreeze. Queues `update` + `unfreeze`
-    # ops back onto the operator queue — they drain at the START of the
-    # NEXT tick, by design (audit-trail symmetry with TB-153
-    # operator-applied edits). No-op when `AP2_AUTO_UNFREEZE_FIX_SHAPES`
-    # is unset (feature is opt-in).
-    try:
-        _maybe_auto_unfreeze(cfg)
-    except Exception as e:  # noqa: BLE001
-        events.append(
-            cfg.events_file,
-            "auto_unfreeze_skipped",
-            reason="sweep_error",
-            error=f"{type(e).__name__}: {e}",
-        )
+    # 0.5. PRE_DISPATCH tick-hook phase (TB-310 axis 2). Walks the
+    # registry-discovered component manifests and dispatches each
+    # hook registered on `Phase.PRE_DISPATCH` in deterministic
+    # name-sorted order. Today's hooks (preserved bit-for-bit):
+    #
+    #   - `auto_unfreeze` — TB-225 / TB-233 sweep that auto-applies
+    #     agent-diagnosed briefing-shape fixes to Frozen tasks. Queues
+    #     `update` + `unfreeze` ops back onto the operator queue;
+    #     they drain at the START of the NEXT tick, by design (audit-
+    #     trail symmetry with TB-153 operator-applied edits). No-op
+    #     when `AP2_AUTO_UNFREEZE_FIX_SHAPES` is unset.
+    #   - `focus_advance` — TB-226 axis-4 focus-list pointer advance.
+    #     Reads `goal.md` + `.cc-autopilot/focus_pointer.json`;
+    #     advances the in-memory pointer when the
+    #     `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` empty-cycles heuristic
+    #     trips. Emits `focus_advanced` / `roadmap_complete` events.
+    #     Opt-out via `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1`.
+    #
+    # Both hooks fire BEFORE cron / pipeline / dispatch / ideation so
+    # their effects (drain-ready unfreeze ops, freshly-advanced focus
+    # pointer) are visible to every later stage on this tick. The
+    # alphabetical sort (`a` < `f`) preserves the pre-TB-310 order
+    # (auto_unfreeze first, then focus_advance) without an explicit
+    # ordering directive — see `Registry.tick_hooks`'s docstring for
+    # the order contract.
+    #
+    # Per-hook error handling lives inside each manifest's wrapper
+    # function (see `ap2/components/<name>/manifest.py`): the
+    # `auto_unfreeze_skipped reason=sweep_error` event for
+    # auto_unfreeze; the `[ap2] _maybe_advance_focus error: ...`
+    # stderr line for focus_advance. The walk has no outer
+    # try/except so the wrappers' observable-error shapes are not
+    # swallowed by a uniform handler.
+    for hook in default_registry().tick_hooks(Phase.PRE_DISPATCH):
+        result = hook(cfg, sdk)
+        if asyncio.iscoroutine(result):
+            await result
 
-    # 0.6. Focus-list pointer advance (TB-226 axis 4). Runs AFTER the
-    # auto-unfreeze sweep (step 0.5) and BEFORE cron / pipeline /
-    # dispatch / ideation so a freshly-advanced pointer is visible to
-    # every later stage on this tick. Reads `goal.md`'s focus list and
-    # `.cc-autopilot/focus_pointer.json`; advances the in-memory pointer
-    # when the empty-cycles heuristic trips
-    # (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive 0-proposal ideation
-    # cycles against the active focus — the sole signal post-TB-283;
-    # the per-focus `Progress signals:` sub-block renamed by TB-285 is
-    # advisory ideation-prompt context only and does NOT gate the
-    # pointer). Emits `focus_advanced` per advance, `roadmap_complete`
-    # + decisions-needed bullet when all foci exhaust. Auto-advance is
-    # opt-out via `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` (kill-switch).
-    # Goal.md itself is never mutated — pointer is in-memory state only
-    # (goal.md L187-191 "Goal.md auto-rotation" Non-goal).
-    try:
-        await _maybe_advance_focus(cfg, sdk)
-    except Exception as e:  # noqa: BLE001
-        # Defensive swallow: the focus-advance pass is best-effort and
-        # the daemon's other stages must continue running on a failure
-        # here. No dedicated event type because the briefing's
-        # event-registry surface is just `focus_advanced` +
-        # `roadmap_complete`; an exception in this code path is a bug
-        # that surfaces via stderr / debug dumps, not a recurring event
-        # the operator should monitor.
-        print(
-            f"[ap2] _maybe_advance_focus error: {type(e).__name__}: {e}",
-            file=sys.stderr,
-        )
-
-    # 0.7. Proactive attention-raised detector sweep (TB-282). Runs
-    # AFTER focus-advance (step 0.6) and BEFORE cron (step 1) so a
-    # status-report cron tick firing on this same tick sees freshly-
-    # emitted `attention_raised` events in its prompt tail AND in the
-    # interesting-types skip-gate (the event is listed in
-    # `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a fresh fire
-    # un-skips the dedup/idle gate). Per-(attention_type, key)
-    # debounce against `AP2_ATTENTION_DEBOUNCE_S` (default 6h) so a
-    # still-stuck task re-fires once per operator workday rather than
-    # every 30s tick. Pure-detector design: `ap2/attention.py` returns
-    # structured records; this wire-up owns the debounce + event
-    # emission so the detector module stays trivially testable.
-    try:
-        _maybe_emit_attention_events(cfg)
-    except Exception as e:  # noqa: BLE001
-        # Defensive: the inner helper already swallows detector
-        # failures; this outer guard catches a surprise from the tail
-        # read or events.append plumbing. The rest of the tick must
-        # continue regardless. No dedicated event type — same
-        # rationale as `_maybe_advance_focus`'s stderr-only error
-        # path above.
-        print(
-            f"[ap2] _maybe_emit_attention_events error: "
-            f"{type(e).__name__}: {e}",
-            file=sys.stderr,
-        )
+    # 0.7. ATTENTION_EMISSION tick-hook phase (TB-310 axis 2). Walks
+    # registry hooks registered on `Phase.ATTENTION_EMISSION`. Today's
+    # single registered hook:
+    #
+    #   - `attention` — TB-282 proactive `attention_raised` detector
+    #     sweep. Runs the detector module, debounces each candidate
+    #     against the most recent matching `attention_raised` event
+    #     within `AP2_ATTENTION_DEBOUNCE_S` (default 6h, per-(type,
+    #     key)), and emits one event per fresh condition. Optional
+    #     immediate-Mattermost-push piggybacks on the same debounce
+    #     when `AP2_ATTENTION_IMMEDIATE_PUSH` is set.
+    #
+    # The phase fires AFTER focus-advance (step 0.5) and BEFORE cron
+    # (step 1) so a status-report cron firing on this same tick sees
+    # freshly-emitted `attention_raised` events both in its prompt
+    # tail AND in the interesting-types skip-gate (the event type is
+    # listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a
+    # fresh fire un-skips the dedup/idle gate). Per-hook error
+    # handling lives inside the manifest wrapper
+    # (`ap2/components/attention/manifest.py`): the
+    # `[ap2] _maybe_emit_attention_events error: ...` stderr line.
+    for hook in default_registry().tick_hooks(Phase.ATTENTION_EMISSION):
+        result = hook(cfg, sdk)
+        if asyncio.iscoroutine(result):
+            await result
 
     # 1. Cron (MM polling moved to _mm_loop — TB-122)
     try:
@@ -2333,6 +2313,21 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             await run_task(cfg, sdk, mcp_server, task)
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "task_error", error=f"{type(e).__name__}: {e}")
+
+    # 3.5. POST_DISPATCH tick-hook phase (TB-310 axis 2). Walks
+    # registry hooks registered on `Phase.POST_DISPATCH`. The
+    # auto_approve component registers a no-op placeholder here
+    # because its gate logic remains inline in the dispatch block
+    # above (the gates evaluate per-task state and emit per-task
+    # events — extracting them into a single tick-callable belongs
+    # to axis (5)). The walk-every-phase uniformity matters: when
+    # axis (5) replaces the stub with the real gate-application
+    # function, the daemon-side walk does not change. Per-hook
+    # error handling lives inside each manifest wrapper.
+    for hook in default_registry().tick_hooks(Phase.POST_DISPATCH):
+        result = hook(cfg, sdk)
+        if asyncio.iscoroutine(result):
+            await result
 
     # 4. Ideation. Two parallel triggers:
     #
