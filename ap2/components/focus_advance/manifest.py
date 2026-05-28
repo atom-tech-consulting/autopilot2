@@ -60,14 +60,17 @@ async def _tick_hook(cfg, sdk) -> None:
 
 MANIFEST = Manifest(
     name="focus_advance",
-    # TB-226's `AP2_FOCUS_AUTO_ADVANCE_DISABLED` is the kill switch the
-    # subpackage already honors internally (reads `os.environ` at
-    # call time inside `_maybe_advance_focus`). Mirroring that knob
-    # here as the manifest-level env_flag would mean two enforcement
-    # sites — the subpackage's existing kill switch is the canonical
-    # one. Default-on with `env_flag=None` per the registry's polarity
-    # rule.
-    env_flag=None,
+    # TB-320: surface TB-226's existing kill switch
+    # `AP2_FOCUS_AUTO_ADVANCE_DISABLED` on the manifest so the
+    # registry / `ap2 status` render the on/off state correctly and
+    # the registry-level enabled filter picks it up. The subpackage's
+    # internal `_maybe_advance_focus` self-gate (reading `os.environ`
+    # via `goal.auto_advance_disabled()`) stays in place — manifest
+    # wiring is informational at the registry layer, not a
+    # replacement. `default_enabled=True` → suppress-polarity per
+    # `registry.Manifest.is_enabled`'s "env_flag set + default_enabled
+    # True → truthy disables" branch (`ap2/registry.py:189-194`).
+    env_flag="AP2_FOCUS_AUTO_ADVANCE_DISABLED",
     default_enabled=True,
     hook_points={
         "tick_hook": _tick_hook,

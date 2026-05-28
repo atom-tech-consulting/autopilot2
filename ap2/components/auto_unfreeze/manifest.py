@@ -66,17 +66,22 @@ def _tick_hook(cfg, sdk) -> None:
 
 MANIFEST = Manifest(
     name="auto_unfreeze",
-    # The TB-225 / TB-233 knobs (`AP2_AUTO_UNFREEZE_FIX_SHAPES`,
-    # `AP2_AUTO_UNFREEZE_DRY_RUN`, etc.) tune behavior per-call inside
-    # the subpackage; there is no global enable/disable knob today.
-    # Default-on with `env_flag=None` per the registry's polarity rule
-    # (goal.md L121-125): always-enabled unless the manifest declares
-    # otherwise. The TB-225 master switch lives inside
-    # `_auto_unfreeze_allowlist()`: when `AP2_AUTO_UNFREEZE_FIX_SHAPES`
-    # is unset, `_maybe_auto_unfreeze` early-returns — the subpackage's
-    # existing in-body switch is the canonical one, mirrored by other
-    # axis-5 manifests' pattern.
-    env_flag=None,
+    # TB-320: kill-switch knob `AP2_AUTO_UNFREEZE_DISABLED` (new in
+    # TB-320 — mirrors the polarity / naming of `AP2_JANITOR_DISABLED`
+    # and `AP2_VALIDATOR_JUDGE_DISABLED`). `default_enabled=True` →
+    # suppress-polarity per `registry.Manifest.is_enabled`'s "env_flag
+    # set + default_enabled True → truthy disables" branch
+    # (`ap2/registry.py:189-194`). The TB-225 / TB-233 knobs
+    # (`AP2_AUTO_UNFREEZE_FIX_SHAPES`, `AP2_AUTO_UNFREEZE_DRY_RUN`,
+    # etc.) still tune behavior per-call inside the subpackage; the
+    # new kill switch is the operator's coarser-grained "disable the
+    # entire sweep" lever (existing fix-shapes opt-in still applies
+    # for finer-grained gating). The subpackage's `_tick_hook` self-
+    # gates on the new knob at the top so observable behavior matches
+    # what the registry advertises (registry-level filtering is
+    # informational; the daemon walks every component's tick hook
+    # regardless of env_flag).
+    env_flag="AP2_AUTO_UNFREEZE_DISABLED",
     default_enabled=True,
     hook_points={
         "tick_hook": _tick_hook,

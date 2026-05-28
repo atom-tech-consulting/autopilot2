@@ -78,17 +78,22 @@ def _tick_hook(cfg, sdk) -> None:
 
 MANIFEST = Manifest(
     name="auto_approve",
-    # TB-232's `AP2_AUTO_APPROVE_DRY_RUN` is the operator-facing
-    # gate-on/gate-off knob, but it lives inside the subpackage's
-    # `evaluate_auto_approve_decision` because the four gates run
-    # in order regardless of the dry-run setting (the knob only
-    # affects the terminal `strip` vs `dry_run` branch). No
-    # manifest-level enable/disable knob today. Default-on with
-    # `env_flag=None`; whether to add a master switch is an open
-    # operator question surfaced in
-    # `.cc-autopilot/ideation_state.md`.
-    env_flag=None,
-    default_enabled=True,
+    # TB-320: wire the existing opt-in master knob `AP2_AUTO_APPROVE`
+    # (TB-223's require-polarity gate the daemon's tick-hook code at
+    # `daemon._tick` self-gates on via `os.environ.get` reads inside
+    # `operator_queue.py` / `board_edits.py` / `ideation.py`) onto the
+    # manifest so the registry / `ap2 status` render the on/off state
+    # correctly and the registry-level briefing-validator filter picks
+    # it up. `default_enabled=False` → require-polarity per
+    # `registry.Manifest.is_enabled`'s "env_flag set + default_enabled
+    # False → truthy enables" branch (`ap2/registry.py:189-194`); the
+    # operator opts into the autonomous-approve behavior by setting
+    # `AP2_AUTO_APPROVE=1` (the existing semantics). Internal
+    # self-gating stays in place — manifest wiring is informational
+    # at the registry layer, not a replacement for the per-call-site
+    # truthy parse the existing code performs.
+    env_flag="AP2_AUTO_APPROVE",
+    default_enabled=False,
     hook_points={
         "tick_hook": _tick_hook,
         # TB-318: expose every symbol `daemon.py`'s pre-migration alias

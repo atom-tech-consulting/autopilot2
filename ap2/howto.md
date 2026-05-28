@@ -1805,6 +1805,20 @@ See also `skills/ap2-task/SKILL.md` § "Reporting failures
 the per-task agent reads at run time, with one fenced worked example
 per bootstrap fix-shape (TB-229).
 
+- `AP2_AUTO_UNFREEZE_DISABLED` — TB-320 component-level kill switch
+  for the auto-unfreeze sweep. **Unset by default → sweep runs.**
+  When set to a truthy value (`1` / `true` / `yes` / `on`,
+  case-insensitive), `_maybe_auto_unfreeze` short-circuits at the
+  top of the tick hook before any other guard runs and emits an
+  `auto_unfreeze_disabled` event once per process (sticky dedup;
+  resets only on daemon restart). Mirrors `AP2_JANITOR_DISABLED` /
+  `AP2_VALIDATOR_JUDGE_DISABLED` polarity / naming. The registry's
+  `Manifest.is_enabled` filter for the `auto_unfreeze` component
+  uses the same knob (suppress-polarity / `default_enabled=True`),
+  so `ap2 status` renders the on/off state correctly. Coarser-
+  grained than `AP2_AUTO_UNFREEZE_FIX_SHAPES` (which selects which
+  shapes are auto-patched); this knob disables the entire sweep
+  regardless of allowlist contents.
 - `AP2_AUTO_UNFREEZE_FIX_SHAPES` — comma-separated allowlist of
   fix-shape tokens. **Unset by default → feature disabled.** The
   daemon refuses to auto-apply any shape that isn't in this

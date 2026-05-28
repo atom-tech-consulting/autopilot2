@@ -108,6 +108,15 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     "AP2_AUTO_UNFREEZE_DRY_RUN",
     "AP2_AUTO_UNFREEZE_MAX_PER_TASK",
     "AP2_AUTO_UNFREEZE_MAX_PER_DAY",
+    # TB-320: kill-switch knob added with the auto_unfreeze manifest
+    # env_flag wiring. Read lazily from `os.environ` inside
+    # `auto_unfreeze._is_auto_unfreeze_disabled()` at tick-hook
+    # call-time so a hot-reload toggling the knob takes effect on
+    # the next tick without a daemon restart. Mirrors the existing
+    # auto-unfreeze-family knobs above and the polarity / hot-reload
+    # treatment of `AP2_VALIDATOR_JUDGE_DISABLED` /
+    # `AP2_FOCUS_AUTO_ADVANCE_DISABLED`.
+    "AP2_AUTO_UNFREEZE_DISABLED",
     # Project-wide verify gate (Config dataclass fields)
     "AP2_VERIFY_CMD",
     # Tick intervals (Config dataclass fields — next sleep picks up the

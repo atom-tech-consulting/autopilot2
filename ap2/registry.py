@@ -198,8 +198,10 @@ class Manifest:
 
         Shape matches the briefing's text-render contract:
           - `env_flag=None`                  — always-on manifests
-                                              (attention, auto_approve,
-                                              auto_unfreeze, focus_advance).
+                                              (post-TB-320: `attention/`
+                                              is the only such manifest
+                                              — operator decision per
+                                              2026-05-28).
           - `<NAME> unset`                   — env var absent or empty.
           - `<NAME>=<value>`                 — env var set to a non-empty
                                               value (value is truncated

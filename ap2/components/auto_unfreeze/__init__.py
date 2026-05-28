@@ -63,6 +63,51 @@ _AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT = 3
 _AUTO_UNFREEZE_WINDOW_S = 24 * 3600  # rolling 24h, mirrors TB-224's window
 
 
+# TB-320: sticky "we already emitted the first-skip `auto_unfreeze_disabled`
+# audit event this process" flag. Reset only on process restart. The
+# first call to `_maybe_auto_unfreeze` after the kill-switch knob is
+# truthy emits the event; subsequent calls in the same process stay
+# silent to avoid flooding `events.jsonl` while disabled (a 30s tick ×
+# 24h = ~2880 ticks/day; without dedup an operator who set the knob
+# would see a daily noise floor on every Frozen-sweep cycle). Mirrors
+# the one-shot `warned_no_destination` pattern in
+# `ap2/components/attention/__init__.py` (TB-297), but module-level
+# rather than file-backed because the briefing's "cheap deduplication
+# acceptable" guidance + restart-resets-the-flag semantics fit a
+# process-local bool without needing a JSON state file.
+_DISABLED_EVENT_EMITTED: bool = False
+
+
+def _is_auto_unfreeze_disabled() -> bool:
+    """TB-320: True iff `AP2_AUTO_UNFREEZE_DISABLED` is set to a truthy
+    value (`"1"` / `"true"` / `"yes"` / `"on"`, case-insensitive).
+
+    Lazy-read pattern: reads `os.environ` directly each call so a
+    hot-reloaded env file (TB-271) takes effect on the next tick.
+    Mirrors `goal.auto_advance_disabled()`'s
+    `AP2_FOCUS_AUTO_ADVANCE_DISABLED` parse — same truthy set, same
+    "default-unset → False" polarity. The truthy set is also
+    consistent with `Manifest.is_enabled`'s falsy enumeration
+    (`"", "0", "false", "no", "off"`) so the registry-level and
+    self-gate paths agree on what counts as "set".
+    """
+    raw = os.environ.get("AP2_AUTO_UNFREEZE_DISABLED", "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _reset_disabled_event_emitted_for_tests() -> None:
+    """Reset the sticky `_DISABLED_EVENT_EMITTED` flag (TB-320).
+
+    Test-only helper. Production never calls this — the flag resets
+    naturally on process restart. Mirrors
+    `env_reload.reset_reload_state_for_tests()`'s shape so a test
+    fixture can re-exercise the "first skip emits the event" path
+    without spawning a subprocess.
+    """
+    global _DISABLED_EVENT_EMITTED
+    _DISABLED_EVENT_EMITTED = False
+
+
 def _auto_unfreeze_allowlist() -> frozenset[str]:
     """Effective allowlist parsed from `AP2_AUTO_UNFREEZE_FIX_SHAPES`.
 
@@ -341,7 +386,37 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
     AND surfaces a `## Decisions needed from operator` bullet so the
     operator sees a systemic-regression signal rather than a silent
     burn.
+
+    TB-320 kill-switch: `AP2_AUTO_UNFREEZE_DISABLED` (truthy →
+    disable) short-circuits the sweep at the top of the tick hook
+    before any other gate runs, matching what the registry's
+    manifest-level env_flag now advertises to `ap2 status` /
+    `enabled_components(cfg)`. Mirrors `AP2_JANITOR_DISABLED` /
+    `AP2_VALIDATOR_JUDGE_DISABLED` polarity / naming. Emits an
+    `auto_unfreeze_disabled` audit event ONCE per process on the
+    first skip (sticky `_DISABLED_EVENT_EMITTED` flag); subsequent
+    skips stay silent so a long-running disabled daemon doesn't
+    flood `events.jsonl`. The flag resets only on process restart —
+    consistent with the briefing's "cheap deduplication acceptable"
+    guidance.
     """
+    if _is_auto_unfreeze_disabled():
+        global _DISABLED_EVENT_EMITTED
+        if not _DISABLED_EVENT_EMITTED:
+            try:
+                events.append(
+                    cfg.events_file,
+                    "auto_unfreeze_disabled",
+                    reason="env_flag_set",
+                    env_flag="AP2_AUTO_UNFREEZE_DISABLED",
+                )
+            except OSError:
+                # Best-effort audit emit — a hiccup writing the event
+                # must not block the disable short-circuit. The next
+                # process restart will re-attempt the first-skip emit.
+                pass
+            _DISABLED_EVENT_EMITTED = True
+        return
     allowlist = _auto_unfreeze_allowlist()
     if not allowlist:
         return

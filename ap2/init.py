@@ -388,6 +388,7 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", # reason: debug/test only
     "AP2_AUTO_DIAGNOSE_COOLDOWN_S",          # reason: internal default, rarely tuned
     "AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S",    # reason: internal default, rarely tuned
+    "AP2_AUTO_UNFREEZE_DISABLED",            # reason: debug/test only — TB-320 kill switch for the auto_unfreeze component; operators flip via shell export, not the per-project template
     "AP2_AUTO_UNFREEZE_DRY_RUN",             # reason: debug/test only
     "AP2_AUTO_UNFREEZE_FIX_SHAPES",          # reason: operator opt-in allowlist; set via shell export so a per-project template doesn't broaden the auto-patch surface by default
     "AP2_AUTO_UNFREEZE_MAX_PER_DAY",         # reason: internal default, rarely tuned

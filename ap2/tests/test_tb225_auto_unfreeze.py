@@ -291,6 +291,178 @@ def test_per_task_cap_default_is_one(monkeypatch):
     assert daemon._auto_unfreeze_max_per_task() == 5
 
 
+# ===========================================================================
+# TB-320: kill-switch `AP2_AUTO_UNFREEZE_DISABLED` — top-of-tick-hook
+# short-circuit + sticky-first-skip `auto_unfreeze_disabled` audit event.
+# ===========================================================================
+
+
+def test_tb320_kill_switch_short_circuits_and_emits_event(
+    cfg: Config, monkeypatch,
+):
+    """Setting `AP2_AUTO_UNFREEZE_DISABLED=1` makes `_maybe_auto_unfreeze`
+    return without running the allowlist / board-load / sweep, AND emits
+    exactly one `auto_unfreeze_disabled` audit event on the first skip
+    per process (sticky dedup via the module-level
+    `_DISABLED_EVENT_EMITTED` flag).
+
+    Mirrors TB-225's (a) "unset allowlist is noop" shape: the existing
+    no-op early-return inside `_maybe_auto_unfreeze` lives BELOW the new
+    kill-switch check, so the test sets BOTH a non-empty allowlist AND
+    a frozen task with a parseable `BriefingFix:` summary (i.e.
+    everything that would normally trigger an `auto_unfreeze_applied`),
+    then flips the kill switch — confirming the short-circuit fires
+    before any of the downstream guards.
+    """
+    from ap2.components import auto_unfreeze as au
+
+    # Reset the sticky flag so the test is hermetic regardless of any
+    # earlier test that exercised the disabled-path.
+    au._reset_disabled_event_emitted_for_tests()
+
+    monkeypatch.setenv(
+        "AP2_AUTO_UNFREEZE_FIX_SHAPES",
+        "grep_missing_r_on_dir",
+    )
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "1")
+
+    task_id, briefing_path = _add_and_freeze(cfg)
+    rel = str(briefing_path.relative_to(cfg.project_root))
+    text = briefing_path.read_text()
+    grep_line_idx = next(
+        i for i, line in enumerate(text.splitlines())
+        if "grep -lE" in line
+    )
+    _emit_blocked_complete(
+        cfg, task_id=task_id,
+        summary=_briefing_fix_line(
+            shape="grep_missing_r_on_dir",
+            path=rel,
+            line=grep_line_idx + 1,
+            frm="grep -lE",
+            to="grep -rlE",
+        ),
+    )
+
+    # First call → emits exactly one `auto_unfreeze_disabled` event.
+    daemon._maybe_auto_unfreeze(cfg)
+
+    evts = events.tail(cfg.events_file, 200)
+    disabled_evts = [
+        e for e in evts if e.get("type") == "auto_unfreeze_disabled"
+    ]
+    assert len(disabled_evts) == 1, disabled_evts
+    assert disabled_evts[0].get("reason") == "env_flag_set", disabled_evts[0]
+    assert (
+        disabled_evts[0].get("env_flag") == "AP2_AUTO_UNFREEZE_DISABLED"
+    ), disabled_evts[0]
+
+    # No downstream applied / skipped event fired — the short-circuit
+    # ran BEFORE the allowlist / cap / line-match guards.
+    applied = [e for e in evts if e.get("type") == "auto_unfreeze_applied"]
+    skipped = [e for e in evts if e.get("type") == "auto_unfreeze_skipped"]
+    assert applied == [], applied
+    assert skipped == [], skipped
+
+    # Task stays Frozen — short-circuit means no unfreeze queue op.
+    board = Board.load(cfg.tasks_file)
+    loc = board.find(task_id)
+    assert loc is not None and loc[0] == "Frozen", loc
+
+    # Second call → STILL no second `auto_unfreeze_disabled` event
+    # (sticky dedup via `_DISABLED_EVENT_EMITTED`).
+    daemon._maybe_auto_unfreeze(cfg)
+    evts = events.tail(cfg.events_file, 200)
+    disabled_evts = [
+        e for e in evts if e.get("type") == "auto_unfreeze_disabled"
+    ]
+    assert len(disabled_evts) == 1, (
+        f"sticky dedup: second tick must NOT re-emit the disabled "
+        f"event; got {disabled_evts}"
+    )
+
+
+def test_tb320_kill_switch_unset_runs_sweep_normally(
+    cfg: Config, monkeypatch,
+):
+    """With `AP2_AUTO_UNFREEZE_DISABLED` unset (and the allowlist set
+    to a matching shape + a Frozen task carrying a parseable
+    `BriefingFix:` summary), the sweep runs end-to-end and emits the
+    normal `auto_unfreeze_applied` event — confirming the kill switch
+    is the only thing being toggled and the rest of the guard chain
+    still fires when the knob is off.
+
+    Sibling to the "disabled" test above — same fixture shape, knob
+    off, asserts the positive case.
+    """
+    from ap2.components import auto_unfreeze as au
+
+    au._reset_disabled_event_emitted_for_tests()
+    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DISABLED", raising=False)
+    monkeypatch.setenv(
+        "AP2_AUTO_UNFREEZE_FIX_SHAPES",
+        "grep_missing_r_on_dir",
+    )
+
+    task_id, briefing_path = _add_and_freeze(cfg)
+    rel = str(briefing_path.relative_to(cfg.project_root))
+    text = briefing_path.read_text()
+    grep_line_idx = next(
+        i for i, line in enumerate(text.splitlines())
+        if "grep -lE" in line
+    )
+    _emit_blocked_complete(
+        cfg, task_id=task_id,
+        summary=_briefing_fix_line(
+            shape="grep_missing_r_on_dir",
+            path=rel,
+            line=grep_line_idx + 1,
+            frm="grep -lE",
+            to="grep -rlE",
+        ),
+    )
+
+    daemon._maybe_auto_unfreeze(cfg)
+
+    evts = events.tail(cfg.events_file, 200)
+    disabled_evts = [
+        e for e in evts if e.get("type") == "auto_unfreeze_disabled"
+    ]
+    assert disabled_evts == [], (
+        f"kill switch unset must NOT emit `auto_unfreeze_disabled`; "
+        f"got {disabled_evts}"
+    )
+    applied = [e for e in evts if e.get("type") == "auto_unfreeze_applied"]
+    assert len(applied) == 1, applied
+
+
+def test_tb320_is_auto_unfreeze_disabled_truthy_parse(monkeypatch):
+    """`_is_auto_unfreeze_disabled` reads `AP2_AUTO_UNFREEZE_DISABLED`
+    fresh from `os.environ` each call and accepts the same truthy set
+    as the sibling kill-switch parsers (`AP2_FOCUS_AUTO_ADVANCE_DISABLED`,
+    `AP2_VALIDATOR_JUDGE_DISABLED`): `1` / `true` / `yes` / `on`
+    (case-insensitive). Default-unset → False.
+    """
+    from ap2.components.auto_unfreeze import _is_auto_unfreeze_disabled
+
+    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DISABLED", raising=False)
+    assert _is_auto_unfreeze_disabled() is False
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "")
+    assert _is_auto_unfreeze_disabled() is False
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "0")
+    assert _is_auto_unfreeze_disabled() is False
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "false")
+    assert _is_auto_unfreeze_disabled() is False
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "1")
+    assert _is_auto_unfreeze_disabled() is True
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "TRUE")
+    assert _is_auto_unfreeze_disabled() is True
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "yes")
+    assert _is_auto_unfreeze_disabled() is True
+    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "on")
+    assert _is_auto_unfreeze_disabled() is True
+
+
 def test_per_day_cap_default_is_three(monkeypatch):
     """`AP2_AUTO_UNFREEZE_MAX_PER_DAY` defaults to 3 (rolling 24h)."""
     monkeypatch.delenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", raising=False)
