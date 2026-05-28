@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-320** **Wire env_flag on 3 component manifests + add AP2_AUTO_UNFREEZE_DISABLED** `#autopilot` `#components` `#env-flag` `#manifest` `#refactor` `@blocked:TB-317,TB-226` [→ brief](.cc-autopilot/tasks/wire-env-flag-on-3-component-manifests-a.md)
 
 ## Pipeline Pending
 
