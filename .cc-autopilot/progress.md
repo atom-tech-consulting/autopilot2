@@ -1113,3 +1113,9 @@
 - **Summary:** Bundled axes 4 + 5: refactored `_validate_briefing_structure` into a pipeline-as-list orchestrator (5 core `BriefingValidator` callables + `BriefingContext` dataclass + registry-walked validators) and relocated `ap2/validator_judge.py` to `ap2/components/validator_judge/` with a manifest registering the dep-coherence check as a `briefing_validator` hook (env_flag=AP2_VALIDATOR_JUDGE_DISABLED, suppress-style, default-enabled). Added `Registry.briefing_validators()`, rewired tools.py/briefing_validators.py/doctor.py through `hook_points` (tools.py uses PEP 562 `__getattr__` to dodge the auto_unfreeze→tools circular import on registry build), and shipped 17 TB-316 regression-pin tests. Full suite green: 2267 passed in 89.86s.
 - **Files:** ap2/briefing_validators.py, ap2/components/validator_judge/__init__.py, ap2/components/validator_judge/manifest.py, ap2/doctor.py, ap2/howto.md, ap2/registry.py, ap2/tests/test_tb269_validator_judge_timeout_calibration.py, ap2/tests/test_tb270_validator_judge_payload_slice.py, ap2/tests/test_tb316_validator_pipeline.py, ap2/tools.py
 - **Tests:** pass
+
+## [2026-05-28] TB-317: Disabled-config test suite — `tests/test_components_disabled.py` (axis 6 second half)
+- **Commit:** `244424b`
+- **Summary:** Fixed TB-317's prior verification gap: rewrote test_disabled_config_channel_adapters_routing to wire core sibling adapters (Stdout/FileAppend/Webhook) into the per-process registry via synthetic always-on manifests, then assert each sibling type appears in the DIRECT return of default_registry().channel_adapters(project_cfg) — not on a manually-combined list as the prior attempt did. Full suite 2276/2276 green; disabled-config gate 9/9 in ~70ms.
+- **Files:** ap2/tests/test_components_disabled.py
+- **Tests:** pass
