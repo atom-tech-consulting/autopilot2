@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/toml-config-schema-parser-config-from-to.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "f5b0f0c",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T22:22:41Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T22:05:40Z",
   "tb_id": "TB-321",
   "why_now": "zero TB-Ns have shipped against this focus and Backlog is\nempty; goal.md L378-381 explicitly names axis (1) as the prerequisite\n\u2014 \"(1) is the prerequisite for everything else. (2) and (3) are\nparallelizable once (1) lands.\" Without this slice the parallelizable\nfollow-ups (TB-322, TB-323) cannot ship in their natural shape, and\nthe daemon-start validator that catches schema mismatches at\nfail-fast time has no engine."
