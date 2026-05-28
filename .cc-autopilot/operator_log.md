@@ -276,3 +276,7 @@ ideation won't re-propose decisions logged here._
 - 2026-05-28T19:54:53Z — applied operator-queued update → TB-320
 - 2026-05-28T20:33:04Z — applied operator-queued update_goal
 - 2026-05-28T20:33:04Z — operator updated goal.md (extend roadmap with new focus: structured config (env -> TOML) — bundles env-var sprawl migration before downstream OSS distribution focus)
+- 2026-05-28T20:34:16Z — roadmap_complete — extended roadmap with new focus 'structured config (env → TOML)' for env-var migration
+- 2026-05-28T20:33:45Z — applied operator-queued ack
+- 2026-05-28T20:33:50Z — applied operator-queued rewind_focus
+- 2026-05-28T20:33:50Z — operator rewound focus pointer ((unknown) → structured config (env → TOML)): fix immediate auto-exhaust on goal extension: empty_cycles was at advance threshold from prior shipped focus; rewind sets pointer back to the new focus and resets counter
