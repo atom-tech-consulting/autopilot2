@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-309",
   "briefing_path": ".cc-autopilot/tasks/import-direction-ci-gate-core-may-not-st.md",
   "focus_anchor": "a ci gate fails the build",
+  "outcome": {
+    "commit": "bafc891",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T05:41:56Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T04:50:08Z",
   "tb_id": "TB-311",
   "why_now": "lands incrementally per goal.md L219-221 (\"(6) lands\nincrementally \u2014 the disabled-config test gets re-run after each\nmigration; the import-direction gate lands once the first component\nis in `ap2/components/`\"). The moment a component exists in\n`ap2/components/`, the import-gate should exist too, before any\naxis-(5) migration can leak. Pinning the cleavage at the canary stage\nis much cheaper than discovering accumulated leaks later."

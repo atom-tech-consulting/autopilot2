@@ -1072,3 +1072,9 @@
 - **Summary:** Landed axis-(1) prerequisite: `ap2/registry.py` (Manifest dataclass + Registry with filesystem-driven `pkgutil.iter_modules` discovery + cached `default_registry()`); git-moved `ap2/janitor.py` → `ap2/components/janitor/__init__.py` and added `manifest.py` declaring `env_flag=AP2_JANITOR_DISABLED`, `default_enabled=True`, hook_points={tick_hook: run_janitor, status_findings_counts: recent_finding_counts_by_verdict}; rewired the three direct janitor importers (cli_daemon.py, daemon.py, status_report.py) through `default_registry().hook(...)`; new canary regression `test_tb309_components_canary.py` (5 tests pin discovery + hook lookup + filesystem-driven source + env-flag polarity); updated test_janitor/test_tb210/test_tb211 for new module path (tb211 monkeypatches manifest.hook_points instead of module attr). Documented AP2_JANITOR_DISABLED in howto.md + init.py exempt set. Full suite passes (2193 tests).
 - **Files:** ap2/registry.py, ap2/components/__init__.py, ap2/components/janitor/__init__.py, ap2/components/janitor/manifest.py, ap2/cli_daemon.py, ap2/daemon.py, ap2/status_report.py, ap2/howto.md, ap2/init.py, ap2/tests/test_tb309_components_canary.py, ap2/tests/test_janitor.py, ap2/tests/test_tb210_env_knobs.py, ap2/tests/test_tb211_event_types.py
 - **Tests:** pass
+
+## [2026-05-28] TB-311: Import-direction CI gate — core may not statically import from `ap2/components/` (axis 6 partial)
+- **Commit:** `bafc891`
+- **Summary:** Added ap2/tests/test_core_import_direction.py (AST-based pytest gate covering 4 static import forms + path-keyed _EXEMPT_FILES for the registry); 11 new tests pass in isolation and full suite (2213 tests) is green.
+- **Files:** ap2/tests/test_core_import_direction.py
+- **Tests:** pass
