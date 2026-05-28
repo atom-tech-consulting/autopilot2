@@ -268,3 +268,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-28T04:34:13Z — operator updated goal.md (extend roadmap: refactor features into opt-in components (focus_advance is a component; status_report digest stays in core, channel-delivery is component) — sets up downstream OSS distribution focus)
 - 2026-05-28T04:35:26Z — roadmap_complete — extended roadmap with new focus on opt-in component refactor
 - 2026-05-28T04:35:19Z — applied operator-queued ack
+- 2026-05-28T04:37:52Z — applied operator-queued rewind_focus
+- 2026-05-28T04:37:52Z — operator rewound focus pointer ((unknown) → refactor features into opt-in components): new focus replaces shipped end-to-end-automation + operator-legible-reporting foci; pointer needs reset to index 0 since goal.md now carries only the new focus heading
