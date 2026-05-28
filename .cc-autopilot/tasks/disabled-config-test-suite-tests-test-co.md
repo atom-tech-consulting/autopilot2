@@ -118,3 +118,10 @@ assertions need a specific component enabled.
   module automatically).
 - Renaming any component env flag (goal.md L64-67 constraint).
 - Adding more components — this is a test gate, not a migration task.
+## Attempts
+
+### 2026-05-28 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `ap2/tests/test_components_disabled.py` Prose: at least one assertion confirms `default_registry().channel_adapters(cfg)
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260528T100735Z-TB-317.prompt.md`, `stream: .cc-autopilot/debug/20260528T100735Z-TB-317.stream.jsonl`, `messages: .cc-autopilot/debug/20260528T100735Z-TB-317.messages.jsonl`

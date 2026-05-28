@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-309,TB-311,TB-312,TB-313,TB-314",
   "briefing_path": ".cc-autopilot/tasks/disabled-config-test-suite-tests-test-co.md",
   "focus_anchor": "current focus refactor features into opt in components",
+  "outcome": {
+    "commit": "1db800e",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-28T10:23:52Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T09:21:02Z",
   "tb_id": "TB-317",
   "why_now": "with TB-312/313/314 landed there are now 4 real subpackage\ncomponents (janitor, focus_advance, auto_unfreeze, mattermost) plus\nthe core `ap2/channel.py` adapter ABC + sibling defaults \u2014 enough\nsurface to assert \"core behavior unchanged when every component env\nflag is suppressed\". Last cycle this was deferred because only the\njanitor canary existed; that gate has now cleared. Without this test,\nthe cleavage erodes silently \u2014 a future migration accidentally\nre-couples core to a component and nobody notices until a downstream\ndistribution attempt (goal.md L211-214)."
