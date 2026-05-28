@@ -163,6 +163,69 @@ class Manifest:
     dependencies: list[str] = field(default_factory=list)
     tick_hooks: list[tuple[Phase, TickHook]] = field(default_factory=list)
 
+    def is_enabled(self, env: Optional[dict] = None) -> bool:
+        """Resolve this manifest's enabled state against `env` (TB-319).
+
+        Single source of truth for the polarity convention codified at
+        the top of this module (`env_flag is None` → `default_enabled`;
+        `default_enabled=True` → env_flag is suppress-polarity / kill
+        switch; `default_enabled=False` → env_flag is require-polarity
+        / opt-in toggle). `Registry._is_enabled` delegates here so the
+        registry's enabled-walk and the `ap2 status` `## Components`
+        enumeration (TB-319) share one implementation — a future
+        polarity edit ripples through both surfaces without drift.
+
+        `env` defaults to `os.environ` when None so callers can pass a
+        synthetic mapping in tests without monkeypatching the process
+        env. Reads via `.get(name, "")` so a missing key is the same
+        empty-string falsy as `os.environ.get(name, "")` in the
+        original `Registry._is_enabled` body.
+        """
+        if env is None:
+            env = os.environ
+        if self.env_flag is None:
+            return self.default_enabled
+        raw = env.get(self.env_flag, "")
+        is_truthy = raw.strip().lower() not in ("", "0", "false", "no", "off")
+        if self.default_enabled:
+            # env_flag DISABLES (kill switch / suppress polarity).
+            return not is_truthy
+        # env_flag ENABLES (opt-in toggle / require polarity).
+        return is_truthy
+
+    def env_flag_description(self, env: Optional[dict] = None) -> str:
+        """Human-readable env-flag state for `ap2 status` (TB-319).
+
+        Shape matches the briefing's text-render contract:
+          - `env_flag=None`                  — always-on manifests
+                                              (attention, auto_approve,
+                                              auto_unfreeze, focus_advance).
+          - `<NAME> unset`                   — env var absent or empty.
+          - `<NAME>=<value>`                 — env var set to a non-empty
+                                              value (value is truncated
+                                              at 32 chars with an
+                                              ellipsis so a long
+                                              channel-id list / opaque
+                                              token doesn't blow up the
+                                              status block width).
+
+        Pure read-layer; no polarity decision here — pair with
+        `is_enabled(env)` for the on/off bit.
+        """
+        if env is None:
+            env = os.environ
+        if self.env_flag is None:
+            return "env_flag=None"
+        raw = env.get(self.env_flag, "")
+        if not raw:
+            return f"{self.env_flag} unset"
+        # Truncate the value so a long AP2_MM_CHANNELS=channel-id,channel-id,...
+        # list doesn't wrap the status block. 32 chars + ellipsis is wide
+        # enough to keep a single channel-id readable for the common case.
+        if len(raw) > 32:
+            raw = raw[:29] + "..."
+        return f"{self.env_flag}={raw}"
+
 
 class Registry:
     """Container of `Manifest`s with lookup + enabled-filtering helpers.
@@ -210,15 +273,16 @@ class Registry:
 
     @staticmethod
     def _is_enabled(m: Manifest) -> bool:
-        if m.env_flag is None:
-            return m.default_enabled
-        raw = os.environ.get(m.env_flag, "")
-        is_truthy = raw.strip().lower() not in ("", "0", "false", "no", "off")
-        if m.default_enabled:
-            # env_flag DISABLES (kill switch).
-            return not is_truthy
-        # env_flag ENABLES (opt-in toggle).
-        return is_truthy
+        """Polarity-respecting enabled check (delegates to `Manifest.is_enabled`).
+
+        TB-319: the polarity rule's body moved onto `Manifest.is_enabled`
+        so both the registry walk (here) and the new `ap2 status`
+        `## Components` enumeration share one implementation. The
+        existing TB-309 canary tests still call
+        `Registry._is_enabled(janitor_manifest)` directly — preserved
+        as a thin staticmethod shim so the call shape is unchanged.
+        """
+        return m.is_enabled()
 
     def hook(self, name: str, *, component: str) -> Callable:
         """Look up a single registered hook by hook-point name + component.

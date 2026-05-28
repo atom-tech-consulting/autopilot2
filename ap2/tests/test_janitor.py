@@ -862,7 +862,15 @@ def test_cmd_status_omits_janitor_line_when_no_recent_findings(
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
-    assert "janitor:" not in out
+    # TB-319: the new `## Components` block contains an indented
+    # `  janitor: on (...)` line; the operator-attention cluster's
+    # `janitor:` line starts at column 0 (`janitor:  N strand...`).
+    # Pin the column-0 prefix so this omit-on-empty test stays
+    # specific to the cluster line and the components-enumeration
+    # substring doesn't false-positive.
+    assert not any(
+        line.startswith("janitor:") for line in out.splitlines()
+    ), out
 
     rc = cmd_status(cfg, Namespace(json=True))
     assert rc == 0

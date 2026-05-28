@@ -136,7 +136,15 @@ def test_text_omits_attention_line_when_no_conditions(
     rc = cli_daemon.cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
-    assert "attention:" not in out, out
+    # TB-319: the new `## Components` block contains an indented
+    # `  attention: on (env_flag=None)` line; the operator-attention
+    # cluster's `attention:` line starts at column 0
+    # (`attention:  N conditions — ...`). Pin the column-0 prefix so
+    # this omit-on-empty test stays specific to the cluster line and
+    # the components-enumeration substring doesn't false-positive.
+    assert not any(
+        line.startswith("attention:") for line in out.splitlines()
+    ), out
 
 
 # ===========================================================================

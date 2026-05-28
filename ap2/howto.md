@@ -648,7 +648,7 @@ never the operator.
 |---|---|---|
 | `ap2 start [--foreground]` | Boot the daemon for a project (backgrounded by default). | Pre-flight refuses if `CLAUDE_CODE_OAUTH_TOKEN` isn't in env (TB-79); `--foreground` is the debugging hook when `daemon.log` doesn't show why the loop died. |
 | `ap2 stop [-f]` | Politely shut the daemon down (SIGTERM; `-f` escalates to SIGKILL). | The clean stop drains the operator queue before exiting, so an `ap2 update` queued just before `ap2 stop` doesn't get lost. |
-| `ap2 status [--json]` | One-screen snapshot — daemon pid, board section counts, cron jobs, decisions-needed nudges. | The "first thing to run" verb at the top of every operator session; pair `--json` with `jq` for tooling. |
+| `ap2 status [--json]` | One-screen snapshot — daemon pid, board section counts, cron jobs, decisions-needed nudges. | The "first thing to run" verb at the top of every operator session; pair `--json` with `jq` for tooling. TB-319 appends a `## Components` block listing every component the registry discovered (text-mode) and a top-level `components` list in `--json` — see `## Components enumeration (`ap2 status`)` below for the on/off polarity rules. |
 | `ap2 init` | Idempotent scaffold of `.gitignore` + `.cc-autopilot/tasks/` skeleton in a fresh project. | Run once when bringing a repo under ap2; no-op if the structure already exists. |
 | `ap2 doctor [--user U]` | Sanity-check that the project is ready to boot — skeleton present, sandbox user installed, OAuth token reachable. | Run before `ap2 start` on an unfamiliar machine to diagnose the "daemon won't start" silent-fail modes (TB-79's token-missing path is the most common hit). |
 | `ap2 check [--json]` | Validate on-disk state-file integrity — TASKS.md shape, briefing-link resolution, cron.yaml schema, JSON state parseability, insights front matter (TB-108). | Exits 1 on errors; warnings (stale brief links, missing goal.md) don't fail. Run after any manual edit to a fenced file. |
@@ -829,6 +829,78 @@ the wrap-helper-into-status-extras pattern shipped across prior
 axis-parity tasks (TB-241 / TB-242 / TB-244). The count is window-
 independent (cursor-based, not 24h-rolling) so a multi-day audit
 pile surfaces on every report until cleared.
+
+## Components enumeration (`ap2 status`)
+
+TB-319 closes the goal.md L235-237 Progress signal that named
+`ap2 status` as the natural surface for discovering which components
+are wired into the daemon. Before TB-319 the only way to find out was
+to `ls ap2/components/` and read each manifest by hand; after, every
+`ap2 status` invocation appends a `## Components` block listing every
+discovered manifest with its on/off state and the env-flag string
+that controls it.
+
+**Text-mode rendering.** After the operator-attention cluster +
+`auto-approve:` block + `next:` line, `ap2 status` prints:
+
+    ## Components
+      attention: on (env_flag=None)
+      auto_approve: on (env_flag=None)
+      auto_unfreeze: on (env_flag=None)
+      focus_advance: on (env_flag=None)
+      janitor: on (AP2_JANITOR_DISABLED unset)
+      mattermost: on (AP2_MM_CHANNELS=channel-id)
+      validator_judge: on (AP2_VALIDATOR_JUDGE_DISABLED unset)
+
+Entries are alphabetic by manifest name (matching
+`default_registry().components` iteration so a reader's mental model
+of "in what order do hooks fire?" lines up with what they see in
+status). Always emitted — unlike the operator-attention cluster's
+omit-on-empty rule, the registry walk is deterministic and the same
+set of components ships on every project, so suppressing the section
+would itself be a regression worth surfacing.
+
+**`<state>` is `on` or `off`** — resolved via `Manifest.is_enabled()`
+against the live process env, so a hot-reloaded `.cc-autopilot/env`
+takes effect on the next invocation. The polarity convention
+(`Registry._is_enabled` since TB-309, now consolidated on
+`Manifest.is_enabled` by TB-319):
+
+- **`env_flag=None`** (attention, auto_approve, auto_unfreeze,
+  focus_advance) — always-on per `default_enabled=True`. There's no
+  master kill switch for these four; whether to add one is the
+  open ideation question logged at the `## Decisions needed` surface.
+- **Suppress polarity** (`*_DISABLED` env_flag, `default_enabled=True`
+  — janitor / `AP2_JANITOR_DISABLED`, validator_judge /
+  `AP2_VALIDATOR_JUDGE_DISABLED`) — the env var is a kill switch:
+  truthy disables, unset/empty/falsy keeps the component on.
+- **Require polarity** (opt-in env_flag, `default_enabled=False`
+  — mattermost / `AP2_MM_CHANNELS`) — the env var is an opt-in
+  toggle: unset/empty disables, non-empty enables.
+
+**`<env_flag_desc>`** renders the env-flag state in operator-legible
+form: `env_flag=None` for always-on manifests, `<NAME> unset` when
+the env var is absent or empty, or `<NAME>=<value>` when set
+(truncated at 32 chars with an ellipsis so a long channel-id list /
+opaque token doesn't blow up the status block width).
+
+**JSON parity (`--json`).** A top-level `components` key carries
+one entry per discovered manifest, each with the four documented
+keys (`name`, `enabled`, `env_flag`, `default_enabled`). ALWAYS
+present (parser-stability mirror of the `auto_approve` / `audit` /
+`attention` blocks), and the text + JSON branches walk the same
+`default_registry().components` snapshot inside one `cmd_status`
+call so they can never disagree about a component's enabled state.
+
+**Out of scope** (deferred to follow-up TBs if operator asks):
+
+- A `/components` web pull page parallel to TB-296's `/attention`.
+- Per-component diagnostic info (tick counts, last-fired timestamps,
+  recent events).
+- New env knobs to filter the enumeration; the walk shows every
+  discovered manifest unconditionally. Master kill-switch flags for
+  the four `env_flag=None` manifests are the open ideation question
+  named above.
 
 ## Classify verdicts
 

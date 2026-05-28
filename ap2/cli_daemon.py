@@ -251,10 +251,17 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # never reaches into `ap2.components.*` directly.
     from .registry import default_registry
 
-    _recent_finding_counts = default_registry().hook(
+    _registry = default_registry()
+    _recent_finding_counts = _registry.hook(
         "status_findings_counts", component="janitor",
     )
     janitor_counts = _recent_finding_counts(cfg)
+    # TB-319: snapshot the registry's manifests once so both the JSON
+    # and text branches render the same enabled-state mapping (a
+    # second `default_registry()` call would re-read `os.environ` and
+    # could in principle disagree across the branches if the env
+    # mutated mid-call — unlikely but the snapshot is free).
+    _component_manifests = _registry.components
     janitor_findings = sum(janitor_counts.values())
     # TB-189 / TB-251: count operator-authored impact verdicts
     # (`task_classified` events) in the last 30 days, broken down by
@@ -505,6 +512,31 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
                     for c in attention_conditions
                 ],
             },
+            # TB-319: enumerate every component the registry discovered.
+            # Machine-consumer parity for the text-mode `## Components`
+            # block — same source-of-truth walk (`default_registry().components`
+            # in alphabetic name order) so a JSON consumer (web UI,
+            # external monitor, ap2 ack scripts) sees the same wired-in
+            # surface the operator's terminal does. Each entry carries
+            # the four documented keys: `name`, `enabled` (resolved via
+            # `Manifest.is_enabled()` against the live process env so a
+            # hot-reloaded `.cc-autopilot/env` takes effect on the next
+            # invocation), `env_flag` (the raw env-var name or null for
+            # always-on manifests), and `default_enabled` (so a consumer
+            # can reason about polarity without re-deriving it from the
+            # env_flag name suffix). ALWAYS present (even on a fresh
+            # project — the registry walk is deterministic and shipping
+            # zero components would itself be a regression worth
+            # surfacing).
+            "components": [
+                {
+                    "name": _m.name,
+                    "enabled": _m.is_enabled(),
+                    "env_flag": _m.env_flag,
+                    "default_enabled": _m.default_enabled,
+                }
+                for _m in _component_manifests
+            ],
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -812,6 +844,24 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     nxt = board.next_ready()
     if nxt:
         print(f"next:     {nxt.id} {nxt.title}")
+    # TB-319: enumerate every component the registry discovered, with
+    # each line showing name + on/off + env-flag description. Closes the
+    # goal.md L235-237 Progress signal that named `ap2 status` as the
+    # natural surface for component visibility (today the only way to
+    # discover what's wired in is to `ls ap2/components/` and read each
+    # manifest by hand). Pure read-layer over `default_registry()` +
+    # `Manifest.is_enabled` / `Manifest.env_flag_description` — no new
+    # env knobs, no filter knobs, no behavior change. Always emitted
+    # (even on a fresh project — every project has the same registry
+    # walk so there's no "zero components" omit-on-empty case to honor).
+    # Walks the snapshot taken above (alphabetic by manifest name,
+    # matching the order `tick_hooks(phase)` already uses) so the text
+    # branch can never disagree with the JSON branch on enabled state.
+    print("## Components")
+    for _manifest in _component_manifests:
+        _state = "on" if _manifest.is_enabled() else "off"
+        _flag_desc = _manifest.env_flag_description()
+        print(f"  {_manifest.name}: {_state} ({_flag_desc})")
     return 0
 
 
