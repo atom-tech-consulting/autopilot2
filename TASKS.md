@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-323** **Env-var override layer + `config_compat.py` back-compat map + `env_deprecated` event (axis 2)** `#autopilot` `#components` `#config` `#env-compat` `#back-compat` `#axis-2` `@blocked:TB-321` — Axis (2) of the structured-config focus: ship `ap2/config_compat.py` (FLAT_TO_SECTIONED map + 12-factor exemption set), the env-override layer plumbed into `Config.from_toml`, the back-compat shim with one-shot `env_deprecated` events, and the `env_reload.py` extension that watches the TOML config file. Preserves every existing shell-export / CI override so OSS users and existing installs don't break on upgrade. [→ brief](.cc-autopilot/tasks/env-var-override-layer-config-compat-py.md)
 
 ## Pipeline Pending
 
@@ -209,5 +208,6 @@
 - [x] **TB-320** **Wire env_flag on 3 component manifests + add AP2_AUTO_UNFREEZE_DISABLED** `#autopilot` `#components` `#env-flag` `#manifest` `#refactor` `@blocked:TB-317,TB-226` [→ brief](.cc-autopilot/tasks/wire-env-flag-on-3-component-manifests-a.md)
 - [x] **TB-321** **TOML config schema + parser + `Config.from_toml` + `Manifest.config_schema` (axis 1)** `#autopilot` `#components` `#config` `#toml` `#registry` `#axis-1` — Axis (1) of the structured-config focus: ship `ap2/config_loader.py` (tomllib-based parser, `ConfigKey` schema, `Config.from_toml`, daemon-start `validate_config`), extend `Manifest` with `config_schema`, and prove end-to-end via the `janitor/` canary. Prerequisite for axes (2)-(6); without it every follow-up has nothing to read against. [→ brief](.cc-autopilot/tasks/toml-config-schema-parser-config-from-to.md)
 - [x] **TB-322** **Fill `config_schema` on the 6 remaining component manifests (axis 3)** `#autopilot` `#components` `#config` `#toml` `#manifest` `#axis-3` `@blocked:TB-321` — Axis (3) of the structured-config focus: walk mattermost / attention / focus_advance / auto_unfreeze / auto_approve / validator_judge manifests and declare their `config_schema` entries (every `AP2_*` knob each component currently reads from `os.environ.get`). Registry's startup-validator (TB-321) consumes the union; axis-5 migration tasks consume the per-knob defaults. [→ brief](.cc-autopilot/tasks/fill-config-schema-on-the-6-remaining-co.md)
+- [x] **TB-323** **Env-var override layer + `config_compat.py` back-compat map + `env_deprecated` event (axis 2)** `#autopilot` `#components` `#config` `#env-compat` `#back-compat` `#axis-2` `@blocked:TB-321` — Axis (2) of the structured-config focus: ship `ap2/config_compat.py` (FLAT_TO_SECTIONED map + 12-factor exemption set), the env-override layer plumbed into `Config.from_toml`, the back-compat shim with one-shot `env_deprecated` events, and the `env_reload.py` extension that watches the TOML config file. Preserves every existing shell-export / CI override so OSS users and existing installs don't break on upgrade. [→ brief](.cc-autopilot/tasks/env-var-override-layer-config-compat-py.md)
 
 ## Frozen

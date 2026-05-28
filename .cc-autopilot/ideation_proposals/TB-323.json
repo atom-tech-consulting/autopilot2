@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-321",
   "briefing_path": ".cc-autopilot/tasks/env-var-override-layer-config-compat-py.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "a50e686",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T23:03:09Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T22:07:50Z",
   "tb_id": "TB-323",
   "why_now": "goal.md L325-329 articulates the delete-test explicitly \u2014\n\"if not shipped, OSS users get a new file but can no longer\noverride per-shell-session; existing CI / sandbox setups break.\"\nToday's `.cc-autopilot/env` is the source of every operator's\ntunable overrides; the TOML migration must preserve that path or\nevery existing install breaks on upgrade. Lands in parallel with\nTB-322 once TB-321's read paths exist (goal.md L378-381 \u2014 \"(2)\nand (3) are parallelizable once (1) lands\")."
