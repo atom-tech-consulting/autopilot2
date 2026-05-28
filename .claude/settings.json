@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Edit(TASKS.md)",
+      "Write(TASKS.md)",
+      "Edit(CLAUDE.md)",
+      "Write(CLAUDE.md)",
+      "Edit(goal.md)",
+      "Write(goal.md)",
+      "Edit(.cc-autopilot/progress.md)",
+      "Write(.cc-autopilot/progress.md)",
+      "Edit(.cc-autopilot/events.jsonl)",
+      "Write(.cc-autopilot/events.jsonl)",
+      "Edit(.cc-autopilot/ideation_state.md)",
+      "Write(.cc-autopilot/ideation_state.md)",
+      "Edit(.cc-autopilot/cron.yaml)",
+      "Write(.cc-autopilot/cron.yaml)",
+      "Edit(.cc-autopilot/operator_log.md)",
+      "Write(.cc-autopilot/operator_log.md)",
+      "Edit(.cc-autopilot/operator_queue.jsonl)",
+      "Write(.cc-autopilot/operator_queue.jsonl)",
+      "Edit(.cc-autopilot/operator_queue_state.json)",
+      "Write(.cc-autopilot/operator_queue_state.json)",
+      "Edit(.cc-autopilot/ideation_proposals)",
+      "Write(.cc-autopilot/ideation_proposals)",
+      "Edit(.cc-autopilot/tasks)",
+      "Write(.cc-autopilot/tasks)",
+      "Edit(.cc-autopilot/insights/_index.md)",
+      "Write(.cc-autopilot/insights/_index.md)",
+      "Edit(.cc-autopilot/focus_pointer.json)",
+      "Write(.cc-autopilot/focus_pointer.json)"
+    ]
+  }
+}
