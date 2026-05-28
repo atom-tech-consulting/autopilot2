@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/auto-unfreeze-subpackage-migration-axis.md",
+  "focus_anchor": "current focus refactor features into opt in components",
+  "proposed_at": "2026-05-28T06:59:58Z",
+  "tb_id": "TB-314",
+  "why_now": "`auto_unfreeze/` is the second-most-self-contained of the\nremaining flat-module behaviors after `focus_advance/`. Its only\ndependency is the operator-queue (which stays in core per goal.md\nL194-195) \u2014 no channel-adapter dependency (unlike `attention/`,\ngoal.md L188), no ideation/cost guard coupling (unlike\n`auto_approve/`, goal.md L196-197). Pairs naturally with axes 3\nand other axis-5 migrations because none of them touch the\noperator queue. Every cycle this flat module survives, the\ncomponent-vs-core boundary remains an asymmetric exemption rather\nthan a clean cleavage."
+}
