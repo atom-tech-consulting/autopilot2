@@ -1078,3 +1078,8 @@
 - **Summary:** Added ap2/tests/test_core_import_direction.py (AST-based pytest gate covering 4 static import forms + path-keyed _EXEMPT_FILES for the registry); 11 new tests pass in isolation and full suite (2213 tests) is green.
 - **Files:** ap2/tests/test_core_import_direction.py
 - **Tests:** pass
+
+## [2026-05-28] TB-310: Daemon tick-hook protocol — walk registry instead of direct imports (axis 2)
+- **Commit:** `5a755c9`
+- **Summary:** Previously committed in 5a755c9 — full TB-310 scope is on disk (Phase enum + TickHook + Manifest.tick_hooks + Registry.tick_hooks(phase) in ap2/registry.py; stub manifests for auto_approve/auto_unfreeze/attention/focus_advance under ap2/components/; daemon._tick walks default_registry().tick_hooks(Phase.PRE_DISPATCH/ATTENTION_EMISSION/POST_DISPATCH) at L2050/2076/2327; regression-pin at ap2/tests/test_tb310_tick_hook_protocol.py). Audit: ap2/tests/ 2213 pass; test_tb310 9/9 pass; test_tb211 8/8 pass; the briefing's prior buggy `test "$(... | wc -l)" = "0"` bullet has been replaced (operator edit, unstaged) with `! grep -qE ...` which passes against the current daemon.py (zero matches). Briefing file edit is operator-fenced — not touched.
+- **Tests:** pass

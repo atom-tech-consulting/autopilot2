@@ -97,10 +97,11 @@ so the regression is mechanical.
   `registry.tick_hooks(PRE_DISPATCH)` returns a deterministic
   ordered list. Run via
   `uv run pytest -q ap2/tests/test_tb310_tick_hook_protocol.py`.
-- `test "$(grep -nE '^\s*(from \.attention|from \.auto_approve|from \.auto_unfreeze|from \.focus_advance|from . import janitor)' ap2/daemon.py | wc -l)" = "0"` —
+- `! grep -qE '^\s*(from \.attention|from \.auto_approve|from \.auto_unfreeze|from \.focus_advance|from \. import janitor)' ap2/daemon.py` —
   daemon no longer direct-imports those modules at module-load
-  time (registry lookup replaces them). Positive-form negation per
-  ap2/howto.md absence-check guidance.
+  time (registry lookup replaces them). Negation via `!`-prefix on
+  `grep -qE` (positive-form `test ... = "0"` was tried originally
+  but tripped macOS `wc -l`'s leading-whitespace padding).
 - `ap2/daemon.py` Prose: the `_tick` body walks
   `registry.tick_hooks(<phase>)` for each phase rather than calling
   `auto_approve.maybe_apply()` / `janitor.run_janitor()` etc.
