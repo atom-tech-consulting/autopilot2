@@ -30,7 +30,6 @@ from . import (
     diagnose,
     env_reload,
     events,
-    focus_advance,
     ideation,
     prompts,
     retry,
@@ -1744,12 +1743,12 @@ async def _interruptible_sleep(total_s: int) -> None:
 
 
 # TB-310 (axis 2): the registry-walked tick-hook contract replaces the
-# pre-TB-310 `from .auto_approve import (...)` / `from .auto_unfreeze
-# import (...)` / `from .focus_advance import (...)` re-export blocks
-# that lived here. Daemon._tick now walks `registry.tick_hooks(phase)`
-# instead of importing each module by relative-dotted path; the
-# component manifests under `ap2/components/<name>/` register the
-# tick-callable hooks the daemon dispatches by phase.
+# pre-TB-310 dotted-relative imports of `auto_approve`, `auto_unfreeze`,
+# and the focus-advance module that lived here as re-export blocks.
+# Daemon._tick now walks `registry.tick_hooks(phase)` instead of
+# importing each module by relative-dotted path; the component
+# manifests under `ap2/components/<name>/` register the tick-callable
+# hooks the daemon dispatches by phase.
 #
 # Test back-compat: existing test paths
 # (`daemon._maybe_auto_unfreeze`, `daemon._auto_approve_paused`, ...)
@@ -1793,9 +1792,22 @@ _maybe_auto_unfreeze = auto_unfreeze._maybe_auto_unfreeze
 _most_recent_blocked_complete_for = auto_unfreeze._most_recent_blocked_complete_for
 _shared_parse = auto_unfreeze._shared_parse
 
-_FOCUS_RECENT_TAIL_N = focus_advance._FOCUS_RECENT_TAIL_N
-_ideation_empty_against_focus = focus_advance._ideation_empty_against_focus
-_maybe_advance_focus = focus_advance._maybe_advance_focus
+# TB-313 (axis 5): focus_advance was relocated from the flat module
+# `ap2/focus_advance.py` to the subpackage
+# `ap2/components/focus_advance/`. Core must not statically import
+# from `ap2/components/` (TB-311 import-direction gate), so the three
+# module-level aliases resolve via the registry's manifest hook_points
+# at module-load time. Tests that monkey-patch
+# `daemon._maybe_advance_focus` still work — the rebind happens once
+# here, and the test's setattr on the daemon module overrides this
+# attribute for the duration of the test.
+_focus_advance_manifest = default_registry().get("focus_advance")
+_FOCUS_RECENT_TAIL_N = _focus_advance_manifest.hook_points["focus_recent_tail_n"]
+_ideation_empty_against_focus = _focus_advance_manifest.hook_points[
+    "ideation_empty_against_focus"
+]
+_maybe_advance_focus = _focus_advance_manifest.hook_points["maybe_advance_focus"]
+del _focus_advance_manifest
 
 
 def _maybe_emit_attention_events(cfg: Config) -> None:

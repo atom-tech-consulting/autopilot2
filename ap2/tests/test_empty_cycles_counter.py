@@ -42,14 +42,14 @@ advance) or drop `ideation_cycle_summary` from the exit-marker set
 (which would re-introduce the TB-300 unreachable-threshold bug).
 
 This module is a pure unit test against
-`ap2.focus_advance._ideation_empty_against_focus` — no fixtures, no
+`ap2.components.focus_advance._ideation_empty_against_focus` — no fixtures, no
 disk I/O, just constructed event-tail dicts. Behavioral coverage of
 the same surface against the live daemon harness lives in
 `test_tb226_focus_rotation.py`.
 """
 from __future__ import annotations
 
-from ap2.focus_advance import _ideation_empty_against_focus
+from ap2.components.focus_advance import _ideation_empty_against_focus
 
 
 # ===========================================================================

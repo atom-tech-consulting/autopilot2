@@ -1,7 +1,14 @@
 """TB-302 regression pin: the roadmap-complete branch of
-`ap2/focus_advance.py:_maybe_advance_focus` must NOT append a
-`Roadmap complete: ...` bullet to
+`ap2/components/focus_advance/__init__.py:_maybe_advance_focus` must
+NOT append a `Roadmap complete: ...` bullet to
 `.cc-autopilot/ideation_state.md`.
+
+TB-313 (axis 5) relocated the module body from the flat path
+`ap2/focus_advance.py` into the subpackage
+`ap2/components/focus_advance/__init__.py`; the source-level pins
+below import via `from ap2.components import focus_advance` so the
+docstring / source-line / docstring-TB-302 checks track the new
+location.
 
 Why this matters (the two bugs the prior bullet write caused):
 
@@ -84,8 +91,8 @@ Behavioral pins covered here:
   - Source-level pin: the `_append_decisions_needed_bullet` call
     no longer appears within 5 lines of a
     `roadmap_complete_emitted` reference in
-    `ap2/focus_advance.py` (the Verification bullet's grep
-    surface).
+    `ap2/components/focus_advance/__init__.py` (the Verification
+    bullet's grep surface).
 """
 from __future__ import annotations
 
@@ -95,7 +102,8 @@ from pathlib import Path
 
 import pytest
 
-from ap2 import daemon, events, focus_advance, goal
+from ap2 import daemon, events, goal
+from ap2.components import focus_advance
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -323,12 +331,23 @@ def test_kill_switch_path_still_writes_decisions_needed_bullet(cfg, monkeypatch)
 
 def test_kill_switch_helper_import_retained():
     """Source-level pin: the `_append_decisions_needed_bullet`
-    import in `ap2/focus_advance.py` is retained because the
-    kill-switch branch below still uses it. Removing the import
-    on the assumption that the only caller was the roadmap-complete
-    branch would break the kill-switch surface."""
+    import in `ap2/components/focus_advance/__init__.py` is retained
+    because the kill-switch branch below still uses it. Removing the
+    import on the assumption that the only caller was the
+    roadmap-complete branch would break the kill-switch surface.
+
+    TB-313 (axis 5) relocated the module body and switched the
+    relative `from .auto_approve import …` to the absolute
+    `from ap2.auto_approve import …` (the relative form would
+    resolve to `ap2.components.focus_advance.auto_approve`, which
+    does not exist); the contract this test pins is "the helper
+    import is retained somewhere in the module," not the exact
+    syntactic shape of the import statement.
+    """
     src = Path(focus_advance.__file__).read_text()
-    assert "from .auto_approve import _append_decisions_needed_bullet" in src, (
+    assert (
+        "from ap2.auto_approve import _append_decisions_needed_bullet" in src
+    ), (
         "TB-302: the kill-switch branch still depends on this "
         "import. If the import is removed, the kill-switch path "
         "raises NameError on the first operator-disabled "
@@ -340,10 +359,12 @@ def test_no_bullet_call_within_roadmap_complete_branch():
     """Source-level pin matching the briefing's Verification grep:
     `_append_decisions_needed_bullet` must NOT appear within 5
     lines after any `roadmap_complete_emitted` reference in
-    `ap2/focus_advance.py`. This is the literal shape the
-    briefing's first Verification bullet checks; pinning it here
-    surfaces a regression even when the bullet call moves to a
-    slightly different line number."""
+    `ap2/components/focus_advance/__init__.py` (post-TB-313
+    relocation from the flat module path `ap2/focus_advance.py`).
+    This is the literal shape the briefing's first Verification
+    bullet checks; pinning it here surfaces a regression even
+    when the bullet call moves to a slightly different line
+    number."""
     src_path = Path(focus_advance.__file__)
     lines = src_path.read_text().splitlines()
     violations = []
@@ -365,10 +386,10 @@ def test_no_bullet_call_within_roadmap_complete_branch():
 
 
 def test_module_docstring_documents_no_bullet_behavior():
-    """The `ap2/focus_advance.py` module docstring must document
-    the TB-302 behavior change (no bullet write on
-    roadmap-complete). A future docs-drift refactor that loses
-    this note would surface cleanly on this test."""
+    """The `ap2/components/focus_advance/__init__.py` module
+    docstring must document the TB-302 behavior change (no bullet
+    write on roadmap-complete). A future docs-drift refactor that
+    loses this note would surface cleanly on this test."""
     doc = focus_advance.__doc__ or ""
     assert "TB-302" in doc, (
         "module docstring must reference TB-302's no-bullet "

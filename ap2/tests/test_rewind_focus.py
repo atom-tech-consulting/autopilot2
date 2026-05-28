@@ -60,7 +60,7 @@ import pytest
 from ap2 import events, goal, tools
 from ap2.cli import build_parser, cmd_rewind_focus
 from ap2.config import Config
-from ap2.focus_advance import _ideation_empty_against_focus
+from ap2.components.focus_advance import _ideation_empty_against_focus
 from ap2.init import init_project
 
 
