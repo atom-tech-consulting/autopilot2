@@ -1131,3 +1131,9 @@
 - **Summary:** Added a `## Components` block to `ap2 status` (text + JSON) that walks `default_registry()` and renders each manifest's name + on/off state + env-flag description; extracted the polarity rule onto `Manifest.is_enabled` / `Manifest.env_flag_description` (shared by the registry walk and the new enumeration). Closes the goal.md L235-237 Progress signal. Full suite (2335 tests) passes.
 - **Files:** ap2/registry.py, ap2/cli_daemon.py, ap2/howto.md, ap2/tests/test_tb319_status_components.py, ap2/tests/test_janitor.py, ap2/tests/test_tb298_status_attention.py
 - **Tests:** pass
+
+## [2026-05-28] TB-320: Wire env_flag on 3 component manifests + add AP2_AUTO_UNFREEZE_DISABLED
+- **Commit:** `e61ecc9`
+- **Summary:** Previously committed in e61ecc9 — verified the diff covers all scope items (auto_approve/auto_unfreeze/focus_advance manifests wired with env_flag + default_enabled, AP2_AUTO_UNFREEZE_DISABLED added to env_reload HOT_RELOADABLE_KNOBS + howto.md Configuration knobs, auto_unfreeze subpackage self-gate + sticky first-skip auto_unfreeze_disabled event, test_components_disabled.py extended with three TB-320 per-component assertions); 2342/2342 pytest green, all 9 verification grep bullets pass against the (now-fixed) briefing — prior run's verification_failed was a TB-207-shape malformed briefing bullet (operator-fixed via update queue at 19:54:53Z), not an implementation gap.
+- **Files:** ap2/components/auto_approve/manifest.py, ap2/components/auto_unfreeze/__init__.py, ap2/components/auto_unfreeze/manifest.py, ap2/components/focus_advance/manifest.py, ap2/env_reload.py, ap2/howto.md, ap2/init.py, ap2/registry.py, ap2/tests/test_components_disabled.py, ap2/tests/test_tb225_auto_unfreeze.py, ap2/tests/test_tb318_auto_approve_migration.py
+- **Tests:** pass
