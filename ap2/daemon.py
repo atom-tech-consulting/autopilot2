@@ -1448,6 +1448,50 @@ from .daemon_state import (
 )
 
 
+def _validate_toml_config_at_start(cfg: Config) -> None:
+    """Daemon-start TOML schema gate (TB-321 axis 1).
+
+    Walks `.cc-autopilot/config.toml` (if present) and validates every
+    `[components.<name>]` sub-table against the union of all
+    manifests' `config_schema` declarations. Raises `SystemExit` on
+    schema mismatch — fail-fast shape, no auto-correction (goal.md
+    L312-313). The error message names the bad key path so the
+    operator can grep their config file directly:
+
+        [components.janitor] disabled = 'yes': expected bool, got str
+
+    Missing `config.toml` is the no-op path — existing installs see
+    zero behavior change. The function is intentionally synchronous +
+    side-effect-free (apart from the SystemExit raise) so a unit
+    test can exercise it directly without spinning up the loop.
+
+    Implementation lives in `ap2.config_loader.validate_config`; this
+    is the daemon-side adapter that loads the registry and translates
+    a `ConfigSchemaError` into a clean exit (stderr-printed message
+    rather than an asyncio traceback).
+    """
+    from . import config_loader as _config_loader
+    from .config import CONFIG_TOML_FILE
+
+    toml_path = cfg.project_root / CONFIG_TOML_FILE
+    if not toml_path.exists():
+        return
+    try:
+        raw = _config_loader.parse_toml(toml_path)
+        _config_loader.validate_config(raw, default_registry())
+    except _config_loader.ConfigSchemaError as exc:
+        # Print the message + exit cleanly so the operator sees a
+        # one-line error instead of an asyncio traceback. The
+        # daemon's bootstrap shell would otherwise just log the
+        # stack trace, which is harder to spot in a tail of
+        # `daemon_start` / cron events.
+        print(
+            f"ap2: config schema error in {toml_path}: {exc}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from exc
+
+
 async def main_loop(cfg: Config) -> None:
     """Start the daemon: bootstrap, then run the two concurrent loops until SIGTERM.
 
@@ -1470,6 +1514,17 @@ async def main_loop(cfg: Config) -> None:
     the pid file.
     """
     cfg.ensure_dirs()
+    # TB-321 (axis 1): if `.cc-autopilot/config.toml` exists, validate
+    # its `[components.<name>]` sub-tables against the union of every
+    # manifest's `config_schema` BEFORE any tick fires. Fail-fast on
+    # schema mismatch — operator-fix-first shape (goal.md L312-313),
+    # no auto-correction. The error message names the bad key path so
+    # the operator can grep their config file directly. A missing
+    # config.toml is the no-op path (existing installs see zero
+    # behavior change). `Config.load` has already attempted to parse
+    # the file once if present, so a syntax error would have surfaced
+    # earlier — this hook is the schema gate.
+    _validate_toml_config_at_start(cfg)
     if bootstrap_cron(cfg.cron_file):
         events.append(cfg.events_file, "cron_bootstrap", path=str(cfg.cron_file))
     _recover_orphans(cfg)

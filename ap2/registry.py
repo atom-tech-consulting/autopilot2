@@ -66,6 +66,17 @@ import pkgutil
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Union
 
+# TB-321: per-component config-schema declarations live on the
+# manifest as `config_schema: dict[str, ConfigKey]`. The ConfigKey
+# type and the daemon-start `validate_config` helper live in
+# `ap2.config_loader` (axis-1 of the structured-config focus). The
+# import is top-level rather than TYPE_CHECKING-guarded so a
+# manifest body referencing `ConfigKey(...)` at module load time
+# resolves without a forward-string-annotation dance. There is no
+# cycle: `config_loader.py` does not import `registry.py` at module
+# scope (it lazy-imports `Config` only inside `from_toml`).
+from .config_loader import ConfigKey
+
 
 # Per-process cached registry built lazily by `default_registry()`. Tests
 # that need to mutate manifests (e.g. patching a registered hook) should
@@ -162,6 +173,17 @@ class Manifest:
     hook_points: dict[str, Callable]
     dependencies: list[str] = field(default_factory=list)
     tick_hooks: list[tuple[Phase, TickHook]] = field(default_factory=list)
+    # TB-321 (axis 1): per-component config-schema declarations keyed
+    # by the bare TOML key name (e.g. `"disabled"` for the janitor's
+    # `[components.janitor] disabled = true` knob). The registry
+    # aggregates the union across all manifests in
+    # `config_loader.aggregate_schemas(registry)`; the daemon-start
+    # `validate_config` walks `[components.<name>]` sub-tables against
+    # the union. Default empty so the six non-canary manifests
+    # (mattermost, attention, focus_advance, auto_unfreeze,
+    # auto_approve, validator_judge) continue to load until TB-322
+    # fills in their per-component schemas (axis 3).
+    config_schema: dict[str, ConfigKey] = field(default_factory=dict)
 
     def is_enabled(self, env: Optional[dict] = None) -> bool:
         """Resolve this manifest's enabled state against `env` (TB-319).

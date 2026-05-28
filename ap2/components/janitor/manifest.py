@@ -22,6 +22,7 @@ filesystem-driven so future migrations need zero registry-side edits
 """
 from __future__ import annotations
 
+from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest, Phase
 
 from . import recent_finding_counts_by_verdict, run_janitor
@@ -56,4 +57,34 @@ MANIFEST = Manifest(
     # `ap2/tests/test_tb310_tick_hook_protocol.py`.
     tick_hooks=[(Phase.POST_CRON, run_janitor)],
     dependencies=[],
+    # TB-321 (axis 1 canary): janitor is the first component to
+    # declare a `config_schema`. The single key here mirrors the
+    # existing `AP2_JANITOR_DISABLED` kill switch — same default
+    # (`False` → janitor on), same semantic role. The schema entry
+    # proves the end-to-end parse → aggregate → validate walk works
+    # against a real manifest; TB-322 (axis 3) fills in the six
+    # remaining components and TB-323 (axis 2) wires the env-var
+    # back-compat map so `AP2_JANITOR_DISABLED` continues to override
+    # the TOML value. Per-component reads at the
+    # `cfg.components_config["janitor"]["disabled"]` shape land in
+    # axis-(5) per-knob migrations — this TB only lays the read
+    # paths (the dict shape on Config); the runtime still consults
+    # `os.environ.get("AP2_JANITOR_DISABLED")` via
+    # `Manifest.is_enabled()` until the per-knob migration TB.
+    config_schema={
+        "disabled": ConfigKey(
+            name="disabled",
+            type=bool,
+            default=False,
+            description=(
+                "Kill switch for the janitor cron job. True suppresses "
+                "every `run_janitor` invocation (CLI status block keeps "
+                "showing the component as off). Mirrors the existing "
+                "`AP2_JANITOR_DISABLED` env var; TB-323 (axis 2) wires "
+                "the env-override back-compat map so the env var keeps "
+                "overriding the TOML value during the migration window."
+            ),
+            hot_reloadable=False,
+        ),
+    },
 )

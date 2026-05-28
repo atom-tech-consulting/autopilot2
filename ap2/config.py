@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 AUTOPILOT_DIR_NAME = ".cc-autopilot"
@@ -18,6 +19,14 @@ DEFAULT_PROGRESS_FILE = f"{AUTOPILOT_DIR_NAME}/progress.md"
 DEFAULT_TASKS_DIR = f"{AUTOPILOT_DIR_NAME}/tasks"
 EVENTS_FILE = f"{AUTOPILOT_DIR_NAME}/events.jsonl"
 CRON_FILE = f"{AUTOPILOT_DIR_NAME}/cron.yaml"
+# TB-321: structured config (axis 1) — the canonical TOML file the
+# opt-in branch in `Config.load()` prefers when present. Existing
+# installs without this file keep the env-only resolution path
+# bit-for-bit unchanged. The convention is `[core.*]` for non-
+# component tunables and `[components.<name>]` for component-owned
+# knobs (goal.md L307-310). `ap2 init` writing this file on fresh
+# projects is axis-(6); for now operators opt in by hand.
+CONFIG_TOML_FILE = f"{AUTOPILOT_DIR_NAME}/config.toml"
 PID_FILE = f"{AUTOPILOT_DIR_NAME}/daemon.pid"
 PAUSE_FLAG = f"{AUTOPILOT_DIR_NAME}/paused"
 CRON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/cron_state.json"
@@ -200,9 +209,66 @@ class Config:
     verify_timeout_s: int
     auto_diagnose_idle_threshold_s: int
     auto_diagnose_cooldown_s: int
+    # TB-321 (axis 1): `[components.<name>]` sub-tables from the
+    # loaded `.cc-autopilot/config.toml`, stashed verbatim for axis-
+    # (5) per-component read paths to consume at the
+    # `cfg.components_config[<name>][<key>]` shape. Empty dict for
+    # the env-path branch (today's default) so the field is always
+    # safe to read — a component that hasn't been migrated to read
+    # from here just sees `{}` and falls back to its env-resolution
+    # path. Field order matters for the dataclass constructor — the
+    # env-path branch passes positional args, so this MUST be a
+    # default-bearing field at the end of the list.
+    components_config: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
+        """Resolve a `Config` for `project_root` (default: `os.getcwd()`).
+
+        TB-321 (axis 1): if `.cc-autopilot/config.toml` exists, prefer
+        it — delegate to `Config.from_toml` to get the TOML-merged
+        result. Else fall back to today's env-only resolution path
+        (`Config._load_env_path`). Existing installs without
+        `config.toml` see zero behavior change; fresh installs that
+        opt in get the structured-config layer transparently.
+        """
+        root = Path(project_root or os.getcwd()).resolve()
+        toml_path = root / CONFIG_TOML_FILE
+        if toml_path.exists():
+            return cls.from_toml(toml_path)
+        return cls._load_env_path(root)
+
+    @classmethod
+    def from_toml(cls, toml_path: str | Path) -> "Config":
+        """Build a `Config` from `.cc-autopilot/config.toml` at `toml_path`.
+
+        TB-321 (axis 1): thin classmethod shim that delegates to
+        `ap2.config_loader.from_toml`. Implementation lives there so
+        the parser, schema dataclass, validator, and constructor all
+        sit in one module (the briefing's axis-1 deliverable). The
+        method exists on `Config` so callers naming the class-level
+        constructor (`Config.from_toml(path)`) resolve through the
+        same surface as `Config.load()` — both return a
+        shape-compatible `Config` instance.
+        """
+        # Lazy import keeps the config.py ↔ config_loader.py cycle
+        # broken (config_loader.from_toml lazy-imports `Config`).
+        from .config_loader import from_toml as _from_toml
+
+        return _from_toml(Path(toml_path))
+
+    @classmethod
+    def _load_env_path(cls, project_root: str | Path | None = None) -> "Config":
+        """The original env-only `Config.load()` body (pre-TB-321).
+
+        Factored out so both `Config.load()` (when no config.toml
+        exists) and `config_loader.from_toml` (which uses this as the
+        baseline before overlaying TOML values) share one
+        implementation. Behavior is bit-for-bit identical to the
+        pre-TB-321 `Config.load` — same env reads, same defaults,
+        same `load_project_env` + `note_initial_applied` startup
+        side effects.
+        """
         root = Path(project_root or os.getcwd()).resolve()
         applied = load_project_env(root)
         # TB-271: seed the env-reload tracker with the set of keys the
