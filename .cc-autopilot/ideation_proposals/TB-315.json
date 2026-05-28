@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-310,TB-312,TB-314",
+  "briefing_path": ".cc-autopilot/tasks/attention-subpackage-migration-axis-5.md",
+  "focus_anchor": "current focus refactor features into opt in components",
+  "proposed_at": "2026-05-28T09:16:47Z",
+  "tb_id": "TB-315",
+  "why_now": "4 of 6 axes have shipped (1, 2, 3, half of 6) and 3 of 7\ncomponent migrations are done (janitor, focus_advance, auto_unfreeze,\nmattermost). Of the two remaining migrations, `attention/` is the\nsmaller-blast-radius one (auto_approve is goal.md-sequenced LAST per\nL196-197). The canary pattern is now well-grooved across TB-309 \u2192\nTB-313 \u2192 TB-314, so this lands cheaply; deferring it lets the\nTB-311 import-direction gate's exemption set grow stale."
+}

@@ -1,134 +1,137 @@
 # Ideation State
 
-_Last updated: 2026-05-28T06:51:00Z by ideation cron_
+_Last updated: 2026-05-28T09:01:00Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 0B / 0P / 183C / 0F — last cycle's three
-proposals (TB-309, TB-310, TB-311) all landed within ~80 min and the
-board fully drained. The 3 most recent Completes — TB-309 (axis-1
-registry + `janitor/` canary, commit cee1c73), TB-311 (axis-6 partial,
-AST-based import-direction CI gate, commit bafc891), TB-310 (axis-2
-tick-hook protocol + stub manifests for auto_approve / auto_unfreeze
-/ attention / focus_advance, commit 5a755c9 — operator hand-edited one
-Verification bullet per 2026-05-28T05:42Z log to clear a BSD `wc -l`
-padding bug, work was substantively correct) — closed the axis (1)
-prerequisite, opened the axis (2) walk path, and pinned axis (6)'s
-import-direction half. Every commit shipped the structural cleavage goal.md requests without altering any
-observable behavior (zero env-knob renames, zero feature deletions).
+Cycle entry: board 0A / 0R / 0B / 0P / 186C / 0F — last cycle's three
+proposals (TB-312, TB-313, TB-314) all landed within ~90 min and the
+board fully drained. The 3 most recent Completes — TB-312 (axis 3
+channel-adapter ABC + `mattermost/` subpackage migration bundled per
+goal.md L184-186, commit 860b68a), TB-313 (axis-5 `focus_advance/`
+subpackage migration, commit 6b4fcea), TB-314 (axis-5 `auto_unfreeze/`
+subpackage migration, commit 73f5a52) — each pinned the now-canonical
+"git-move + manifest-with-hook_points + late-bind in daemon" shape
+from TB-309's janitor canary. Every commit preserved observable
+behavior (zero env-knob renames, the existing kill switches still bite
+identically) and shipped per-task regression pins (10 tests each in
+TB-313/TB-314). Mission progress is squarely on the axis the operator
+just re-engaged (2026-05-28T04:37:52Z rewind_focus): "refactor
+features into opt-in components".
 
 ## Current focus assessment
 
 - **Current focus: refactor features into opt-in components**
   - Progress so far:
     - Axis (1) registry + manifest schema + `janitor/` canary
-      LANDED (TB-309, cee1c73) — `ap2/registry.py` with `Manifest`
-      dataclass + filesystem-discovery `Registry` + cached
-      `default_registry()`; `ap2/janitor.py` git-moved into
-      `ap2/components/janitor/` with full `manifest.py`. This is the
-      only component that's been migrated to subpackage shape (axis 5).
+      LANDED (TB-309, cee1c73).
     - Axis (2) tick-hook protocol LANDED (TB-310, 5a755c9) — `Phase`
-      enum, `Manifest.tick_hooks`, `Registry.tick_hooks(phase)`;
-      `daemon._tick` walks the registry at PRE_DISPATCH /
-      ATTENTION_EMISSION / POST_DISPATCH. Stub manifests added for
-      auto_approve / auto_unfreeze / attention / focus_advance —
-      these point at the FLAT `ap2/<name>.py` modules (axis 5
-      subpackage move still pending).
+      enum + `Registry.tick_hooks(phase)` + walk at PRE_DISPATCH /
+      ATTENTION_EMISSION / POST_DISPATCH; stub manifests for
+      auto_approve / auto_unfreeze / attention / focus_advance
+      (since TB-313/TB-314 the focus_advance + auto_unfreeze stubs
+      are no longer stubs — they're real subpackages).
+    - Axis (3) channel-adapter abstraction LANDED (TB-312, 860b68a)
+      — `ap2/channel.py` `ChannelAdapter` ABC + three core sibling
+      adapters (`StdoutChannelAdapter`, `FileAppendChannelAdapter`,
+      `WebhookChannelAdapter`); `_mm_post` call sites in
+      `daemon._maybe_push_attention` + `watchdog._maybe_auto_diagnose`
+      now walk the registry's adapter list.
+    - Axis (5) `mattermost/` migration LANDED (TB-312, 860b68a —
+      bundled per goal.md L184-186).
+    - Axis (5) `focus_advance/` migration LANDED (TB-313, 6b4fcea).
+    - Axis (5) `auto_unfreeze/` migration LANDED (TB-314, 73f5a52).
     - Axis (6) import-direction CI gate LANDED (TB-311, bafc891) —
-      AST-based pytest gate covering 4 static import forms + exempt
-      set for the registry.
+      first half of axis 6.
   - Gaps (in sequenced order per goal.md L216-221):
-    - Axis (3) channel-adapter abstraction NOT STARTED — `_mm_post`
-      call sites in `daemon.py:1919`, `watchdog.py:90,130` and the
-      status-report digest delivery still hardcode Mattermost. Goal.md
-      L184-186 explicitly bundles the `mattermost/` axis-5 migration
-      with axis 3 (channel/team/bot env knobs + `mattermost_reply`
-      MCP tool move together).
-    - Axis (5) `focus_advance/` subpackage move NOT STARTED — the
-      stub manifest at `ap2/components/focus_advance/manifest.py`
-      still imports `from ap2 import focus_advance as
-      _focus_advance_mod` (flat module). Per goal.md L189-193 the
-      module body itself needs to move into the subpackage.
-    - Axis (5) `auto_unfreeze/` subpackage move NOT STARTED — same
-      shape as focus_advance gap; stub manifest exists.
-    - Axis (5) `attention/` subpackage move BLOCKED on axis 3 — per
-      goal.md L188 attention publishes via the channel adapter, so
-      sequencing requires axis 3 first.
-    - Axis (5) `auto_approve/` subpackage move — explicitly sequenced
-      LAST per goal.md L196-197 (largest blast radius — touches
-      ideation, proposal labeling, retry semantics, cost guards).
-    - Axis (4) validator pipeline + `validator_judge/` migration —
-      conjoined per goal.md L218. Independent of axes 3/2 but distinct
-      slice; lower marginal value this cycle vs. axis 3.
-    - Axis (6) disabled-config test suite — second half of axis 6
-      (the half TB-311 didn't ship). Lands incrementally; cheaper
-      after a couple more migrations than as the immediate next step
-      (today only `janitor/` is a true subpackage component, so a
-      "every component disabled" suite has minimal surface to assert
-      against — wait until ≥3 subpackages exist).
+    - Axis (5) `attention/` migration NOT STARTED — flat
+      `ap2/attention.py` (879 lines) still exists; stub manifest at
+      `ap2/components/attention/manifest.py` late-binds via `from ap2
+      import daemon as _daemon_mod`. Per goal.md L187-188 attention
+      sequences AFTER axis 3 (channel-adapter); axis 3 shipped in
+      TB-312, so attention is now unblocked.
+    - Axis (4) validator pipeline as list + `validator_judge/`
+      migration NOT STARTED. `_validate_briefing_structure` in
+      `ap2/briefing_validators.py` (1133 lines) calls TB-154/TB-161/
+      TB-164/TB-171/TB-235/TB-308 checks inline; the TB-235
+      LLM-judge call sits at L1105-1129 (imports
+      `_check_dependency_coherence` from flat `ap2/validator_judge.py`,
+      898 lines, also imported by `ap2/tools.py` + `ap2/doctor.py`).
+      Goal.md L218 says axis 4 "gates on (5)'s validator_judge
+      migration" — the two ship together.
+    - Axis (5) `auto_approve/` migration NOT STARTED — flat
+      `ap2/auto_approve.py` (743 lines) still exists; stub manifest
+      late-binds via daemon. Per goal.md L196-197 sequenced LAST
+      (largest blast radius — touches ideation, proposal labeling,
+      retry semantics, cost guards). Defer to next cycle once the
+      attention + validator_judge migrations land.
+    - Axis (6) disabled-config test suite NOT STARTED — second half
+      of axis 6 (TB-311 only shipped the import-direction gate).
+      Goal.md L206-209 names `tests/test_components_disabled.py`
+      asserting the full suite passes in the "every component
+      disabled" configuration. Now has surface: 4 real subpackages
+      (janitor, focus_advance, auto_unfreeze, mattermost) plus the
+      core `ap2/channel.py` adapter ABC + sibling defaults — enough
+      to assert "core behavior unchanged with every component env
+      flag disabled".
   - Status: `in-progress`
-  - Reasoning: 3 of 6 axes have shipped foundational work (1, 2,
-    half of 6); 3 axes plus 5 component migrations remain. Plenty
-    of unblocked structural work.
 
 ## Non-goal risk check
 
 None. All proposed work is the structural refactor the focus asks
-for. No new env-knob renames (goal.md L64-67 constraint), no goal.md
+for. No env-knob renames (goal.md L64-67 constraint), no goal.md
 auto-mutation (L272-277), no behavior-removal during extraction
-(L278-282). Each migration preserves the existing kill switch
-(`AP2_FOCUS_AUTO_ADVANCE_DISABLED`, `AP2_AUTO_UNFREEZE_DISABLED`,
-etc.).
+(L278-282). Each migration preserves existing kill switches
+(`AP2_ATTENTION_IMMEDIATE_PUSH`, `AP2_AUTO_UNFREEZE_FIX_SHAPES`,
+`AP2_VALIDATOR_JUDGE_*`, etc.).
 
 ## Considered & deferred this cycle
 
-- **Axis (5) `attention/` migration proposal this cycle** — Goal.md
-  L188 makes this depend on axis 3's channel-adapter abstraction.
-  Premature until TB-312 lands; re-propose next cycle once axis 3
-  is in. (Surfaces the channel-adapter integration point as the
-  immediate gate.)
-- **Axis (4) validator-pipeline-as-list + `validator_judge/`
-  migration proposal this cycle** — Independent of axis 3 and could
-  ship in parallel; deferred because three structural proposals
-  already populate this cycle's slate and the validator_judge
-  migration is largest of the remaining (manifest schema for the
-  pipeline-as-list plus an SDK-call-bearing component). Re-propose
-  next cycle.
-- **Axis (5) `auto_approve/` migration** — Goal.md L196-197 places
-  this LAST in migration order ("largest blast radius — touches
-  ideation, proposal labeling, retry semantics, cost guards").
-  Premature; wait until ≥4 prior migrations land and the migration
-  shape is well-grooved.
-- **Axis (6) disabled-config test suite proposal this cycle** —
-  Today only `janitor/` is a real subpackage component; a
-  "every component disabled" assertion has minimal surface area to
-  bite on. Higher leverage after 2-3 more migrations land. Carry
-  to a future cycle.
+- **Axis (5) `auto_approve/` migration proposal this cycle** —
+  Goal.md L196-197 places this LAST in migration order ("largest
+  blast radius — touches ideation, proposal labeling, retry
+  semantics, cost guards; migrate last"). Defer until attention/ +
+  validator_judge/ land first; next cycle is the natural slot.
+- **Auto-unfreeze of TB-310** — Operator manually edited TB-310's
+  Verification bullet on 2026-05-28T05:42:24Z (BSD `wc -l` padding
+  fix); the change rode into a state commit as a side effect.
+  Process lesson noted in operator log — not actionable from
+  ideation (the original task is already Complete).
 - **Rejection-pattern check (carried, re-justified)**: operator
   vetoes TB-185/184 (ap2-meta-polish unconnected to focus), TB-231
   (symptom-patching without root-cause), TB-175 (premature
-  aggregation), TB-240 (validator whack-a-mole). New-focus
-  proposals must clear "structural cleavage, not polish" — every
-  ranked proposal below maps directly to a named axis line in
-  goal.md (L116-214), not a meta-polish gap.
+  aggregation), TB-240 (validator whack-a-mole). The three proposals
+  below all map directly to a named axis line in goal.md
+  (L116-214) — axis 5 attention, axis 4 + axis 5 validator_judge,
+  axis 6 disabled-config test — not meta-polish. TB-316 in
+  particular is goal.md-mandated restructuring of the validator
+  pipeline, NOT another "lint shell bullets" whack-a-mole (TB-172/
+  TB-240 shape — those proposed *new* check kinds; TB-316 keeps
+  the existing 7 checks identical, only rearranges them into a
+  list and extracts the SDK-bearing one as a component).
 
 ## Cycle observations
 
-- The shipped axis-2 stub manifests (TB-310, 5a755c9) point at the
-  pre-move flat modules. The axis-5 migration of each is now a
-  focused "git-move + manifest-update + test-path-fix" pattern —
-  identical shape to TB-309's janitor canary. This means axis 5
-  migrations can land in parallel and don't require novel design
-  per migration (the canary did the design work).
-- Operator manually edited TB-310's Verification bullet on 2026-05-28
-  (`test "$(... | wc -l)" = "0"` → `! grep -qE ...`) because BSD
-  `wc -l` emits padded `       0`. Briefing-shape lesson #7 in memory.
-  Ranked proposals below use `! grep -q ...` for absence checks per
-  TB-270 absence-check rule.
-- Goal.md L184-186 bundles `mattermost/` axis-5 migration WITH axis
-  3 ("Mattermost HTTP client, channel/team/bot env knobs, and the
-  `mattermost_reply` MCP tool all move together"). TB-312 below
-  proposes both in one task, matching that explicit bundling.
+- Three axis-5 migrations landed in a single 90-min window
+  (TB-312/313/314). The pattern is now well-grooved: git-mv flat
+  module → `__init__.py` of subpackage, write/update `manifest.py`
+  exposing every previously-direct-imported symbol in
+  `hook_points`, rebind daemon module-level aliases via
+  `default_registry().get(...).hook_points[...]`, fix the handful
+  of test files that imported the flat path. Briefings can be
+  shorter going forward — naming the canary commit (cee1c73 or
+  the most-recent sibling) as the shape reference avoids
+  re-spelling the design.
+- Goal.md L218 explicitly conjoins axes 4 + the `validator_judge/`
+  migration ("(4) gates on (5)'s `validator_judge` migration").
+  TB-316 below proposes both in one task, matching that explicit
+  conjunction (same model as TB-312's axes-3+5 bundling).
+- The disabled-config test was deferred last cycle ("today only
+  `janitor/` is a true subpackage component, so a 'every component
+  disabled' suite has minimal surface to assert against — wait
+  until ≥3 subpackages exist"). With TB-312/313/314 landing, the
+  count is now 4 (janitor + focus_advance + auto_unfreeze +
+  mattermost), well past that threshold. Proposing this cycle.
 
 ## Decisions needed from operator
 
@@ -136,10 +139,11 @@ etc.).
 
 ## Proposals this cycle
 
-3 proposals: TB-312 (axis 3 channel-adapter abstraction + axis-5
-`mattermost/` migration, bundled per goal.md L184-186), TB-313
-(axis-5 `focus_advance/` subpackage migration), TB-314 (axis-5
-`auto_unfreeze/` subpackage migration). Slot budget is 5; deliberately
-proposing 3 because the remaining unblocked work (axis 4, attention/,
-auto_approve/, disabled-config test suite) is sequenced behind these
-or behind one of them.
+3 proposals: TB-315 (axis-5 `attention/` subpackage migration),
+TB-316 (axis-4 validator pipeline-as-list + axis-5 `validator_judge/`
+migration, bundled per goal.md L218), TB-317 (axis-6 disabled-config
+test suite, second half of axis 6 — complements TB-311's
+import-direction gate). Slot budget is 5; deliberately proposing 3
+because the only remaining unblocked work after these is
+`auto_approve/` (goal.md L196-197 places it LAST), which is the
+natural anchor for next cycle.
