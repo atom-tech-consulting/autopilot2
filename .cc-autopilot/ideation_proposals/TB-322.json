@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-321",
+  "briefing_path": ".cc-autopilot/tasks/fill-config-schema-on-the-6-remaining-co.md",
+  "focus_anchor": "current focus structured config env toml",
+  "proposed_at": "2026-05-28T22:06:36Z",
+  "tb_id": "TB-322",
+  "why_now": "TB-321 lands the `Manifest.config_schema` field plus the\njanitor canary but only the canary fills it in. Without the six\nfollow-up declarations the validator surface is vacuous and the\naxis-6 docs-drift gate has nothing to assert against. This is the\nmeat of axis (3) per goal.md L335 \u2014 \"Each existing component gains\na config_schema field on its Manifest\" \u2014 and unblocks the axis-5\nper-cluster migration tasks that need schema defaults to migrate\ntheir reads against."
+}

@@ -1,138 +1,146 @@
 # Ideation State
 
-_Last updated: 2026-05-28T19:53:10Z by ideation cron_
+_Last updated: 2026-05-28T21:57:00Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 1B / 0P / 191C / 0F (TB-320 still
-in Backlog post verification_failed event). The operator engaged
-since the prior cycle (2026-05-28T17:38:00Z): TB-320 was
-add_backlog-queued at 19:35:48Z and auto-promoted within 12s —
-direct action on the prior cycle's first surfaced decision (the
-env_flag-polarity question for the 4 env_flag=None manifests).
-TB-320's run landed substantive work in commit e61ecc9 (wired
-env_flag on auto_approve / auto_unfreeze / focus_advance manifests
-+ new AP2_AUTO_UNFREEZE_DISABLED kill switch with sticky-first-skip
-audit event); 11 of 12 verification bullets passed; the lone fail
-was a `kind=malformed` shell bullet — TB-207-shape literal backtick
-inside a single-backtick codespan, with the verifier emitting its
-own diagnostic (`Rewrite the bullet to either (a) use a
-double-backtick wrapping…`). At 19:54:53Z the operator queued an
-`update` op on TB-320 — the standard remediation path for a
-shell-bullet typo, no ideation surface needed. Three most recent
-Completes: TB-318 (axis-5 final auto_approve migration, 548e667),
-TB-319 (ap2 status enumerates components, ce55765), TB-320 in
-flight (e61ecc9, verification_failed pending operator update).
+Cycle entry: board 0A / 0R / 0B / 0P / 192C / 0F. Operator extended
+goal.md at 2026-05-28T20:33:04Z with a new focus, **"structured
+config (env → TOML)"**, then ran `rewind-focus` to reset the empty-
+cycles counter (the prior focus auto-exhausted as soon as goal.md
+was extended). The just-shipped component-refactor focus
+(TB-309 → TB-320, all six named axes + the `ap2 status` L235-237
+Progress signal landed) closed cleanly: every autonomous behavior
+now lives under `ap2/components/<name>/` with manifest-declared
+hook points (TB-318 final migration, 548e667). Most recent Completes
+considered: TB-318 (axis-5 auto_approve migration, 548e667),
+TB-319 (`ap2 status` enumerates components, ce55765), TB-320
+(env_flag wiring on the last 3 manifests + AP2_AUTO_UNFREEZE_DISABLED
+kill switch, e61ecc9). Backlog is empty and a fresh 6-axis roadmap
+is on the table — this cycle re-derives proposals from scratch
+against goal.md L266-403 (the new focus body).
 
 ## Current focus assessment
 
-- **Current focus: refactor features into opt-in components**
+- **Current focus: structured config (env → TOML)**
   - Progress so far:
-    - Axis (1) registry + manifest LANDED (TB-309, cee1c73).
-    - Axis (2) tick-hook protocol LANDED (TB-310, 5a755c9).
-    - Axis (3) channel-adapter ABC + sibling defaults LANDED
-      (TB-312, 860b68a).
-    - Axis (4) validator pipeline-as-list LANDED (TB-316, 1af2400).
-    - Axis (5) seven migrations LANDED: `janitor/` (TB-309),
-      `mattermost/` (TB-312), `focus_advance/` (TB-313),
-      `auto_unfreeze/` (TB-314), `attention/` (TB-315),
-      `validator_judge/` (TB-316), `auto_approve/` (TB-318).
-    - Axis (6) import-direction CI gate LANDED (TB-311, bafc891);
-      disabled-config test suite LANDED (TB-317, 244424b).
-    - Progress signal L235-237 (`ap2 status` enumerates components)
-      LANDED (TB-319, ce55765); confirmed against live daemon.
-    - Env_flag-polarity gap (prior-cycle decision #1) now in flight
-      via operator-queued TB-320 (e61ecc9) — 3 of 4 env_flag=None
-      manifests gain explicit knobs, attention/ stays env_flag=None
-      per the operator's authored exception, AP2_AUTO_UNFREEZE_DISABLED
-      added as a new HOT_RELOADABLE kill switch with subpackage
-      self-gate. 11 of 12 verification bullets pass; pending the
-      operator's queued 19:54:53Z update op to fix the malformed bullet.
+    - Zero TB-Ns shipped against this focus yet (added 2026-05-28
+      via operator `update_goal` op at 20:33:04Z; rewind_focus
+      at 20:33:50Z reset the empty-cycles counter so the daemon
+      doesn't auto-advance on entry).
+    - Adjacent ground-truth shipped: TB-309 left the registry +
+      `Manifest` dataclass (`ap2/registry.py`) as the natural home
+      for the new `config_schema` field per goal.md L335-340; TB-305
+      shipped the env-template docs-drift gate
+      (`test_every_env_knob_in_template_or_exempt`,
+      `_TEMPLATE_EXEMPT_KNOBS` frozenset with 38 entries) that the
+      axis-6 config-schema sibling will mirror.
   - Gaps:
-    - **In-flight remediation**: TB-320's one failing bullet
-      (`kind=malformed`, TB-207-shape literal backtick in
-      single-backtick codespan); operator has already queued an
-      update op, so the standard fix-and-retry loop closes this
-      without ideation surface.
-    - **Operator-blocked** (carried — re-articulated): extracting
-      `auto_approve`'s per-task gate logic from `daemon._tick`
-      into the component's `_tick_hook` is the remaining structural
-      follow-up (auto_approve manifest docstring L11-16 explicitly
-      flags "observable-behavior risk (per-task event payloads)"
-      and labels it a "separate follow-up refactor"); ideation
-      reads that as operator-gated.
-  - Status: in operator-update flow and pending operator decision on roadmap extension.
+    - **Axis (1) prerequisite missing** (goal.md L304-315): no
+      `ap2/config_loader.py` or `Config.from_toml(path)`
+      constructor exists; the daemon still loads exclusively via
+      `Config.load()` reading `os.environ.get("AP2_*", default)`
+      at 9 sites in `ap2/config.py` (110 `AP2_*` env reads across
+      30 files — Grep audit 2026-05-28). Without axis (1) every
+      downstream axis has nothing to read against.
+    - **Axis (2) back-compat layer missing** (goal.md L317-329):
+      no `ap2/config_compat.py` mapping the existing flat
+      `AP2_*` names to the TOML-section overrides; no
+      `env_deprecated` one-shot event vocabulary registered in
+      `ap2/events.py`. Without this, OSS users get a new file
+      but every existing shell-export / CI override breaks.
+    - **Axis (3) per-component schema declarations missing**
+      (goal.md L331-340): the 7 existing `Manifest` instances
+      (janitor, validator_judge, mattermost, attention,
+      focus_advance, auto_unfreeze, auto_approve) carry no
+      `config_schema` field; the `Manifest` dataclass at
+      `ap2/registry.py` L88-105 has no slot for it yet either.
+      A scaffold (field + janitor canary) + per-component fill-in
+      both need to land.
+    - **Axes (4) CLI surface, (5) ~52-knob migration, (6) docs-
+      drift sibling**: all blocked on (1)-(3); not ideation-
+      proposable this cycle. (5) is explicitly a per-cluster
+      long-tail per goal.md L353-364.
+  - Status: `in-progress`
+  - Reasoning: fresh focus, zero TB-Ns shipped, prerequisite
+    structural slice (axis 1) is the unambiguous next step;
+    parallelizable follow-ups (axes 2 + 3) have a natural shape
+    once axis 1 lands.
 
 ## Non-goal risk check
 
-None. Continuing 0-proposal posture respects goal.md L102-105
-(OSS distribution is a SEPARATE downstream focus) and the
-operator-rejection pattern that punishes meta-polish unconnected
-to named axes (TB-185, TB-184, TB-175).
+None. All three proposed tasks sit squarely in the new focus's
+axes (1)-(3) per goal.md L304-340. The previously-shipped
+behavior surface stays bit-identical (axis 1 / 2 are pure
+add-then-parallel-path; axis 3 is dataclass-field additions
++ registry-walked validation). No drift into goal.md L405-447
+Non-goals (no multi-tenancy, no goal.md auto-rotation, no
+API-stability commitments on `ap2/core/`, no behavior removal
+during component extraction).
 
 ## Considered & deferred this cycle
 
-- **`#fix-briefing` task for TB-320's malformed bullet** — TB-88
-  Step 1.5 classification fits (edit-briefing: single bullet,
-  known TB-207 shape, substantive commit landed). DEFERRED because
-  the operator already queued an `update TB-320` op at 19:54:53Z;
-  proposing a parallel fix-briefing task would duplicate the
-  in-flight remediation. Re-evaluate only if the operator update
-  goes stale.
-- **Extract `auto_approve` per-task gate logic from `daemon._tick`
-  into the component's `_tick_hook`** (carried) — would pay focus
-  rent (L223-227 delete-test: "move a previously-hardcoded behavior
-  into a component without changing its observable behavior") but
-  the auto_approve manifest docstring (L11-16) explicitly flags
-  "observable-behavior risk (per-task event payloads)" and labels
-  it a "separate follow-up refactor". Promoting without operator
-  sign-off would bypass an authored guardrail. Carried to
-  `## Decisions needed from operator` with explicit unblock.
-- **Add env_flag to `attention/` manifest** — operator decision
-  pinned in TB-320's Out-of-scope (L192-194): "attention stays
-  always-on as baseline operator-legible signal". Dropping this
-  candidate from future-cycle consideration unless operator re-opens.
-- **Web `/components` page mirroring `ap2 status`'s component
-  block** — pure meta-polish unconnected to a named axis; below
-  the operator-rejection threshold (TB-185 shape). Deferred
-  indefinitely.
-- **Rejection-pattern check (carried, re-justified)**: operator
-  vetoes TB-185/184 (ap2-meta-polish unconnected to focus), TB-175
-  (premature aggregation), TB-231 (symptom-patching), TB-240
-  (validator whack-a-mole). All four deferred candidates above
-  would risk one of these failure modes. Zero-proposal posture
-  remains the goal-aligned move.
+- **Axis (4) CLI surface (`ap2 config list / get / set / validate`)**:
+  natural follow-up to TB-321 (axis 1), but the validate / list
+  verbs need the schema-registry walk that doesn't exist until
+  TB-321 ships. Defer to a post-TB-321 cycle. Re-rank once axis 1
+  is in HEAD; until then the daemon-startup-validator covers the
+  validation surface and the toml file is operator-readable
+  directly.
+- **Axis (5) per-knob migration (one TB-N per cluster)**: the
+  long-tail body of the focus per goal.md L353-364. Defer until
+  axes (1) + (3) ship — without `cfg.<path>.<key>` read paths
+  and per-component `config_schema` declarations, every
+  migration task would be a stub. Each cluster (auto_approve
+  knobs, attention knobs, etc.) is a clean ~30-line TB-N once
+  the foundation exists.
+- **Axis (6) docs-drift gate sibling (TB-305 sibling for
+  config-key documentation)**: cheap to write but premature —
+  with zero schema keys declared and zero knobs migrated, the
+  gate would pass vacuously. Defer until axis (3) fills in the
+  first 2-3 component schemas so the gate has surface to assert
+  against.
+- **Recurring rejection-pattern check (carried, re-justified)**:
+  operator vetoes TB-185/184 (ap2-meta-polish unconnected to
+  focus), TB-175 (premature aggregation), TB-231
+  (symptom-patching), TB-240 (validator whack-a-mole). None of
+  the three proposed tasks fit those shapes — they're direct
+  build-out of operator-authored goal.md L266-403 axes (1)-(3)
+  with explicit delete-test alignment. Pattern carried so
+  future cycles re-verify alignment as the foundation matures.
 
 ## Cycle observations
 
-(none — prior cycle's observation that the manifest-internal-switch
-design polarity is "pinned in manifest docstrings on disk" is now
-also pinned in TB-320's authored Out-of-scope clause, so the rule
-is double-anchored and doesn't need ideation working memory)
+- Prior cycle's observation about manifest-internal-switch design
+  polarity being double-anchored (in manifest docstrings + TB-320
+  Out-of-scope) has shipped to current state and no longer
+  informs reasoning. Dropped.
+- New observation worth carrying once: the 110-call sweep of
+  `os.environ.get("AP2_*")` across 30 files (Grep,
+  2026-05-28T21:55Z) is the size estimate for axis (5)'s
+  migration tail; informs cluster-grouping decisions in future
+  cycles. Carry for one cycle, then drop once axis (5) starts
+  shipping.
 
 ## Decisions needed from operator
 
-- Decision needed: with all six named axes + the L235-237 Progress
-  signal landed AND TB-320 closing the env_flag-polarity gap
-  (operator-update remediation in flight), should the operator
-  extend goal.md with the next focus (OSS distribution per
-  L102-105, or something else), OR run `ap2 approve` on an
-  explicit follow-up to extract `auto_approve`'s per-task gate
-  logic out of `daemon._tick` into the component's `_tick_hook`?
-  The auto_approve manifest docstring (L11-16) flags the
-  extraction as "observable-behavior risk (per-task event
-  payloads)" and a "separate follow-up refactor"; ideation reads
-  that as operator-gated rather than auto-proposable. Unblock
-  condition: extending the roadmap restores ideation's grounding
-  surface; without it, this becomes the fourth consecutive empty
-  cycle and the empty-cycles counter is accumulating toward
-  auto-advance / `roadmap_complete` (the daemon will emit on its
-  own once the threshold is hit, since this is the sole active
-  focus).
+(none — fresh focus is well-specified at goal.md L266-403 with
+explicit axis ordering, delete-tests, and Progress signals; no
+narrative-judgment ambiguity ideation is uniquely positioned to
+surface this cycle. The three proposed tasks below are direct
+build-out of operator-authored axes (1)-(3); operator approval
+via `ap2 approve TB-321`/`TB-322`/`TB-323` is the standard
+review-gate path.)
 
 ## Proposals this cycle
 
-0 proposals. Slot budget is 4; deliberately proposing 0 rather
-than inventing meta-polish or pre-empting the auto_approve
-extraction decision. TB-320's malformed-bullet fix is already in
-operator-update flow; no parallel fix-briefing proposal needed.
+- TB-321 (axis 1): TOML config schema + parser + validator +
+  `Config.from_toml` + `Manifest.config_schema` dataclass field
+  + janitor canary declaration (single end-to-end vertical
+  slice).
+- TB-322 (axis 3): walk the remaining 6 component manifests and
+  fill in their `config_schema` declarations; registry's
+  startup-validator (from TB-321) consumes them. `@blocked:TB-321`.
+- TB-323 (axis 2): env-var override layer + `config_compat.py`
+  back-compat map for the ~52 flat `AP2_*` names + one-shot
+  `env_deprecated` event vocabulary. `@blocked:TB-321`.
