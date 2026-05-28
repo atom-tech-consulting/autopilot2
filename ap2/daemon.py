@@ -26,7 +26,6 @@ from pathlib import Path
 from . import (
     attention,
     auto_approve,
-    auto_unfreeze,
     diagnose,
     env_reload,
     events,
@@ -1778,19 +1777,55 @@ _was_auto_approved = auto_approve._was_auto_approved
 _window_token_cap = auto_approve._window_token_cap
 evaluate_auto_approve_decision = auto_approve.evaluate_auto_approve_decision
 
-_AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT = auto_unfreeze._AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT
-_AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT = auto_unfreeze._AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT
-_AUTO_UNFREEZE_WINDOW_S = auto_unfreeze._AUTO_UNFREEZE_WINDOW_S
-_apply_auto_unfreeze_patch = auto_unfreeze._apply_auto_unfreeze_patch
-_auto_unfreeze_allowlist = auto_unfreeze._auto_unfreeze_allowlist
-_auto_unfreeze_dry_run = auto_unfreeze._auto_unfreeze_dry_run
-_auto_unfreeze_max_per_day = auto_unfreeze._auto_unfreeze_max_per_day
-_auto_unfreeze_max_per_task = auto_unfreeze._auto_unfreeze_max_per_task
-_count_auto_unfreeze_applied_for_task = auto_unfreeze._count_auto_unfreeze_applied_for_task
-_count_auto_unfreeze_applied_in_window = auto_unfreeze._count_auto_unfreeze_applied_in_window
-_maybe_auto_unfreeze = auto_unfreeze._maybe_auto_unfreeze
-_most_recent_blocked_complete_for = auto_unfreeze._most_recent_blocked_complete_for
-_shared_parse = auto_unfreeze._shared_parse
+# TB-314 (axis 5): auto_unfreeze was relocated from the flat module
+# `ap2/auto_unfreeze.py` to the subpackage
+# `ap2/components/auto_unfreeze/`. Core must not statically import
+# from `ap2/components/` (TB-311 import-direction gate), so the
+# module-level aliases below resolve via the registry's manifest
+# hook_points at module-load time. Tests that monkey-patch
+# `daemon._maybe_auto_unfreeze` (or any other alias here) still work
+# — the rebind happens once here, and the test's setattr on the
+# daemon module overrides this attribute for the duration of the
+# test.
+_auto_unfreeze_manifest = default_registry().get("auto_unfreeze")
+_AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT = _auto_unfreeze_manifest.hook_points[
+    "AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT"
+]
+_AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT = _auto_unfreeze_manifest.hook_points[
+    "AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT"
+]
+_AUTO_UNFREEZE_WINDOW_S = _auto_unfreeze_manifest.hook_points[
+    "AUTO_UNFREEZE_WINDOW_S"
+]
+_apply_auto_unfreeze_patch = _auto_unfreeze_manifest.hook_points[
+    "apply_auto_unfreeze_patch"
+]
+_auto_unfreeze_allowlist = _auto_unfreeze_manifest.hook_points[
+    "auto_unfreeze_allowlist"
+]
+_auto_unfreeze_dry_run = _auto_unfreeze_manifest.hook_points[
+    "auto_unfreeze_dry_run"
+]
+_auto_unfreeze_max_per_day = _auto_unfreeze_manifest.hook_points[
+    "auto_unfreeze_max_per_day"
+]
+_auto_unfreeze_max_per_task = _auto_unfreeze_manifest.hook_points[
+    "auto_unfreeze_max_per_task"
+]
+_count_auto_unfreeze_applied_for_task = _auto_unfreeze_manifest.hook_points[
+    "count_auto_unfreeze_applied_for_task"
+]
+_count_auto_unfreeze_applied_in_window = _auto_unfreeze_manifest.hook_points[
+    "count_auto_unfreeze_applied_in_window"
+]
+_maybe_auto_unfreeze = _auto_unfreeze_manifest.hook_points[
+    "maybe_auto_unfreeze"
+]
+_most_recent_blocked_complete_for = _auto_unfreeze_manifest.hook_points[
+    "most_recent_blocked_complete_for"
+]
+_shared_parse = _auto_unfreeze_manifest.hook_points["shared_parse"]
+del _auto_unfreeze_manifest
 
 # TB-313 (axis 5): focus_advance was relocated from the flat module
 # `ap2/focus_advance.py` to the subpackage
