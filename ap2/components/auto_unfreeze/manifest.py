@@ -29,6 +29,7 @@ callable-or-value.
 from __future__ import annotations
 
 from ap2 import events as _events_mod
+from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest, Phase
 
 from . import (
@@ -107,4 +108,81 @@ MANIFEST = Manifest(
     },
     tick_hooks=[(Phase.PRE_DISPATCH, _tick_hook)],
     dependencies=[],
+    # TB-322 (axis 3): per-component `config_schema` declarations for
+    # every auto-unfreeze knob the subpackage reads via
+    # `os.environ.get` in `ap2/components/auto_unfreeze/__init__.py`
+    # (the five `AP2_AUTO_UNFREEZE_DISABLED` /
+    # `AP2_AUTO_UNFREEZE_FIX_SHAPES` / `AP2_AUTO_UNFREEZE_DRY_RUN` /
+    # `AP2_AUTO_UNFREEZE_MAX_PER_TASK` /
+    # `AP2_AUTO_UNFREEZE_MAX_PER_DAY` call sites).
+    # Defaults mirror the in-source `_AUTO_UNFREEZE_*_DEFAULT`
+    # constants (`__init__.py` L61-63 + the falsy-default booleans);
+    # every knob here is in `env_reload.HOT_RELOADABLE_KNOBS`
+    # (per-call lazy reads — tune-without-restart per TB-225 / TB-233 /
+    # TB-320), so `hot_reloadable=True` across the board.
+    config_schema={
+        "disabled": ConfigKey(
+            name="disabled",
+            type=bool,
+            default=False,
+            description=(
+                "Kill switch for the auto-unfreeze sweep (TB-320). "
+                "True short-circuits `_maybe_auto_unfreeze` entirely. "
+                "Mirrors `AP2_AUTO_UNFREEZE_DISABLED`; in "
+                "`HOT_RELOADABLE_KNOBS`."
+            ),
+            hot_reloadable=True,
+        ),
+        "fix_shapes": ConfigKey(
+            name="fix_shapes",
+            type=str,
+            default="",
+            description=(
+                "Comma-separated allowlist of fix-shape tokens "
+                "(TB-225). Non-empty enables auto-unfreeze attempts "
+                "for the listed shapes; default empty means the "
+                "feature is off. Mirrors `AP2_AUTO_UNFREEZE_FIX_SHAPES`."
+            ),
+            hot_reloadable=True,
+        ),
+        "dry_run": ConfigKey(
+            name="dry_run",
+            type=bool,
+            default=False,
+            description=(
+                "Monitor-only on-ramp (TB-233). When True alongside "
+                "a non-empty `fix_shapes`, the sweep runs the entire "
+                "guard chain but emits `would_auto_unfreeze` instead "
+                "of patching the briefing. Mirrors "
+                "`AP2_AUTO_UNFREEZE_DRY_RUN`."
+            ),
+            hot_reloadable=True,
+        ),
+        "max_per_task": ConfigKey(
+            name="max_per_task",
+            type=int,
+            default=1,
+            description=(
+                "Per-task cap on auto-unfreeze applications across "
+                "the rolling 24h window (TB-225). A task that's been "
+                "auto-unfrozen `max_per_task` times falls back to "
+                "manual `ap2 unfreeze`. Mirrors "
+                "`AP2_AUTO_UNFREEZE_MAX_PER_TASK`; 0 disables the cap."
+            ),
+            hot_reloadable=True,
+        ),
+        "max_per_day": ConfigKey(
+            name="max_per_day",
+            type=int,
+            default=3,
+            description=(
+                "Per-day cap on total auto-unfreeze applications "
+                "across all tasks (rolling 24h window). When "
+                "exceeded the daemon halts and surfaces a "
+                "`## Decisions needed from operator` bullet. Mirrors "
+                "`AP2_AUTO_UNFREEZE_MAX_PER_DAY`; 0 disables the cap."
+            ),
+            hot_reloadable=True,
+        ),
+    },
 )

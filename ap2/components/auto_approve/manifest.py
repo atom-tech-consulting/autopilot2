@@ -38,6 +38,7 @@ live in `hook_points`; the dict's value is just a callable-or-value.
 """
 from __future__ import annotations
 
+from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest, Phase
 
 from . import (
@@ -123,4 +124,85 @@ MANIFEST = Manifest(
     },
     tick_hooks=[(Phase.POST_DISPATCH, _tick_hook)],
     dependencies=[],
+    # TB-322 (axis 3): per-component `config_schema` declarations for
+    # the auto-approve knobs the component logically owns
+    # (`AP2_AUTO_APPROVE`, `AP2_AUTO_APPROVE_DRY_RUN`,
+    # `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`,
+    # `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`,
+    # `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`).
+    # The three threshold/cap knobs (`FREEZE_THRESHOLD`,
+    # `PER_TASK_TOKEN_CAP`, `WINDOW_TOKEN_CAP`) are read via
+    # `os.environ.get` in `ap2/components/auto_approve/__init__.py`
+    # (call sites L85 / L269 / L287); the master switch
+    # `AP2_AUTO_APPROVE` and the dry-run knob `AP2_AUTO_APPROVE_DRY_RUN`
+    # are read elsewhere today (daemon.py / operator_queue.py /
+    # board_edits.py / ideation.py) but are listed here because the
+    # briefing's per-component-ownership contract puts them on this
+    # manifest (axis-5 read-site migrations will move the
+    # `os.environ.get` calls themselves intra-package). Every knob is
+    # in `env_reload.HOT_RELOADABLE_KNOBS`, so `hot_reloadable=True`
+    # across the board.
+    config_schema={
+        "enabled": ConfigKey(
+            name="enabled",
+            type=bool,
+            default=False,
+            description=(
+                "Opt-in master switch for autonomous board-edit "
+                "auto-approval (TB-223). Default off so a fresh "
+                "install keeps operator-in-the-loop semantics. "
+                "Mirrors `AP2_AUTO_APPROVE`; in `HOT_RELOADABLE_KNOBS`."
+            ),
+            hot_reloadable=True,
+        ),
+        "dry_run": ConfigKey(
+            name="dry_run",
+            type=bool,
+            default=False,
+            description=(
+                "Monitor-only mode (TB-232): runs the gate-evaluation "
+                "path and emits `would_auto_approve` instead of "
+                "applying the queued board-edit. Mirrors "
+                "`AP2_AUTO_APPROVE_DRY_RUN`."
+            ),
+            hot_reloadable=True,
+        ),
+        "freeze_threshold": ConfigKey(
+            name="freeze_threshold",
+            type=int,
+            default=3,
+            description=(
+                "Number of consecutive failed `task_complete` events "
+                "that trips the auto-approve circuit-breaker "
+                "(TB-223). 0 or negative disables the circuit "
+                "breaker. Mirrors `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`."
+            ),
+            hot_reloadable=True,
+        ),
+        "per_task_token_cap": ConfigKey(
+            name="per_task_token_cap",
+            type=int,
+            default=0,
+            description=(
+                "Per-task token cap for auto-approved tasks (TB-224). "
+                "0 (default) disables the cap; positive values trip "
+                "the per-task halt path. Mirrors "
+                "`AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`."
+            ),
+            hot_reloadable=True,
+        ),
+        "window_token_cap": ConfigKey(
+            name="window_token_cap",
+            type=int,
+            default=0,
+            description=(
+                "24h rolling-window token cap across all auto-approved "
+                "tasks (TB-224). 0 (default) disables the cap; "
+                "positive values trip the window halt path and "
+                "require `ap2 ack auto_approve_window_resume`. "
+                "Mirrors `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`."
+            ),
+            hot_reloadable=True,
+        ),
+    },
 )

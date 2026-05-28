@@ -56,6 +56,7 @@ short-circuits with `None` — every historical caller stays green.
 """
 from __future__ import annotations
 
+from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest
 
 from . import (
@@ -152,4 +153,79 @@ MANIFEST = Manifest(
         "slice_briefing_for_dep_judge": _slice_briefing_for_dep_judge,
     },
     dependencies=[],
+    # TB-322 (axis 3): per-component `config_schema` declarations for
+    # every validator_judge knob the subpackage reads via
+    # `os.environ.get` in `ap2/components/validator_judge/__init__.py`
+    # (the four `AP2_VALIDATOR_JUDGE_DISABLED` /
+    # `AP2_VALIDATOR_JUDGE_TIMEOUT_S` /
+    # `AP2_VALIDATOR_JUDGE_MAX_TURNS` /
+    # `AP2_VALIDATOR_JUDGE_MAX_TOKENS` call sites at
+    # L689 / L695 / L708 / L709). All four are in
+    # `env_reload.HOT_RELOADABLE_KNOBS` except the deprecated
+    # `max_tokens` alias (kept as a back-compat sentinel — not listed
+    # in either set, so the conservative default `hot_reloadable=False`
+    # applies). The component's model identifier
+    # (`_VALIDATOR_JUDGE_MODEL`) is intentionally NOT env-tunable
+    # today (see `__init__.py` L102-109 — "Intentionally NOT exposed
+    # as an env knob yet") so it is omitted from the schema; a future
+    # TB introducing a model-override knob will add the `model` entry.
+    config_schema={
+        "disabled": ConfigKey(
+            name="disabled",
+            type=bool,
+            default=False,
+            description=(
+                "Kill switch for the LLM-driven dep-coherence check "
+                "(TB-235). True short-circuits the validator inside "
+                "`_check_dependency_coherence` and (at the manifest "
+                "env_flag layer) drops the component from "
+                "`registry.briefing_validators()`. Mirrors "
+                "`AP2_VALIDATOR_JUDGE_DISABLED`; in "
+                "`HOT_RELOADABLE_KNOBS`."
+            ),
+            hot_reloadable=True,
+        ),
+        "timeout_s": ConfigKey(
+            name="timeout_s",
+            type=float,
+            default=60.0,
+            description=(
+                "Per-call timeout (seconds) for the dep-coherence "
+                "SDK invocation (TB-235). Default 60s — short enough "
+                "to keep `ap2 add` responsive, long enough for a "
+                "Haiku judge round-trip. Mirrors "
+                "`AP2_VALIDATOR_JUDGE_TIMEOUT_S`; in "
+                "`HOT_RELOADABLE_KNOBS`."
+            ),
+            hot_reloadable=True,
+        ),
+        "max_turns": ConfigKey(
+            name="max_turns",
+            type=int,
+            default=2,
+            description=(
+                "Per-call max-turns budget for the dep-coherence "
+                "judge (TB-249). Default 2 — one verdict message "
+                "plus one optional Read/Grep tool call. Mirrors "
+                "`AP2_VALIDATOR_JUDGE_MAX_TURNS`; in "
+                "`HOT_RELOADABLE_KNOBS`."
+            ),
+            hot_reloadable=True,
+        ),
+        "max_tokens": ConfigKey(
+            name="max_tokens",
+            type=int,
+            default=500,
+            description=(
+                "TB-249 deprecated alias for `max_turns`; honored "
+                "(ceiling-capped at 5) when `max_turns` is unset so "
+                "operators with stale `AP2_VALIDATOR_JUDGE_MAX_TOKENS` "
+                "exports don't break. Mirrors "
+                "`AP2_VALIDATOR_JUDGE_MAX_TOKENS`; not in "
+                "`HOT_RELOADABLE_KNOBS` (deprecated knob — operators "
+                "should migrate to `max_turns`)."
+            ),
+            hot_reloadable=False,
+        ),
+    },
 )

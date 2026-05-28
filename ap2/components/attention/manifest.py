@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import sys
 
+from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest, Phase
 
 from . import (
@@ -123,4 +124,78 @@ MANIFEST = Manifest(
     },
     tick_hooks=[(Phase.ATTENTION_EMISSION, _tick_hook)],
     dependencies=[],
+    # TB-322 (axis 3): per-component `config_schema` declarations for
+    # every `AP2_*` knob the subpackage reads via `os.environ.get` in
+    # `ap2/components/attention/__init__.py`. Defaults mirror the
+    # in-source `DEFAULT_*` constants in `ap2/config.py` (L66-132);
+    # every one of these knobs is in `env_reload.HOT_RELOADABLE_KNOBS`
+    # (detector sensitivity / push toggle — tune-without-restart per
+    # TB-282 / TB-287 / TB-290 / TB-297), so `hot_reloadable=True`
+    # across the board.
+    config_schema={
+        "task_stuck_threshold_s": ConfigKey(
+            name="task_stuck_threshold_s",
+            type=int,
+            default=14400,
+            description=(
+                "Seconds an Active task may sit without progress "
+                "before a `task_stuck` attention condition fires "
+                "(TB-282). Mirrors `AP2_TASK_STUCK_THRESHOLD_S`; "
+                "in `HOT_RELOADABLE_KNOBS`, so an operator "
+                "tightening the floor takes effect on the next tick."
+            ),
+            hot_reloadable=True,
+        ),
+        "task_frozen_recency_s": ConfigKey(
+            name="task_frozen_recency_s",
+            type=int,
+            default=86400,
+            description=(
+                "Recency window (seconds) for `task_frozen` "
+                "attention emission — a Frozen task whose most-recent "
+                "`retry_exhausted` / `task_failed` event is within "
+                "this window surfaces as a fresh attention condition "
+                "(TB-287). Mirrors `AP2_TASK_FROZEN_RECENCY_S`."
+            ),
+            hot_reloadable=True,
+        ),
+        "cost_approach_pct": ConfigKey(
+            name="cost_approach_pct",
+            type=int,
+            default=75,
+            description=(
+                "Pre-trip `cost_cap_approach` detector threshold as "
+                "percent of `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` "
+                "(TB-290); fires when the rolling 24h auto-approved "
+                "token sum is >= this percent of the cap. Mirrors "
+                "`AP2_AUTO_APPROVE_COST_APPROACH_PCT`."
+            ),
+            hot_reloadable=True,
+        ),
+        "debounce_s": ConfigKey(
+            name="debounce_s",
+            type=int,
+            default=21600,
+            description=(
+                "Per-(type, key) debounce window (seconds) for "
+                "repeated `attention_raised` emissions (TB-282). "
+                "Default ~6h so a still-stuck task re-fires roughly "
+                "once per operator workday. Mirrors "
+                "`AP2_ATTENTION_DEBOUNCE_S`."
+            ),
+            hot_reloadable=True,
+        ),
+        "immediate_push": ConfigKey(
+            name="immediate_push",
+            type=bool,
+            default=False,
+            description=(
+                "Opt-in: post an immediate Mattermost message on "
+                "each `attention_raised` event (TB-297). Default "
+                "off so the status-report cron stays the routine "
+                "push surface. Mirrors `AP2_ATTENTION_IMMEDIATE_PUSH`."
+            ),
+            hot_reloadable=True,
+        ),
+    },
 )

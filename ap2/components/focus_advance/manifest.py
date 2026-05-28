@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import sys
 
+from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest, Phase
 
 from . import (
@@ -86,4 +87,43 @@ MANIFEST = Manifest(
     },
     tick_hooks=[(Phase.PRE_DISPATCH, _tick_hook)],
     dependencies=[],
+    # TB-322 (axis 3): per-component `config_schema` declarations for
+    # the knobs the focus_advance component logically owns. The
+    # subpackage itself does not call `os.environ.get("AP2_*")`
+    # directly — both knobs are read via `ap2/goal.py` helpers
+    # (`goal.auto_advance_disabled()` and
+    # `goal.advance_empty_cycles_threshold()`) that the
+    # `_maybe_advance_focus` body consults. The schema entries cover
+    # them anyway because the briefing's per-component-ownership
+    # contract puts AP2_FOCUS_AUTO_ADVANCE_DISABLED / AP2_FOCUS_ADVANCE_EMPTY_CYCLES
+    # on this manifest (axis-5 read-site migrations will move the
+    # `os.environ.get` calls themselves intra-package). Both knobs
+    # are in `env_reload.HOT_RELOADABLE_KNOBS`, so `hot_reloadable=True`.
+    config_schema={
+        "auto_advance_disabled": ConfigKey(
+            name="auto_advance_disabled",
+            type=bool,
+            default=False,
+            description=(
+                "Kill switch for focus-pointer auto-advance (TB-226). "
+                "True short-circuits `_maybe_advance_focus` even when "
+                "the empty-cycles heuristic would otherwise fire. "
+                "Mirrors `AP2_FOCUS_AUTO_ADVANCE_DISABLED`; in "
+                "`HOT_RELOADABLE_KNOBS`."
+            ),
+            hot_reloadable=True,
+        ),
+        "empty_cycles": ConfigKey(
+            name="empty_cycles",
+            type=int,
+            default=3,
+            description=(
+                "Number of consecutive empty ideation cycles before "
+                "the focus pointer auto-advances (TB-292). Mirrors "
+                "`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`; in "
+                "`HOT_RELOADABLE_KNOBS`."
+            ),
+            hot_reloadable=True,
+        ),
+    },
 )

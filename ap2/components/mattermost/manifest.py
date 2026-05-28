@@ -44,6 +44,7 @@ event family stays for the in-band channel-lookup-failed case.
 """
 from __future__ import annotations
 
+from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest
 
 from . import (
@@ -81,4 +82,62 @@ MANIFEST = Manifest(
         "inbound_poll": check_new_messages,
     },
     dependencies=[],
+    # TB-322 (axis 3): per-component `config_schema` declarations for
+    # every Mattermost-family env knob the subpackage reads via
+    # `os.environ.get` in `ap2/components/mattermost/__init__.py`
+    # (`AP2_MM_CHANNELS`, `AP2_MM_BOT_USER_ID`, `AP2_MM_MENTION`).
+    # The registry's TB-321 `aggregate_schemas` / `validate_config`
+    # walk consumes this entry; the runtime still resolves each knob
+    # from `os.environ` until axis-5 migrates the per-knob reads to
+    # `cfg.components_config["mattermost"][…]`. Hot-reload flags
+    # mirror `env_reload.HOT_RELOADABLE_KNOBS` / `FIXED_KNOBS`:
+    # `AP2_MM_CHANNELS` is in `FIXED_KNOBS` (subscription bound at
+    # daemon-start, restart required), so `hot_reloadable=False`; the
+    # other two are not in either set, so the conservative
+    # `hot_reloadable=False` default applies.
+    config_schema={
+        "channels": ConfigKey(
+            name="channels",
+            type=str,
+            default="",
+            description=(
+                "Comma-separated Mattermost channel IDs the daemon "
+                "polls for inbound mentions and posts outbound "
+                "messages to. Unset / empty disables the mattermost "
+                "component entirely (manifest env_flag with "
+                "default_enabled=False means truthy ENABLES). "
+                "Mirrors `AP2_MM_CHANNELS`; listed in "
+                "`env_reload.FIXED_KNOBS` so a change requires "
+                "`ap2 stop && ap2 start` (subscription set is bound "
+                "once at daemon-start)."
+            ),
+            hot_reloadable=False,
+        ),
+        "bot_user_id": ConfigKey(
+            name="bot_user_id",
+            type=str,
+            default="",
+            description=(
+                "Mattermost user ID for the bot account; used to "
+                "filter the bot's own posts out of the inbound poll. "
+                "Mirrors `AP2_MM_BOT_USER_ID`; not in "
+                "`HOT_RELOADABLE_KNOBS`, so conservative-default "
+                "`hot_reloadable=False`."
+            ),
+            hot_reloadable=False,
+        ),
+        "mention": ConfigKey(
+            name="mention",
+            type=str,
+            default="@claude-bot",
+            description=(
+                "Mention token (e.g. `@claude-bot`) the bot "
+                "recognizes as addressing it in poll content. "
+                "Mirrors `AP2_MM_MENTION`; not in "
+                "`HOT_RELOADABLE_KNOBS`, so conservative-default "
+                "`hot_reloadable=False`."
+            ),
+            hot_reloadable=False,
+        ),
+    },
 )
