@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-154,TB-161,TB-164,TB-171,TB-235,TB-308,TB-309,TB-311",
   "briefing_path": ".cc-autopilot/tasks/validator-pipeline-as-list-validator-jud.md",
   "focus_anchor": "current focus refactor features into opt in components",
+  "outcome": {
+    "commit": "1af2400",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T10:07:03Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T09:19:42Z",
   "tb_id": "TB-316",
   "why_now": "4 of 6 axes have shipped; axis 4 is the last unstarted\nnon-migration axis, and the `validator_judge/` migration is the\nexplicit gate per goal.md L218. Bundling them ships both halves of\nthe dependency in one commit and avoids a half-state where the\npipeline is a list but the judge is still hardcoded."
