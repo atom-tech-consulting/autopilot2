@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/focus-advance-subpackage-migration-axis.md",
   "focus_anchor": "current focus refactor features into opt in components",
+  "outcome": {
+    "commit": "6b4fcea",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T07:44:48Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T06:59:03Z",
   "tb_id": "TB-313",
   "why_now": "`focus_advance/` is the most self-contained of the\nremaining flat-module behaviors \u2014 no channel-adapter dependency\n(unlike `attention/`, goal.md L188), no operator-queue coupling\n(unlike `auto_unfreeze/`), no ideation/cost guard touchpoints\n(unlike `auto_approve/`, goal.md L196-197). Highest-ROI migration\nto convert next while axis-3 channel work runs in parallel; every\ncycle the flat module survives, the component-vs-core boundary is\ndefined by an asymmetric exemption rather than a clean cleavage."
