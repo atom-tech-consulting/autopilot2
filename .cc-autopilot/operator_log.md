@@ -270,3 +270,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-28T04:35:19Z — applied operator-queued ack
 - 2026-05-28T04:37:52Z — applied operator-queued rewind_focus
 - 2026-05-28T04:37:52Z — operator rewound focus pointer ((unknown) → refactor features into opt-in components): new focus replaces shipped end-to-end-automation + operator-legible-reporting foci; pointer needs reset to index 0 since goal.md now carries only the new focus heading
+- 2026-05-28T04:40:42Z — applied operator-queued ideate → (forced)
