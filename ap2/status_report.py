@@ -1154,8 +1154,14 @@ def _compose_status_report_snapshot(cfg: Config) -> dict:
     return identical dicts iff nothing structural moved between them.
     """
     from .ideation import parse_operator_decisions
-    from .janitor import (
-        recent_finding_counts_by_verdict as _recent_finding_counts,
+    # TB-309: janitor's data accessor moved behind the registry's
+    # `status_findings_counts` hook-point. The status-report digest
+    # composition stays in core (goal.md L150-152) — only the
+    # janitor-data fetch is delegated.
+    from .registry import default_registry
+
+    _recent_finding_counts = default_registry().hook(
+        "status_findings_counts", component="janitor",
     )
 
     state_extras: list[str] = []

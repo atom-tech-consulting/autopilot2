@@ -245,10 +245,15 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # `operator_draft` findings get a softer summary; `ambiguous`
     # findings (judge couldn't decide) bucket together for operator
     # eyes-on without flagging as urgent.
-    from .janitor import (
-        recent_finding_counts_by_verdict as _recent_finding_counts,
-    )
+    # TB-309: janitor's data accessor is exposed via the registry's
+    # `status_findings_counts` hook-point. The previous direct import
+    # of `ap2.janitor.recent_finding_counts_by_verdict` is gone — core
+    # never reaches into `ap2.components.*` directly.
+    from .registry import default_registry
 
+    _recent_finding_counts = default_registry().hook(
+        "status_findings_counts", component="janitor",
+    )
     janitor_counts = _recent_finding_counts(cfg)
     janitor_findings = sum(janitor_counts.values())
     # TB-189 / TB-251: count operator-authored impact verdicts

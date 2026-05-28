@@ -1,5 +1,15 @@
 """Janitor — git-stranded-state detector + LLM-judge classifier (TB-177, TB-178).
 
+This module is the **canary component** for the registry + manifest cleavage
+landed by TB-309. Pre-TB-309 lived at `ap2/janitor.py`; the move into
+`ap2/components/janitor/` is a structural refactor only (no behavior delta)
+that pins the manifest contract every later axis-(5) migration follows.
+The manifest lives in `manifest.py`; consumers (daemon, cli_daemon,
+status_report) reach `run_janitor` / `recent_finding_counts_by_verdict`
+through `ap2.registry.default_registry().hook(...)` rather than via a
+direct `from ap2.components.janitor import …` (axis (6) gates the
+import-direction rule, separate TB).
+
 Why this module exists
 ----------------------
 The walk-away promise in `goal.md` ("an operator can point ap2 at a fresh
@@ -115,9 +125,9 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import events
-from .config import Config
-from .json_extract import extract_rightmost_json_object
+from ap2 import events
+from ap2.config import Config
+from ap2.json_extract import extract_rightmost_json_object
 
 
 # --------------------------------------------------------------------------
@@ -636,7 +646,7 @@ def _build_judge_shared_context(cfg: Config) -> str:
     # Active / Backlog / Pipeline-Pending TB list.
     tb_block: list[str] = []
     try:
-        from .board import Board
+        from ap2.board import Board
 
         board = Board.load(cfg.tasks_file)
         for section in ("Active", "Backlog", "Pipeline Pending"):

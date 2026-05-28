@@ -978,11 +978,18 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
     # through the same event vocabulary as every other cron job.
     # `job.prompt` is intentionally ignored — the work is hard-coded.
     if job.name == "janitor":
-        from . import janitor as _janitor
+        # TB-309: janitor became a registry-discovered component. The
+        # registry's manifest pins `tick_hook` to `run_janitor`; the
+        # call site here no longer imports the module directly.
+        from .registry import default_registry
+
+        janitor_tick_hook = default_registry().hook(
+            "tick_hook", component="janitor",
+        )
 
         events.append(cfg.events_file, "cron_start", job=job.name)
         try:
-            await _janitor.run_janitor(cfg, sdk)
+            await janitor_tick_hook(cfg, sdk)
         except Exception as e:  # noqa: BLE001
             events.append(
                 cfg.events_file,

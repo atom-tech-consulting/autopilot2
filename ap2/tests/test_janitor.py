@@ -44,7 +44,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import AsyncIterator
 
-from ap2 import events, janitor
+from ap2 import events
+# TB-309: janitor moved to `ap2.components.janitor`; import under the
+# old name so the rest of the test file continues to reference
+# `janitor.<sym>` unchanged.
+from ap2.components import janitor
 from ap2.config import Config
 from ap2.cron import CronJob
 from ap2.daemon import run_cron

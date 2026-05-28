@@ -70,7 +70,11 @@ from typing import AsyncIterator
 
 import pytest
 
-from ap2 import daemon, janitor, sandbox
+from ap2 import daemon, sandbox
+# TB-309: janitor moved to `ap2.components.janitor`; alias under the
+# old name so the rest of the file keeps referencing `janitor.<sym>`
+# unchanged.
+from ap2.components import janitor
 from ap2.config import DEFAULT_TASK_MAX_TURNS
 
 

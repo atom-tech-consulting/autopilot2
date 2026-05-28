@@ -399,6 +399,7 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_IDEATION_COOLDOWN_S",               # reason: internal default, rarely tuned
     "AP2_IDEATION_DISABLED",                 # reason: debug/test only
     "AP2_IDEATION_SCRUB_MODEL",              # reason: covered by global AP2_AGENT_MODEL for most projects
+    "AP2_JANITOR_DISABLED",                  # reason: debug/test only — kill switch for the janitor component (TB-309); operators flip via shell export, not the per-project template
     "AP2_JANITOR_JUDGE_MAX_TURNS",           # reason: internal default, rarely tuned
     "AP2_JANITOR_MAX_FINDINGS_LLM",          # reason: internal default, rarely tuned
     "AP2_MAX_RETRIES",                       # reason: internal default, rarely tuned

@@ -45,8 +45,9 @@ source, not in test code.
                                       No emit when the file already exists.
   4. cron_error                     — three emitter sites:
                                       (a) janitor branch in `run_cron`
-                                          (line 961) when
-                                          `janitor.run_janitor` raises;
+                                          (line 961) when the registry's
+                                          janitor `tick_hook` raises
+                                          (TB-309 reroute);
                                       (b) `_tick`'s outer wrap (line 2401)
                                           when `load_jobs` raises. Both
                                           payloads carry `error` formatted
@@ -325,11 +326,14 @@ def test_cron_error_carries_error_field_when_janitor_raises(tmp_path, monkeypatc
     async def _boom(cfg, sdk):  # noqa: ARG001
         raise RuntimeError("janitor exploded mid-run")
 
-    # The janitor module is imported INSIDE run_cron (`from . import
-    # janitor as _janitor`), so monkeypatching `ap2.janitor.run_janitor`
-    # at the module attribute is the binding the inner import reads.
-    import ap2.janitor as _janitor_mod
-    monkeypatch.setattr(_janitor_mod, "run_janitor", _boom)
+    # TB-309: janitor is now a registry-discovered component. `run_cron`
+    # looks up the tick_hook via `default_registry().hook(...)` at
+    # call-time, so the patching point is the manifest's `hook_points`
+    # dict (a regular dict — intentionally mutable so a test can swap
+    # one hook for a stub without rebuilding the whole registry).
+    from ap2.registry import default_registry
+    janitor_manifest = default_registry().get("janitor")
+    monkeypatch.setitem(janitor_manifest.hook_points, "tick_hook", _boom)
 
     sdk = _NoopSDK()
     job = CronJob(

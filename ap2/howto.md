@@ -1894,6 +1894,15 @@ status-report cron's tick rate):
 - `AP2_JANITOR_MAX_FINDINGS_LLM` (10) — cap on per-cycle findings sent
   to the SDK judge. `0` disables the judge call entirely (the janitor
   emits rule-based findings only).
+- `AP2_JANITOR_DISABLED` (TB-309) — kill switch for the entire janitor
+  component (declared in `ap2/components/janitor/manifest.py`). Set
+  truthy (`1`, `true`, `yes`) to disable; default unset = enabled.
+  Distinct from `AP2_JANITOR_MAX_FINDINGS_LLM=0` (which keeps the
+  deterministic detector running but disables the LLM judge); this
+  flag skips the janitor entirely. Reserved for the axis-(2) daemon
+  tick-hook walk landing in a later TB — for TB-309 the schema field
+  is declared but the daemon does not yet consult it before
+  dispatching the `janitor` cron job.
 
 **Mattermost.**
 - `AP2_MM_CHANNELS` — comma-separated MM channel IDs to poll for
