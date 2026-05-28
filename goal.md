@@ -69,6 +69,27 @@ For the component model specifically:
   of "which components default to enabled" plus packaging extras —
   no further structural refactor required.
 
+For the structured-config focus specifically:
+
+- A fresh `ap2 init` writes a `.cc-autopilot/config.toml` with
+  every tunable knob present as a commented default; operators
+  discover knobs by reading one file, not by grepping howto.md.
+- Each component's `manifest.py` declares a `config_schema` field;
+  the registry validates the merged config (file + env overrides
+  + defaults) at daemon-start with clear error messages on
+  schema mismatch.
+- ≥80% of `os.environ.get("AP2_*")` calls in source migrate to
+  `cfg.<path>.<key>` reads. The exception list is true 12-factor
+  knobs (secrets, deployment identity, etc.) documented in a
+  single comment block.
+- Existing `AP2_*` env names continue to work as overrides for
+  one full release cycle (back-compat shim emits a one-shot
+  `env_deprecated` event per process on first use of a
+  deprecated name).
+- A TB-305-style docs-drift gate enforces "every config schema
+  key is mentioned in `ap2/howto.md`'s `## Configuration knobs`
+  section."
+
 ## Current focus: refactor features into opt-in components
 
 The walk-away-automation and operator-legible-reporting foci shipped
@@ -241,6 +262,145 @@ Progress signals:
 - The status-report digest is composed by core and routed through
   whichever channel adapter(s) the operator configured — no
   hardcoded Mattermost dependency in the composition path.
+
+## Current focus: structured config (env → TOML)
+
+The just-shipped component refactor (TB-309 → TB-320) closes the
+"every feature is a togglable component" structural axis but leaves
+runtime configuration on its pre-refactor footing: ~52 `AP2_*` env
+vars in a flat namespace, each documented across three places
+(`config.py` defaults, `env_reload.HOT_RELOADABLE_KNOBS`,
+`ap2/howto.md ## Configuration knobs`), discovery via grep, schema
+validation via "is this knob in TB-305's docs-drift gate?" Adding
+a new component now means adding 1-6 new env knobs and threading
+each through three documentation surfaces. The flat namespace
+isn't broken, but it's drifted past the threshold where it scales
+gracefully — TB-320 alone added one new knob plus wired three more
+into component manifests.
+
+This focus migrates ap2's runtime configuration to a structured
+TOML config file (`.cc-autopilot/config.toml`), with env-var
+overrides preserved as a 12-factor escape hatch. Each component
+declares its config schema in its `manifest.py` (matching the
+`config_schema` pattern Claude Code's plugin manifest already
+ships); the registry validates the merged config (file + env
+overrides + defaults) at startup with a clear error message on
+schema mismatch. Operators get a single discoverable surface
+(`ap2 config list / get / set`); fresh-project onboarding becomes
+"edit one file" instead of "discover 50+ knobs across howto.md".
+
+Why now: the env-knob count just bumped past 50, the component
+refactor gives a natural per-component grouping for the new
+schema, and the downstream OSS-distribution focus benefits if it
+starts with a clean operator-facing surface. The work is cheaper
+now (per-component knob counts are fresh) than later (more knobs
+accumulate, more documentation drifts, the migration's blast
+radius grows). Independently surfaced by operator audit on
+2026-05-28T20:00Z immediately after TB-320 wired the last set of
+`env_flag=None` component manifests.
+
+Six axes form this focus. Each has its own failure mode to detect:
+
+(1) **TOML schema + parser** — Extend `ap2/config.py` (or add a
+sibling `ap2/config_loader.py`) with the file's canonical schema
+shape, a parser, and a startup-time schema validator. The schema
+is sectioned: a `[core.*]` group for non-component tunables
+(verifier, ideation, control-agent, cron) and `[components.<name>]`
+sub-tables for each component-owned knob. Validation at
+daemon-start fails fast with a clear error naming the bad key
+path; the daemon does NOT auto-correct typos (operator-fix-first
+shape). Deliver: parser, schema registry, validator, plus a
+`Config.from_toml(path)` constructor that returns the same
+`Config` dataclass the daemon already consumes. Delete-test: if
+not shipped, every subsequent axis has nothing to read against.
+
+(2) **Env-var override layer** — Mapping rule:
+`AP2_<SECTION>_<KEY>` overrides `[<section>.<subsection>] key =
+...`. e.g., `AP2_COMPONENTS_AUTO_APPROVE_ENABLED=1` overrides
+`[components.auto_approve] enabled = true`. Same hot-reload
+semantics as today — `env_reload.py`'s mtime trick still works,
+extended to also watch `config.toml`. Existing flat `AP2_FOO`
+names get a back-compat map in `ap2/config_compat.py` with a
+one-shot `env_deprecated` event emission on first use per
+process. Deliver: the override layer plus the back-compat map
+for every migrated knob. Delete-test: if not shipped, OSS users
+get a new file but can no longer override per-shell-session;
+existing CI / sandbox setups break.
+
+(3) **Per-component config schemas** — Each existing component
+(auto_approve, auto_unfreeze, attention, focus_advance, janitor,
+mattermost, validator_judge) gains a `config_schema` field on
+its `Manifest` (a `@dataclass` or `TypedDict`) declaring its
+tunable knobs with types, defaults, descriptions, and a
+hot-reloadability flag. The registry validates the loaded config
+against the union of all components' schemas. Existing internal
+`os.environ.get("AP2_FOO")` calls in component bodies migrate
+to reading from `cfg.<path>.<key>`. Delete-test: if not shipped,
+the migration is half-done — operators have a new config file
+but components still consult env directly.
+
+(4) **CLI surface** — `ap2 config list` (enumerates every config
+key with current value + source: file / env-override / default),
+`ap2 config get <path>` (single-key lookup), `ap2 config set
+<path> <value>` (writes to file via the operator queue for
+audit; emits `config_updated` event), `ap2 config validate`
+(dry-run schema check). Each verb mirrors the existing
+operator-CLI shape (operator-queue-routed for the write paths,
+fcntl-locked, audit events). Delete-test: if not shipped, the
+new config surface is present but not operator-discoverable —
+every operator has to read the toml file directly.
+
+(5) **Migration of existing knobs** — Walk the ~52 known
+`AP2_*` knobs (per TB-305's `_collect_env_knobs()`
+source-of-truth), map each to a config-file home, and migrate
+the in-source readers. Some knobs explicitly stay env-only —
+true 12-factor secrets (Mattermost auth tokens, sandbox-user
+identity, OAuth tokens) and deployment-environment knobs
+(`AP2_DIR`, `AP2_REAL_SDK`). The migration list lives in a
+comment block in `ap2/config_compat.py` so the cut-line is
+auditable. One TB-N per logical cluster of knobs (auto_approve,
+auto_unfreeze, attention, etc.). Delete-test: if not shipped,
+the new file exists but holds nothing — operators still tune
+via env.
+
+(6) **Docs + drift-gate parity** — `ap2/howto.md`'s
+`## Configuration knobs` section gets a tree-rendered table of
+config paths (replacing the flat env-var list). `ap2/init.py`'s
+`ENV_TEMPLATE` gets a `CONFIG_TEMPLATE` sibling for the
+fresh-init TOML file. The TB-305 docs-drift gate
+(`test_every_env_knob_documented`) gets a sibling
+(`test_every_config_key_documented`) that walks the component
+schemas and asserts each is mentioned in howto.md. The
+`_TEMPLATE_EXEMPT_KNOBS` exemption set from TB-305 gets a
+config analogue. Delete-test: if not shipped, the docs-drift
+class TB-305 closed reopens against the new surface.
+
+The six axes are mutually reinforcing. (1) is the prerequisite
+for everything else. (2) and (3) are parallelizable once (1)
+lands. (4) gates on (1) for the read paths. (5) is the long
+tail — one TB-N per knob cluster. (6) lands incrementally
+alongside (5).
+
+The delete-test for any proposed work in this focus: does this
+make the config surface strictly more discoverable / validatable
+/ structured, OR migrate a previously-env-only knob into the
+config schema without losing back-compat? Refactors that touch
+config plumbing without exercising the schema validator or
+moving a knob aren't paying focus rent.
+
+Progress signals:
+- `.cc-autopilot/config.toml` exists as the fresh-project
+  default, written by `ap2 init`.
+- `ap2 config list` enumerates every tunable knob with its
+  source (file / env-override / default).
+- Each component's `manifest.py` carries a `config_schema`
+  field that the registry validates against the loaded config.
+- ≥80% of source-side `os.environ.get("AP2_*")` calls migrated
+  to `cfg.<path>.<key>` reads.
+- A TB-305-style docs-drift gate exists for config keys.
+- The set of true 12-factor env-only knobs (secrets, deployment
+  identity) is documented in a single comment block in
+  `ap2/config_compat.py` and is clearly minimal.
 
 ## Non-goals
 
