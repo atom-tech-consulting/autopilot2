@@ -92,7 +92,20 @@ _BUILTIN_TOOLS = frozenset({
 # inline branch. Sub-types (env knob / MCP tool / event type) share
 # one frozenset because the namespaces don't collide and the diff is
 # tighter with a single audit point.
-_COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset()
+_COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset({
+    # TB-323: sectioned-env f-string prefixes the regex picks up from
+    # `ap2/config_compat.py::_apply_sectioned_env_overrides` — synthetic
+    # shapes, not operator-tunable knobs. Mirrors the same entries in
+    # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` (test_docs_drift.py).
+    "AP2_COMPONENTS_",
+    "AP2_CORE_",
+    # TB-323: forward-compat placeholders in
+    # `config_compat._KNOBS_STAYING_ENV_ONLY` per goal.md L358 — not
+    # currently read in source, documented on the env-only side so a
+    # future addition stays on the right side of the partition.
+    "AP2_DIR",
+    "AP2_REAL_SDK",
+})
 
 
 def _iter_source_files() -> list[Path]:

@@ -50,6 +50,7 @@ from pathlib import Path
 
 from . import events
 from .config import (
+    CONFIG_TOML_FILE,
     ENV_FILE,
     Config,
     DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S,
@@ -190,9 +191,22 @@ FIXED_KNOBS: frozenset[str] = frozenset({
 # (called from `Config.load`) with the dict of keys file-sourced at
 # startup, so the reload helper knows which keys are safe to overwrite
 # on a later reload vs which were set only by a genuine shell export.
+#
+# `last_toml_mtime` (TB-323) extends the watcher to the
+# `.cc-autopilot/config.toml` file: a bumped mtime on EITHER the env
+# file OR the TOML file un-no-ops the per-tick reload, so an operator
+# editing `config.toml` to bump a hot-reloadable knob (e.g.
+# `[components.attention] task_stuck_threshold_s = ...`) gets the
+# same next-tick propagation the env file already enjoys. The TOML
+# values themselves are not re-parsed here — the helper still pulls
+# tunables from `os.environ` (the structured-config layer's overrides
+# already wrote there at daemon-start). A TOML-only edit therefore
+# refreshes the `Config` dataclass via `_refresh_tunable_config_fields`,
+# picking up any companion env-side change the operator also made.
 _RELOAD_STATE: dict = {
-    "file_keys": None,   # set[str] | None
-    "last_mtime": None,  # float | None
+    "file_keys": None,        # set[str] | None
+    "last_mtime": None,       # float | None  — `.cc-autopilot/env` mtime
+    "last_toml_mtime": None,  # float | None  — `.cc-autopilot/config.toml` mtime
 }
 
 
@@ -214,6 +228,7 @@ def note_initial_applied(
     since boot — the common case for the first tick.
     """
     env_file = project_root / ENV_FILE
+    toml_file = project_root / CONFIG_TOML_FILE
     _RELOAD_STATE["file_keys"] = set(initial_applied.keys())
     try:
         _RELOAD_STATE["last_mtime"] = (
@@ -221,6 +236,16 @@ def note_initial_applied(
         )
     except OSError:
         _RELOAD_STATE["last_mtime"] = None
+    # TB-323: pin the TOML file's startup mtime so the next
+    # `maybe_reload_env` call no-ops when neither file has been touched
+    # since boot. None when the file is absent (today's default — opt-in
+    # via `Config.load`'s TOML branch).
+    try:
+        _RELOAD_STATE["last_toml_mtime"] = (
+            toml_file.stat().st_mtime if toml_file.exists() else None
+        )
+    except OSError:
+        _RELOAD_STATE["last_toml_mtime"] = None
 
 
 def reset_reload_state_for_tests() -> None:
@@ -232,6 +257,7 @@ def reset_reload_state_for_tests() -> None:
     """
     _RELOAD_STATE["file_keys"] = None
     _RELOAD_STATE["last_mtime"] = None
+    _RELOAD_STATE["last_toml_mtime"] = None
 
 
 def _parse_env_file(env_file: Path) -> dict[str, str]:
@@ -359,16 +385,33 @@ def maybe_reload_env(cfg: Config) -> dict | None:
     rather than dying mid-tick.
     """
     env_file = cfg.env_file
+    # TB-323: also watch `.cc-autopilot/config.toml` mtime — an operator
+    # editing the TOML file should get the same next-tick HOT_RELOADABLE
+    # refresh pass an env-file edit triggers today. Derive the path from
+    # `cfg.project_root` rather than adding a Config dataclass field
+    # (the new attribute would ripple through `_load_env_path`'s
+    # positional constructor; deriving keeps the reload contract local).
+    toml_file = cfg.project_root / CONFIG_TOML_FILE
     try:
         current_mtime = (
             env_file.stat().st_mtime if env_file.exists() else None
         )
     except OSError:
         current_mtime = None
+    try:
+        current_toml_mtime = (
+            toml_file.stat().st_mtime if toml_file.exists() else None
+        )
+    except OSError:
+        current_toml_mtime = None
 
     cached_mtime = _RELOAD_STATE["last_mtime"]
-    # mtime-gated no-op (the hot path).
-    if current_mtime == cached_mtime:
+    cached_toml_mtime = _RELOAD_STATE["last_toml_mtime"]
+    env_mtime_changed = current_mtime != cached_mtime
+    toml_mtime_changed = current_toml_mtime != cached_toml_mtime
+    # mtime-gated no-op (the hot path) — neither watched file has
+    # changed since the last reload.
+    if not env_mtime_changed and not toml_mtime_changed:
         return None
 
     parsed = _parse_env_file(env_file)
@@ -410,11 +453,25 @@ def maybe_reload_env(cfg: Config) -> dict | None:
 
     _RELOAD_STATE["file_keys"] = file_keys
     _RELOAD_STATE["last_mtime"] = current_mtime
+    # TB-323: track the TOML file's mtime even when the env file is the
+    # one that bumped. A subsequent TOML-only edit then un-no-ops the
+    # next reload without false-firing on this tick's `current_toml_mtime`
+    # already being baselined.
+    _RELOAD_STATE["last_toml_mtime"] = current_toml_mtime
 
     if not changed:
-        # File mtime bumped but no value differed (touch / comment
-        # edit / key reorder). Silent — `env_reloaded` is a behavioral
-        # event, not a filesystem one.
+        # Env file's value set didn't differ. If the TOML file ALSO didn't
+        # change, this is a touch / comment edit / key reorder on the env
+        # file — silent (no `env_reloaded` event, no Config refresh).
+        # If the TOML file IS what changed, still trigger the
+        # HOT_RELOADABLE-filtered refresh pass so an operator editing
+        # `config.toml` to bump a tunable (with the matching env var
+        # also re-exported) gets the same next-tick propagation the env
+        # file already enjoys. The refresh re-reads `os.environ` — the
+        # TOML file is not re-parsed here (TB-323 docstring above
+        # captures this trade-off).
+        if toml_mtime_changed:
+            _refresh_tunable_config_fields(cfg)
         return None
 
     # Rewrite tunable Config fields from the refreshed os.environ.

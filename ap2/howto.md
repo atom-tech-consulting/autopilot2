@@ -1031,6 +1031,25 @@ project-wide), `verification_partial`, `retry_exhausted`,
 `env_reload_error` (TB-271 — `env_reload.maybe_reload_env` raised at
 tick-top; swallowed defensively so the rest of the tick continues on
 whatever cfg state survived; payload `error=<ExceptionType>: <message>`),
+`env_deprecated` (TB-323 — the structured-config back-compat shim in
+`ap2/config_compat.py::_apply_flat_back_compat` detected a flat-name
+`AP2_*` env var listed in `FLAT_TO_SECTIONED` and overlaid the value at
+its sectioned counterpart on the loaded `Config`; one-shot per process
+per knob — module-level `_EMITTED_ONCE: set[str]` guarded by a
+`threading.Lock` records each flat name's first hit, so a daemon read
+at startup + re-checks on later config reloads stay silent past the
+first; payload `flat` (the deprecated env name — e.g. `AP2_AUTO_APPROVE`),
+`sectioned` (its replacement path — e.g.
+`components.auto_approve.enabled`), `process_pid` (so a multi-daemon
+operator setup can attribute the event to its emitter); the
+audit trail makes the migration discoverable in `events.jsonl` —
+a fresh ap2 upgrade surfaces every still-set legacy knob at first
+daemon-start, operators remove them in favor of the sectioned config
+keys, subsequent starts go silent; NOT emitted by the sectioned-env
+override path nor for knobs in
+`config_compat._KNOBS_STAYING_ENV_ONLY` — the 12-factor exemption set
+(Mattermost auth / channel identity, integration secrets, deployment
+paths) doesn't migrate to TOML by design),
 `state_commit_error`, `rollback_error`, `web_error`,
 `pipeline_pending_sweep_error`, `operator_queue_error` /
 `operator_queue_drain_error`, `auto_diagnose_error` /
@@ -1407,6 +1426,14 @@ overwrites `os.environ` for file-sourced keys. A bumped knob takes
 effect on the next tick (≤30s) without `ap2 stop && ap2 start`. The
 canonical set is `env_reload.HOT_RELOADABLE_KNOBS`; the reload emits
 an `env_reloaded` event with the changed keys for the audit trail.
+TB-323 extended the watcher to `.cc-autopilot/config.toml` as well — a
+bumped mtime on EITHER file triggers the next-tick HOT_RELOADABLE-
+filtered refresh, so an operator editing the TOML to bump a tunable
+gets the same propagation an env-file edit enjoys. (The TOML values
+themselves are not re-parsed by the reload helper — `os.environ` is
+the authoritative source for the refresh pass; the structured-config
+layer's env-override / back-compat shim already wrote there at
+daemon-start.)
 A small fixed-knob set (`env_reload.FIXED_KNOBS` — `AP2_WEB_PORT`,
 `AP2_WEB_DISABLED`, `AP2_MM_CHANNELS`) still requires a restart:
 each configures a stateful resource (a bound HTTP socket, a

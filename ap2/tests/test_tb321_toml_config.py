@@ -35,6 +35,8 @@ prerequisite layer is the cheapest place to catch the drift.
 """
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from ap2.config import CONFIG_TOML_FILE, Config
@@ -240,10 +242,27 @@ def _write_toml(tmp_path, body):
     return p
 
 
+def _strip_ap2_env(monkeypatch):
+    """Strip every `AP2_*` env knob the harness/CI might have set so the
+    TOML overlay's behavior is observable in isolation.
+
+    TB-323 (axis 2) made the env-override layer authoritative — `AP2_*`
+    values in `os.environ` win over the loaded TOML by design (the
+    operator's shell-export back-compat path). The TB-321 tests pin
+    the TOML overlay's behavior specifically, so they need the env
+    surface cleaned to avoid the daemon/CI environment's pre-set
+    `AP2_TICK_S` / `AP2_AUTO_APPROVE` / etc. silently winning over the
+    test's fixture TOML."""
+    for name in list(os.environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
+
+
 def test_config_from_toml_returns_config_dataclass(tmp_path, monkeypatch):
     """`Config.from_toml` returns an instance of `Config` — shape-
     compatible with `Config.load()`, same dataclass, same field
     names."""
+    _strip_ap2_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     toml_path = _write_toml(tmp_path, "[core]\ntick_interval_s = 45\n")
     cfg = Config.from_toml(toml_path)
@@ -255,6 +274,7 @@ def test_config_from_toml_returns_config_dataclass(tmp_path, monkeypatch):
 def test_config_from_toml_stashes_components_section(tmp_path, monkeypatch):
     """`[components.<name>]` sub-tables land on `cfg.components_config`
     verbatim — the dict shape axis-(5) per-component reads consume."""
+    _strip_ap2_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     toml_path = _write_toml(
         tmp_path,
@@ -269,6 +289,7 @@ def test_config_from_toml_core_overlay_ignores_unknown_keys(tmp_path, monkeypatc
     silently ignored (per the module docstring — core-schema
     validation is a future-axis concern; today's overlay only
     populates known fields)."""
+    _strip_ap2_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     toml_path = _write_toml(
         tmp_path,
@@ -306,6 +327,7 @@ def test_config_load_without_toml_takes_env_path(tmp_path, monkeypatch):
 def test_config_load_with_toml_prefers_toml_path(tmp_path, monkeypatch):
     """`config.toml` present → `Config.load()` delegates to
     `from_toml` — the opt-in branch in scope item (4)."""
+    _strip_ap2_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     _write_toml(
         tmp_path,

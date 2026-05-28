@@ -184,6 +184,33 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     so the tick continues on whatever cfg state survived; the event
     surfaces the failure shape for operator triage. Payload: `error`
     (`<ExceptionType>: <message>`).
+  - `env_deprecated` (TB-323) — the structured-config back-compat shim
+    in `ap2/config_compat.py::_apply_flat_back_compat` detected a
+    flat-name `AP2_*` env var listed in `FLAT_TO_SECTIONED` and
+    overlaid the value at its sectioned counterpart on the loaded
+    `Config`. One-shot per process per knob — a module-level
+    `_EMITTED_ONCE: set[str]` (guarded by a `threading.Lock`) records
+    each flat name's first hit, so a daemon read at startup +
+    re-checks on later config reloads stay silent past the first.
+    Payload: `flat` (the deprecated env name — e.g. `AP2_AUTO_APPROVE`),
+    `sectioned` (its replacement path — e.g.
+    `components.auto_approve.enabled`), `process_pid` (the emitter's
+    PID — distinguishes events from a multi-daemon operator setup
+    sharing one project events file across forks/relaunches). The
+    audit trail makes the operator's migration path discoverable in
+    `events.jsonl`: a fresh ap2 upgrade surfaces every still-set
+    legacy knob at first daemon-start, the operator removes them in
+    favor of the sectioned config / TOML keys, and subsequent
+    daemon starts go silent on `env_deprecated`. Listed alongside
+    `env_reloaded` / `env_reload_error` so operators reading the
+    env-related event family find all three in one place. NOT
+    emitted by the sectioned-env override path
+    (`_apply_sectioned_env_overrides`) — sectioned names are the
+    new canonical surface and don't carry deprecation framing.
+    Knobs listed in `_KNOBS_STAYING_ENV_ONLY` (the 12-factor
+    exemption set — Mattermost auth, channel identity, integration
+    secrets, deployment paths) ALSO never emit this event even when
+    present in env, because they don't migrate to TOML by design.
   - `verify_passed` (TB-252) — project-wide `AP2_VERIFY_CMD` ran to
     completion AND exited zero (the successful sibling of
     `verification_failed`). Emitted from daemon.py's

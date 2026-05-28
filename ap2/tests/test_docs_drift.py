@@ -48,8 +48,27 @@ _BUILTIN_TOOLS = frozenset({
 # focused on real operator-tunable surfaces. A future genuine env knob
 # named `*_DEFAULT` would be a misnomer and should rename rather than land
 # on this list.
+#
+# TB-323 adds four entries: `AP2_COMPONENTS_` and `AP2_CORE_` are the
+# regex-anchored f-string prefixes the sectioned-env override layer
+# builds in `ap2/config_compat.py::_apply_sectioned_env_overrides`
+# (`f"AP2_COMPONENTS_{comp.upper()}_{key.upper()}"` and the parallel
+# `AP2_CORE_<FIELD>` form). They're synthetic shapes the regex picks up,
+# not operator-tunable knobs in their own right — the operator's
+# surface is `AP2_COMPONENTS_AUTO_APPROVE_ENABLED` (a fully-qualified
+# name), never the bare prefix. `AP2_DIR` and `AP2_REAL_SDK` are
+# forward-compatibility placeholders in
+# `config_compat._KNOBS_STAYING_ENV_ONLY` listed per goal.md L358's
+# 12-factor cut-line documentation; neither is currently read in
+# source, but documenting them on the env-only side now keeps a
+# future addition on the right side of the partition without an
+# architectural debate.
 _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     "AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT",
+    "AP2_COMPONENTS_",  # TB-323 — sectioned-env f-string prefix, not an operator knob
+    "AP2_CORE_",        # TB-323 — sectioned-env f-string prefix, not an operator knob
+    "AP2_DIR",          # TB-323 — forward-compat placeholder per goal.md L358, not currently read
+    "AP2_REAL_SDK",     # TB-323 — forward-compat placeholder per goal.md L358, not currently read
 })
 
 

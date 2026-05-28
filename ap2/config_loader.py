@@ -287,5 +287,21 @@ def from_toml(toml_path: Path) -> "Config":
             f"[components] must be a TOML table; got "
             f"{type(components_section).__name__}"
         )
-    cfg.components_config = dict(components_section)
+    # Deep-copy the sub-tables so per-component dicts are mutable and
+    # the env-override layer can write into them without aliasing the
+    # parsed TOML structure. `dict(components_section)` alone would
+    # reuse the inner dicts.
+    cfg.components_config = {
+        name: dict(knobs) if isinstance(knobs, dict) else knobs
+        for name, knobs in components_section.items()
+    }
+    # TB-323 (axis 2): apply the env-override layer + flat-name back-
+    # compat shim. Sectioned envs (`AP2_<SECTION>_<KEY>`) win over the
+    # TOML value; flat envs (`AP2_<FLAT>` listed in
+    # `config_compat.FLAT_TO_SECTIONED`) also override + emit a
+    # one-shot `env_deprecated` event per process per knob. Lazy
+    # import keeps the config_loader.py ↔ config_compat.py boundary
+    # tidy and avoids any import-time cycle through the events module.
+    from .config_compat import apply_env_overrides
+    apply_env_overrides(cfg)
     return cfg
