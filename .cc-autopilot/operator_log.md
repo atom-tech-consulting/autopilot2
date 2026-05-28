@@ -266,3 +266,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-27T21:48:43Z — applied operator-queued add_backlog → TB-308
 - 2026-05-28T04:34:13Z — applied operator-queued update_goal
 - 2026-05-28T04:34:13Z — operator updated goal.md (extend roadmap: refactor features into opt-in components (focus_advance is a component; status_report digest stays in core, channel-delivery is component) — sets up downstream OSS distribution focus)
+- 2026-05-28T04:35:26Z — roadmap_complete — extended roadmap with new focus on opt-in component refactor
+- 2026-05-28T04:35:19Z — applied operator-queued ack
