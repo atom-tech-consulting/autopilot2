@@ -1,109 +1,109 @@
 # Ideation State
 
-_Last updated: 2026-05-27T15:06:03Z by ideation cron_
+_Last updated: 2026-05-28T04:40:43Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 0B / 0P / 173C / 3F (Frozen unchanged:
-TB-119 / TB-120 / TB-133 — operator-classified preventive). Focus
-pointer still on `operator-legible reporting and monitoring` (2 of
-2). Since the 13:02Z prior cycle, two operator-queued bug-fix tasks
-landed — TB-300 (`6b0f268` 13:59Z — empty-cycles counter recognizes
-`ideation_cycle_summary` exit-marker, aligning the daemon's
-empty-cycles vocabulary with the agent's no-proposal exit name) and
-TB-301 (`9c77bff` 13:53Z — `now=` injection seam through
-`render_attention_section` plus `_detect_auto_approve_paused` /
-`_auto_approve_check_violations` to repair 5 wall-clock-drift
-time-bombs). Both are infrastructure / regression-pin repairs to the
-focus-2 surface (counter alignment + test-fixture hygiene), NOT new
-Progress-signal work. The 3 most-recent substantive focus-2
-completes remain TB-297 / TB-298 / TB-299 (immediate-MM push, CLI
-attention line, web home attention card) — the 4-surface
-detector-driven matrix called out in prior-cycle assessment still
-holds.
+Cycle entry: board 0A / 0R / 0B / 0P / 180C / 0F (operator deleted TB-119
+/ TB-120 / TB-133 at 2026-05-27T18:19Z, draining the preventive-Frozen
+section). Focus pointer was rewound at 2026-05-28T04:37:52Z to a
+brand-new heading: `refactor features into opt-in components`, added to
+goal.md at 2026-05-28T04:34:13Z. The 3 most recent Completes —
+TB-306 (default status-report cron 2h→8h, commit e3ca933), TB-307 (scrub
+of ~30 hardcoded 2h refs, commit 785fc8a, operator-moved after verifier
+flake on `!`-prefix bullets), TB-308 (briefing-validator check #7
+rejects fenced paths in `## Scope`, commit 5a29e2f) — all closed the
+tail of the prior focus (operator-legible reporting and monitoring) and
+its briefing-validator hygiene siblings. Every shipped axis is infrastructure the OSS-cut focus will inherit; the new focus opens the structural prerequisite (component cleavage) without which OSS distribution is a hand-edit per install.
 
 ## Current focus assessment
 
-- **Current focus: operator-legible reporting and monitoring**
-  - Progress so far:
-    - Progress signal #1 (titled + project-named reports): TB-280
-      closed `Config.project_name` + `[<project>]` headline +
-      pre-rendered `## Recent task activity` digest.
-    - Progress signal #2 (significance-gated + dedup): TB-281
-      content-fingerprint dedup; TB-297 event-driven immediate-MM
-      push (push surface no longer purely clock-driven).
-    - Progress signal #3 (proactive attention surface): all 5
-      detector kinds shipped (TB-282 stuck-Active + TB-287
-      task_frozen + TB-288 validator-judge-noisy + TB-289
-      auto-approve-paused + TB-290 cost-cap-approach); 4 operator
-      entry-points sharing one detector contract — cron push
-      (TB-282), immediate-MM push (TB-297), web `/attention` pull
-      (TB-296), web home card (TB-299), `ap2 status` CLI line
-      (TB-298).
-    - Infrastructure repairs since: TB-300 (counter-vocabulary
-      alignment to agent exit-name `ideation_cycle_summary`),
-      TB-301 (`now=` injection seam closing 5 time-bombed tests).
-  - Gaps:
-    - Two completes between 13:02Z and 15:06Z were both infrastructure / regression-pin repairs
-      (TB-300 + TB-301), not focus-2 axis work. The 5h59m
-      stretch (13:07Z queue ack → now) confirms no fresh axis
-      surfaced from operator side.
-  - Status: `exhausted-needs-operator`
+- **Current focus: refactor features into opt-in components**
+  - Progress so far: none yet — focus added at 2026-05-28T04:34Z;
+    no proposals or completes against it. Goal.md enumerates six
+    axes; axis (1) is the explicit prerequisite per goal.md L216.
+  - Gaps: all six axes open.
+    - Axis (1) component manifest + registry shape + janitor canary
+      — prerequisite for everything downstream (goal.md L116-130).
+    - Axis (2) daemon tick-hook protocol — `daemon._tick` today
+      direct-imports `auto_approve.maybe_apply()`,
+      `auto_unfreeze.sweep()`, `attention._maybe_emit_attention_events()`,
+      `focus_advance.advance_if_exhausted()`, `janitor.run_janitor()`
+      (confirmed via grep of ap2/daemon.py imports); must be
+      registry-walked instead (goal.md L132-144).
+    - Axis (3) channel-adapter abstraction — `_mm_post` is the
+      single delivery sink; status-report digest composition stays
+      in core (goal.md L146-161).
+    - Axis (4) validator pipeline as a list — `briefing_validators.py`
+      currently inlines TB-154/161/164/171/235/308 checks (goal.md
+      L163-174).
+    - Axis (5) component migrations — janitor first as canary,
+      auto_approve last; each is its own TB-N (goal.md L176-201).
+    - Axis (6) toggle-correctness tests + CI gate — disabled-config
+      pytest + import-direction gate; lands incrementally (goal.md
+      L203-214).
+  - Status: `in-progress`
+  - Reasoning: Focus is fresh (0 TB-Ns); per the prompt rule, status
+    must be `in-progress` until at least one Complete lands.
 
 ## Non-goal risk check
 
-None. TB-300 + TB-301 stayed inside the existing detector /
-counter / test-fixture surface — no new event types, no
-cross-project aggregation, no daemon-side mutation of goal.md.
-Scope guard L227-228 (per-project legibility, not cross-project
-aggregation) still respected.
+None. The 6 axes are purely structural (move modules into
+`ap2/components/<name>/`, route wiring through a registry); goal.md
+L278-282 explicitly affirms "Removing behavior during component
+extraction" is a non-goal. No new event types, no goal.md auto-mutation
+(L272-277 reinforces operator-only goal authority), no cross-project
+aggregation. Backwards-compat on env-knob names is a constraint
+(goal.md L64-67).
 
 ## Considered & deferred this cycle
 
-- **`/events?type=attention_raised` quick filter** — UX polish;
-  reverse-navigation already mediated by TB-296's per-row
-  link-through. Rejection-pattern shape: TB-185/240 ap2-meta-polish.
-- **Attention threshold calibration evaluation** — still 0
-  production `attention_raised` events fired (~2 days live with 6
-  detectors); threshold-too-high vs project-healthy unfalsifiable
-  until at least one fires. Re-evaluate once firing signal
-  accumulates. Same TB-175 rejection class (premature aggregation).
-- **`attention_cleared` event class** — carried; still no concrete
-  consumer asking for "what just resolved?" data.
-- **TB-175-shape ideation-acceptance-rate aggregator** — operator
-  parked it 2026-05-07T01:57Z pending ≥3 cycles of TB-188 records;
-  still gated.
-- **Rejection-pattern check (carried, re-justified)**: TB-185 /
-  TB-184 vetoed ap2-meta-polish; TB-231 vetoed symptom-patching;
-  TB-175 vetoed premature aggregation; TB-240 vetoed validator
-  whack-a-mole. Three consecutive empty-cycle abstentions (10:59Z
-  + 13:02Z + this one) honor that cluster.
+- **Axis (3) channel-adapter abstraction proposal this cycle** —
+  Independent of axis (2) per goal.md L216-217, so could ship in
+  parallel. Deferred: touches `_mm_post` plus status-report composition
+  refactor; safer to land registry + tick-hook contract first so the
+  channel adapter has a registered hook point to attach to. Re-propose
+  next cycle once axis (1)+(2) land.
+- **Axis (4) validator pipeline proposal this cycle** — Goal.md L218
+  states (4) gates on (5)'s `validator_judge` migration. Premature to
+  propose before the canary lands and proves the migration shape.
+- **Failure-remediation TB for verifier `!`-prefix shell-bullet edge
+  case (TB-307 retry-exhaust)** — Operator's operator_log entry at
+  2026-05-27T21:30Z classifies this as a briefing-shape lesson, not a
+  verifier bug request ("prefer positive-form assertions like
+  `test \"$(grep -rcE 'PAT' DIR | wc -l)\" = \"0\"`"). The substantive
+  work landed (785fc8a); no operator ask for a verifier-side fix.
+- **Rejection-pattern check (carried, re-justified)**: TB-185/184
+  vetoed ap2-meta-polish; TB-231 vetoed symptom-patching; TB-175 vetoed
+  premature aggregation; TB-240 vetoed validator whack-a-mole. New-focus
+  proposals must clear the "structural cleavage, not polish" bar — each
+  ranked proposal below maps to a named axis in goal.md, not a
+  meta-polish gap.
 
 ## Cycle observations
 
-- Bug-fix cadence in the 13:02Z→15:06Z stretch (TB-300 + TB-301)
-  validates the 4-surface detector-driven matrix is the right
-  shape — both repairs were local (one counter-vocabulary line +
-  one `now=` kwarg seam), not structural. Carrying as the
-  reference pattern for any future detector-surface work, not as
-  a new proposal.
-- 0 production `attention_raised` events still — ~2.5 days live, 6
-  detectors. Threshold-vs-health unfalsifiable until at least one
-  fires; calibration deferred above rather than proposed.
+- Goal.md L216-221 hard-sequences the axes: (1) prerequisite; (2)+(3)
+  independent and unblock (5); (4) gates on (5)'s validator_judge
+  migration; (6) lands incrementally. Constrains first-cycle proposals
+  to axis (1) plus at most one independent axis it directly enables —
+  this cycle picks axis (2) (tick-hook protocol) alongside (1).
+- Janitor named explicitly as canary candidate (goal.md L128, L181).
+  Confirmed via `ls ap2/`: `janitor.py` is a flat module; converting
+  to `ap2/components/janitor/` is the natural first step and the
+  migration order in axis (5) places it first.
+- Axis (6) import-direction CI gate (goal.md L207-211) is cheap to land
+  alongside axis (1)'s canary and prevents the cleavage from eroding
+  silently — proposing it this cycle pins the gate at the moment the
+  first component lands rather than letting it slip behind subsequent
+  migrations.
 
 ## Decisions needed from operator
 
-- Decision needed: extend the roadmap (add a new
-  `## Current focus:` heading via `ap2 update-goal`) OR ack the
-  empty-cycle signal. This is the THIRD consecutive 0-proposal
-  cycle (10:59Z + 13:02Z + 15:06Z); the empty-cycles counter is
-  now within one cycle of the `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
-  threshold, after which the daemon emits `roadmap_complete` and
-  halts auto-approve. Unblock-condition: next ideation cycle has
-  a fresh focus to derive proposals from (or an explicit operator
-  ack acknowledging the halt is intended). Carried from prior
-  cycle with re-articulated action + unblock-condition.
+(none this cycle — roadmap was extended at 2026-05-28T04:34Z and ack'd
+at 04:35Z; the prior cycle's "extend the roadmap" decision is resolved.)
 
 ## Proposals this cycle
 
-0 proposals — third consecutive empty-cycle abstention.
+3 proposals: TB-309 (axis 1 — component registry + manifest schema +
+janitor canary), TB-310 (axis 2 — daemon tick-hook protocol), TB-311
+(axis 6 partial — import-direction CI gate).

@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/component-registry-manifest-schema-janit.md",
+  "focus_anchor": "current focus refactor features into opt in components",
+  "proposed_at": "2026-05-28T04:47:09Z",
+  "tb_id": "TB-309",
+  "why_now": "the focus was extended on 2026-05-28 and explicitly sequences\nthis as the prerequisite (goal.md L216 \u2014 \"(1) is the prerequisite for\neverything else\"); attempting axis (2), (3), (4), or any axis-(5)\nmigration first would either invent an ad-hoc registry shape that the\ncanonical axis-1 work then has to unwind, or stall the migration\npipeline entirely."
+}
