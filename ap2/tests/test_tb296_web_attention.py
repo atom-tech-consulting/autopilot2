@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 from ap2 import events as ev_mod, web
-from ap2.attention import AttentionCondition
+from ap2.components.attention import AttentionCondition
 from ap2.config import Config
 
 
@@ -53,7 +53,7 @@ def test_attention_empty_state_when_no_conditions(project: Config, monkeypatch):
     # `project` fixture seeds a clean board with no Active task; pin the
     # detector to empty so the test isn't sensitive to future detectors.
     monkeypatch.setattr(
-        "ap2.web_attention._attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         lambda cfg, **_kwargs: [],
     )
     html = web._render_attention(project)
@@ -84,7 +84,7 @@ def test_attention_renders_per_task_bullet(project: Config, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "ap2.web_attention._attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         lambda cfg, **_kwargs: [cond],
     )
     html = web._render_attention(project)
@@ -122,7 +122,7 @@ def test_attention_renders_singleton_bullet(project: Config, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        "ap2.web_attention._attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         lambda cfg, **_kwargs: [cond],
     )
     html = web._render_attention(project)

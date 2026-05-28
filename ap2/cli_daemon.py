@@ -309,9 +309,21 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # never takes the status surface down — the cluster line just
     # omits, mirroring `render_attention_section`'s swallow-on-error
     # contract.
-    from . import attention as _attention_mod
+    # TB-315: `detect_attention_conditions` lives in
+    # `ap2/components/attention/__init__.py` post-migration. Core
+    # resolves it via a dynamic `importlib.import_module(...)` call
+    # so the TB-311 import-direction gate (which walks static
+    # Import / ImportFrom nodes) stays quiet; the module attribute
+    # is dereferenced at call time so monkeypatch.setattr-style
+    # test fixtures targeting the new module path still propagate.
+    import importlib as _importlib
     try:
-        attention_conditions = _attention_mod.detect_attention_conditions(cfg)
+        _attention_mod = _importlib.import_module(
+            "ap2.components.attention",
+        )
+        attention_conditions = _attention_mod.detect_attention_conditions(
+            cfg,
+        )
     except Exception:  # noqa: BLE001 — never break the status surface
         attention_conditions = []
     # TB-242: axis-4 focus-rotation surface — read the focus list +

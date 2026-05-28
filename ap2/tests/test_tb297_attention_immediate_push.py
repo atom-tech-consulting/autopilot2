@@ -39,7 +39,7 @@ from pathlib import Path
 import pytest
 
 from ap2 import events
-from ap2.attention import (
+from ap2.components.attention import (
     AttentionCondition,
     DEFAULT_ATTENTION_DEBOUNCE_S,
     DEFAULT_TASK_STUCK_THRESHOLD_S,
@@ -608,11 +608,25 @@ def test_push_event_types_documented_in_events_module():
 
 
 def test_briefing_verification_greps_match():
-    """Mirror the briefing's `## Verification` greps in test form."""
+    """Mirror the briefing's `## Verification` greps in test form.
+
+    TB-315 (axis 5): `_maybe_push_attention` + its `attention_pushed`
+    audit-event emission moved from `ap2/daemon.py` into
+    `ap2/components/attention/__init__.py` as part of the subpackage
+    migration. The daemon retains a module-level alias
+    `_maybe_push_attention = _attention_manifest.hook_points[…]` (so
+    the alias name still appears in daemon.py source and the test path
+    `from ap2.daemon import _maybe_push_attention` still resolves), but
+    the `attention_pushed` literal lives in the subpackage now —
+    redirect that grep to the new location.
+    """
     repo_root = Path(__file__).resolve().parent.parent
     config_src = (repo_root / "config.py").read_text()
     env_reload_src = (repo_root / "env_reload.py").read_text()
     daemon_src = (repo_root / "daemon.py").read_text()
+    attention_src = (
+        repo_root / "components" / "attention" / "__init__.py"
+    ).read_text()
     events_src = (repo_root / "events.py").read_text()
     status_report_src = (repo_root / "status_report.py").read_text()
 
@@ -620,9 +634,14 @@ def test_briefing_verification_greps_match():
     assert "AP2_ATTENTION_IMMEDIATE_PUSH" in config_src
     # `grep -q "AP2_ATTENTION_IMMEDIATE_PUSH" ap2/env_reload.py`
     assert "AP2_ATTENTION_IMMEDIATE_PUSH" in env_reload_src
-    # `grep -Eq "_maybe_push_attention|attention_pushed" ap2/daemon.py`
+    # `grep -Eq "_maybe_push_attention" ap2/daemon.py` (the alias
+    # block still names it; the body lives in the subpackage).
     assert "_maybe_push_attention" in daemon_src
-    assert "attention_pushed" in daemon_src
+    # `grep -Eq "_maybe_push_attention|attention_pushed"
+    # ap2/components/attention/__init__.py` (the relocated home of the
+    # helper + the `attention_pushed` audit-event emission).
+    assert "_maybe_push_attention" in attention_src
+    assert "attention_pushed" in attention_src
     # `grep -q "attention_pushed" ap2/events.py`
     assert "attention_pushed" in events_src
     # `grep -q "attention_pushed" ap2/status_report.py`

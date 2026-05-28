@@ -43,8 +43,9 @@ from pathlib import Path
 
 import pytest
 
-from ap2 import attention, events
-from ap2.attention import (
+from ap2 import events
+from ap2.components import attention
+from ap2.components.attention import (
     AttentionCondition,
     _cost_approach_pct,
     _detect_cost_cap_approach,
@@ -731,7 +732,7 @@ def test_briefing_verification_greps_match():
         the gate stays the trip check, attention stays the surface.)
     """
     repo_root = Path(__file__).resolve().parent.parent
-    attention_src = (repo_root / "attention.py").read_text()
+    attention_src = (repo_root / "components" / "attention" / "__init__.py").read_text()
     config_src = (repo_root / "config.py").read_text()
     env_reload_src = (repo_root / "env_reload.py").read_text()
     howto_src = (repo_root / "howto.md").read_text()

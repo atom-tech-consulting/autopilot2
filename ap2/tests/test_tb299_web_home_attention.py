@@ -29,7 +29,7 @@ from __future__ import annotations
 import pytest
 
 from ap2 import web
-from ap2.attention import AttentionCondition
+from ap2.components.attention import AttentionCondition
 from ap2.config import Config
 
 
@@ -91,7 +91,7 @@ def test_home_omits_attention_card_when_no_conditions(
     Mirrors `_render_focus_card` / `_render_automation_card`'s
     omit-on-empty discipline."""
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _stub_detect([]),
+        "ap2.components.attention.detect_attention_conditions", _stub_detect([]),
     )
     html_out = web._render_home(project)
     assert "<!DOCTYPE html>" in html_out
@@ -115,7 +115,7 @@ def test_home_renders_attention_card_with_bullets(
         "TB-77", "TB-77 Active for 4.2h since 2026-05-27T02:00:00Z",
     )
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _stub_detect([cond]),
+        "ap2.components.attention.detect_attention_conditions", _stub_detect([cond]),
     )
     html_out = web._render_home(project)
     assert 'class="attention-card"' in html_out
@@ -143,7 +143,7 @@ def test_home_attention_card_singleton_renders_bare_bullet(
         "(threshold 5); see `ap2 status` or /usage",
     )
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _stub_detect([cond]),
+        "ap2.components.attention.detect_attention_conditions", _stub_detect([cond]),
     )
     html_out = web._render_home(project)
     # Card present.
@@ -175,7 +175,7 @@ def test_home_attention_card_caps_bullets_at_three(
         for i in range(1, 6)  # 5 conditions
     ]
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _stub_detect(conds),
+        "ap2.components.attention.detect_attention_conditions", _stub_detect(conds),
     )
     html_out = web._render_home(project)
     # Heading counter reflects the FULL count (5), not the truncated 3.
@@ -203,7 +203,7 @@ def test_home_attention_card_per_task_bullet_links_to_task(
     through to `/attention`)."""
     cond = _per_task_cond("TB-42")
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _stub_detect([cond]),
+        "ap2.components.attention.detect_attention_conditions", _stub_detect([cond]),
     )
     html_out = web._render_home(project)
     assert 'href="/task/TB-42"' in html_out
@@ -227,7 +227,7 @@ def test_home_attention_card_detector_exception_renders_notice(
         raise RuntimeError("synthetic detector explosion")
 
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _raise,
+        "ap2.components.attention.detect_attention_conditions", _raise,
     )
     html_out = web._render_home(project)
     # Page rendered — no exception propagated.
@@ -274,7 +274,7 @@ def test_home_attention_card_sits_between_focus_and_automation(
     # Force the attention card to render with at least one bullet.
     cond = _per_task_cond("TB-9", "TB-9 Active for 2.0h")
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _stub_detect([cond]),
+        "ap2.components.attention.detect_attention_conditions", _stub_detect([cond]),
     )
 
     html_out = web._render_home(project)

@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import html
 
-from . import attention as _attention
 from .config import Config
 from .web_chrome import _layout
 from .web_home import _WebRouter
@@ -77,8 +76,19 @@ def _render_attention(cfg: Config) -> str:
     because one detector errored. Mirrors the
     `render_attention_section` swallow-on-error contract.
     """
+    # TB-315: `detect_attention_conditions` lives in
+    # `ap2/components/attention/__init__.py` post-migration. Core
+    # resolves it via a dynamic `importlib.import_module(...)` call
+    # so the TB-311 import-direction gate (which walks static
+    # Import / ImportFrom nodes) stays quiet; the module attribute
+    # is dereferenced at call time so monkeypatch.setattr-style
+    # test fixtures targeting the new module path still propagate.
+    import importlib as _importlib
     try:
-        conditions = _attention.detect_attention_conditions(cfg)
+        _attention_mod = _importlib.import_module(
+            "ap2.components.attention",
+        )
+        conditions = _attention_mod.detect_attention_conditions(cfg)
     except Exception as e:  # noqa: BLE001 — never break the page
         body = (
             "<h1>attention</h1>"

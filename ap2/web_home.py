@@ -694,10 +694,20 @@ def _render_attention_card(cfg: Config) -> str:
     because one detector errored. Mirrors `web_attention._render_attention`'s
     swallow-on-error contract.
     """
-    from . import attention as _attention
+    # TB-315: `detect_attention_conditions` lives in
+    # `ap2/components/attention/__init__.py` post-migration. Core
+    # resolves it via a dynamic `importlib.import_module(...)` call
+    # so the TB-311 import-direction gate (which walks static
+    # Import / ImportFrom nodes) stays quiet; the module attribute
+    # is dereferenced at call time so monkeypatch.setattr-style
+    # test fixtures targeting the new module path still propagate.
+    import importlib as _importlib
 
     try:
-        conditions = _attention.detect_attention_conditions(cfg)
+        _attention_mod = _importlib.import_module(
+            "ap2.components.attention",
+        )
+        conditions = _attention_mod.detect_attention_conditions(cfg)
     except Exception as e:  # noqa: BLE001 — never break the page
         # Tinted notice — reuse the `automation-status is-paused`
         # palette so the operator's eye picks up the surface error

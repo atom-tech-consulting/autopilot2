@@ -24,7 +24,6 @@ import time
 from pathlib import Path
 
 from . import (
-    attention,
     auto_approve,
     diagnose,
     env_reload,
@@ -1845,267 +1844,62 @@ _maybe_advance_focus = _focus_advance_manifest.hook_points["maybe_advance_focus"
 del _focus_advance_manifest
 
 
-def _maybe_emit_attention_events(cfg: Config) -> None:
-    """Per-tick attention-detector → `attention_raised` event wire-up
-    (TB-282).
-
-    Runs `attention.detect_attention_conditions(cfg)`, debounces each
-    candidate against the most recent matching `attention_raised`
-    event in the tail (suppress when last fire was within
-    `AP2_ATTENTION_DEBOUNCE_S`), and emits one `attention_raised`
-    event per fresh condition.
-
-    Per-(attention_type, key) debounce so a second stuck task doesn't
-    get suppressed because a different stuck task fired recently —
-    the briefing's load-bearing contract.
-
-    Best-effort by design: a detector / events-emit hiccup must not
-    take the tick down. Caller wraps in try/except too; this helper
-    only swallows the inner detector exceptions so a known-broken
-    detector returns no candidates instead of raising.
-    """
-    import datetime as _dt
-    now = _dt.datetime.now(_dt.timezone.utc)
-    try:
-        candidates = attention.detect_attention_conditions(cfg, now=now)
-    except Exception:  # noqa: BLE001 — never break the tick on detector bugs
-        return
-    if not candidates:
-        return
-    # Single tail read shared across all candidates' debounce checks
-    # to keep the per-tick cost bounded (the candidate count for any
-    # one detector is small — Active section length — but a future
-    # extension that registers 5+ detectors would otherwise read the
-    # tail 5+ times per tick).
-    tail = (
-        events.tail(cfg.events_file, 2000)
-        if cfg.events_file.exists() else []
-    )
-    for cond in candidates:
-        if attention.should_suppress(cond, tail=tail, now=now):
-            continue
-        try:
-            events.append(
-                cfg.events_file,
-                "attention_raised",
-                attention_type=cond.type,
-                key=cond.key,
-                summary=cond.summary,
-                **cond.extras,
-            )
-        except Exception:  # noqa: BLE001
-            # An events-emit failure on one candidate must not block
-            # the others — keep iterating.
-            continue
-        # TB-297: opt-in immediate-Mattermost-push. Runs AFTER the
-        # `attention_raised` event has been appended so the push
-        # piggybacks structurally on the existing per-(type, key)
-        # debounce — a still-active condition that just got its
-        # `attention_raised` fire will not get a second push until
-        # the next debounce-window-elapsed fresh `attention_raised`
-        # emits. Best-effort: a push hiccup must not abort the tick
-        # or the rest of the candidate iteration.
-        try:
-            _maybe_push_attention(cfg, cond)
-        except Exception:  # noqa: BLE001
-            # Defensive — the helper already catches `_mm_post`
-            # failures and emits `attention_push_error`; this outer
-            # guard catches a surprise in the helper's own plumbing
-            # (state-file write, environ read). The rest of the
-            # candidate loop must continue regardless.
-            continue
-
-
-def _attention_push_state_path(cfg: Config) -> Path:
-    """Return the per-project `attention_push_state.json` path (TB-297).
-
-    Inline-computed (mirroring `goal._focus_pointer_path` /
-    `focus_pointer.json`'s home) rather than threaded through `Config`
-    — the state is a single sticky boolean (`warned_no_destination`)
-    that no other module reads, so a Config field would be paperwork
-    for a one-key file. Gitignored via
-    `init.NESTED_GITIGNORE_BLOCKS`'s runtime-state block: an
-    `ap2 rollback` should NOT resurrect a stale "we already warned"
-    flag — a fresh daemon should re-warn against a freshly-misconfigured
-    env file.
-    """
-    return cfg.project_root / ".cc-autopilot" / "attention_push_state.json"
-
-
-def _load_attention_push_state(cfg: Config) -> dict:
-    """Load the TB-297 push state file. Returns `{}` on missing /
-    corrupt — defensive parse mirrors `_load_diagnose_state`.
-    """
-    path = _attention_push_state_path(cfg)
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _save_attention_push_state(cfg: Config, state: dict) -> None:
-    path = _attention_push_state_path(cfg)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, sort_keys=True))
-
-
-def _is_attention_immediate_push_enabled() -> bool:
-    """Parse `AP2_ATTENTION_IMMEDIATE_PUSH` fresh from `os.environ`.
-
-    Read at push-decision time (NOT cached on `Config`) so a hot-reload
-    of the env file flips the knob on the very next tick. Truthy set
-    mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED` style:
-    `1` / `true` / `yes` / `on` (case-insensitive). Anything else,
-    including the unset case, is false (conservative default per
-    goal.md Non-goals L253-256).
-    """
-    raw = os.environ.get("AP2_ATTENTION_IMMEDIATE_PUSH", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
-def _maybe_push_attention(cfg: Config, cond) -> None:
-    """Post a one-line Mattermost message for a freshly-emitted
-    `attention_raised` condition (TB-297).
-
-    Called from `_maybe_emit_attention_events` AFTER the
-    `attention_raised` event has been appended for `cond`. Per-(type,
-    key) debounce piggybacks structurally on the existing
-    `attention_raised` debounce (the push runs only when a fresh event
-    appended, which already honors `AP2_ATTENTION_DEBOUNCE_S`) — no
-    new state file is needed for push-debounce bookkeeping.
-
-    Conservative-default opt-in via `AP2_ATTENTION_IMMEDIATE_PUSH`:
-    when unset / falsy, returns without posting. Operators flip the
-    knob once they've sampled their own detector cadence and confirmed
-    it's low enough not to noise the channel.
-
-    Missing-destination handling mirrors the watchdog's
-    `warned_no_destination` pattern: when `AP2_MM_CHANNELS` is unset
-    so `_first_mm_channel()` returns "", emit ONE
-    `attention_push_no_destination` audit event then sticky-suppress
-    further such audits via a state-file flag — the sticky flag resets
-    to `False` on a successful post so a destination that returns can
-    re-warn on its next gap.
-
-    Best-effort by design: on `_mm_post` failure emit an
-    `attention_push_error` audit event and return (caller's outer
-    try/except wraps this so an unexpected helper-plumbing failure
-    also doesn't abort the tick). Success emits an
-    `attention_pushed` audit event the status-report skip-gate
-    consults (the event is in
-    `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a fresh push
-    un-skips the dedup/idle gate).
-    """
-    if not _is_attention_immediate_push_enabled():
-        return
-
-    # TB-312: route through `_deliver(cfg, text, **meta)` so the
-    # destination is owned by the registered channel-adapter list
-    # rather than hard-coded to Mattermost. `_first_mm_channel()`
-    # still drives the no-destination warning shape — pre-TB-312
-    # behavior preserved for operators who only have Mattermost
-    # wired: when `AP2_MM_CHANNELS` is unset the mattermost
-    # component is disabled by its `env_flag`, so
-    # `channel_adapters(cfg)` returns [] and the sticky-warning
-    # branch fires per the existing contract.
-    channel = _first_mm_channel()
-    adapters = default_registry().channel_adapters(cfg)
-    if not adapters:
-        # No destination configured. Emit one sticky audit event then
-        # suppress further such audits via the state-file flag, parity
-        # with the watchdog's no-destination short-circuit.
-        state = _load_attention_push_state(cfg)
-        if not state.get("warned_no_destination"):
-            try:
-                events.append(
-                    cfg.events_file,
-                    "attention_push_no_destination",
-                    reason="AP2_MM_CHANNELS unset",
-                    attention_type=cond.type,
-                    key=cond.key,
-                )
-            except Exception:  # noqa: BLE001
-                # Events-append plumbing surprise must not break the
-                # tick. Skip the state-file flip too so the warning
-                # can re-fire on the next push attempt.
-                return
-            state["warned_no_destination"] = True
-            try:
-                _save_attention_push_state(cfg, state)
-            except OSError:
-                # Best-effort: a state-write hiccup is acceptable; the
-                # event already went to events.jsonl which is the
-                # operator's primary audit surface.
-                pass
-        return
-
-    # Compose the one-line post. Project-name prefix is looked up at
-    # call-time from `cfg.project_name` (the existing helper the
-    # status-report cron uses — TB-280) so a project rename
-    # propagates immediately without duplicating that helper here.
-    text = f"[{cfg.project_name}] ⚠ {cond.summary}"
-    any_success = False
-    for adapter in adapters:
-        try:
-            outcome = adapter.post(text, channel=channel)
-        except Exception as e:  # noqa: BLE001
-            try:
-                events.append(
-                    cfg.events_file,
-                    "attention_push_error",
-                    channel=channel,
-                    attention_type=cond.type,
-                    key=cond.key,
-                    error=f"{type(e).__name__}: {e}",
-                )
-            except Exception:  # noqa: BLE001
-                # Defensive — if even the audit-event append fails, swallow
-                # so the tick continues. The remaining adapters in the
-                # list still get their chance.
-                pass
-            continue
-        if outcome is None:
-            # Adapter is unconfigured (e.g. webhook with empty
-            # AP2_WEBHOOK_URL). Skip — not an error, not a success.
-            continue
-        post_id = outcome.get("post_id", "") if isinstance(outcome, dict) else ""
-        try:
-            events.append(
-                cfg.events_file,
-                "attention_pushed",
-                attention_type=cond.type,
-                key=cond.key,
-                channel=outcome.get("channel", channel) if isinstance(outcome, dict) else channel,
-                post_id=post_id,
-                summary=cond.summary,
-            )
-        except Exception:  # noqa: BLE001
-            # The post DID happen; the audit-event append failed. The
-            # operator already received the Mattermost line so the
-            # observable behavior is intact — silently continue.
-            pass
-        any_success = True
-
-    if not any_success:
-        # All adapters failed (or all were unconfigured). The error
-        # path already emitted per-adapter `attention_push_error`
-        # events; nothing more to do — the sticky-flag reset below
-        # is gated on `any_success` so a fully-failing dispatch
-        # doesn't reset the no-destination flag inappropriately.
-        return
-    # Destination is back — reset the sticky no-destination flag so
-    # a future env-config gap re-warns. Matches the watchdog's
-    # `state["warned_no_destination"] = False` post-success reset.
-    state = _load_attention_push_state(cfg)
-    if state.get("warned_no_destination"):
-        state["warned_no_destination"] = False
-        try:
-            _save_attention_push_state(cfg, state)
-        except OSError:
-            pass
+# TB-315 (axis 5): attention was relocated from the flat module
+# `ap2/attention.py` to the subpackage `ap2/components/attention/`.
+# Core must not statically import from `ap2/components/` (TB-311
+# import-direction gate), so the module-level aliases below resolve
+# via the registry's manifest hook_points at module-load time. The
+# attention surface is wider than focus_advance / auto_unfreeze: the
+# alias block spans both the original detector layer
+# (`detect_attention_conditions`, `should_suppress`, `AttentionCondition`,
+# debounce / approach-pct env helpers) and the daemon-side wire-up
+# helpers (`_maybe_emit_attention_events`, `_maybe_push_attention`,
+# and the push-state file helpers) which TB-315 also relocated from
+# daemon.py into the subpackage so the manifest's tick hook can call
+# them body-locally. Tests that monkey-patch
+# `daemon._maybe_emit_attention_events` (or any other alias here)
+# still work — the rebind happens once here, and the test's setattr
+# on the daemon module overrides this attribute for the duration of
+# the test.
+_attention_manifest = default_registry().get("attention")
+AttentionCondition = _attention_manifest.hook_points["AttentionCondition"]
+detect_attention_conditions = _attention_manifest.hook_points[
+    "detect_attention_conditions"
+]
+find_last_attention_fire = _attention_manifest.hook_points[
+    "find_last_attention_fire"
+]
+should_suppress = _attention_manifest.hook_points["should_suppress"]
+_parse_ts = _attention_manifest.hook_points["parse_ts"]
+_task_stuck_threshold_s = _attention_manifest.hook_points[
+    "task_stuck_threshold_s"
+]
+_task_frozen_recency_s = _attention_manifest.hook_points[
+    "task_frozen_recency_s"
+]
+_cost_approach_pct = _attention_manifest.hook_points["cost_approach_pct"]
+_attention_debounce_s = _attention_manifest.hook_points[
+    "attention_debounce_s"
+]
+_maybe_emit_attention_events = _attention_manifest.hook_points[
+    "maybe_emit_attention_events"
+]
+_maybe_push_attention = _attention_manifest.hook_points[
+    "maybe_push_attention"
+]
+_attention_push_state_path = _attention_manifest.hook_points[
+    "attention_push_state_path"
+]
+_load_attention_push_state = _attention_manifest.hook_points[
+    "load_attention_push_state"
+]
+_save_attention_push_state = _attention_manifest.hook_points[
+    "save_attention_push_state"
+]
+_is_attention_immediate_push_enabled = _attention_manifest.hook_points[
+    "is_attention_immediate_push_enabled"
+]
+del _attention_manifest
 
 
 async def _tick(cfg: Config, sdk, mcp_server) -> None:

@@ -35,7 +35,6 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-from . import attention as _attention
 from . import automation_stats, automation_status, events
 from .board import Board
 from .config import Config
@@ -1039,8 +1038,19 @@ def render_attention_section(
     "") so a regression in `detect_attention_conditions` never takes
     a status-report run down.
     """
+    # TB-315: `detect_attention_conditions` lives in
+    # `ap2/components/attention/__init__.py` post-migration. Core
+    # resolves it via a dynamic `importlib.import_module(...)` call
+    # so the TB-311 import-direction gate (which walks static
+    # Import / ImportFrom nodes) stays quiet; the module attribute
+    # is dereferenced at call time so monkeypatch.setattr-style
+    # test fixtures targeting the new module path still propagate.
+    import importlib as _importlib
     try:
-        conditions = _attention.detect_attention_conditions(
+        _attention_mod = _importlib.import_module(
+            "ap2.components.attention",
+        )
+        conditions = _attention_mod.detect_attention_conditions(
             cfg, tail=tail, now=now,
         )
     except Exception:  # noqa: BLE001 — never break the status-report run

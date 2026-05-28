@@ -47,7 +47,7 @@ from pathlib import Path
 import pytest
 
 from ap2 import status_report
-from ap2.attention import AttentionCondition
+from ap2.components.attention import AttentionCondition
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -130,7 +130,7 @@ def test_text_omits_attention_line_when_no_conditions(
     from ap2 import cli_daemon
 
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect([]),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=False))
@@ -157,7 +157,7 @@ def test_text_renders_attention_line_for_single_condition(
         "TB-77 Active for 2.0h since 2026-05-27T04:00:00Z",
     )
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect([cond]),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=False))
@@ -190,7 +190,7 @@ def test_text_renders_attention_line_for_two_conditions(
         ),
     ]
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect(conds),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=False))
@@ -218,7 +218,7 @@ def test_text_renders_attention_line_for_three_conditions(
         _per_task("TB-3", "TB-3 Active for 3.0h since Z"),
     ]
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect(conds),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=False))
@@ -251,7 +251,7 @@ def test_text_caps_attention_at_three_with_more_suffix(
         _per_task("TB-5", "TB-5 Active for 5.0h since X"),
     ]
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect(conds),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=False))
@@ -283,7 +283,7 @@ def test_json_carries_attention_block_when_zero_conditions(
     from ap2 import cli_daemon
 
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect([]),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
@@ -306,7 +306,7 @@ def test_json_attention_block_shape_for_per_task_condition(
         "TB-77 Active for 2.0h since 2026-05-27T04:00:00Z",
     )
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect([cond]),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
@@ -335,7 +335,7 @@ def test_json_attention_block_shape_for_singleton_condition(
         "validator-judge noisy: 3+2=5 fails+timeouts in last 24h",
     )
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect([cond]),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
@@ -364,7 +364,7 @@ def test_json_conditions_list_is_unfiltered(
 
     conds = [_per_task(f"TB-{i}", f"TB-{i} Active for {i}.0h") for i in range(1, 6)]
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions",
+        "ap2.components.attention.detect_attention_conditions",
         _stub_detect(conds),
     )
     rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
@@ -466,7 +466,7 @@ def test_cli_consumes_shared_detector_entrypoint(
         return []
 
     monkeypatch.setattr(
-        "ap2.attention.detect_attention_conditions", _spy,
+        "ap2.components.attention.detect_attention_conditions", _spy,
     )
     # Run both branches — both must invoke the shared entrypoint.
     cli_daemon.cmd_status(cfg, Namespace(json=False))
