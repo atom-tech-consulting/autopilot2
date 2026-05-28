@@ -119,3 +119,10 @@ so the regression is mechanical.
   L64-67 backwards-compat constraint).
 - Changing the firing order or semantics of any tick hook;
   observable behavior is bit-for-bit preserved.
+## Attempts
+
+### 2026-05-28 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `test "$(grep -nE '^\s*(from \.attention|from \.auto_approve|from \.auto_unfreeze|from \.focus_advance|from . import jan
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260528T050915Z-TB-310.prompt.md`, `stream: .cc-autopilot/debug/20260528T050915Z-TB-310.stream.jsonl`, `messages: .cc-autopilot/debug/20260528T050915Z-TB-310.messages.jsonl`

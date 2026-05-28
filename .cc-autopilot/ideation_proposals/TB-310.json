@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-309",
   "briefing_path": ".cc-autopilot/tasks/daemon-tick-hook-protocol-walk-registry.md",
   "focus_anchor": "current focus refactor features into opt in components",
+  "outcome": {
+    "commit": "5a755c9",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-28T05:32:58Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T04:49:43Z",
   "tb_id": "TB-310",
   "why_now": "axis (2) is one of two independent unblockers for component\nmigrations in axis (5) per goal.md L216-217. Without the tick-hook\nprotocol, the canary's \"componentness\" is only half-real, and every\nsubsequent migration TB has to plumb a fresh ad-hoc call site instead\nof extending a uniform contract."
