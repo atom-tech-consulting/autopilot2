@@ -285,6 +285,46 @@ class Registry:
             out.append(adapter)
         return out
 
+    def briefing_validators(self, cfg=None) -> list[Callable]:
+        """Ordered list of `BriefingValidator` callables registered on
+        enabled components (TB-316 axis 4).
+
+        Walks every enabled manifest's
+        `hook_points["briefing_validator"]` and returns the resulting
+        callables in deterministic component-name-sorted order. Mirrors
+        the structural shape of `tick_hooks(phase)` and
+        `channel_adapters(cfg)`: name-sorted walk over enabled
+        manifests, skip entries that don't carry the named hook point.
+
+        Determinism is load-bearing for
+        `_validate_briefing_structure`'s pipeline-as-list orchestrator
+        (TB-316). The five deterministic structural checks (sections,
+        goal-anchor, why-now, no-manual-bullets, no-fenced-paths-in-
+        scope) live in core and always run first; the registry-walked
+        list is appended after them, so a future component that
+        registers an additional `briefing_validator` hook (validator-
+        chain extension is the explicit forward-compatibility point of
+        the refactor) slots in at the end without rewriting core.
+
+        Empty list is a legitimate return — when no enabled component
+        declares a `briefing_validator` hook point, the validator's
+        orchestrator simply walks the core list. This is the path
+        unit tests take when the entire components surface is shielded
+        via env flag.
+
+        `cfg` is accepted for forward compatibility (a validator
+        callable may want per-cfg knobs); unused today — validators
+        that read env do so lazily inside their own body so a hot-
+        reloaded env (TB-271) applies on the next call.
+        """
+        out: list[Callable] = []
+        for manifest in self.enabled_components(cfg):
+            validator = manifest.hook_points.get("briefing_validator")
+            if validator is None:
+                continue
+            out.append(validator)
+        return out
+
     def tick_hooks(self, phase: Phase) -> list[TickHook]:
         """Ordered list of tick hooks registered on `phase` (TB-310 axis 2).
 

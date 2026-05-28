@@ -112,20 +112,71 @@ from .briefing_validators import (  # noqa: E402  re-export below `_ok`/`_err` d
     reconcile_proposal_outcome,
     write_ideation_proposal_record,
 )
-from .validator_judge import (  # noqa: E402
-    _DEP_JUDGE_PARSE_ERRORS,
-    _DepJudgeOutcome,
-    _DepJudgeTimeout,
-    _VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL,
-    _VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED,
-    _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT,
-    _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT,
-    _VALIDATOR_JUDGE_MODEL,
-    _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT,
-    _check_dependency_coherence,
-    _judge_dep_coherence_default,
-    _parse_dep_judge_response,
-)
+# TB-316: the validator_judge LLM dep-coherence surface ships as a
+# component subpackage (`ap2/components/validator_judge/`); core resolves
+# the symbols `tools.py` historically re-exported through the registry's
+# `hook_points` dict rather than via a static `from .validator_judge
+# import …`. The TB-311 import-direction gate forbids the latter (a core
+# module statically importing from `ap2/components/` is a build-failure
+# leak). The pre-TB-316 attribute names (`_DEP_JUDGE_PARSE_ERRORS`,
+# `_DepJudgeOutcome`, …) are preserved verbatim on the `tools` module
+# so `from ap2.tools import _DepJudgeTimeout` etc. keeps working in the
+# >50 test modules that touch this surface.
+#
+# Resolution is via module-level `__getattr__` (PEP 562) rather than
+# eager assignment at import time. The eager-assignment path triggered a
+# circular-import bug: `auto_unfreeze/__init__.py` does `from ap2 import
+# tools`, and at that point `tools` is mid-load; the eager registry
+# call here would recursively kick off another `default_registry()`
+# pass which then tries to re-import `auto_unfreeze/__init__.py` —
+# which is still partially initialized — and the inner `from . import
+# (...)` block fails with `ImportError: cannot import name ... from
+# partially initialized module`. The lazy `__getattr__` form binds the
+# registry resolution to first attribute access, which by that point
+# is post-import for both `tools` and every component subpackage.
+_VJ_SYMBOL_MAP: "dict[str, str]" = {
+    "_DEP_JUDGE_PARSE_ERRORS": "DEP_JUDGE_PARSE_ERRORS",
+    "_DepJudgeOutcome": "DepJudgeOutcome",
+    "_DepJudgeTimeout": "DepJudgeTimeout",
+    "_VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL": (
+        "VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL"
+    ),
+    "_VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED": (
+        "VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED"
+    ),
+    "_VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT": (
+        "VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT"
+    ),
+    "_VALIDATOR_JUDGE_MAX_TURNS_DEFAULT": "VALIDATOR_JUDGE_MAX_TURNS_DEFAULT",
+    "_VALIDATOR_JUDGE_MODEL": "VALIDATOR_JUDGE_MODEL",
+    "_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT": "VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT",
+    "_check_dependency_coherence": "check_dependency_coherence",
+    "_judge_dep_coherence_default": "judge_dep_coherence_default",
+    "_parse_dep_judge_response": "parse_dep_judge_response",
+}
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level attribute hook for the TB-316 backward-
+    compatibility re-exports of the validator_judge component's
+    `hook_points`.
+
+    Triggered on `tools.<name>` (or `from ap2.tools import <name>`)
+    when the import-time module scope doesn't already carry that
+    attribute. We resolve the value from the registry's manifest
+    hook_points dict and return it; we do NOT cache on the tools
+    module's `__dict__` because monkeypatched stubs (a few tests
+    override `tools._VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED.clear()`
+    or similar) need to see the live container the component module
+    publishes — caching here would freeze a snapshot.
+    """
+    if name in _VJ_SYMBOL_MAP:
+        from .registry import default_registry
+
+        return default_registry().get(
+            "validator_judge",
+        ).hook_points[_VJ_SYMBOL_MAP[name]]
+    raise AttributeError(f"module 'ap2.tools' has no attribute {name!r}")
 from .operator_queue import (  # noqa: E402
     OPERATOR_QUEUE_OPS,
     _APPROVE_LEGACY_REVIEW_RE,

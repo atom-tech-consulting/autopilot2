@@ -35,8 +35,18 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from . import events
-from .json_extract import extract_rightmost_json_object
+# TB-316: the flat module `ap2/validator_judge.py` moved here as the
+# subpackage's `__init__.py`. Pre-TB-316 the relative imports
+# `from . import events` and `from .json_extract import …` resolved
+# against the `ap2` package; post-relocation the same dots would
+# resolve against `ap2.components.validator_judge`, breaking the
+# cross-module access. Rewrite as absolute imports (`from ap2 import
+# events` / `from ap2.json_extract import …`) so the runtime
+# references survive the move without behavior drift. The
+# `from . import …` shape inside the sibling `manifest.py` is
+# intra-package by design (it sources symbols from this very file).
+from ap2 import events
+from ap2.json_extract import extract_rightmost_json_object
 
 
 # TB-235: knob defaults for the LLM-driven dependency-coherence check

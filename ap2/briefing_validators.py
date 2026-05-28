@@ -1,5 +1,5 @@
 """Briefing-structure + board-input validators (TB-138 / TB-154 / TB-161 /
-TB-164 / TB-171 / TB-235 / TB-188).
+TB-164 / TB-171 / TB-235 / TB-188 / TB-316).
 
 Hosts the queue-append-time gates that score a freshly-authored briefing
 markdown against the structural / goal-alignment / why-now / manual-bullet
@@ -34,11 +34,20 @@ Public symbols (still re-exported from `ap2.tools` for backward compat):
 - The main gate: `_validate_briefing_structure` — the single entry
   point called by `do_board_edit` (add / update branches) and
   `do_operator_queue_append` (add / update branches).
+- Pipeline-as-list seams (TB-316): `BriefingContext`, `BriefingValidator`,
+  `_CORE_VALIDATORS` — the five deterministic structural-check
+  callables in canonical order, walked by the orchestrator before the
+  registry-walked validators (today: the validator_judge component's
+  dep-coherence wrapper) run.
 
-This module imports `_check_dependency_coherence` from
-`ap2.validator_judge` — the briefing-validator's check #7 fans out to
-the LLM-judge surface. The dependency is one-way; `validator_judge.py`
-has no awareness of briefing-section parsing.
+TB-316: the LLM-driven dep-coherence check (`_check_dependency_coherence`)
+no longer lives at the flat `ap2/validator_judge.py` path; it moved to
+`ap2/components/validator_judge/` and registers itself as a
+`briefing_validator` hook via the component registry. Core resolves it
+through `registry.briefing_validators()` rather than a static import —
+the TB-311 import-direction gate forbids the latter. The dependency
+is still one-way: the validator_judge component has no awareness of
+briefing-section parsing.
 """
 from __future__ import annotations
 
@@ -46,7 +55,9 @@ import datetime as _dt
 import json
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 from . import events
 from .config import Config
@@ -55,7 +66,6 @@ from .init import (
     GOAL_ANCHOR_HEADINGS,
     WHY_NOW_MIN_CHARS,
 )
-from .validator_judge import _check_dependency_coherence
 from .verify import parse_verification_section
 
 
@@ -806,6 +816,287 @@ def reconcile_proposal_outcome(
     return target
 
 
+# ---------------------------------------------------------------------------
+# TB-316 axis 4: pipeline-as-list orchestrator.
+#
+# Pre-TB-316 `_validate_briefing_structure` was a 200-line inline chain
+# that called each TB-154 / TB-161 / TB-164 / TB-171 / TB-308 / TB-235
+# check in sequence. Post-TB-316 the chain is an iterable list of
+# `BriefingValidator` callables: the five deterministic structural
+# checks live in core (top-level callables below) and always run; the
+# TB-235 LLM dep-coherence check ships as a `validator_judge/`
+# component whose manifest registers it as a `briefing_validator` hook
+# via the component registry. Components can register additional
+# validators via the same hook — extension is the explicit forward-
+# compatibility point of the refactor.
+#
+# Error messages and return-on-first-failure semantics stay byte-
+# identical to the pre-TB-316 chain so the existing 100+ briefing-
+# validator tests (covering every reject path's exact wording) stay
+# green without modification.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BriefingContext:
+    """Shared payload threaded through every `BriefingValidator` callable
+    in the TB-316 pipeline-as-list orchestrator.
+
+    Frozen so a downstream validator can't accidentally mutate state
+    another validator in the chain depends on — the chain's contract
+    is purely read-the-context-and-return-an-error. Each field below
+    maps to a kwarg of the pre-TB-316 `_validate_briefing_structure`
+    signature; the orchestrator builds one context per validation pass
+    and walks the list.
+
+    Fields:
+      - `text`               — the briefing markdown source (pre-empty-
+                               text short-circuit already applied by
+                               the orchestrator, so validators see
+                               non-empty content).
+      - `goal_md_path`       — `Path | None`; supplied by the operator-
+                               queue / board-edit caller (the project
+                               root's `goal.md`). `None` short-circuits
+                               the TB-161 goal-anchor check.
+      - `skip_goal_alignment`— TB-170 operator-CLI escape hatch; when
+                               True, the goal-anchor (TB-161) and
+                               Why-now (TB-164) checks short-circuit
+                               but every other gate runs unchanged.
+      - `description`        — task description prose (post-em-dash on
+                               the board line) used by the TB-235
+                               dep-coherence judge.
+      - `blocked_csv`        — the task's `@blocked:` codespan tokens
+                               as a comma-separated string; the TB-235
+                               judge checks every hard-predecessor it
+                               names against this list.
+      - `events_file`        — `Path | None`; opt-in flag for TB-235.
+                               Set to a real events.jsonl by queue-
+                               append / board-edit callers; left None
+                               by unit tests that exercise only the
+                               deterministic checks.
+      - `dep_judge_fn`       — test-injection seam for TB-235; the
+                               production path leaves it None and the
+                               judge delegates to the SDK helper.
+    """
+
+    text: str
+    goal_md_path: "Path | None" = None
+    skip_goal_alignment: bool = False
+    description: str = ""
+    blocked_csv: str = ""
+    events_file: "Path | None" = None
+    dep_judge_fn: "Callable[..., Any] | None" = None
+
+
+# TB-316: canonical type for the pipeline-as-list validators. Each
+# callable takes a `BriefingContext` and returns either a single error-
+# message string (rejection) or None (this validator's gate passed,
+# continue the chain). The chain is short-circuiting — the orchestrator
+# returns on the first error so the operator's diagnostic names one
+# concrete fix at a time (matches the pre-TB-316 inline-chain behavior
+# byte-for-byte).
+BriefingValidator = Callable[[BriefingContext], "str | None"]
+
+
+def _validate_required_sections(ctx: BriefingContext) -> "str | None":
+    """TB-154 (+ TB-138 + TB-135 extensions): required-sections gate.
+
+    Asserts three structural invariants in one validator:
+      1. Every section in `BRIEFING_REQUIRED_SECTIONS` is present at
+         the `##` level (case-sensitive). Extra `##`-level sections
+         (e.g. `## Decision log`) are allowed.
+      2. The `## Verification` section is parseable by
+         `verify.parse_verification_section` — defends against a
+         briefing whose heading the structural-pass regex accepts but
+         the AST-driven verifier silently drops (TB-153 historical
+         failure mode: `## Acceptance` with a malformed Verification
+         shape).
+      3. `## Verification` carries at least one bullet — an empty
+         section is structurally valid markdown but produces zero
+         criteria for the per-task verifier to score against.
+
+    Error messages stay byte-identical to the pre-TB-316 inline check
+    so the existing reject-shape tests (TB-154 + TB-138 + TB-135 pins)
+    keep passing without modification.
+    """
+    text = ctx.text
+    found = _briefing_section_names(text)
+    missing = [s for s in BRIEFING_REQUIRED_SECTIONS if s not in found]
+    if missing:
+        first = missing[0]
+        return (
+            f"briefing structure invalid: missing section "
+            f"`## {first}`. {_BRIEFING_STRUCTURE_HINT}"
+        )
+    bullets = parse_verification_section(text)
+    if bullets is None:
+        # `## Verification` heading is present per the structural pass,
+        # but `parse_verification_section` couldn't find it via mistune
+        # AST. This shouldn't happen given the regex tolerance lines up
+        # with `_is_verification_heading`, but if a future briefing
+        # quirk slips past one and not the other, refuse rather than
+        # ship a briefing the verifier will silently skip.
+        return (
+            "briefing structure invalid: `## Verification` heading is "
+            "present but the verifier can't parse it. "
+            f"{_BRIEFING_STRUCTURE_HINT}"
+        )
+    if not bullets:
+        return (
+            "briefing structure invalid: `## Verification` section is "
+            "empty — the per-task verifier needs at least one bullet "
+            "(backticked shell command, test name, or judge-checkable "
+            "prose) to score against the agent's diff. "
+            f"{_BRIEFING_STRUCTURE_HINT}"
+        )
+    return None
+
+
+def _validate_goal_anchor(ctx: BriefingContext) -> "str | None":
+    """TB-161: goal-anchor check.
+
+    Honors the TB-170 `skip_goal_alignment` operator-CLI escape hatch
+    — when True, the gate short-circuits to None and the rest of the
+    pipeline runs unchanged. Otherwise runs only when `goal_md_path`
+    is parseable and contributes derivable anchors — a fresh project
+    whose goal.md is still the all-placeholder template short-circuits
+    to "skip" so day-one of a new project doesn't reject every
+    proposal.
+
+    Error message stays byte-identical to the pre-TB-316 inline check.
+    """
+    if ctx.skip_goal_alignment:
+        return None
+    goal_anchors = _goal_md_anchors(ctx.goal_md_path)
+    if not goal_anchors:
+        return None
+    goal_body = _briefing_section_body(ctx.text, "Goal")
+    goal_norm = _normalize_anchor(goal_body)
+    if any(a in goal_norm for a in goal_anchors):
+        return None
+    preview = sorted(goal_anchors)[:5]
+    preview_str = ", ".join(f"`{a}`" for a in preview)
+    return (
+        "briefing structure invalid: `## Goal` body cites no "
+        "anchor from goal.md — every proposal must reduce to "
+        "a visible step toward the declared project goal "
+        "(reject-ap2-meta-polish-drift, TB-161). Reword the "
+        "Goal section to quote or reference one of "
+        "`goal.md`'s `## Current focus` / `## Done when` "
+        "headings or a Done-when bullet. Available anchors "
+        f"include: {preview_str}."
+    )
+
+
+def _validate_why_now(ctx: BriefingContext) -> "str | None":
+    """TB-164: "Why now" rationale check.
+
+    Honors the TB-170 `skip_goal_alignment` operator-CLI escape hatch
+    — when True, the gate short-circuits to None. Otherwise runs even
+    when goal.md is missing / all-placeholder; the delete-test is
+    intrinsic to the briefing contract, not a goal-relevance check.
+
+    Error messages stay byte-identical to the pre-TB-316 inline check.
+    """
+    if ctx.skip_goal_alignment:
+        return None
+    goal_body = _briefing_section_body(ctx.text, "Goal")
+    rationale = _why_now_paragraph(goal_body)
+    if rationale is None:
+        return (
+            "## Goal section must include a non-empty 'Why now' "
+            "rationale (goal.md's delete-test). Add a line beginning "
+            "with `Why now` (e.g. `Why now: <one sentence answering "
+            "\"if we delete this and the goal still ships, was it "
+            "useful?\">`) inside the `## Goal` body. The marker must "
+            "start a line — mid-sentence \"why now\" inside "
+            "arbitrary prose doesn't count. Min "
+            f"{WHY_NOW_MIN_CHARS} chars after the marker (TB-164)."
+        )
+    if len(rationale) < WHY_NOW_MIN_CHARS:
+        return (
+            "## Goal section must include a non-empty 'Why now' "
+            "rationale (goal.md's delete-test). The `Why now` "
+            f"paragraph is only {len(rationale)} chars after the "
+            f"marker; minimum is {WHY_NOW_MIN_CHARS}. Articulate "
+            "the delete-test answer in writing — name the failure "
+            "mode this closes or the gap it fills, not just \"this "
+            "would be nice to have\" (TB-164)."
+        )
+    return None
+
+
+def _validate_no_manual_bullets(ctx: BriefingContext) -> "str | None":
+    """TB-171: reject `Manual:` / `[manual]` bullets in `## Verification`.
+
+    Runs unconditionally (the TB-170 escape hatch does NOT bypass this
+    check — pre-TB-308 the hatch did, but the inconsistency was the
+    load-bearing fix). Walks the briefing text line-by-line rather than
+    via `_briefing_section_body` because the latter's heading regex is
+    `\\s*`-greedy and can swallow the first list bullet of a section
+    whose body starts with a bullet — which is the structural shape of
+    every well-formed `## Verification` section.
+
+    Error message stays byte-identical to the pre-TB-316 inline check.
+    """
+    _verif_heading = re.compile(r"^##[ \t]+Verification\b", re.IGNORECASE)
+    _next_heading = re.compile(r"^##[ \t]+")
+    in_verification = False
+    for line in ctx.text.splitlines():
+        if _verif_heading.match(line):
+            in_verification = True
+            continue
+        if in_verification and _next_heading.match(line):
+            break
+        if in_verification and _MANUAL_BULLET_RE.match(line):
+            offending = line.strip()
+            return (
+                "briefing structure invalid: `## Verification` contains a "
+                f"`Manual:` bullet (`{offending}`). Auto-verifiable "
+                "bullets only — the unattended per-task verifier cannot "
+                "observe a live operator action (TB-122 hit "
+                "`retry_exhausted` on exactly this shape, TB-138 pinned "
+                "the rule). Convert the bullet to a backticked shell "
+                "command, a unit/e2e test name (with stubbed deps for "
+                "the operator-observation case), or a judge-checkable "
+                "prose claim that names a concrete file/symbol — or "
+                "move the bullet to `## Out of scope` if the behavior "
+                "genuinely cannot be auto-verified (TB-171)."
+            )
+    return None
+
+
+def _validate_no_fenced_paths_in_scope_check(
+    ctx: BriefingContext,
+) -> "str | None":
+    """TB-308: reject `## Scope` bullets that codespan a
+    `TASK_AGENT_FENCED_PATHS` entry.
+
+    Thin adapter over the pre-TB-316 top-level helper
+    `_validate_no_fenced_paths_in_scope(briefing_text)` so the helper's
+    error-string shape (and the lazy `TASK_AGENT_FENCED_PATHS` import
+    pattern it documents) stays byte-identical post-pipeline-as-list.
+    """
+    return _validate_no_fenced_paths_in_scope(ctx.text)
+
+
+# TB-316: canonical core-validator list. The five deterministic
+# structural checks in the order the pre-TB-316 inline chain ran them.
+# Components register additional validators via
+# `manifest.hook_points["briefing_validator"]` and the orchestrator
+# appends `registry.briefing_validators()` after this list — so the
+# core checks always fire first (cheaper, and a malformed briefing has
+# a clearer rejection reason than a downstream SDK-judge fail-open
+# event would surface).
+_CORE_VALIDATORS: tuple[BriefingValidator, ...] = (
+    _validate_required_sections,
+    _validate_goal_anchor,
+    _validate_why_now,
+    _validate_no_manual_bullets,
+    _validate_no_fenced_paths_in_scope_check,
+)
+
+
 def _validate_briefing_structure(
     briefing_text: str,
     *,
@@ -943,191 +1234,46 @@ def _validate_briefing_structure(
     extends the gate to goal-relevance: a briefing that passes (1)-(3)
     but whose Goal body cites nothing in `goal.md` is the next failure
     mode (ap2-meta-polish drift slipping past the structural check).
+
+    TB-316: refactored from an inline call chain into a pipeline-as-list
+    orchestrator. The five deterministic structural checks (`_CORE_VALIDATORS`)
+    plus any registry-walked `briefing_validator` hooks (today: the
+    `validator_judge` component's TB-235 dep-coherence wrapper) compose
+    the chain; this function builds a `BriefingContext` once and walks
+    the list, returning on the first error. Error messages and chain
+    order are byte-identical to the pre-TB-316 inline chain so the
+    existing 100+ briefing-validator reject-shape tests stay green.
     """
     text = briefing_text or ""
     if not text.strip():
         # Defer to TB-135's "briefing is required" gate — that one names
-        # the right error for an empty payload.
+        # the right error for an empty payload. Short-circuiting here
+        # mirrors the pre-TB-316 inline-chain entry guard byte-for-byte.
         return None
-    found = _briefing_section_names(text)
-    missing = [s for s in BRIEFING_REQUIRED_SECTIONS if s not in found]
-    if missing:
-        first = missing[0]
-        return (
-            f"briefing structure invalid: missing section "
-            f"`## {first}`. {_BRIEFING_STRUCTURE_HINT}"
-        )
-    bullets = parse_verification_section(text)
-    if bullets is None:
-        # `## Verification` heading is present per the structural pass,
-        # but `parse_verification_section` couldn't find it via mistune
-        # AST. This shouldn't happen given the regex tolerance lines up
-        # with `_is_verification_heading`, but if a future briefing
-        # quirk slips past one and not the other, refuse rather than
-        # ship a briefing the verifier will silently skip.
-        return (
-            "briefing structure invalid: `## Verification` heading is "
-            "present but the verifier can't parse it. "
-            f"{_BRIEFING_STRUCTURE_HINT}"
-        )
-    if not bullets:
-        return (
-            "briefing structure invalid: `## Verification` section is "
-            "empty — the per-task verifier needs at least one bullet "
-            "(backticked shell command, test name, or judge-checkable "
-            "prose) to score against the agent's diff. "
-            f"{_BRIEFING_STRUCTURE_HINT}"
-        )
-    # TB-170: operator-CLI escape hatch. When `skip_goal_alignment=True`,
-    # the TB-161 goal-anchor and TB-164 Why-now checks are skipped while
-    # every other gate above (TB-154 canonical sections, TB-138 verifiable
-    # bullets via `parse_verification_section`, TB-135 non-empty
-    # Verification) AND every gate below (TB-171 manual-bullet, TB-308
-    # fenced-paths-in-Scope, TB-235 dep-coherence) keep firing. The
-    # bypass is opt-in at the operator CLI surface only; ideation / MM
-    # handler / other control agents do NOT pass this kwarg, so
-    # autonomous proposals always go through the full goal-alignment
-    # gate. TB-308 narrowed the bypass: pre-TB-308 the function
-    # short-circuited with `return None` here, which silently skipped
-    # the manual-bullet / fenced-paths / dep-coherence checks too
-    # (inconsistent with this comment's intent). The narrower wrap
-    # below is the load-bearing fix.
-    if not skip_goal_alignment:
-        # TB-161: goal-anchor check. Runs only when goal.md is parseable
-        # and contributes derivable anchors — a fresh project whose
-        # goal.md is still the all-placeholder template short-circuits
-        # to "skip" so we don't reject every proposal on day-one of a
-        # new project.
-        goal_anchors = _goal_md_anchors(goal_md_path)
-        goal_body = _briefing_section_body(briefing_text, "Goal")
-        if goal_anchors:
-            goal_norm = _normalize_anchor(goal_body)
-            if not any(a in goal_norm for a in goal_anchors):
-                preview = sorted(goal_anchors)[:5]
-                preview_str = ", ".join(f"`{a}`" for a in preview)
-                return (
-                    "briefing structure invalid: `## Goal` body cites no "
-                    "anchor from goal.md — every proposal must reduce to "
-                    "a visible step toward the declared project goal "
-                    "(reject-ap2-meta-polish-drift, TB-161). Reword the "
-                    "Goal section to quote or reference one of "
-                    "`goal.md`'s `## Current focus` / `## Done when` "
-                    "headings or a Done-when bullet. Available anchors "
-                    f"include: {preview_str}."
-                )
-        # TB-164: "Why now" rationale check. Line-anchored marker plus a
-        # minimum-length rationale so the author articulates goal.md's
-        # delete-test ("if we delete this and the goal still ships, was
-        # it useful?") in writing. Runs even when goal.md is missing /
-        # all-placeholder — the delete-test is intrinsic to the briefing
-        # contract, not a goal-relevance check, so it doesn't share the
-        # TB-161 anchor-skip fallback.
-        rationale = _why_now_paragraph(goal_body)
-        if rationale is None:
-            return (
-                "## Goal section must include a non-empty 'Why now' "
-                "rationale (goal.md's delete-test). Add a line beginning "
-                "with `Why now` (e.g. `Why now: <one sentence answering "
-                "\"if we delete this and the goal still ships, was it "
-                "useful?\">`) inside the `## Goal` body. The marker must "
-                "start a line — mid-sentence \"why now\" inside "
-                "arbitrary prose doesn't count. Min "
-                f"{WHY_NOW_MIN_CHARS} chars after the marker (TB-164)."
-            )
-        if len(rationale) < WHY_NOW_MIN_CHARS:
-            return (
-                "## Goal section must include a non-empty 'Why now' "
-                "rationale (goal.md's delete-test). The `Why now` "
-                f"paragraph is only {len(rationale)} chars after the "
-                f"marker; minimum is {WHY_NOW_MIN_CHARS}. Articulate "
-                "the delete-test answer in writing — name the failure "
-                "mode this closes or the gap it fills, not just \"this "
-                "would be nice to have\" (TB-164)."
-            )
-    # TB-171: reject `Manual:` / `[manual]` bullets in `## Verification`.
-    # The per-task verifier is unattended — it has the diff, the working
-    # tree, and a shell, but no live operator. TB-122 hit `retry_exhausted`
-    # on a single manual bullet despite the implementation being complete.
-    # The rule lives in three author-side surfaces (ideation prompt,
-    # briefing template, ap2-task skill) and as a non-fatal `ap2 check`
-    # lint (`_check_briefings_manual_bullets`); this is the queue-append
-    # gate that mechanically blocks the malformed briefing before it costs
-    # a TB-N + a task-agent run. Only `## Verification` is scanned —
-    # bullets in `## Out of scope` (or anywhere else) are fine. We scan
-    # raw lines (rather than the parsed `bullets` list) so the regex
-    # stays aligned shape-for-shape with `ap2/check.py::_MANUAL_BULLET_RE`,
-    # and we walk the text line-by-line (rather than via
-    # `_briefing_section_body`) because the latter's heading regex is
-    # `\s*`-greedy and can swallow the first list bullet of a section
-    # whose body starts with a bullet — which is the structural shape of
-    # every well-formed `## Verification` section.
-    _verif_heading = re.compile(r"^##[ \t]+Verification\b", re.IGNORECASE)
-    _next_heading = re.compile(r"^##[ \t]+")
-    in_verification = False
-    for line in briefing_text.splitlines():
-        if _verif_heading.match(line):
-            in_verification = True
-            continue
-        if in_verification and _next_heading.match(line):
-            break
-        if in_verification and _MANUAL_BULLET_RE.match(line):
-            offending = line.strip()
-            return (
-                "briefing structure invalid: `## Verification` contains a "
-                f"`Manual:` bullet (`{offending}`). Auto-verifiable "
-                "bullets only — the unattended per-task verifier cannot "
-                "observe a live operator action (TB-122 hit "
-                "`retry_exhausted` on exactly this shape, TB-138 pinned "
-                "the rule). Convert the bullet to a backticked shell "
-                "command, a unit/e2e test name (with stubbed deps for "
-                "the operator-observation case), or a judge-checkable "
-                "prose claim that names a concrete file/symbol — or "
-                "move the bullet to `## Out of scope` if the behavior "
-                "genuinely cannot be auto-verified (TB-171)."
-            )
-    # TB-308 check #7: reject `## Scope` bullets that codespan a
-    # `TASK_AGENT_FENCED_PATHS` entry. The task agent's SDK call wires
-    # `Edit(<path>)` + `Write(<path>)` into `--disallowedTools` for
-    # every fenced entry; a Scope bullet listing such a path is
-    # structurally unsatisfiable and burns dispatches in the
-    # retry-then-freeze loop (TB-306 hit ~5 dispatches + ~$7 in
-    # tokens before manual close). Runs unconditionally — the TB-170
-    # `skip_goal_alignment` escape hatch bypasses goal-anchor +
-    # Why-now only; there's no legitimate operator scenario where the
-    # task agent SHOULD edit a fenced path (the path lives in the
-    # fence precisely because the daemon owns it). Mirrors TB-171's
-    # shape: queue-append-time mechanical gate against a structural
-    # error that already cost a TB-N + a task-agent run before
-    # author-side prose alone caught it.
-    fenced_err = _validate_no_fenced_paths_in_scope(briefing_text)
-    if fenced_err is not None:
-        return fenced_err
-    # TB-235 check #8: LLM-driven dependency-coherence judge. Runs
-    # AFTER every deterministic check above passes (so the judge never
-    # sees structurally-malformed input — cheaper, and a malformed
-    # briefing already has a clearer rejection reason). The caller
-    # opts into the check by supplying `events_file` (a real
-    # queue-append / board-edit surface) or `dep_judge_fn` (test
-    # injection); unit tests that exercise only the deterministic
-    # checks omit both kwargs and the gate short-circuits.
-    # `dep_judge_fn` is the test-injection seam — production leaves
-    # it None and `_check_dependency_coherence` delegates to the SDK;
-    # tests pass a stub callable to drive the decision logic
-    # deterministically. Fail-open by design (see
-    # `_check_dependency_coherence` docstring): a judge timeout /
-    # parse failure / network error logs a
-    # `validator_judge_{timeout,fail}` event and returns None,
-    # letting the briefing through. Refusing to gate on transient
-    # infrastructure failures is the load-bearing trade-off — auto-
-    # approve mode (TB-223) amplifies the cost of false-positives.
-    if events_file is not None or dep_judge_fn is not None:
-        dep_err = _check_dependency_coherence(
-            briefing_text=briefing_text,
-            description=description or "",
-            blocked_csv=blocked_csv or "",
-            events_file=events_file,
-            judge_fn=dep_judge_fn,
-        )
-        if dep_err:
-            return dep_err
+    ctx = BriefingContext(
+        text=briefing_text,
+        goal_md_path=goal_md_path,
+        skip_goal_alignment=skip_goal_alignment,
+        description=description,
+        blocked_csv=blocked_csv,
+        events_file=events_file,
+        dep_judge_fn=dep_judge_fn,
+    )
+    # TB-316: the canonical pipeline is the five core checks (always
+    # run, deterministic structural gates) followed by the registry-
+    # walked `briefing_validator` hooks (today: the validator_judge
+    # component's dep-coherence wrapper). Sorting is by component-name
+    # inside the registry's `briefing_validators()` accessor, so the
+    # chain stays deterministic across daemon restarts. Local import
+    # of `default_registry` keeps `ap2.briefing_validators` cheap to
+    # import for paths that don't trigger validation (e.g. the per-
+    # proposal record helpers below).
+    from .registry import default_registry
+
+    pipeline: list[BriefingValidator] = list(_CORE_VALIDATORS)
+    pipeline.extend(default_registry().briefing_validators())
+    for validator in pipeline:
+        err = validator(ctx)
+        if err:
+            return err
     return None

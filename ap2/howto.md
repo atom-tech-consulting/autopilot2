@@ -1435,7 +1435,9 @@ symmetry.
   TB-270 ships the complementary axis-1 lever the same artifact named
   as the secondary factor (`prompt-too-heavy`):
   `_slice_briefing_for_dep_judge(briefing_text)` in
-  `ap2/validator_judge.py` narrows the user payload's
+  `ap2/components/validator_judge/__init__.py` (relocated from the
+  flat module `ap2/validator_judge.py` by TB-316) narrows the user
+  payload's
   `briefing_markdown` field to the briefing's `## Goal` + `## Scope`
   sections only (Design / Verification / Out-of-scope are bytes the
   judge wouldn't have used to change its hard-predecessor verdict).

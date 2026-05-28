@@ -651,19 +651,27 @@ def validator_judge_timeout_audit(
     so the value the audit compares against is byte-identical to what
     the validator will actually use at runtime.
     """
-    # Local import to dodge the validator_judge → events → ... cycle
-    # if this module ever sits in the wrong import order. The judge
-    # module is cheap to import (no SDK at module scope; lazy import
-    # inside `_judge_dep_coherence_default`).
-    from . import validator_judge as _vj
+    # TB-316: resolve the validator-judge timeout default via the
+    # component registry's `hook_points` dict — the flat module
+    # `ap2/validator_judge.py` was relocated to
+    # `ap2/components/validator_judge/` and core may not statically
+    # import from `ap2/components/` (the TB-311 import-direction gate).
+    # The local-scope import of `default_registry` keeps the doctor
+    # module cheap to import and parallels the pre-TB-316 lazy-import
+    # pattern that dodged the `validator_judge → events → …` cycle.
+    from .registry import default_registry
+
+    _vj_default = default_registry().get(
+        "validator_judge",
+    ).hook_points["VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT"]
 
     res = AuditResult()
     events_file = state_dir / EVENTS_FILE
     raw = os.environ.get("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "").strip()
     try:
-        timeout = float(raw) if raw else _vj._VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+        timeout = float(raw) if raw else _vj_default
     except ValueError:
-        timeout = _vj._VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+        timeout = _vj_default
     durations, sample_days = _iter_validator_judge_passed_durations(
         events_file,
         window_days=_VALIDATOR_JUDGE_TIMEOUT_AUDIT_WINDOW_DAYS,

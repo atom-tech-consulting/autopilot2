@@ -38,7 +38,11 @@ from pathlib import Path
 
 import pytest
 
-from ap2 import validator_judge as vj
+# TB-316: the flat module `ap2/validator_judge.py` moved to
+# `ap2/components/validator_judge/`. Tests are exempt from the TB-311
+# import-direction gate; the alias name (`vj`) is preserved so the rest
+# of this module's bodies keep reading byte-identically.
+from ap2.components import validator_judge as vj
 
 
 # A canonical-shaped briefing that covers all five sections the
