@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/auto-approve-subpackage-migration-axis-5.md",
   "focus_anchor": "current focus refactor features into opt in components",
+  "outcome": {
+    "commit": "548e667",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T11:49:38Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T11:27:46Z",
   "tb_id": "TB-318",
   "why_now": "TB-315 (attention) shipped 2026-05-28T09:46Z and TB-316\n(validator_judge) shipped 2026-05-28T10:07Z. All other axis-5\nmigrations are done. Goal.md L196-197 explicitly sequences `auto_approve`\nLAST; with siblings landed, the canary-shape repetition is most\nefficient now (5 prior migrations have grooved the pattern) and\ndeferring lets the flat path linger as a goal-named gap."

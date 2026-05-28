@@ -1119,3 +1119,9 @@
 - **Summary:** Fixed TB-317's prior verification gap: rewrote test_disabled_config_channel_adapters_routing to wire core sibling adapters (Stdout/FileAppend/Webhook) into the per-process registry via synthetic always-on manifests, then assert each sibling type appears in the DIRECT return of default_registry().channel_adapters(project_cfg) — not on a manually-combined list as the prior attempt did. Full suite 2276/2276 green; disabled-config gate 9/9 in ~70ms.
 - **Files:** ap2/tests/test_components_disabled.py
 - **Tests:** pass
+
+## [2026-05-28] TB-318: `auto_approve/` subpackage migration (axis 5 — final migration)
+- **Commit:** `548e667`
+- **Summary:** Relocated `ap2/auto_approve.py` (743 lines) to `ap2/components/auto_approve/__init__.py` — the FINAL named axis-5 migration. Manifest rewritten to source intra-package via `from . import …` and exposes all 18 daemon-alias symbols (the 17 at L1760-1776 plus `evaluate_auto_approve_decision` at L1777) through `hook_points`; daemon rebinds them via `default_registry().get("auto_approve").hook_points[…]` so core never statically imports from `ap2/components/`. Sibling components (auto_unfreeze, attention, focus_advance) and three test files retargeted to the new path; new TB-318 regression pin (46 tests) covers structural / manifest / daemon-resolution / import-direction invariants. Full suite passes (2322 tests).
+- **Files:** ap2/auto_approve.py, ap2/components/auto_approve/__init__.py, ap2/components/auto_approve/manifest.py, ap2/components/attention/__init__.py, ap2/components/auto_unfreeze/__init__.py, ap2/components/focus_advance/__init__.py, ap2/daemon.py, ap2/tests/test_roadmap_complete_no_bullet_append.py, ap2/tests/test_tb272_validator_judge_noisy_pause.py, ap2/tests/test_tb290_attention_cost_cap_approach.py, ap2/tests/test_tb318_auto_approve_migration.py
+- **Tests:** pass
