@@ -202,3 +202,10 @@ risk.
 - Renaming `AP2_AUTO_APPROVE` to align with the `*_DISABLED` suffix
   convention. The existing knob name is operator-facing and
   documented; backwards compatibility wins.
+## Attempts
+
+### 2026-05-28 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `grep -q '\`AP2_AUTO_UNFREEZE_DISABLED`' ap2/howto.md`— the new knob has a backtick-fenced mention in`## Configuration k
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260528T193600Z-TB-320.prompt.md`, `stream: .cc-autopilot/debug/20260528T193600Z-TB-320.stream.jsonl`, `messages: .cc-autopilot/debug/20260528T193600Z-TB-320.messages.jsonl`
