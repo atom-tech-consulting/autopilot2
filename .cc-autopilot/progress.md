@@ -1125,3 +1125,9 @@
 - **Summary:** Relocated `ap2/auto_approve.py` (743 lines) to `ap2/components/auto_approve/__init__.py` — the FINAL named axis-5 migration. Manifest rewritten to source intra-package via `from . import …` and exposes all 18 daemon-alias symbols (the 17 at L1760-1776 plus `evaluate_auto_approve_decision` at L1777) through `hook_points`; daemon rebinds them via `default_registry().get("auto_approve").hook_points[…]` so core never statically imports from `ap2/components/`. Sibling components (auto_unfreeze, attention, focus_advance) and three test files retargeted to the new path; new TB-318 regression pin (46 tests) covers structural / manifest / daemon-resolution / import-direction invariants. Full suite passes (2322 tests).
 - **Files:** ap2/auto_approve.py, ap2/components/auto_approve/__init__.py, ap2/components/auto_approve/manifest.py, ap2/components/attention/__init__.py, ap2/components/auto_unfreeze/__init__.py, ap2/components/focus_advance/__init__.py, ap2/daemon.py, ap2/tests/test_roadmap_complete_no_bullet_append.py, ap2/tests/test_tb272_validator_judge_noisy_pause.py, ap2/tests/test_tb290_attention_cost_cap_approach.py, ap2/tests/test_tb318_auto_approve_migration.py
 - **Tests:** pass
+
+## [2026-05-28] TB-319: `ap2 status` enumerates active components from the registry (closes Progress signal)
+- **Commit:** `ce55765`
+- **Summary:** Added a `## Components` block to `ap2 status` (text + JSON) that walks `default_registry()` and renders each manifest's name + on/off state + env-flag description; extracted the polarity rule onto `Manifest.is_enabled` / `Manifest.env_flag_description` (shared by the registry walk and the new enumeration). Closes the goal.md L235-237 Progress signal. Full suite (2335 tests) passes.
+- **Files:** ap2/registry.py, ap2/cli_daemon.py, ap2/howto.md, ap2/tests/test_tb319_status_components.py, ap2/tests/test_janitor.py, ap2/tests/test_tb298_status_attention.py
+- **Tests:** pass

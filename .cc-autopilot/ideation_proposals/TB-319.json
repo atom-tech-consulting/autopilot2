@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-309",
   "briefing_path": ".cc-autopilot/tasks/ap2-status-enumerates-active-components.md",
   "focus_anchor": "current focus refactor features into opt in components",
+  "outcome": {
+    "commit": "ce55765",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-28T12:06:27Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-28T11:30:53Z",
   "tb_id": "TB-319",
   "why_now": "with TB-309 through TB-317 shipped, the registry has 7 real\ncomponents (janitor, mattermost, focus_advance, auto_unfreeze,\nattention, validator_judge) plus auto_approve (TB-318 pending). The\nProgress signal at goal.md L235-237 cannot close until the operator\nsurface enumerates components; without this task the refactor delivers\nonly internal plumbing benefit. The slot is naturally now because\nthe cleavage is complete enough that a stable enumeration list exists."
