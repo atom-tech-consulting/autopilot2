@@ -50,7 +50,10 @@ import os
 import time
 
 from ap2 import events, tools
-from ap2.auto_approve import _append_decisions_needed_bullet, _parse_event_ts
+from ap2.components.auto_approve import (
+    _append_decisions_needed_bullet,
+    _parse_event_ts,
+)
 from ap2.board import Board
 from ap2.config import Config
 

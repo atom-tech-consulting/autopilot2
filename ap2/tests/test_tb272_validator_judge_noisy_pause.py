@@ -61,12 +61,12 @@ import pytest
 
 from ap2 import (
     automation_status,
-    auto_approve,
     daemon,
     env_reload,
     events,
     tools,
 )
+from ap2.components import auto_approve
 from ap2.board import Board
 from ap2.config import Config
 from ap2.init import init_project

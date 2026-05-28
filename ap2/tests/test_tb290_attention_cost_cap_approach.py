@@ -53,7 +53,7 @@ from ap2.components.attention import (
     find_last_attention_fire,
     should_suppress,
 )
-from ap2.auto_approve import _auto_approve_check_violations
+from ap2.components.auto_approve import _auto_approve_check_violations
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -737,7 +737,13 @@ def test_briefing_verification_greps_match():
     env_reload_src = (repo_root / "env_reload.py").read_text()
     howto_src = (repo_root / "howto.md").read_text()
     architecture_src = (repo_root / "architecture.md").read_text()
-    auto_approve_src = (repo_root / "auto_approve.py").read_text()
+    # TB-318 (axis 5): `ap2/auto_approve.py` was relocated to
+    # `ap2/components/auto_approve/__init__.py`. The absence-check below
+    # pins the same invariant (the detector must NOT live in the
+    # auto_approve subpackage body) against the new canonical path.
+    auto_approve_src = (
+        repo_root / "components" / "auto_approve" / "__init__.py"
+    ).read_text()
     this_test_src = Path(__file__).read_text()
 
     assert "_detect_cost_cap_approach" in attention_src
@@ -747,9 +753,11 @@ def test_briefing_verification_greps_match():
     assert "cost_cap_approach" in howto_src
     assert "cost_cap_approach" in architecture_src
     assert "_detect_cost_cap_approach" in this_test_src
-    # Absence-check: the detector must NOT live in auto_approve.py.
+    # Absence-check: the detector must NOT live in the auto_approve
+    # subpackage body (post-TB-318 path).
     assert "_detect_cost_cap_approach" not in auto_approve_src, (
-        "detector function should live in ap2/attention.py, not "
-        "ap2/auto_approve.py — the gate stays the trip check, "
-        "attention stays the surface"
+        "detector function should live in "
+        "ap2/components/attention/__init__.py, not "
+        "ap2/components/auto_approve/__init__.py — the gate stays the "
+        "trip check, attention stays the surface"
     )

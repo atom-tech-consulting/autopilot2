@@ -83,7 +83,7 @@ can advance manually via `ap2 update-goal`.
 from __future__ import annotations
 
 from ap2 import events, goal
-from ap2.auto_approve import _append_decisions_needed_bullet
+from ap2.components.auto_approve import _append_decisions_needed_bullet
 from ap2.config import Config
 
 

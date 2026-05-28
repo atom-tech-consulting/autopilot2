@@ -340,13 +340,18 @@ def test_kill_switch_helper_import_retained():
     relative `from .auto_approve import …` to the absolute
     `from ap2.auto_approve import …` (the relative form would
     resolve to `ap2.components.focus_advance.auto_approve`, which
-    does not exist); the contract this test pins is "the helper
-    import is retained somewhere in the module," not the exact
-    syntactic shape of the import statement.
+    does not exist). TB-318 (axis 5) then relocated `auto_approve`
+    itself into `ap2/components/auto_approve/`, so the absolute
+    import retargets to `from ap2.components.auto_approve import …`
+    (sibling-component imports inside `ap2/components/` are exempt
+    from the TB-311 import-direction gate). The contract this test
+    pins is "the helper import is retained somewhere in the module,"
+    not the exact syntactic shape of the import statement.
     """
     src = Path(focus_advance.__file__).read_text()
     assert (
-        "from ap2.auto_approve import _append_decisions_needed_bullet" in src
+        "from ap2.components.auto_approve import _append_decisions_needed_bullet"
+        in src
     ), (
         "TB-302: the kill-switch branch still depends on this "
         "import. If the import is removed, the kill-switch path "

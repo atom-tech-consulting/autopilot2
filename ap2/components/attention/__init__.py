@@ -65,7 +65,7 @@ from pathlib import Path
 from typing import Any
 
 from ap2 import events
-from ap2.auto_approve import (
+from ap2.components.auto_approve import (
     _AUTO_APPROVE_WINDOW_S,
     _auto_approve_window_resume_idx,
     _auto_approved_task_ids,

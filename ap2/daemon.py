@@ -24,7 +24,6 @@ import time
 from pathlib import Path
 
 from . import (
-    auto_approve,
     diagnose,
     env_reload,
     events,
@@ -1757,24 +1756,65 @@ async def _interruptible_sleep(total_s: int) -> None:
 # obvious at a glance — when axis (5) relocates each flat module into
 # its component subpackage, the aliases retarget and tests stay
 # unchanged.
-_AUTO_APPROVE_FAILURE_STATUSES = auto_approve._AUTO_APPROVE_FAILURE_STATUSES
-_AUTO_APPROVE_UNFREEZE_TOKEN = auto_approve._AUTO_APPROVE_UNFREEZE_TOKEN
-_AUTO_APPROVE_WINDOW_RESUME_TOKEN = auto_approve._AUTO_APPROVE_WINDOW_RESUME_TOKEN
-_AUTO_APPROVE_WINDOW_S = auto_approve._AUTO_APPROVE_WINDOW_S
-_append_decisions_needed_bullet = auto_approve._append_decisions_needed_bullet
-_auto_approve_already_halted = auto_approve._auto_approve_already_halted
-_auto_approve_check_violations = auto_approve._auto_approve_check_violations
-_auto_approve_freeze_threshold = auto_approve._auto_approve_freeze_threshold
-_auto_approve_paused = auto_approve._auto_approve_paused
-_auto_approve_window_resume_idx = auto_approve._auto_approve_window_resume_idx
-_auto_approved_task_ids = auto_approve._auto_approved_task_ids
-_event_combined_tokens = auto_approve._event_combined_tokens
-_parse_event_ts = auto_approve._parse_event_ts
-_per_task_token_cap = auto_approve._per_task_token_cap
-_validator_judge_noisy_paused = auto_approve._validator_judge_noisy_paused
-_was_auto_approved = auto_approve._was_auto_approved
-_window_token_cap = auto_approve._window_token_cap
-evaluate_auto_approve_decision = auto_approve.evaluate_auto_approve_decision
+# TB-318 (axis 5): auto_approve was relocated from the flat module path
+# at `ap2/auto_approve` to the subpackage `ap2/components/auto_approve/`.
+# Core must not statically import from `ap2/components/` (TB-311
+# import-direction gate), so the module-level aliases below resolve via
+# the registry's manifest hook_points at module-load time. Tests that
+# monkey-patch `daemon._auto_approve_paused` (or any other alias here)
+# still work — the rebind happens once here, and the test's setattr on
+# the daemon module overrides this attribute for the duration of the
+# test.
+_auto_approve_manifest = default_registry().get("auto_approve")
+_AUTO_APPROVE_FAILURE_STATUSES = _auto_approve_manifest.hook_points[
+    "_AUTO_APPROVE_FAILURE_STATUSES"
+]
+_AUTO_APPROVE_UNFREEZE_TOKEN = _auto_approve_manifest.hook_points[
+    "_AUTO_APPROVE_UNFREEZE_TOKEN"
+]
+_AUTO_APPROVE_WINDOW_RESUME_TOKEN = _auto_approve_manifest.hook_points[
+    "_AUTO_APPROVE_WINDOW_RESUME_TOKEN"
+]
+_AUTO_APPROVE_WINDOW_S = _auto_approve_manifest.hook_points[
+    "_AUTO_APPROVE_WINDOW_S"
+]
+_append_decisions_needed_bullet = _auto_approve_manifest.hook_points[
+    "_append_decisions_needed_bullet"
+]
+_auto_approve_already_halted = _auto_approve_manifest.hook_points[
+    "_auto_approve_already_halted"
+]
+_auto_approve_check_violations = _auto_approve_manifest.hook_points[
+    "_auto_approve_check_violations"
+]
+_auto_approve_freeze_threshold = _auto_approve_manifest.hook_points[
+    "_auto_approve_freeze_threshold"
+]
+_auto_approve_paused = _auto_approve_manifest.hook_points[
+    "_auto_approve_paused"
+]
+_auto_approve_window_resume_idx = _auto_approve_manifest.hook_points[
+    "_auto_approve_window_resume_idx"
+]
+_auto_approved_task_ids = _auto_approve_manifest.hook_points[
+    "_auto_approved_task_ids"
+]
+_event_combined_tokens = _auto_approve_manifest.hook_points[
+    "_event_combined_tokens"
+]
+_parse_event_ts = _auto_approve_manifest.hook_points["_parse_event_ts"]
+_per_task_token_cap = _auto_approve_manifest.hook_points[
+    "_per_task_token_cap"
+]
+_validator_judge_noisy_paused = _auto_approve_manifest.hook_points[
+    "_validator_judge_noisy_paused"
+]
+_was_auto_approved = _auto_approve_manifest.hook_points["_was_auto_approved"]
+_window_token_cap = _auto_approve_manifest.hook_points["_window_token_cap"]
+evaluate_auto_approve_decision = _auto_approve_manifest.hook_points[
+    "evaluate_auto_approve_decision"
+]
+del _auto_approve_manifest
 
 # TB-314 (axis 5): auto_unfreeze was relocated from the flat module
 # `ap2/auto_unfreeze.py` to the subpackage
