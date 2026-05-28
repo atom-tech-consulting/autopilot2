@@ -92,7 +92,7 @@ def test_chat_triggered_status_report_routes_through_shared_routine(
             }
         )
     )
-    monkeypatch.setattr("ap2.mattermost._api_get", _fake_mm_api_status())
+    monkeypatch.setattr("ap2.components.mattermost._api_get", _fake_mm_api_status())  # TB-312
 
     # Seed activity AFTER the most recent status-report cron_complete so
     # the skip-gate doesn't fire (we want the run path, not the skip
@@ -160,7 +160,7 @@ def test_chat_triggered_status_report_routes_through_shared_routine(
 
     # Drive the MM-loop work for one tick: poll, dispatch handlers,
     # await all. Mirrors what `_mm_loop` does per cycle in production.
-    from ap2.mattermost import check_new_messages
+    from ap2.components.mattermost import check_new_messages  # TB-312
 
     msgs = check_new_messages(cfg)
     assert len(msgs) == 1, f"expected one status mention, got {msgs!r}"

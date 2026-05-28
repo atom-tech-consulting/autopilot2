@@ -1904,9 +1904,39 @@ status-report cron's tick rate):
   is declared but the daemon does not yet consult it before
   dispatching the `janitor` cron job.
 
+**Channel adapters (axis 3).**
+- `AP2_CHANNEL_FILE_PATH` (TB-312) — target path for the
+  `FileAppendChannelAdapter` (one of three core-shipped sibling
+  adapters in `ap2/channel.py`). Defaults to
+  `<cwd>/.cc-autopilot/channel.log` when unset. Operators wiring a
+  non-Mattermost delivery (or piping ap2's outbound digests into a
+  local log file for grep / tail) point this at the destination
+  they want appended. Hot-reloadable: read fresh from `os.environ`
+  on every `.post(...)` call so a hot-swapped env value (TB-271)
+  takes effect on the next adapter dispatch.
+- `AP2_WEBHOOK_URL` (TB-312) — destination for the
+  `WebhookChannelAdapter` (POSTs `{"text": <text>, **meta}` as JSON
+  to the URL). Unset → adapter returns `None` without raising, the
+  caller's audit event notes the no-destination state. Compatible
+  with Slack incoming webhooks, Discord webhooks, internal HTTP
+  collectors. Read fresh per `.post()` call (same hot-reload
+  semantics as `AP2_CHANNEL_FILE_PATH`).
+
 **Mattermost.**
 - `AP2_MM_CHANNELS` — comma-separated MM channel IDs to poll for
-  `@claude-bot` mentions.
+  `@claude-bot` mentions. **TB-312 polarity note**: `AP2_MM_CHANNELS`
+  is also the `env_flag` on the `mattermost` component's manifest
+  with `default_enabled=False`. Unset / empty → component is
+  disabled, `registry.channel_adapters(cfg)` returns no Mattermost
+  adapter, the watchdog / attention-push paths emit the
+  `*_no_destination` audit event family they already used pre-TB-312
+  when `_first_mm_channel()` returned "". Any non-empty value
+  enables both delivery (the `MattermostChannelAdapter` is
+  registered) AND polling (the daemon's `_mm_loop` walks the
+  registry's `inbound_poll` hook and reaches
+  `check_new_messages`). The env-knob name is verbatim-preserved
+  per goal.md L64-67 — DO NOT rename this key without an operator-
+  visible migration.
 - `AP2_MM_REPORT_CHANNEL` (TB-190) — explicit channel ID for
   status-report posts. Unset → falls back to `AP2_MM_CHANNELS[0]`.
 - `AP2_PROJECT_NAME` (TB-280) — operator-facing project identity that
@@ -2134,6 +2164,69 @@ reordering / retiring foci stays `ap2 update-goal`-only. This
 keeps the surface symmetric with the other operator-only paths
 (cron mutation via `ap2 cron edit`, classify-verdict via
 `ap2 classify`, ack via `ap2 ack`).
+
+### Channel-adapter convention (axis 3, TB-312)
+
+Outbound delivery — auto-diagnose digests (`auto_diagnose_fired`),
+pending-review reminders (`pending_review_reminder`), attention
+immediate-pushes (`attention_pushed`) — flows through registered
+`ChannelAdapter`s rather than calling Mattermost helpers directly.
+
+**Contract.** Every adapter subclasses `ap2.channel.ChannelAdapter`
+and implements:
+
+    class MyChannelAdapter(ChannelAdapter):
+        name = "my-channel"
+
+        def post(self, text: str, **meta) -> dict | None:
+            ...  # deliver text via the channel-specific transport
+
+`name` is the short identifier the registry uses for ordering. The
+`**meta` shape is intentionally open — today's call sites pass
+`channel` (the resolved Mattermost channel id, when applicable) and
+`thread_id` (for reply-targeting). Adapters that don't consume a
+given key MUST ignore it, never raise — forward-compat as new
+delivery channels join the list.
+
+Return value: a small dict describing the delivery (typically
+`{"adapter": name, "post_id": ...}`) on success, `None` for a
+best-effort no-op when the adapter is unconfigured (e.g. webhook
+adapter with `AP2_WEBHOOK_URL` unset). Raising signals a hard
+failure; the caller's per-adapter try/except emits a `*_error`
+audit event and continues iterating.
+
+**Registration.** Components register their adapter under
+`Manifest.hook_points["channel_adapter"]` (either a class — the
+registry instantiates fresh per call — or a module-level
+singleton). The registry walks enabled manifests and returns the
+adapter list via `default_registry().channel_adapters(cfg)` in
+deterministic component-name-sorted order so dispatch is
+reproducible across daemon restarts.
+
+**Core-shipped sibling adapters** (in `ap2/channel.py`, not bound
+to any component manifest by default — operators can wire them via
+a project-specific component or call `_deliver(...)` directly for
+unit / smoke contexts):
+
+- `StdoutChannelAdapter` — prints `[stdout] <text>` to stdout.
+  Useful for `ap2 start --foreground` smoke runs.
+- `FileAppendChannelAdapter` — appends `<text>\n` to the file at
+  `AP2_CHANNEL_FILE_PATH` (default
+  `<cwd>/.cc-autopilot/channel.log`). Parent dir auto-created.
+- `WebhookChannelAdapter` — POSTs `{"text": text, **meta}` as JSON
+  to `AP2_WEBHOOK_URL`. Slack incoming webhooks, Discord, generic
+  HTTP collectors. 10s fixed timeout — a slow webhook must not
+  hold up the watchdog tick.
+
+**Mattermost.** The Mattermost adapter (`MattermostChannelAdapter`)
+lives under `ap2/components/mattermost/__init__.py` because the
+HTTP client, channel/team/bot env knobs, and the `mattermost_reply`
+MCP tool all move together (goal.md L184-186). The adapter routes
+through `ap2.tools._mm_post` (a backwards-compat shim that defers
+to the component's `_mm_post`) so pre-TB-312 tests monkeypatching
+`tools._mm_post` keep working unchanged. See the `AP2_MM_CHANNELS`
+polarity note in `## Configuration knobs` → Mattermost above for the
+enable / disable rules.
 
 ## Sandbox model
 

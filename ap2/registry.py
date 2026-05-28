@@ -231,6 +231,60 @@ class Registry:
         manifest = self._by_name[component]
         return manifest.hook_points[name]
 
+    def channel_adapters(self, cfg=None) -> list:
+        """Ordered list of `ChannelAdapter` instances from enabled components
+        (TB-312 axis 3).
+
+        Walks every enabled manifest, instantiates its
+        `hook_points["channel_adapter"]` factory (or treats the entry as an
+        already-built adapter when it's not callable — components may
+        register either a class or a module-level singleton), and returns
+        the resulting list in deterministic component-name-sorted order.
+
+        Determinism is load-bearing: today's three call sites (the
+        attention immediate-push at `daemon.py`, the watchdog's
+        no-destination + main-fire paths at `watchdog.py`, and the
+        status-report delivery path) iterate the list and best-effort
+        post to each adapter. Stable iteration order means a future
+        component (e.g. `slack/`) joins the list in a predictable spot —
+        adapter logs / dedup state files don't shuffle on each daemon
+        restart.
+
+        Empty list is a legitimate return — when no component declares
+        a `channel_adapter` hook point (or all such components are
+        disabled by their env_flag), the caller's `_deliver(...)`
+        helper observes "no destination" and emits the
+        `*_no_destination` audit event family that pre-TB-312 watchdog
+        used. The behavior preserves goal.md L156-157's "the digest's
+        default destination is non-null when Mattermost is disabled"
+        only when at least one core sibling adapter (Stdout, FileAppend,
+        Webhook) is wired into a component manifest — TB-312 ships the
+        core ABC + adapters; downstream TBs may register them on
+        component manifests as project conventions evolve.
+
+        `cfg` is accepted for forward compatibility (an adapter factory
+        may want per-cfg knobs); unused today — adapters that read env
+        do so lazily inside `.post()` so a hot-reloaded env (TB-271)
+        applies on the next dispatch pass.
+        """
+        out: list = []
+        for manifest in self.enabled_components(cfg):
+            factory = manifest.hook_points.get("channel_adapter")
+            if factory is None:
+                continue
+            try:
+                adapter = factory() if callable(factory) else factory
+            except Exception:  # noqa: BLE001
+                # A factory raise must not abort the walk — other
+                # adapters may still be deliverable. The caller's
+                # per-adapter try/except in `_deliver(...)` would catch
+                # a post-side raise; here we swallow construction
+                # failures and continue so the registry stays usable
+                # even on a half-broken component install.
+                continue
+            out.append(adapter)
+        return out
+
     def tick_hooks(self, phase: Phase) -> list[TickHook]:
         """Ordered list of tick hooks registered on `phase` (TB-310 axis 2).
 

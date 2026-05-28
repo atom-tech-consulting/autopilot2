@@ -16,7 +16,7 @@ import json
 from ap2 import events
 from ap2.board import Board
 from ap2.daemon import _tick, handle_message
-from ap2.mattermost import check_new_messages
+from ap2.components.mattermost import check_new_messages  # TB-312
 from ap2.tools import do_board_edit
 
 from ap2.tests._briefing_fixtures import canonical_briefing
@@ -162,7 +162,7 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
             }
         )
     )
-    monkeypatch.setattr("ap2.mattermost._api_get", _fake_mm_api())
+    monkeypatch.setattr("ap2.components.mattermost._api_get", _fake_mm_api())  # TB-312
 
     # --- scripted SDK. ---
     sdk = FakeSDK()

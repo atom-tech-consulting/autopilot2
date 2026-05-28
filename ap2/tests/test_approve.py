@@ -215,7 +215,7 @@ def test_watchdog_skips_diagnose_when_wholly_pending_review(
 
     posted: list[tuple[str, str]] = []
 
-    def _fake_post(channel, text):
+    def _fake_post(channel, text, thread_id=""):  # TB-312: adapter passes thread_id
         posted.append((channel, text))
         return "post-stub"
 

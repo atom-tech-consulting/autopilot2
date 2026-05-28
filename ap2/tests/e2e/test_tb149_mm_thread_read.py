@@ -22,7 +22,8 @@ import asyncio
 from types import SimpleNamespace
 from typing import AsyncIterator
 
-from ap2 import events, mattermost, tools
+from ap2 import events, tools
+from ap2.components import mattermost  # TB-312
 from ap2.daemon import handle_message
 
 from ap2.tests.e2e._fakes import FakeSDK

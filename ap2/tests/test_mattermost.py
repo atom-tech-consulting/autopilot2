@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from ap2 import mattermost
+from ap2.components import mattermost  # TB-312: moved from `ap2.mattermost`
 from ap2.config import Config
 
 

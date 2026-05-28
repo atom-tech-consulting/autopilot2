@@ -397,15 +397,20 @@ def test_mm_poll_error_on_check_new_messages_exception(tmp_path, monkeypatch):
         "from `<type>: <msg>` — operators lose the type-vs-message "
         "split that matches cron_error / mattermost_error"
     )
-    assert "check_new_messages(cfg)" in src, (
+    # TB-312: `_mm_loop` now routes through `_check_inbound_messages(cfg)`
+    # which walks the registry's `inbound_poll` hook points. The
+    # pre-TB-312 `check_new_messages(cfg)` call site was renamed; the
+    # structural invariant (MM polling fires per iteration) is preserved
+    # at the new symbol name.
+    assert "_check_inbound_messages(cfg)" in src, (
         "regression: `_mm_loop` no longer calls "
-        "`check_new_messages(cfg)` — MM polling is structurally broken"
+        "`_check_inbound_messages(cfg)` — MM polling is structurally broken"
     )
 
     def _boom(cfg):  # noqa: ARG001
         raise RuntimeError("MM poll API down")
 
-    monkeypatch.setattr(daemon, "check_new_messages", _boom)
+    monkeypatch.setattr(daemon, "_check_inbound_messages", _boom)
     monkeypatch.setattr(daemon, "RUNNING", True)
     _stop_loop_after(1, monkeypatch)
 
@@ -427,13 +432,15 @@ def test_mm_poll_error_emits_once_per_iteration_no_double_on_retry(
 ):
     """Branch invariant (daemon.py:2337-2352): the try/except sits
     INSIDE the `while RUNNING:` loop body but OUTSIDE any in-iteration
-    retry — so a raising `check_new_messages` produces exactly one
-    `mm_poll_error` per iteration, never two.
+    retry — so a raising poll produces exactly one `mm_poll_error`
+    per iteration, never two.
 
     Drives `_mm_loop` for two iterations with a monkeypatched
-    raise-every-call `check_new_messages`. Asserts the event count is
-    exactly equal to the iteration count (2), not 4 — proves the wrap
-    is per-iteration, not per-call within a hypothetical retry loop.
+    raise-every-call `_check_inbound_messages` (TB-312: the
+    registry-walked poll layer that replaced the pre-TB-312 direct
+    `check_new_messages` import). Asserts the event count is exactly
+    equal to the iteration count (2), not 4 — proves the wrap is
+    per-iteration, not per-call within a hypothetical retry loop.
     A refactor that bolted retry-with-backoff inside the iteration
     without dedup would emit multiple events per loop pass and trip
     this test.
@@ -446,7 +453,7 @@ def test_mm_poll_error_emits_once_per_iteration_no_double_on_retry(
         call_count[0] += 1
         raise RuntimeError(f"poll #{call_count[0]} failed")
 
-    monkeypatch.setattr(daemon, "check_new_messages", _boom)
+    monkeypatch.setattr(daemon, "_check_inbound_messages", _boom)
     monkeypatch.setattr(daemon, "RUNNING", True)
     sleep_counter = _stop_loop_after(2, monkeypatch)
 

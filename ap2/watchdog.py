@@ -35,8 +35,9 @@ import json
 import os
 import time
 
-from . import diagnose, events, tools
+from . import diagnose, events
 from .config import Config
+from .registry import default_registry
 
 
 def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
@@ -44,9 +45,11 @@ def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
 
     Inspects events.jsonl for the most recent meaningful event. If the gap
     exceeds `cfg.auto_diagnose_idle_threshold_s` AND we haven't fired within
-    `cfg.auto_diagnose_cooldown_s`, post `diagnose.render_markdown` to
-    `AP2_MM_CHANNELS[0]` via `tools._mm_post`. Updates persistent state in
-    `cfg.auto_diagnose_state_file`.
+    `cfg.auto_diagnose_cooldown_s`, post `diagnose.render_markdown` through
+    the channel-adapter list (TB-312) — the default registered adapter for
+    a Mattermost-wired project is `MattermostChannelAdapter`, which posts
+    to `AP2_MM_CHANNELS[0]` via the same path pre-TB-312 used directly.
+    Updates persistent state in `cfg.auto_diagnose_state_file`.
 
     `now` parameter exists so tests can drive a fake clock; production uses
     `time.time()`.
@@ -84,10 +87,17 @@ def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
             f"approval ({ids_str}). Run `ap2 approve TB-N` to dispatch, "
             f"or `ap2 delete TB-N --force` to discard."
         )
+        # TB-312: walk registered channel adapters instead of calling
+        # `tools._mm_post` directly. When no adapter is registered (or
+        # mattermost is the only adapter and AP2_MM_CHANNELS is unset),
+        # `channel_adapters(cfg)` returns [] and the reminder simply
+        # lands as an audit event with `post_id=None` — same observable
+        # shape as pre-TB-312's `channel=""` branch.
+        adapters = default_registry().channel_adapters(cfg)
         post_id: str | None = None
-        if channel:
+        for adapter in adapters:
             try:
-                post_id = tools._mm_post(channel, reminder)
+                outcome = adapter.post(reminder, channel=channel)
             except Exception as e:  # noqa: BLE001
                 events.append(
                     cfg.events_file,
@@ -96,6 +106,8 @@ def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
                     error=f"{type(e).__name__}: {e}",
                 )
                 return
+            if isinstance(outcome, dict):
+                post_id = outcome.get("post_id") or post_id
         events.append(
             cfg.events_file,
             "pending_review_reminder",
@@ -110,10 +122,12 @@ def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
         return
 
     channel = _first_mm_channel()
-    if not channel:
-        # Without a destination there's nowhere to post. Warn ONCE per run
-        # of "AP2_MM_CHANNELS is unset"; the flag is sticky in state so we
-        # don't fill events.jsonl with the same line every tick.
+    adapters = default_registry().channel_adapters(cfg)
+    if not adapters:
+        # No registered adapter (or mattermost component disabled
+        # because AP2_MM_CHANNELS is empty). Warn ONCE per run; the
+        # flag is sticky in state so we don't fill events.jsonl with
+        # the same line every tick.
         if not state.get("warned_no_destination"):
             events.append(
                 cfg.events_file,
@@ -126,16 +140,20 @@ def _maybe_auto_diagnose(cfg: Config, *, now: float | None = None) -> None:
         return
 
     text = diagnose.render_markdown(report)
-    try:
-        post_id = tools._mm_post(channel, text)
-    except Exception as e:  # noqa: BLE001
-        events.append(
-            cfg.events_file,
-            "auto_diagnose_post_error",
-            channel=channel,
-            error=f"{type(e).__name__}: {e}",
-        )
-        return
+    post_id: str | None = None
+    for adapter in adapters:
+        try:
+            outcome = adapter.post(text, channel=channel)
+        except Exception as e:  # noqa: BLE001
+            events.append(
+                cfg.events_file,
+                "auto_diagnose_post_error",
+                channel=channel,
+                error=f"{type(e).__name__}: {e}",
+            )
+            return
+        if isinstance(outcome, dict):
+            post_id = outcome.get("post_id") or post_id
 
     events.append(
         cfg.events_file,

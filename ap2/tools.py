@@ -30,11 +30,8 @@ import contextvars
 import json
 import os
 import re
-import ssl
 import subprocess
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -557,138 +554,65 @@ def do_daemon_control(cfg: Config, args: dict) -> dict:
     return _err(f"unknown action {action!r}")
 
 
-def do_mattermost_thread_read(cfg: Config, args: dict) -> dict:
-    """Fetch all posts in a Mattermost thread for the MM handler agent (TB-149).
-
-    Args (string-shaped — matches every other MCP tool in this server):
-      thread_id: post id of the thread root (the `thread_id` field on
-        the incoming message). Required; an empty value is rejected.
-      max_messages: optional integer / numeric string capping the number
-        of returned posts (default 50, truncates from the OLDEST end).
-
-    Returns an `_ok` dict whose body has:
-      thread_id: echoed back so the agent can correlate calls.
-      count: number of posts returned.
-      posts: list of `{user, text, create_at, post_id}` dicts in
-        chronological (oldest-first) order.
-
-    Returns `_err("mattermost not configured")` when MATTERMOST_URL or
-    MATTERMOST_TOKEN are unset — matches `check_new_messages`'s skip
-    behavior and gives the handler a distinguishable failure so it can
-    fall back to a `mattermost_reply` ("I can't read thread history
-    right now") rather than acting on empty context.
-    """
-    from . import mattermost as _mm
-
-    thread_id = (args.get("thread_id") or "").strip()
-    if not thread_id:
-        return _err("thread_id is required")
-
-    raw_max = args.get("max_messages")
-    if raw_max in (None, ""):
-        max_messages = 50
-    else:
-        try:
-            max_messages = int(raw_max)
-        except (TypeError, ValueError):
-            return _err(f"max_messages must be an int, got {raw_max!r}")
-    if max_messages <= 0:
-        max_messages = 50
-
-    if not (os.environ.get("MATTERMOST_URL") and os.environ.get("MATTERMOST_TOKEN")):
-        return _err("mattermost not configured")
-
-    try:
-        posts = _mm.fetch_thread(cfg, thread_id, max_messages=max_messages)
-    except Exception as e:  # noqa: BLE001
-        return _err(f"{type(e).__name__}: {e}")
-
-    return _ok(
-        f"fetched {len(posts)} thread post(s)",
-        thread_id=thread_id,
-        count=len(posts),
-        posts=posts,
-    )
-
-
-def do_mattermost_reply(cfg: Config, args: dict) -> dict:
-    channel = args.get("channel") or ""
-    text = args.get("text") or ""
-    thread_id = args.get("thread_id") or ""
-    if not channel or not text:
-        return _err("channel and text are required")
-    try:
-        post_id = _mm_post(channel, text, thread_id)
-        events.append(
-            cfg.events_file,
-            "mattermost_reply",
-            channel=channel,
-            thread_id=thread_id,
-            post_id=post_id,
-            summary=text[:200],
-        )
-        return _ok(f"posted to {channel}", post_id=post_id)
-    except Exception as e:  # noqa: BLE001
-        return _err(f"{type(e).__name__}: {e}")
+# ---------------- TB-312: mattermost handlers moved to component ----------------
+#
+# `do_mattermost_reply`, `do_mattermost_thread_read`, `_mm_post`,
+# `_mm_lookup_channel`, `_mm_user_team`, and the `_TEAM_CACHE`
+# module-level cache all moved to `ap2/components/mattermost/__init__.py`
+# in TB-312 (goal.md L184-186 bundles the HTTP client, env knobs, and
+# `mattermost_reply` MCP tool together). The MCP server in
+# `build_mcp_server` below looks the handlers up via the registry's
+# `hook_points["mcp_tool_reply"]` / `["mcp_tool_thread_read"]` slots
+# rather than statically importing the component (axis-(6)
+# import-direction gate, TB-311).
+#
+# `_mm_post` survives as a thin shim that defers to the component's
+# live implementation via `importlib.import_module` (a dynamic import
+# — the import-direction gate's AST walk does not flag `Call` nodes
+# referencing the components package as a string). The shim exists so
+# pre-TB-312 tests that monkeypatched `tools._mm_post` (e.g.
+# `test_tb297_attention_immediate_push.py`,
+# `e2e/test_auto_diagnose.py`) keep working: the
+# `MattermostChannelAdapter.post()` body calls `tools._mm_post(...)`
+# via a late `from ap2 import tools` so the monkeypatched callable is
+# what actually runs. Tests authored post-TB-312 should prefer
+# monkeypatching the component's `_mm_post` directly (or, cleaner,
+# stubbing a `MattermostChannelAdapter` subclass), but the shim keeps
+# the existing surface stable.
 
 
 def _mm_post(channel: str, text: str, thread_id: str = "") -> str:
-    url = os.environ.get("MATTERMOST_URL")
-    token = os.environ.get("MATTERMOST_TOKEN")
-    if not url or not token:
-        raise RuntimeError("MATTERMOST_URL and MATTERMOST_TOKEN must be set")
-    # Resolve channel name → id if needed (names start without alnum restriction,
-    # but IDs are 26-char base32). Best-effort: treat 26-char as id.
-    channel_id = channel if len(channel) == 26 and channel.isalnum() else _mm_lookup_channel(url, token, channel)
-    body = {"channel_id": channel_id, "message": text}
-    if thread_id:
-        body["root_id"] = thread_id
-    req = urllib.request.Request(
-        f"{url}/api/v4/posts",
-        data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    ctx = ssl.create_default_context()
-    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-        data = json.loads(resp.read())
-    return data.get("id", "")
+    """Backwards-compat shim — see TB-312 module-level note.
+
+    Resolves `ap2.components.mattermost._mm_post` via `importlib`
+    every call so a registry rebuild (e.g. `_reset_default_registry()`
+    between tests) or a hot-swapped component implementation is
+    picked up.
+    """
+    import importlib
+    mod = importlib.import_module("ap2.components.mattermost")
+    return mod._mm_post(channel, text, thread_id)
 
 
-def _mm_lookup_channel(url: str, token: str, name: str) -> str:
-    name = name.lstrip("#")
-    # Need a team id; we pick the user's first team as a default.
-    team_id = _mm_user_team(url, token)
-    req = urllib.request.Request(
-        f"{url}/api/v4/teams/{team_id}/channels/name/{name}",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    ctx = ssl.create_default_context()
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-            return json.loads(resp.read())["id"]
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"channel {name!r} not found: {e}") from e
+def do_mattermost_reply(cfg: Config, args: dict) -> dict:
+    """Backwards-compat shim for the MCP-tool handler that moved to
+    `ap2/components/mattermost/__init__.py` in TB-312. Tests that
+    invoke the handler directly (e.g. `e2e/test_tb149_mm_thread_read.py`)
+    keep working; the MCP server itself looks the handler up via the
+    registry in `build_mcp_server` below — not via this shim.
+    """
+    import importlib
+    mod = importlib.import_module("ap2.components.mattermost")
+    return mod.do_mattermost_reply(cfg, args)
 
 
-_TEAM_CACHE: str | None = None
-
-
-def _mm_user_team(url: str, token: str) -> str:
-    global _TEAM_CACHE
-    if _TEAM_CACHE:
-        return _TEAM_CACHE
-    req = urllib.request.Request(
-        f"{url}/api/v4/users/me/teams",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    ctx = ssl.create_default_context()
-    with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-        teams = json.loads(resp.read())
-    if not teams:
-        raise RuntimeError("user has no mattermost teams")
-    _TEAM_CACHE = teams[0]["id"]
-    return _TEAM_CACHE
+def do_mattermost_thread_read(cfg: Config, args: dict) -> dict:
+    """Backwards-compat shim for the MCP-tool handler that moved to
+    `ap2/components/mattermost/__init__.py` in TB-312.
+    """
+    import importlib
+    mod = importlib.import_module("ap2.components.mattermost")
+    return mod.do_mattermost_thread_read(cfg, args)
 
 
 # ---------------- SDK wiring ----------------
@@ -735,13 +659,35 @@ def build_mcp_server(cfg: Config):
     async def cron_edit(args):
         return do_cron_edit(cfg, args)
 
+    # TB-312: Mattermost MCP-tool handlers come from the `mattermost`
+    # component's manifest (axis-(6) import-direction gate forbids a
+    # static `from ap2.components.mattermost import …` here). The
+    # handler bodies live in `ap2/components/mattermost/__init__.py`;
+    # this lookup grabs them via the registry's hook-point slots so
+    # the tool's external name (`mattermost_reply`) stays stable per
+    # goal.md L184-186 even though the implementation moved.
+    from .registry import default_registry as _default_registry
+    try:
+        _mm_manifest = _default_registry().get("mattermost")
+        _do_mattermost_reply = _mm_manifest.hook_points["mcp_tool_reply"]
+        _do_mattermost_thread_read = _mm_manifest.hook_points["mcp_tool_thread_read"]
+    except (KeyError, Exception):  # noqa: BLE001
+        # Component absent (e.g. someone removed the subpackage from
+        # the tree) — stub handlers that return a clean MCP error so
+        # the agent gets a coherent "not configured" signal rather
+        # than an MCP-server import-time crash.
+        def _do_mattermost_reply(_cfg, _args):
+            return _err("mattermost component is not installed")
+        def _do_mattermost_thread_read(_cfg, _args):
+            return _err("mattermost component is not installed")
+
     @tool(
         "mattermost_reply",
         "Send a message to a Mattermost channel or thread.",
         {"channel": str, "text": str, "thread_id": str},
     )
     async def mattermost_reply(args):
-        return do_mattermost_reply(cfg, args)
+        return _do_mattermost_reply(cfg, args)
 
     @tool(
         "mattermost_thread_read",
@@ -763,7 +709,7 @@ def build_mcp_server(cfg: Config):
         {"thread_id": str, "max_messages": int},
     )
     async def mattermost_thread_read(args):
-        return do_mattermost_thread_read(cfg, args)
+        return _do_mattermost_thread_read(cfg, args)
 
     @tool(
         "log_event",

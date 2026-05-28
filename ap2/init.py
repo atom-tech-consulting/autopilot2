@@ -392,6 +392,7 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_AUTO_UNFREEZE_FIX_SHAPES",          # reason: operator opt-in allowlist; set via shell export so a per-project template doesn't broaden the auto-patch surface by default
     "AP2_AUTO_UNFREEZE_MAX_PER_DAY",         # reason: internal default, rarely tuned
     "AP2_AUTO_UNFREEZE_MAX_PER_TASK",        # reason: internal default, rarely tuned
+    "AP2_CHANNEL_FILE_PATH",                 # reason: TB-312 core sibling channel adapter target; default path is fine for most projects, only set via shell export when explicitly wiring `FileAppendChannelAdapter` to a non-default location
     "AP2_CONTROL_MAX_TURNS",                 # reason: internal default, rarely tuned
     "AP2_EVENT_CONTEXT",                     # reason: internal default, rarely tuned
     "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",        # reason: internal default, rarely tuned
@@ -418,6 +419,7 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD",   # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_TIMEOUT_S",         # reason: internal default, rarely tuned
     "AP2_VERIFY_JUDGE_MAX_TURNS",            # reason: internal default, rarely tuned
+    "AP2_WEBHOOK_URL",                       # reason: TB-312 integration secret for the `WebhookChannelAdapter`; set via shell export alongside the project-specific webhook destination (Slack incoming webhook, Discord, etc.)
 })
 
 

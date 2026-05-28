@@ -50,7 +50,12 @@ from .cron import (
     load_state,
     mark_run,
 )
-from .mattermost import check_new_messages
+# TB-312: `check_new_messages` and the Mattermost HTTP client moved to
+# `ap2/components/mattermost/` (axis-(5) bundled with axis-(3)
+# channel-adapter abstraction). Core looks them up via the registry
+# rather than importing the component directly (axis-(6)
+# import-direction gate, TB-311). See `_check_inbound_messages` below
+# for the lookup site that replaces the pre-TB-312 direct import.
 from .result import TaskResult
 from .tools import (
     CONTROL_AGENT_TOOLS,
@@ -1641,7 +1646,7 @@ async def _mm_loop(
     while RUNNING:
         if not cfg.pause_flag.exists():
             try:
-                for msg in check_new_messages(cfg):
+                for msg in _check_inbound_messages(cfg):
                     task = asyncio.create_task(
                         handle_message(cfg, sdk, mcp_server, msg)
                     )
@@ -1654,6 +1659,76 @@ async def _mm_loop(
                     error=f"{type(e).__name__}: {e}",
                 )
         await _interruptible_sleep(cfg.mm_tick_interval_s)
+
+
+def _check_inbound_messages(cfg: Config) -> list[dict]:
+    """Poll for inbound messages via the registry's `inbound_poll` hook
+    (TB-312 axis-(5) migration).
+
+    Pre-TB-312 this was a direct call to
+    `from .mattermost import check_new_messages`. The git-move of
+    `ap2/mattermost.py` into `ap2/components/mattermost/__init__.py`
+    forbids a static import from core (axis-(6) gate, TB-311); this
+    helper instead looks up the `inbound_poll` hook on every enabled
+    component that declares one. Today only the mattermost component
+    does — but the lookup shape is uniform so a future migration
+    (e.g. Slack inbound) can join the list by declaring its own
+    `inbound_poll` hook on its manifest.
+
+    Returns the concatenation of all enabled adapters' poll results
+    in deterministic component-name-sorted order. Empty list means
+    "no component is configured to poll for inbound messages" — the
+    `_mm_loop` simply sleeps until the next interval.
+    """
+    out: list[dict] = []
+    for manifest in default_registry().enabled_components(cfg):
+        poll = manifest.hook_points.get("inbound_poll")
+        if poll is None:
+            continue
+        try:
+            msgs = poll(cfg)
+        except Exception as e:  # noqa: BLE001
+            # Per-adapter poll failures emit a generic `mm_poll_error`
+            # event upstream in `_mm_loop`'s outer try/except so the
+            # operator sees ONE coherent failure rather than two
+            # nested ones; here we just re-raise to that surface.
+            raise
+        if msgs:
+            out.extend(msgs)
+    return out
+
+
+def _deliver(cfg: Config, text: str, **meta) -> list[dict]:
+    """Walk `registry.channel_adapters(cfg)` and best-effort `.post()`
+    on each (TB-312 axis (3)).
+
+    Replaces the pre-TB-312 direct Mattermost-`_mm_post` call sites
+    in `daemon.py` (attention immediate push) and `watchdog.py`
+    (auto-diagnose + pending-review reminder).
+    Each call site now passes the destination via `meta["channel"]`
+    if it has one (legacy `_first_mm_channel` semantics — the
+    watchdog and attention paths historically picked the first entry
+    from `AP2_MM_CHANNELS`; the Mattermost adapter falls back to
+    that env knob when `channel` is unset, preserving observable
+    behavior).
+
+    Returns the list of `{adapter, ...}` result dicts from each
+    adapter's `.post()`. A `None` return from an adapter means
+    "unconfigured" — silently skipped, not added to the result. A
+    raise from an adapter is RE-RAISED so the caller's existing
+    `*_error` audit-event path (e.g. `attention_push_error`,
+    `auto_diagnose_post_error`) still fires per the pre-TB-312
+    contract. The caller decides whether one adapter's failure
+    aborts further iteration; today's call sites surface the first
+    error and continue with the remaining adapters.
+    """
+    adapters = default_registry().channel_adapters(cfg)
+    results: list[dict] = []
+    for adapter in adapters:
+        outcome = adapter.post(text, **meta)
+        if outcome is not None:
+            results.append(outcome)
+    return results
 
 
 async def _interruptible_sleep(total_s: int) -> None:
@@ -1880,8 +1955,18 @@ def _maybe_push_attention(cfg: Config, cond) -> None:
     if not _is_attention_immediate_push_enabled():
         return
 
+    # TB-312: route through `_deliver(cfg, text, **meta)` so the
+    # destination is owned by the registered channel-adapter list
+    # rather than hard-coded to Mattermost. `_first_mm_channel()`
+    # still drives the no-destination warning shape — pre-TB-312
+    # behavior preserved for operators who only have Mattermost
+    # wired: when `AP2_MM_CHANNELS` is unset the mattermost
+    # component is disabled by its `env_flag`, so
+    # `channel_adapters(cfg)` returns [] and the sticky-warning
+    # branch fires per the existing contract.
     channel = _first_mm_channel()
-    if not channel:
+    adapters = default_registry().channel_adapters(cfg)
+    if not adapters:
         # No destination configured. Emit one sticky audit event then
         # suppress further such audits via the state-file flag, parity
         # with the watchdog's no-destination short-circuit.
@@ -1915,39 +2000,55 @@ def _maybe_push_attention(cfg: Config, cond) -> None:
     # status-report cron uses — TB-280) so a project rename
     # propagates immediately without duplicating that helper here.
     text = f"[{cfg.project_name}] ⚠ {cond.summary}"
-    try:
-        post_id = tools._mm_post(channel, text)
-    except Exception as e:  # noqa: BLE001
+    any_success = False
+    for adapter in adapters:
+        try:
+            outcome = adapter.post(text, channel=channel)
+        except Exception as e:  # noqa: BLE001
+            try:
+                events.append(
+                    cfg.events_file,
+                    "attention_push_error",
+                    channel=channel,
+                    attention_type=cond.type,
+                    key=cond.key,
+                    error=f"{type(e).__name__}: {e}",
+                )
+            except Exception:  # noqa: BLE001
+                # Defensive — if even the audit-event append fails, swallow
+                # so the tick continues. The remaining adapters in the
+                # list still get their chance.
+                pass
+            continue
+        if outcome is None:
+            # Adapter is unconfigured (e.g. webhook with empty
+            # AP2_WEBHOOK_URL). Skip — not an error, not a success.
+            continue
+        post_id = outcome.get("post_id", "") if isinstance(outcome, dict) else ""
         try:
             events.append(
                 cfg.events_file,
-                "attention_push_error",
-                channel=channel,
+                "attention_pushed",
                 attention_type=cond.type,
                 key=cond.key,
-                error=f"{type(e).__name__}: {e}",
+                channel=outcome.get("channel", channel) if isinstance(outcome, dict) else channel,
+                post_id=post_id,
+                summary=cond.summary,
             )
         except Exception:  # noqa: BLE001
-            # Defensive — if even the audit-event append fails, swallow
-            # so the tick continues.
+            # The post DID happen; the audit-event append failed. The
+            # operator already received the Mattermost line so the
+            # observable behavior is intact — silently continue.
             pass
-        return
+        any_success = True
 
-    try:
-        events.append(
-            cfg.events_file,
-            "attention_pushed",
-            attention_type=cond.type,
-            key=cond.key,
-            channel=channel,
-            post_id=post_id,
-            summary=cond.summary,
-        )
-    except Exception:  # noqa: BLE001
-        # The post DID happen; the audit-event append failed. The
-        # operator already received the Mattermost line so the
-        # observable behavior is intact — silently continue.
-        pass
+    if not any_success:
+        # All adapters failed (or all were unconfigured). The error
+        # path already emitted per-adapter `attention_push_error`
+        # events; nothing more to do — the sticky-flag reset below
+        # is gated on `any_success` so a fully-failing dispatch
+        # doesn't reset the no-destination flag inappropriately.
+        return
     # Destination is back — reset the sticky no-destination flag so
     # a future env-config gap re-warns. Matches the watchdog's
     # `state["warned_no_destination"] = False` post-success reset.
