@@ -135,3 +135,12 @@ active focus → `--skip-goal-alignment`.
   streaming modes) — this is a compatibility bump to fix the
   thinking-block contract, not a feature-adoption pass. New-feature
   adoption can be proposed separately once the bump is stable.
+## Attempts
+
+### 2026-05-29 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** None
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T221303Z-TB-341.prompt.md`, `stream: .cc-autopilot/debug/20260529T221303Z-TB-341.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T221303Z-TB-341.messages.jsonl`
