@@ -9,15 +9,20 @@ TB-322) and explicitly deferred a typed core schema to a later axis
 round-trip is shape-only") + `config_loader.validate_config`'s
 docstring both flag the asymmetry. This module closes that gap.
 
-The 21 keys declared here are the non-component cluster — verifier,
+The keys declared here are the non-component cluster — verifier,
 ideation, agent runtime, control / mattermost timeouts, tick
 intervals, web port, project identity. The cut-line mirrors
 `config_compat.FLAT_TO_SECTIONED`'s `core.*` entries (config_compat.py
-L88-115) minus the four detector-sensitivity / status-report-effort
-knobs that are intentionally out of scope per the briefing
-(`auto_diagnose_cooldown_s`, `auto_diagnose_idle_threshold_s`,
-`status_report_effort`, `verify_judge_effort` — operator-tunable but
-not currently part of the "21 known core keys" round-trip set).
+L88-115) minus the two detector-sensitivity knobs that are
+intentionally out of scope per the briefing
+(`auto_diagnose_cooldown_s`, `auto_diagnose_idle_threshold_s` —
+operator-tunable but not currently part of the original "21 known
+core keys" round-trip set). TB-339 drained the prior carve-out for
+`verify_judge_effort` + `status_report_effort` — both are now
+declared here so the corresponding read sites in `verify.py` and
+`status_report.py` can route through `cfg.get_core_value(...)`
+instead of carrying the last two direct `os.environ.get("AP2_*")`
+reads outside the bootstrap path.
 
 Why this lives in its own module (not folded into `ap2/config.py`):
 `ConfigKey` is declared in `ap2/config_loader.py`. A schema declaration
@@ -290,6 +295,37 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
             "verifier's optional LLM judge step). Default 20 — enough "
             "for a Read + verdict round-trip without runaway. Mirrors "
             "the flat env `AP2_VERIFY_JUDGE_MAX_TURNS`; hot-reloadable."
+        ),
+        hot_reloadable=True,
+    ),
+    "verify_judge_effort": ConfigKey(
+        name="verify_judge_effort",
+        type=str,
+        default="",
+        description=(
+            "Per-site reasoning-effort label override for the verify "
+            "judge SDK query (the per-task verifier's optional LLM "
+            "judge step). Same value space as `agent_effort` (low | "
+            "medium | high | xhigh | max). Empty default = fall "
+            "through to `agent_effort` at the call site (the `or`-"
+            "chain in `verify.py`); the per-site hardcoded fallback "
+            "is `high`. Mirrors the flat env `AP2_VERIFY_JUDGE_EFFORT`; "
+            "hot-reloadable."
+        ),
+        hot_reloadable=True,
+    ),
+    "status_report_effort": ConfigKey(
+        name="status_report_effort",
+        type=str,
+        default="",
+        description=(
+            "Per-site reasoning-effort label override for the status-"
+            "report cron's control-agent SDK query. Same value space "
+            "as `agent_effort` (low | medium | high | xhigh | max). "
+            "Empty default = fall through to `agent_effort` at the "
+            "call site (the `or`-chain in `status_report.py`); the "
+            "per-site hardcoded fallback is `medium`. Mirrors the "
+            "flat env `AP2_STATUS_REPORT_EFFORT`; hot-reloadable."
         ),
         hot_reloadable=True,
     ),

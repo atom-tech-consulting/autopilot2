@@ -2019,16 +2019,16 @@ async def run_status_report(
     # specific value via `AP2_STATUS_REPORT_EFFORT`, or globally via
     # `AP2_AGENT_EFFORT`. Precedence: per-site env > global env > per-site
     # default.
-    # TB-334 (axis 5 core cluster): the global-`AGENT_EFFORT` layer is
-    # now resolved via `cfg.get_core_value("agent_effort", default="medium")`
-    # — same sectioned-env > flat-env > TOML > default chain. The
-    # per-site `AP2_STATUS_REPORT_EFFORT` outer read stays as a direct
-    # env read (a `core.status_report_effort` follow-up migration is
-    # out-of-scope for this TB).
-    effort = os.environ.get(
-        "AP2_STATUS_REPORT_EFFORT",
-        cfg.get_core_value("agent_effort", default="medium"),
-    )
+    # TB-339 (axis-5 cleanup): the per-site `status_report_effort`
+    # layer is now resolved through `cfg.get_core_value(...)` too —
+    # the `or`-chain collapses the empty-string default to the global
+    # `agent_effort` fallback, preserving the original `per-site env
+    # > global env > per-site default` precedence exactly (sectioned
+    # env > flat env > TOML > "" > sectioned env > flat env > TOML >
+    # "medium"). FLAT_TO_SECTIONED already maps
+    # `AP2_STATUS_REPORT_EFFORT` → `core.status_report_effort`.
+    effort = cfg.get_core_value("status_report_effort", default="") \
+        or cfg.get_core_value("agent_effort", default="medium")
     timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
         cfg,
         sdk,

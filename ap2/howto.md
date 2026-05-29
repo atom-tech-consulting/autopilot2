@@ -2495,6 +2495,13 @@ start`; everything else propagates on the next tick after a
   headline (`**[<project_name>] Autopilot Status Report**`) so a
   multi-project operator can identify a post's source. Empty default
   falls back to `project_root.name`. Mirrors `AP2_PROJECT_NAME`.
+- `core.status_report_effort` — str, default `""` (hot-reloadable).
+  Per-site reasoning-effort label override for the status-report
+  cron's control-agent SDK query. Same value space as
+  `core.agent_effort` (`low` | `medium` | `high` | `xhigh` | `max`).
+  Empty default = fall through to `core.agent_effort` at the call
+  site; the per-site hardcoded fallback is `medium`. Mirrors
+  `AP2_STATUS_REPORT_EFFORT`.
 - `core.task_max_turns` — int, default `200` (hot-reloadable). Max
   turns per task-agent SDK query. Default raised from 50 → 200 in
   TB-278 after TB-122 hit the old wall at 51 turns; bump further
@@ -2515,6 +2522,13 @@ start`; everything else propagates on the next tick after a
   successful task-agent commit; failure routes the task through
   retry like any other crash. Empty default = no project-wide gate.
   Mirrors `AP2_VERIFY_CMD`.
+- `core.verify_judge_effort` — str, default `""` (hot-reloadable).
+  Per-site reasoning-effort label override for the verify-judge SDK
+  query (the per-task verifier's optional LLM judge step). Same value
+  space as `core.agent_effort` (`low` | `medium` | `high` | `xhigh` |
+  `max`). Empty default = fall through to `core.agent_effort` at the
+  call site; the per-site hardcoded fallback is `high`. Mirrors
+  `AP2_VERIFY_JUDGE_EFFORT`.
 - `core.verify_judge_max_turns` — int, default `20` (hot-reloadable).
   Max turns per verify-judge SDK query (the per-task verifier's
   optional LLM judge step). Default 20 — enough for a Read + verdict

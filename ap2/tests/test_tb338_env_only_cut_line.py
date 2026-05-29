@@ -120,29 +120,24 @@ _BOOTSTRAP_FILES: frozenset[str] = frozenset({
 # any NEW direct env reads added beyond this documented debt.
 #
 # Same shape as ``test_docs_drift._DOCS_DRIFT_EXEMPT_ENV_KNOBS``: per-knob,
-# with an inline comment naming the deferring TB / follow-up TB. The set
-# stays empty-by-design once the named follow-ups land; a future PR that
-# migrates one of these reads should also remove the entry here, so the
-# next New direct read of the same knob still trips the gate.
+# with an inline comment naming the deferring TB / follow-up TB.
+#
+# TB-339 drained the last two entries (``AP2_VERIFY_JUDGE_EFFORT`` and
+# ``AP2_STATUS_REPORT_EFFORT``) — both now route through
+# ``cfg.get_core_value(...)`` via a chained-``or`` fallback at the read
+# site (``ap2/verify.py`` L588 + ``ap2/status_report.py`` L2028), so the
+# cleanness signal is now ~100% minus the bootstrap + 12-factor exempt
+# carve-outs. The set is intentionally empty: the briefing-author's
+# intent (goal.md L401-403's "clearly minimal" framing) is that this debt
+# set trends toward empty, not grow. ``test_tb339_pending_migration_drained``
+# pins the empty state so a future regression that re-introduces a direct
+# env read can't quietly add a new entry here to satisfy the cut-line
+# gate.
 #
 # Adding a new entry to this set requires explicit operator review on a
-# case-by-case basis (per goal.md L401-403's "clearly minimal" framing —
-# the briefing-author's intent is that this debt set trends toward empty,
-# not grow).
+# case-by-case basis.
 # ---------------------------------------------------------------------------
-_PENDING_MIGRATION_KNOBS: frozenset[str] = frozenset({
-    # TB-334 (axis-5 core cluster) left the per-call-site `*_EFFORT`
-    # knobs behind — they wrap a `cfg.get_core_value("agent_effort", …)`
-    # default in a `per-site env > global env > per-site default` chain.
-    # The wrapping read can't be a naive cfg helper (the fallback value
-    # depends on a cfg read), so it stays direct until a helper that
-    # accepts a fallback callable lands. Deferring TB: TB-334.
-    # Source: ap2/verify.py L588.
-    "AP2_VERIFY_JUDGE_EFFORT",
-    # Same pattern as above for the status-report cron's effort knob.
-    # Deferring TB: TB-334. Source: ap2/status_report.py L2028.
-    "AP2_STATUS_REPORT_EFFORT",
-})
+_PENDING_MIGRATION_KNOBS: frozenset[str] = frozenset()
 
 
 # Only AP2_-prefixed identifier-shaped strings count. The trailing

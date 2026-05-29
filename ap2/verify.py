@@ -577,18 +577,16 @@ async def _judge_prose_bullet(
         # `xhigh`); operators can still pin a specific value via
         # `AP2_VERIFY_JUDGE_EFFORT`, or globally via `AP2_AGENT_EFFORT`.
         # Precedence: per-site env > global env > per-site default.
-        # TB-334: the global-AGENT_EFFORT layer is now resolved via
-        # `cfg.get_core_value("agent_effort", default="high")` — same
-        # sectioned-env > flat-env > TOML > default chain. The
-        # per-site `AP2_VERIFY_JUDGE_EFFORT` knob stays on the direct
-        # env read here (own-cluster Out-of-scope per the briefing's
-        # core-cluster split — `verify_judge_effort` is a follow-up
-        # alongside `verify_judge_max_turns`'s sibling once the helper
-        # stabilizes).
-        effort = os.environ.get(
-            "AP2_VERIFY_JUDGE_EFFORT",
-            cfg.get_core_value("agent_effort", default="high"),
-        )
+        # TB-339 (axis-5 cleanup): the per-site `verify_judge_effort`
+        # layer is now resolved through `cfg.get_core_value(...)` too —
+        # the `or`-chain collapses the empty-string default to the
+        # global `agent_effort` fallback, preserving the original
+        # `per-site env > global env > per-site default` precedence
+        # exactly (sectioned env > flat env > TOML > "" > sectioned
+        # env > flat env > TOML > "high"). FLAT_TO_SECTIONED already
+        # maps `AP2_VERIFY_JUDGE_EFFORT` → `core.verify_judge_effort`.
+        effort = cfg.get_core_value("verify_judge_effort", default="") \
+            or cfg.get_core_value("agent_effort", default="high")
         # The judge can take a few tool roundtrips (Grep → Read) before
         # emitting its final verdict, so allow a handful of turns. The
         # tools are read-only and scoped to project_root via cwd.
