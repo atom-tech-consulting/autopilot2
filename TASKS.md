@@ -5,7 +5,6 @@
 
 ## Ready
 
-- [ ] **TB-341** **Upgrade claude-agent-sdk 0.1.71 → 0.2.x (unblock Opus 4.8 thinking-block round-trip)** `#autopilot` `#sdk` `#dependency` `#infrastructure` `#opus-4-8` `#thinking-blocks` [→ brief](.cc-autopilot/tasks/upgrade-claude-agent-sdk-0-1-71-0-2-x-un.md)
 
 ## Backlog
 
