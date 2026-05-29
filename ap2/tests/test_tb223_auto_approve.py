@@ -368,19 +368,27 @@ def test_should_auto_approve_helper_directly(monkeypatch):
 # ===========================================================================
 
 
-def test_freeze_threshold_default_is_three(monkeypatch):
+def test_freeze_threshold_default_is_three(cfg: Config, monkeypatch):
     """`AP2_AUTO_APPROVE_FREEZE_THRESHOLD` unset → defaults to 3
     (`ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT`). Direct pin
-    against the parser default flipping silently."""
+    against the parser default flipping silently.
+
+    TB-326 (axis-5): the helper now takes a `cfg` argument and routes
+    the env lookup through `Config.get_component_value`'s reverse-
+    `FLAT_TO_SECTIONED` fallback. The flat env name still wins via the
+    back-compat shim, so this parser pin still exercises the env
+    parser shape end-to-end (default-on-empty, int-cast, default-on-
+    error).
+    """
     monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
-    assert daemon._auto_approve_freeze_threshold() == 3
+    assert daemon._auto_approve_freeze_threshold(cfg) == 3
     assert ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT == 3
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
-    assert daemon._auto_approve_freeze_threshold() == 5
+    assert daemon._auto_approve_freeze_threshold(cfg) == 5
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "not-a-number")
-    assert daemon._auto_approve_freeze_threshold() == 3
+    assert daemon._auto_approve_freeze_threshold(cfg) == 3
 
 
 def test_auto_approve_paused_fires_after_threshold_failures(

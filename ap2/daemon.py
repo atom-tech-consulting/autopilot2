@@ -2252,7 +2252,7 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
                     cfg.events_file,
                     "auto_approve_paused",
                     task=backlog.id,
-                    threshold=_auto_approve_freeze_threshold(),
+                    threshold=_auto_approve_freeze_threshold(cfg),
                     reason=(
                         "consecutive task failures landed in "
                         "retry_exhausted; auto-promote of auto-approved "

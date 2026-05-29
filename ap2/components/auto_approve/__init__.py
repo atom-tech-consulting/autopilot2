@@ -34,7 +34,6 @@ follow-up.
 """
 from __future__ import annotations
 
-import os
 import re as _re
 import time
 from datetime import datetime
@@ -70,9 +69,10 @@ _AUTO_APPROVE_FAILURE_STATUSES: frozenset[str] = frozenset(
 _AUTO_APPROVE_UNFREEZE_TOKEN = "auto_approve_unfreeze"
 
 
-def _auto_approve_freeze_threshold() -> int:
+def _auto_approve_freeze_threshold(cfg: Config) -> int:
     """Effective threshold for the auto-approve cumulative-regression
-    circuit-breaker, env-overridable via `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`.
+    circuit-breaker (TB-326 axis-5: read via
+    `cfg.get_component_value("auto_approve", "freeze_threshold")`).
 
     Default 3 (`ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT`).
     Non-int / empty values silently fall back to the default; a value
@@ -81,13 +81,23 @@ def _auto_approve_freeze_threshold() -> int:
     operator who wants the auto-approve dispatch without the safety
     net can configure that explicitly). Same permissive-parse shape
     as `ideation._cooldown_s`.
+
+    Resolution shape (TB-326): the helper no longer reads
+    `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` from `os.environ` directly —
+    `Config.get_component_value` handles the TOML → sectioned-env →
+    flat-env back-compat precedence, returning whichever layer the
+    operator set first. The flat env name still works via the
+    `FLAT_TO_SECTIONED` back-compat reverse-lookup so a shell-export
+    operator who never migrated their `.cc-autopilot/env` keeps
+    today's behavior bit-for-bit. The manifest's docstring documents
+    the chosen access shape; see `ap2/components/auto_approve/manifest.py`.
     """
-    raw = os.environ.get("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "").strip()
-    if not raw:
+    raw = cfg.get_component_value("auto_approve", "freeze_threshold")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT
     try:
         return int(raw)
-    except ValueError:
+    except (TypeError, ValueError):
         return ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT
 
 
@@ -115,7 +125,7 @@ def _auto_approve_paused(cfg: Config) -> bool:
     Pure / no I/O beyond the events.jsonl tail read; safe to call from
     `_tick` without taking the board lock.
     """
-    threshold = _auto_approve_freeze_threshold()
+    threshold = _auto_approve_freeze_threshold(cfg)
     if threshold <= 0:
         return False
     if not cfg.events_file.exists():
@@ -258,38 +268,47 @@ _AUTO_APPROVE_WINDOW_RESUME_TOKEN = "auto_approve_window_resume"
 _AUTO_APPROVE_WINDOW_S = 24 * 3600  # 24h rolling window
 
 
-def _per_task_token_cap() -> int:
-    """Effective per-task token cap from `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`.
+def _per_task_token_cap(cfg: Config) -> int:
+    """Effective per-task token cap (TB-326 axis-5: read via
+    `cfg.get_component_value("auto_approve", "per_task_token_cap")`).
 
-    Returns `0` (cap disabled) when the env var is unset / empty /
+    Returns `0` (cap disabled) when neither the TOML / env layers
+    populate the value, or when the populated value is empty /
     non-integer / non-positive. Operators who haven't budgeted their
     project don't get a hardcoded cap surprising them; the explicit
     way to disable is to leave the knob unset (or set it to `0`).
+    The flat env name `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` still
+    works via the `FLAT_TO_SECTIONED` back-compat reverse-lookup
+    `Config.get_component_value` performs internally.
     """
-    raw = os.environ.get("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "").strip()
-    if not raw:
+    raw = cfg.get_component_value("auto_approve", "per_task_token_cap")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return 0
     try:
         v = int(raw)
-    except ValueError:
+    except (TypeError, ValueError):
         return 0
     return v if v > 0 else 0
 
 
-def _window_token_cap() -> int:
-    """Effective 24h rolling-window token cap from
-    `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`.
+def _window_token_cap(cfg: Config) -> int:
+    """Effective 24h rolling-window token cap (TB-326 axis-5: read via
+    `cfg.get_component_value("auto_approve", "window_token_cap")`).
 
-    Returns `0` (cap disabled) when the env var is unset / empty /
+    Returns `0` (cap disabled) when neither the TOML / env layers
+    populate the value, or when the populated value is empty /
     non-integer / non-positive. Same parse shape as
     `_per_task_token_cap` so the two knobs share one mental model.
+    The flat env name `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` still
+    works via the `FLAT_TO_SECTIONED` back-compat reverse-lookup
+    `Config.get_component_value` performs internally.
     """
-    raw = os.environ.get("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "").strip()
-    if not raw:
+    raw = cfg.get_component_value("auto_approve", "window_token_cap")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return 0
     try:
         v = int(raw)
-    except ValueError:
+    except (TypeError, ValueError):
         return 0
     return v if v > 0 else 0
 
@@ -446,8 +465,8 @@ def _auto_approve_check_violations(
         detail = str(e.get("error") or "")[:160]
         return ("task_error", 0, 0, tid, detail)
 
-    per_task_cap = _per_task_token_cap()
-    window_cap = _window_token_cap()
+    per_task_cap = _per_task_token_cap(cfg)
+    window_cap = _window_token_cap(cfg)
 
     # 2) `per_task_cap` — any task_run_usage for an auto-approved task
     #    whose tokens exceed the cap.

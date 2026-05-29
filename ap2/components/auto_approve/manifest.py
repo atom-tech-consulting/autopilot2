@@ -35,6 +35,45 @@ statically import from `ap2/components/` per the TB-311
 import-direction gate; the registry's hook-point dict is the declared
 cross-reference path (goal.md L57-59). Constants vs. functions both
 live in `hook_points`; the dict's value is just a callable-or-value.
+
+TB-326 axis-5 read-site migration — chosen resolved-config access shape
+=========================================================================
+The three operator-tunable knobs the component logically owns
+(`freeze_threshold`, `per_task_token_cap`, `window_token_cap`) are now
+read via the **`cfg.get_component_value(component, key)`** helper on
+`Config` (option 2 of the briefing's three candidate shapes — see
+`ap2/config.py`'s docstring for the helper). The three legacy flat env
+names (`AP2_AUTO_APPROVE_FREEZE_THRESHOLD`,
+`AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`,
+`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`) are no longer read directly via
+the `os.environ` mapping inside the component body; the back-compat
+path flows through `Config.get_component_value`'s reverse-
+`FLAT_TO_SECTIONED` lookup so a shell-export operator who never
+migrated their `.cc-autopilot/env` keeps today's behavior bit-for-bit,
+while a TOML-opted operator's `[components.auto_approve]` values win
+transparently.
+
+Why option 2 (helper) and not 1 (raw dict) or 3 (per-component
+dataclass): option 1 (`cfg.components_config["auto_approve"][<key>]`)
+loses the env-only-mode back-compat without an additional wrapper —
+the env-only resolution branch (`_load_env_path`) doesn't invoke
+`apply_env_overrides`, so `components_config` stays empty and a raw
+dict read would skip the operator's shell-exported value. Option 3
+(per-component dataclass synthesis from `Manifest.config_schema`) is
+the long-term ergonomic shape but requires a code-gen pass at load
+time + per-component constructors, deferred to a post-pilot follow-up.
+Option 2 is the lightest-touch incremental shape every remaining
+cluster (attention, focus_advance, auto_unfreeze, mattermost,
+validator_judge, janitor, core) reuses verbatim — see the same helper
+used uniformly across the call sites for each migrated knob.
+
+The TB-326 regression-pin
+`ap2/tests/test_tb326_auto_approve_cfg_reads.py` checks (1) the
+grep-absence of any direct flat-env read inside the component body
+(canary anchor pinned to the briefing's grep shape), (2) the
+TOML-first read precedence, (3) the flat-env back-compat parity, (4)
+the parser default-on-bad-value semantics preservation, and (5) this
+docstring's documentation contract for the follow-up clusters.
 """
 from __future__ import annotations
 

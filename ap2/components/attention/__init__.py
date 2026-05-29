@@ -672,7 +672,7 @@ def _detect_auto_approve_paused(
 
 
 def _detect_cost_cap_approach(
-    cfg: Config,  # noqa: ARG001 — accepted for parity with sibling detectors
+    cfg: Config,
     *,
     tail: list[dict],
     now: _dt.datetime,
@@ -726,7 +726,7 @@ def _detect_cost_cap_approach(
     (fall back to `now` on no parseable ts) — same defensive shape the
     sibling singleton `_detect_validator_judge_noisy` uses.
     """
-    cap = _window_token_cap()
+    cap = _window_token_cap(cfg)
     if cap <= 0:
         return []
     approach_pct = _cost_approach_pct()

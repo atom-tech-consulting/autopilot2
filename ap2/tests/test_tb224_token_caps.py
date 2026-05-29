@@ -221,44 +221,72 @@ def _seed_task_run_usage(
 # ===========================================================================
 
 
-def test_per_task_cap_unset_defaults_to_zero(monkeypatch):
+def test_per_task_cap_unset_defaults_to_zero(cfg: Config, monkeypatch):
     """`AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` unset / empty / non-int
-    / non-positive → `_per_task_token_cap()` returns 0 (cap
-    disabled). Pin against a refactor that bakes in a default cap."""
+    / non-positive → `_per_task_token_cap(cfg)` returns 0 (cap
+    disabled). Pin against a refactor that bakes in a default cap.
+
+    TB-326 (axis-5): the helper now takes a `cfg` argument and routes
+    the env lookup through `Config.get_component_value`'s reverse-
+    `FLAT_TO_SECTIONED` fallback. The flat env name still wins via the
+    back-compat shim, so this parser pin still exercises the env
+    parser shape end-to-end (default-on-empty/garbage/negative,
+    positive-int passthrough).
+    """
     monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    assert daemon._per_task_token_cap() == 0
+    assert daemon._per_task_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "")
-    assert daemon._per_task_token_cap() == 0
+    assert daemon._per_task_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "not-a-number")
-    assert daemon._per_task_token_cap() == 0
+    assert daemon._per_task_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "-5")
-    assert daemon._per_task_token_cap() == 0
+    assert daemon._per_task_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "50000")
-    assert daemon._per_task_token_cap() == 50000
+    assert daemon._per_task_token_cap(cfg) == 50000
 
 
-def test_window_cap_unset_defaults_to_zero(monkeypatch):
+def test_window_cap_unset_defaults_to_zero(tmp_path: Path, monkeypatch):
     """`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` follows the same parse
     shape as the per-task cap. Distinct test rather than parameterized
-    so a single regression names the failing knob explicitly."""
+    so a single regression names the failing knob explicitly.
+
+    TB-326 (axis-5): same `cfg`-argument migration as the sibling
+    per-task-cap parser test; the flat env name still wins via the
+    `Config.get_component_value` back-compat reverse-lookup. Unlike the
+    sibling test, this one builds its own cfg AFTER stripping every
+    `AP2_*` env var so the cfg snapshot doesn't carry a stale
+    `window_token_cap` value from a parent process whose
+    `.cc-autopilot/env` happens to export the knob (this project's own
+    env exports it at 100_000_000 — the cfg fixture would otherwise
+    populate `cfg.components_config["auto_approve"]["window_token_cap"]`
+    at load time and the call-time-evaluated `unset → 0` assertion
+    would test the wrong precedence layer).
+    """
+    import os
+    for name in list(os.environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+
     monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
-    assert daemon._window_token_cap() == 0
+    assert daemon._window_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "")
-    assert daemon._window_token_cap() == 0
+    assert daemon._window_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "garbage")
-    assert daemon._window_token_cap() == 0
+    assert daemon._window_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "0")
-    assert daemon._window_token_cap() == 0
+    assert daemon._window_token_cap(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000000")
-    assert daemon._window_token_cap() == 1000000
+    assert daemon._window_token_cap(cfg) == 1000000
 
 
 # ===========================================================================

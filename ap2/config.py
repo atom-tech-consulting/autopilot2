@@ -353,6 +353,98 @@ class Config:
         self.events_file.parent.mkdir(parents=True, exist_ok=True)
         self.progress_file.parent.mkdir(parents=True, exist_ok=True)
 
+    def get_component_value(
+        self,
+        component: str,
+        key: str,
+        *,
+        default: Any = None,
+    ) -> Any:
+        """Resolved value for a per-component config key (TB-326 axis-5 pilot).
+
+        Precedence (high → low) — call-time-evaluated, matching the
+        ``apply_env_overrides`` precedence at load time but kept live
+        so a mid-process env change (the hot-reload story that
+        ``env_reload.HOT_RELOADABLE_KNOBS`` carries today, plus the
+        ``monkeypatch.setenv(...); helper(cfg)`` test idiom that
+        pre-migration helpers exercised by reading env every call)
+        takes effect on the next read without an explicit cfg reload:
+
+          1. Sectioned env (``AP2_COMPONENTS_<NAME>_<KEY>``) — the new
+             canonical naming. Wins over the cfg snapshot so an
+             operator who exports the sectioned env mid-process sees
+             the next-tick propagation immediately (parallel to
+             ``apply_env_overrides`` putting sectioned env at the head
+             of the load-time precedence).
+          2. Flat env (``AP2_<knob>``) via reverse-``FLAT_TO_SECTIONED``
+             lookup — the back-compat path the shell-export operator
+             who never migrated their ``.cc-autopilot/env`` carries.
+             Same precedence ordering as ``_apply_flat_back_compat``'s
+             load-time hits.
+          3. ``self.components_config[component][key]`` — the cfg
+             snapshot populated by ``config_loader.from_toml`` (TOML
+             overlay) at load time. Values here are already type-
+             coerced against the manifest schema. This is the layer
+             the operator who opted into ``config.toml`` reads from
+             once env-side overrides are unset.
+          4. ``default`` — when none of the above carry a value.
+
+        Why call-time env-first (not snapshot-only): the pre-migration
+        ``os.environ.get("AP2_<flat>")`` helpers naturally hot-reloaded
+        by reading env on every call. ``env_reload.maybe_reload_env``
+        re-syncs cfg from the env file on mtime change, but tests +
+        operators who monkeypatch / shell-export mid-process don't
+        trip that mtime check. Reading env-first at call time
+        preserves the pre-migration call-site contract bit-for-bit;
+        the cfg snapshot is the lower-precedence default that fires
+        only when no env override is live. The flat env lookup keeps
+        the component body free of ``os.environ.get('AP2_<flat>')``
+        calls (TB-326's grep-shape Verification bullet); this helper
+        in ``config.py`` is the one centralized site that reads env.
+
+        Why this shape (option 2 of the briefing's three candidates):
+        a single ``get_component_value`` helper is the lightest-touch
+        incremental pattern the remaining six component clusters
+        (attention, focus_advance, auto_unfreeze, mattermost,
+        validator_judge, janitor, core) can adopt verbatim. Option 1
+        (raw ``cfg.components_config[component][key]`` access) loses
+        the env-only-mode back-compat without a wrapper, and option 3
+        (per-component dataclass synthesis) requires a code-gen pass
+        on every ``Manifest.config_schema`` plus a constructor-time
+        invocation hook — both deferred to a post-pilot follow-up.
+
+        Pure / read-only — no caching, no side effects. The env lookup
+        is bounded by ``FLAT_TO_SECTIONED``'s ~40 entries; an O(N)
+        walk is faster than a reverse-map cache for the rare per-tick
+        call rate of these knobs.
+        """
+        # 1) Sectioned env (highest precedence — same head-of-list
+        #    position `_apply_sectioned_env_overrides` enforces at
+        #    load time).
+        sectioned_env_name = f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"
+        raw = os.environ.get(sectioned_env_name)
+        if raw is not None:
+            return raw
+        # 2) Flat env via reverse-FLAT_TO_SECTIONED lookup. Late import
+        #    keeps the config.py ↔ config_compat.py boundary tidy and
+        #    avoids a startup-time import cycle (config_compat imports
+        #    Config only behind TYPE_CHECKING).
+        from .config_compat import FLAT_TO_SECTIONED
+        sectioned_target = f"components.{component}.{key}"
+        for flat, sectioned in FLAT_TO_SECTIONED.items():
+            if sectioned != sectioned_target:
+                continue
+            raw = os.environ.get(flat)
+            if raw is not None:
+                return raw
+            break
+        # 3) cfg snapshot (TOML overlay / load-time env-coerced value).
+        comp = (self.components_config or {}).get(component)
+        if isinstance(comp, dict) and key in comp:
+            return comp[key]
+        # 4) Default.
+        return default
+
 
 def load_project_env(project_root: Path) -> dict[str, str]:
     """Read `.cc-autopilot/env` (KEY=VALUE lines) and merge into `os.environ`.
