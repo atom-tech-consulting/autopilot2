@@ -120,6 +120,12 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
             description=description,
             blocked_csv=blocked_on,
             events_file=cfg.events_file,
+            # TB-331 axis-5: thread `cfg` through so the validator_judge
+            # component's four cfg-routed knob reads
+            # (`disabled` / `timeout_s` / `max_turns` / `max_tokens`)
+            # resolve against the live Config rather than the manifest
+            # adapter's synthetic back-compat fallback.
+            cfg=cfg,
         )
         if struct_err:
             return _err(struct_err)

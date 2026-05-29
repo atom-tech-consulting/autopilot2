@@ -626,6 +626,11 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
             description=description,
             blocked_csv=blocked_on,
             events_file=cfg.events_file,
+            # TB-331 axis-5: thread `cfg` through so the validator_judge
+            # component's four cfg-routed knob reads resolve against
+            # the live Config rather than the manifest adapter's
+            # synthetic back-compat fallback.
+            cfg=cfg,
         )
         if struct_err:
             return _err(struct_err)
@@ -1123,6 +1128,10 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                     description=eff_description,
                     blocked_csv=eff_blocked,
                     events_file=cfg.events_file,
+                    # TB-331 axis-5: thread `cfg` through so the
+                    # validator_judge component's four cfg-routed knob
+                    # reads resolve against the live Config.
+                    cfg=cfg,
                 )
                 if struct_err:
                     return _err(struct_err)

@@ -877,6 +877,26 @@ class BriefingContext:
       - `dep_judge_fn`       — test-injection seam for TB-235; the
                                production path leaves it None and the
                                judge delegates to the SDK helper.
+      - `cfg`                 — TB-331 axis-5: optional `Config` plumbed
+                               through to the `validator_judge`
+                               component so the dep-coherence judge can
+                               resolve its four cfg-routed knobs
+                               (`disabled` / `timeout_s` / `max_turns`
+                               / `max_tokens`) via
+                               `cfg.get_component_value(...)`. Optional
+                               because legacy unit tests
+                               (test_dep_validator_judge.py,
+                               test_tb247_*, test_tb316_*) call
+                               `_validate_briefing_structure(...)`
+                               without a Config; the validator_judge
+                               adapter (`_briefing_validator` in the
+                               manifest) synthesizes an empty Config
+                               for that path so the env-first
+                               precedence of `get_component_value`
+                               preserves their `monkeypatch.setenv`
+                               semantics. Real queue-append /
+                               board-edit callers always supply a real
+                               cfg.
     """
 
     text: str
@@ -886,6 +906,7 @@ class BriefingContext:
     blocked_csv: str = ""
     events_file: "Path | None" = None
     dep_judge_fn: "Callable[..., Any] | None" = None
+    cfg: "Config | None" = None
 
 
 # TB-316: canonical type for the pipeline-as-list validators. Each
@@ -1106,6 +1127,7 @@ def _validate_briefing_structure(
     blocked_csv: str = "",
     events_file: "Path | None" = None,
     dep_judge_fn=None,
+    cfg: "Config | None" = None,
 ) -> str | None:
     """TB-154 + TB-161 + TB-164 + TB-171 + TB-308 + TB-235: structural
     gate for a freshly-authored briefing.
@@ -1258,6 +1280,15 @@ def _validate_briefing_structure(
         blocked_csv=blocked_csv,
         events_file=events_file,
         dep_judge_fn=dep_judge_fn,
+        # TB-331 axis-5: threads the caller's `Config` through to the
+        # validator_judge component's `_briefing_validator` adapter so
+        # the four cfg-routed knob reads (`disabled` / `timeout_s` /
+        # `max_turns` / `max_tokens`) resolve against the same Config
+        # the surrounding board-edit / operator-queue surface already
+        # has. Defaults to None for legacy test paths that don't carry
+        # a Config (the manifest adapter synthesizes an empty one for
+        # back-compat).
+        cfg=cfg,
     )
     # TB-316: the canonical pipeline is the five core checks (always
     # run, deterministic structural gates) followed by the registry-

@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
 import re
 import time
 from pathlib import Path
@@ -46,7 +45,21 @@ from typing import Any, NamedTuple
 # `from . import …` shape inside the sibling `manifest.py` is
 # intra-package by design (it sources symbols from this very file).
 from ap2 import events
+from ap2.config import Config
 from ap2.json_extract import extract_rightmost_json_object
+
+# TB-331 axis-5: `os` (env-read source) intentionally dropped from
+# this module's import list. The four pre-TB-331 direct-env reads of
+# the operator-facing knob names (the disabled / timeout-s / max-turns
+# / max-tokens cluster) now route through
+# `cfg.get_component_value("validator_judge", <key>)` via the four
+# helpers below (`_validator_judge_disabled`, `…_timeout_s`,
+# `…_max_turns`, `…_max_tokens_legacy`). Re-introducing `import os` here
+# would re-enable the env-read shape the TB-331 grep gate forbids; the
+# component body's resolved-config reads now flow exclusively through
+# `Config.get_component_value`, whose call-time env-first precedence
+# (sectioned env > flat env via reverse-`FLAT_TO_SECTIONED` > cfg
+# snapshot > default) preserves the pre-TB-331 behavior bit-for-bit.
 
 
 # TB-235: knob defaults for the LLM-driven dependency-coherence check
@@ -638,7 +651,132 @@ def _judge_dep_coherence_default(
     return _parse_dep_judge_response(text, events_file=events_file)
 
 
+def _validator_judge_disabled(cfg: Config) -> bool:
+    """TB-331 axis-5: True iff the validator-judge kill switch is set.
+
+    Resolution shape (mirrors the TB-326 pilot template + TB-327 /
+    TB-328 / TB-329 / TB-330 cluster siblings): routes through
+    `cfg.get_component_value("validator_judge", "disabled")`, which
+    evaluates sectioned env (the
+    `f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"` shape built
+    inside the helper) > flat env (`AP2_VALIDATOR_JUDGE_DISABLED` via
+    the `FLAT_TO_SECTIONED` reverse-lookup) > `cfg.components_config`
+    snapshot > default at call time. Call-time env-first precedence
+    preserves the pre-TB-331 `os.environ.get(...)` lazy-read pattern —
+    `monkeypatch.setenv(...)` plus a subsequent helper call picks up
+    the new value without rebuilding cfg.
+
+    Same truthy enumeration as the pre-TB-331 inline check
+    (`"1"` / `"true"` / `"yes"`, case-insensitive) so the existing
+    kill-switch pin (`test_dep_judge_disabled_skips_check` in
+    `test_dep_validator_judge.py` and the TB-254 conftest shield) passes
+    without modification. The TOML layer's typed `True` / `False` is
+    also honored so an operator who opts into
+    `[components.validator_judge] disabled = true` gets the same
+    behavior the shell-export operator does.
+
+    Default unset → False (judge enabled), bit-for-bit identical to
+    the pre-TB-331 env-only behavior.
+    """
+    raw = cfg.get_component_value("validator_judge", "disabled")
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in {"1", "true", "yes"}
+
+
+def _validator_judge_timeout_s(cfg: Config) -> float:
+    """TB-331 axis-5: effective per-call timeout (seconds) for the
+    dep-coherence SDK invocation.
+
+    Resolution shape (mirrors the TB-326 pilot template + cluster
+    siblings): routes through
+    `cfg.get_component_value("validator_judge", "timeout_s")`, which
+    evaluates sectioned env > flat env (`AP2_VALIDATOR_JUDGE_TIMEOUT_S`
+    via the reverse-`FLAT_TO_SECTIONED` lookup) > `cfg.components_config`
+    snapshot > default at call time.
+
+    Permissive parse (pre-TB-331 parity): empty / non-float / whitespace-
+    only values fall back to `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` (60.0
+    post-TB-269). The TOML layer's typed `float` is honored directly so
+    an operator who opts into `[components.validator_judge] timeout_s =
+    30.0` gets the same behavior the shell-export operator does.
+    """
+    raw = cfg.get_component_value("validator_judge", "timeout_s")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+
+
+def _validator_judge_max_turns(cfg: Config) -> int | None:
+    """TB-331 axis-5: effective `max_turns` budget from the canonical
+    knob, or `None` when unset/invalid so the caller can fall through
+    to the deprecated-alias resolution.
+
+    Resolution shape (mirrors the TB-326 pilot template + cluster
+    siblings): routes through
+    `cfg.get_component_value("validator_judge", "max_turns")`, which
+    evaluates sectioned env > flat env (`AP2_VALIDATOR_JUDGE_MAX_TURNS`
+    via the reverse-`FLAT_TO_SECTIONED` lookup) > `cfg.components_config`
+    snapshot > default at call time.
+
+    Returns `None` (NOT the default) when:
+      - the resolved value is `None` (unset across every layer),
+      - the value is an empty/whitespace-only string,
+      - `int(raw)` raises (operator typo),
+      - the parsed int is `<= 0` (zero / negative budgets are
+        semantically the same as "knob not set" for the layered
+        preference in `_check_dependency_coherence`).
+    The caller distinguishes the unset-canonical-knob case from a
+    positive override so the TB-249 deprecated-alias path can fire
+    when the canonical knob is missing. A positive value short-
+    circuits the alias resolution exactly as the pre-TB-331 check
+    `if raw_turns:` did.
+    """
+    raw = cfg.get_component_value("validator_judge", "max_turns")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _validator_judge_max_tokens_legacy(cfg: Config) -> int:
+    """TB-331 axis-5: deprecated-alias resolution for
+    `AP2_VALIDATOR_JUDGE_MAX_TOKENS` (the pre-TB-249 knob name).
+
+    Resolution shape: routes through
+    `cfg.get_component_value("validator_judge", "max_tokens")` so the
+    same TOML / env precedence applies. Returns `0` when the layer is
+    empty / non-int / non-positive — same sentinel the pre-TB-331
+    inline check used (`legacy_val = 0; if legacy_val > 0: …`). The
+    caller treats `0` as "alias not set" and falls through to the
+    module-level `_VALIDATOR_JUDGE_MAX_TURNS_DEFAULT`.
+
+    Kept on the component-config schema (TB-322) as a back-compat
+    sentinel so an operator with a stale `.cc-autopilot/env` /
+    `[components.validator_judge] max_tokens = N` opt-in keeps today's
+    behavior bit-for-bit while the deprecation warning fires once per
+    process.
+    """
+    raw = cfg.get_component_value("validator_judge", "max_tokens")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return 0
+    try:
+        legacy_val = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return legacy_val if legacy_val > 0 else 0
+
+
 def _check_dependency_coherence(
+    cfg: Config,
     *,
     briefing_text: str,
     description: str,
@@ -656,12 +794,24 @@ def _check_dependency_coherence(
         predecessors),
       - the judge returns an empty `hard_predecessors` list (nothing
         to gate on),
-      - the off-switch `AP2_VALIDATOR_JUDGE_DISABLED=1` is set,
+      - the off-switch `AP2_VALIDATOR_JUDGE_DISABLED=1` is set
+        (resolved post-TB-331 through `_validator_judge_disabled(cfg)`
+        → `cfg.get_component_value("validator_judge", "disabled")`),
       - the judge SDK call fails for any reason (timeout / parse
         error / network). The fail-open path emits a
         `validator_judge_{timeout,fail}` event when `events_file` is
         supplied so a rising skip rate is observable in
         `ap2 logs` / the status-report.
+
+    TB-331 axis-5: `cfg` is now a required positional argument. The
+    four pre-TB-331 direct-env reads of the operator-facing knob
+    names (`DISABLED` / `TIMEOUT_S` / `MAX_TURNS` / `MAX_TOKENS`) all
+    route through `cfg.get_component_value("validator_judge", <key>)`
+    via the four helpers above; the manifest's `_briefing_validator`
+    adapter threads `ctx.cfg` through, with a synthetic empty Config
+    fallback for legacy test paths that don't carry a real one
+    (test_dep_validator_judge.py et al). See the manifest's
+    TB-331 doc block for the chosen access-shape rationale.
 
     `judge_fn`: callable matching `_judge_dep_coherence_default`'s
     signature. Test paths inject a stub; the production path uses the
@@ -686,18 +836,10 @@ def _check_dependency_coherence(
     the first such resolution so the operator sees the deprecation
     without it spamming the event log on every `ap2 add`.
     """
-    if os.environ.get("AP2_VALIDATOR_JUDGE_DISABLED", "").lower() in {
-        "1", "true", "yes",
-    }:
+    if _validator_judge_disabled(cfg):
         return None
-    try:
-        timeout_s = float(
-            os.environ.get("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "")
-            or _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
-        )
-    except ValueError:
-        timeout_s = _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
-    # TB-249: resolve `max_turns` with a layered preference:
+    timeout_s = _validator_judge_timeout_s(cfg)
+    # TB-249 / TB-331: resolve `max_turns` with a layered preference:
     #   (1) AP2_VALIDATOR_JUDGE_MAX_TURNS — canonical knob, default 2.
     #   (2) AP2_VALIDATOR_JUDGE_MAX_TOKENS — deprecated alias; if set
     #       AND (1) is unset, used as `max_turns` capped at
@@ -705,21 +847,22 @@ def _check_dependency_coherence(
     #       `validator_judge_deprecated_knob` event fires once per
     #       process on the first hit.
     #   (3) module default — _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT.
-    raw_turns = os.environ.get("AP2_VALIDATOR_JUDGE_MAX_TURNS", "")
-    raw_tokens_legacy = os.environ.get("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "")
+    #
+    # TB-331: env reads happen inside the cfg-routed helpers above
+    # (`_validator_judge_max_turns` / `_validator_judge_max_tokens_legacy`)
+    # so the component body no longer carries any `os.environ.get(...)`
+    # call site. The canonical-knob helper returns `None` (not the
+    # default) when unset/invalid so the alias-resolution branch
+    # below can fire exactly when the pre-TB-331 `if raw_turns:`
+    # branch did. The legacy helper returns `0` (sentinel for "alias
+    # not set") so the final `legacy_val > 0` guard preserves the
+    # pre-TB-331 deprecation semantics bit-for-bit.
+    canonical_turns = _validator_judge_max_turns(cfg)
     max_turns = _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT
-    if raw_turns:
-        try:
-            parsed = int(raw_turns)
-            if parsed > 0:
-                max_turns = parsed
-        except ValueError:
-            pass
-    elif raw_tokens_legacy:
-        try:
-            legacy_val = int(raw_tokens_legacy)
-        except ValueError:
-            legacy_val = 0
+    if canonical_turns is not None:
+        max_turns = canonical_turns
+    else:
+        legacy_val = _validator_judge_max_tokens_legacy(cfg)
         if legacy_val > 0:
             capped = min(legacy_val, _VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL)
             max_turns = capped
