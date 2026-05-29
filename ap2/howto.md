@@ -2523,6 +2523,26 @@ identifies.
   component as off). Mirrors `AP2_JANITOR_DISABLED`; TB-323 wires
   the env-override back-compat map so the env var keeps overriding
   the TOML value during the migration window.
+- `components.janitor.judge_effort` — str, default `"high"`
+  (hot-reloadable). Per-judge effort label passed as
+  `extra_args={"effort": <value>}` to the SDK options for each
+  finding's judge call (TB-178). Falls back to `AP2_AGENT_EFFORT`
+  then to `"high"` when unset. Mirrors `AP2_JANITOR_JUDGE_EFFORT`;
+  read fresh at each judge call via `cfg.get_component_value`
+  (TB-330).
+- `components.janitor.judge_max_turns` — int, default `12`
+  (hot-reloadable). Per-judge `ClaudeAgentOptions.max_turns` cap
+  for the per-finding judge call (TB-178). Operators who want a
+  tighter or looser budget can override. Mirrors
+  `AP2_JANITOR_JUDGE_MAX_TURNS`; read fresh at each judge call via
+  `cfg.get_component_value` (TB-330).
+- `components.janitor.max_findings_llm` — int, default `10`
+  (hot-reloadable). Per-run cap on LLM judge calls (TB-178). A
+  scan with N candidate findings issues at most `min(N, cap)` SDK
+  calls; findings beyond the cap emit with `verdict="ambiguous"`.
+  Set to 0 to disable the judge entirely (deterministic-only
+  fallback). Mirrors `AP2_JANITOR_MAX_FINDINGS_LLM`; read fresh at
+  each janitor cron run via `cfg.get_component_value` (TB-330).
 
 ### `[components.mattermost]` — operator chat integration
 

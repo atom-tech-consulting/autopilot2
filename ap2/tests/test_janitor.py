@@ -537,7 +537,7 @@ def test_cost_cap_via_seeded_findings_directly(
     # This mirrors run_janitor's own structure exactly so the cap
     # logic under test is the production code path, not a copy.
 
-    cap = janitor._max_findings_llm()
+    cap = janitor._max_findings_llm(cfg)
     assert cap == 10  # sanity-check the env propagation
 
     shared_ctx = janitor._build_judge_shared_context(cfg)

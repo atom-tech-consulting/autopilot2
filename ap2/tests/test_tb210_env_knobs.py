@@ -411,50 +411,68 @@ def test_janitor_judge_max_turns_env_override_flows_through(
     assert sdk.captured_options[0].get("max_turns") == 5
 
 
-def test_janitor_judge_max_turns_invalid_value_caught_as_judge_error(
+def test_janitor_judge_max_turns_invalid_value_falls_back_to_default(
     tmp_path, monkeypatch,
 ):
-    """Error path: `AP2_JANITOR_JUDGE_MAX_TURNS="abc"` — the bare
-    `int(...)` raises ValueError. `_judge_finding`'s outer
-    `try/except Exception` (line 748) captures it, drops the verdict to
-    `ambiguous`, and stamps the reasoning with the
+    """TB-330 axis-5 migration shifted the parser to the permissive
+    `_int_env`-style helper this test's pre-migration form anticipated:
+    `_judge_max_turns(cfg)` catches `ValueError` on a non-int env value
+    and returns the in-source default (12), so the SDK call proceeds
+    normally with `max_turns=12` rather than the previous pre-migration
+    behavior where the bare `int(...)` raised and `_judge_finding`'s
+    outer `try/except` wrapped it into `verdict="ambiguous"` with a
     `judge error: ValueError: ...` trace.
 
-    Pin the raise via the call-site source AND the wrapped behavior:
-    if a future refactor swaps to a permissive `_int_env`-style helper
-    with default-fallback, both the source-grep and the runtime
-    `pytest.raises` flip simultaneously, and the wrapped reasoning
-    swap (no more `ValueError` mention) catches the silent regression
-    that just masks the operator's typo."""
-    src = inspect.getsource(janitor._judge_finding)
-    assert (
-        'int(os.environ.get("AP2_JANITOR_JUDGE_MAX_TURNS", 12))' in src
-    ), (
-        "regression: `janitor._judge_finding` no longer reads "
-        "AP2_JANITOR_JUDGE_MAX_TURNS with the bare-int parse"
+    The shift is deliberate: an operator typo on a tunable should not
+    crash the whole janitor cron run; the migration aligns janitor with
+    every other axis-5 cluster (`_advance_empty_cycles_threshold`,
+    `_task_stuck_threshold_s`, etc.) which all return the default on
+    bad values. This test pins the new contract so a future revert
+    surfaces here.
+
+    Source-grep pin: the migrated helper lives at
+    `janitor._judge_max_turns` and reads the value via
+    `cfg.get_component_value("janitor", "judge_max_turns")`. A refactor
+    that re-introduces a bare `int(...)` raising on bad input would
+    drop this pin AND re-introduce the crash-on-typo regression."""
+    helper_src = inspect.getsource(janitor._judge_max_turns)
+    assert 'cfg.get_component_value("janitor", "judge_max_turns")' in helper_src, (
+        "TB-330: `janitor._judge_max_turns` must read via "
+        "`cfg.get_component_value('janitor', 'judge_max_turns')`; a "
+        "refactor that reverts to a bare-env-read raises crash-on-typo "
+        "and breaks the axis-5 cluster contract"
     )
 
     monkeypatch.setenv("AP2_JANITOR_JUDGE_MAX_TURNS", "abc")
-    # Direct pin of the bare-int parse contract (mirrors AP2_TASK_MAX_TURNS
-    # invalid test): the EXACT expression _judge_finding evaluates raises
-    # ValueError on non-int input.
-    with pytest.raises(ValueError):
-        int(os.environ.get("AP2_JANITOR_JUDGE_MAX_TURNS", 12))
 
-    # Behavioral pin (wrapped): driving _judge_finding swallows the
-    # ValueError into verdict=ambiguous + reasoning carrying the trace.
-    # The SDK is never reached because the kwargs evaluation raises
-    # before sdk.query() is called.
-    sdk = _ScriptedJudgeSDK()
+    # Behavioral pin: driving _judge_finding through to the SDK call
+    # path: the bad env value resolves to the default 12 via the helper,
+    # the SDK is invoked with max_turns=12, and the scripted SDK's
+    # canned real_strand reply propagates as the verdict (not the
+    # pre-migration ambiguous-from-ValueError trace).
+    sdk = _ScriptedJudgeSDK(
+        response='{"verdict": "real_strand", "reasoning": "ok"}',
+    )
     verdict, reasoning = _drive_judge_finding(tmp_path, sdk)
-    assert sdk.calls == 0, (
-        "ValueError on int() must short-circuit before sdk.query() runs"
+    assert sdk.calls == 1, (
+        "TB-330: bad-value fallback must NOT short-circuit the SDK call; "
+        "the helper now returns the default 12 and the judge proceeds"
     )
-    assert verdict == janitor.VERDICT_AMBIGUOUS, (
-        f"swallowed parse error must drop verdict to ambiguous; got {verdict}"
+    assert sdk.captured_options[0].get("max_turns") == 12, (
+        "TB-330: `_judge_max_turns(cfg)` must fall back to the in-source "
+        "default 12 on a non-int env value"
     )
-    assert "ValueError" in reasoning, (
-        f"reasoning must surface the swallowed exception type; got {reasoning!r}"
+    # The verdict reflects whatever the scripted SDK returned (not
+    # ambiguous-from-error).
+    assert verdict == janitor.VERDICT_REAL_STRAND, (
+        f"TB-330: with the SDK reached normally, the verdict mirrors "
+        f"the scripted reply (not the pre-migration ambiguous-from-"
+        f"ValueError); got {verdict}"
+    )
+    assert "ValueError" not in reasoning, (
+        f"TB-330: bad-value fallback no longer routes through the outer "
+        f"try/except wrapper, so the reasoning must NOT carry a "
+        f"`ValueError` trace; got {reasoning!r}"
     )
 
 

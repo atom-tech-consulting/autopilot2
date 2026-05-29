@@ -151,7 +151,7 @@ MIN_MODIFIED_AGE_S = 5 * 60
 RECENT_FINDING_WINDOW_S = 7 * 3600
 
 # Per-run cap on LLM judge calls (TB-178). A scan with N candidate findings
-# issues at most `min(N, _max_findings_llm())` SDK calls; findings beyond
+# issues at most `min(N, _max_findings_llm(cfg))` SDK calls; findings beyond
 # the cap emit with `verdict="ambiguous"` (operator decides). Set to 0
 # via env to disable the judge entirely and fall back to TB-177's
 # deterministic behavior. The default of 10 matches the briefing's
@@ -159,23 +159,78 @@ RECENT_FINDING_WINDOW_S = 7 * 3600
 # >10-finding scans should fix the underlying churn, not raise the cap.
 _AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT = 10
 
+# Default per-judge max-turns budget (TB-178). Cap on the SDK
+# `ClaudeAgentOptions.max_turns` for the per-finding judge call. 12
+# matches the pre-TB-330 inline `int(...)` fallback in `_judge_finding`'s
+# `AP2_JANITOR_JUDGE_MAX_TURNS` env-read expression (TB-330 routed it
+# through `cfg.get_component_value("janitor", "judge_max_turns")`).
+_AP2_JANITOR_JUDGE_MAX_TURNS_DEFAULT = 12
 
-def _max_findings_llm() -> int:
-    """Resolve the per-run LLM judge cap from env (TB-178).
 
-    `AP2_JANITOR_MAX_FINDINGS_LLM` overrides the default; non-numeric
-    values fall back to the default rather than crashing the cron run
-    (operator typos shouldn't break janitor). Negative values clamp to 0
-    (disabled).
+def _max_findings_llm(cfg: Config) -> int:
+    """Resolve the per-run LLM judge cap (TB-178; TB-330 cfg-routed).
+
+    Resolution shape (TB-330 axis-5): routes through
+    `cfg.get_component_value("janitor", "max_findings_llm")` so the
+    legacy flat env name `AP2_JANITOR_MAX_FINDINGS_LLM` still wins via
+    the `FLAT_TO_SECTIONED` reverse-lookup back-compat path while a
+    `[components.janitor] max_findings_llm = N` TOML value flows through
+    the same call when no env override is live. Call-time env-first
+    precedence inside `get_component_value` preserves the
+    pre-migration lazy-read pattern so a monkeypatched env value
+    (the test idiom) takes effect on the next call without rebuilding
+    cfg. Non-numeric values fall back to the default rather than
+    crashing the cron run (operator typos shouldn't break janitor);
+    negative values clamp to 0 (disabled).
     """
-    raw = os.environ.get("AP2_JANITOR_MAX_FINDINGS_LLM")
-    if raw is None or raw == "":
+    raw = cfg.get_component_value("janitor", "max_findings_llm")
+    if raw is None or (isinstance(raw, str) and raw == ""):
         return _AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT
     try:
         v = int(raw)
-    except ValueError:
+    except (TypeError, ValueError):
         return _AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT
     return max(0, v)
+
+
+def _judge_effort(cfg: Config) -> str:
+    """Resolve the per-judge effort knob (TB-178; TB-330 cfg-routed).
+
+    Same cfg-routed shape as `_max_findings_llm` for the janitor-
+    specific value (`AP2_JANITOR_JUDGE_EFFORT` → sectioned
+    `components.janitor.judge_effort`). Falls back to `AP2_AGENT_EFFORT`
+    (a core-namespace knob outside this cluster's migration scope, read
+    directly at the helper boundary) and finally to `"high"` — same
+    precedence chain the pre-TB-330 nested env-get fallback expression
+    evaluated.
+    """
+    raw = cfg.get_component_value("janitor", "judge_effort")
+    if isinstance(raw, str) and raw.strip():
+        return raw
+    if raw is not None and not isinstance(raw, str):
+        # TOML-typed non-str (unlikely for a free-form effort label but
+        # defensive): coerce to its string form.
+        return str(raw)
+    return os.environ.get("AP2_AGENT_EFFORT", "high")
+
+
+def _judge_max_turns(cfg: Config) -> int:
+    """Resolve the per-judge max-turns knob (TB-178; TB-330 cfg-routed).
+
+    Same cfg-routed shape as `_max_findings_llm` for the janitor-
+    specific value (`AP2_JANITOR_JUDGE_MAX_TURNS` → sectioned
+    `components.janitor.judge_max_turns`). Default 12 mirrors the
+    pre-TB-330 `int(...)`-with-default fallback on the flat env name;
+    non-numeric values fall back to the default rather than crashing
+    the cron run (operator typos shouldn't break janitor).
+    """
+    raw = cfg.get_component_value("janitor", "judge_max_turns")
+    if raw is None or (isinstance(raw, str) and raw == ""):
+        return _AP2_JANITOR_JUDGE_MAX_TURNS_DEFAULT
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return _AP2_JANITOR_JUDGE_MAX_TURNS_DEFAULT
 
 
 # Verdict vocabulary (TB-178). Codebase-fixed; per-project custom labels
@@ -529,7 +584,7 @@ async def run_janitor(cfg: Config, sdk=None) -> JanitorReport:
     # events. Cap-aware (overflow → "ambiguous"); SDK-optional (None
     # falls back to "ambiguous" without judging). The shared-context
     # block is built once per run and reused across per-finding calls.
-    cap = _max_findings_llm()
+    cap = _max_findings_llm(cfg)
     if sdk is not None and cap > 0:
         shared_ctx = _build_judge_shared_context(cfg)
         for i, f in enumerate(report.findings):
@@ -724,15 +779,12 @@ async def _judge_finding(
     error_note = ""
     t0 = time.monotonic()
     try:
-        effort = os.environ.get(
-            "AP2_JANITOR_JUDGE_EFFORT",
-            os.environ.get("AP2_AGENT_EFFORT", "high"),
-        )
+        effort = _judge_effort(cfg)
         options = sdk.ClaudeAgentOptions(
             cwd=str(cfg.project_root),
             allowed_tools=list(JUDGE_REPO_READ_TOOLS),
             permission_mode="bypassPermissions",
-            max_turns=int(os.environ.get("AP2_JANITOR_JUDGE_MAX_TURNS", 12)),
+            max_turns=_judge_max_turns(cfg),
             setting_sources=["project"],
             model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
             extra_args={"effort": effort},

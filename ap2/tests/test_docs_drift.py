@@ -65,6 +65,7 @@ _BUILTIN_TOOLS = frozenset({
 # architectural debate.
 _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     "AP2_JANITOR_MAX_FINDINGS_LLM_DEFAULT",
+    "AP2_JANITOR_JUDGE_MAX_TURNS_DEFAULT",  # TB-330 — private in-source default sentinel, not an operator knob
     "AP2_COMPONENTS_",  # TB-323 — sectioned-env f-string prefix, not an operator knob
     "AP2_CORE_",        # TB-323 — sectioned-env f-string prefix, not an operator knob
     "AP2_DIR",          # TB-323 — forward-compat placeholder per goal.md L358, not currently read
