@@ -269,6 +269,140 @@ def test_every_env_knob_in_template_or_exempt():
     )
 
 
+def test_every_config_key_documented():
+    """Every config key declared in `aggregate_schemas(default_registry())`
+    is EITHER referenced verbatim in `ap2/howto.md`'s `## Config keys
+    (TOML)` block (the structurally-parallel sibling to `## Configuration
+    knobs`) OR listed in `ap2.init._CONFIG_TEMPLATE_EXEMPT_KEYS` with an
+    inline `# reason:` comment explaining why operators don't need it
+    surfaced (TB-325, axis 6 of the structured-config focus).
+
+    Parallel to `test_every_env_knob_documented` / `_in_template_or_exempt`
+    (TB-305 — flat `AP2_*` env knob gate) but pinned against the new
+    per-component schema surface TB-321/322 landed. Forces the
+    operator-facing-vs-internal decision at the same PR that adds a
+    `ConfigKey`, instead of letting drift compound the way it did between
+    TB-278 (which authored the env template at 10 knobs) and TB-305
+    (which added that gate after ~40 knobs had accumulated outside it).
+
+    Matching is full-path substring: each key is rendered as the dotted
+    `components.<name>.<key>` form an operator would type into config.toml.
+    A `` `components.foo.bar` `` backtick-fence OR a bare row entry both
+    satisfy the gate — the howto section uses tree-rendered prose, not a
+    strict-fence enumeration. The test ALSO pins existence of the
+    `## Config keys (TOML)` heading so a future refactor that moves the
+    block (or removes it entirely) trips here.
+
+    `[core.*]` keys are NOT walked yet — TB-321's docstring explicitly
+    defers a typed core schema to a later axis (the `[core.<field>]`
+    round-trip path exists shape-only). When a core schema lands, this
+    test extends to walk it too without a callsite change here.
+    """
+    from ap2.init import _CONFIG_TEMPLATE_EXEMPT_KEYS
+    from ap2.config_loader import aggregate_schemas
+    from ap2.registry import default_registry
+
+    howto = HOWTO_PATH.read_text()
+    assert "## Config keys (TOML)" in howto, (
+        "howto.md is missing the `## Config keys (TOML)` heading — the "
+        "structured-config TOML surface (TB-321/322/325) needs a "
+        "dedicated reference block parallel to `## Configuration knobs`. "
+        "Add the section with a tree-rendered list of `components.<name>.<key>` "
+        "paths sourced from the per-component manifest `config_schema` "
+        "declarations."
+    )
+
+    schemas = aggregate_schemas(default_registry())
+    assert schemas, (
+        "no component config schemas found — registry walk or "
+        "aggregate_schemas regressed; the docs-drift gate would pass "
+        "vacuously"
+    )
+
+    paths: list[str] = []
+    for comp_name in sorted(schemas):
+        for key_name in sorted(schemas[comp_name]):
+            paths.append(f"components.{comp_name}.{key_name}")
+
+    missing = sorted(
+        p for p in paths
+        if p not in howto and p not in _CONFIG_TEMPLATE_EXEMPT_KEYS
+    )
+    assert not missing, (
+        f"config key(s) declared on a component manifest "
+        f"`config_schema` but NEITHER documented in `ap2/howto.md`'s "
+        f"`## Config keys (TOML)` block NOR listed in "
+        f"`ap2.init._CONFIG_TEMPLATE_EXEMPT_KEYS`: {missing}.\n\n"
+        f"To make the gate pass, EITHER:\n\n"
+        f"(1) Add a row to `## Config keys (TOML)` in howto.md naming the "
+        f"full `components.<name>.<key>` path, its default, and a one-line "
+        f"description (mirror the ConfigKey's `description` field). Use "
+        f"this path when the knob is operator-facing — something a "
+        f"fresh-project operator should discover from the reference "
+        f"section alone.\n\n"
+        f"(2) Add the path to `_CONFIG_TEMPLATE_EXEMPT_KEYS` in "
+        f"`ap2/init.py` with a `# reason: ...` comment categorizing why "
+        f"the key is not documentation-worthy — deprecated alias for "
+        f"another key, test-only, undocumented-on-purpose, etc. The "
+        f"`# reason:` comment IS the audit trail for a future reader "
+        f"asking \"should this graduate to documentation?\""
+    )
+
+
+def test_every_config_key_in_template():
+    """Every config key declared in `aggregate_schemas(default_registry())`
+    appears in `ap2.init.CONFIG_TEMPLATE` — the `.cc-autopilot/config.toml`
+    scaffold `ap2 init` writes into fresh projects (TB-325, axis 6).
+
+    Parallel to `test_every_env_knob_in_template_or_exempt` for the env
+    template surface, this test pins the template's "renders the full
+    schema union" contract. The template body is generated at module-
+    import time from `aggregate_schemas(default_registry())`, so this
+    assertion would only fire if the renderer's walk regressed (e.g.
+    a future refactor that hardcoded a partial section list). No exempt
+    set is consulted here — by construction, every schema key MUST
+    appear in the rendered template; the operator-facing exemption is
+    `_CONFIG_TEMPLATE_EXEMPT_KEYS` (covered by
+    `test_every_config_key_documented` above), which gates documentation
+    presence, not template inclusion.
+    """
+    from ap2.init import CONFIG_TEMPLATE
+    from ap2.config_loader import aggregate_schemas
+    from ap2.registry import default_registry
+
+    schemas = aggregate_schemas(default_registry())
+    assert schemas, (
+        "no component config schemas found — registry walk regressed; "
+        "the template-coverage gate would pass vacuously"
+    )
+
+    missing: list[str] = []
+    for comp_name in sorted(schemas):
+        section_marker = f"[components.{comp_name}]"
+        if section_marker not in CONFIG_TEMPLATE:
+            missing.append(section_marker)
+            continue
+        for key_name in sorted(schemas[comp_name]):
+            # The renderer emits the key as `# <key> = <default>` so we
+            # match the commented-out form to avoid false positives on
+            # description-prose mentions.
+            needle = f"# {key_name} ="
+            # Each section's body is bounded — but a substring scan on the
+            # full template is enough: the key names are unique within a
+            # well-formed schema and tightly fenced by the comment prefix.
+            if needle not in CONFIG_TEMPLATE:
+                missing.append(f"components.{comp_name}.{key_name}")
+
+    assert not missing, (
+        f"config key(s) declared on a component manifest "
+        f"`config_schema` but missing from `ap2.init.CONFIG_TEMPLATE`: "
+        f"{missing}. The template body is generated at module-import "
+        f"time from `aggregate_schemas(default_registry())` — if this "
+        f"test trips, the renderer (`_render_config_template`) has "
+        f"regressed and is no longer walking the full schema union."
+    )
+
+
 def test_every_event_type_documented():
     """Every event type emitted via `events.append(events_file, "<type>", ...)`
     in ap2 source is mentioned in `ap2/howto.md`. Substring check (not

@@ -295,8 +295,14 @@ def _coerce(env_val: str, *, existing: Any = None) -> Any:
         garbage env value).
       - existing is float → `float(env_val)`; on ValueError, return
         existing unchanged.
-      - existing is str → return `env_val` verbatim (no whitespace strip;
-        callers wanting strip semantics can do it themselves).
+      - existing is str → strip whitespace from `env_val`. If the
+        stripped value is empty, return `existing` (a whitespace-only
+        env override is treated as "unset" — matches the
+        `_load_env_path` strip-and-fallback contract for
+        `AP2_PROJECT_NAME` / `AP2_VERIFY_CMD`, so an accidental
+        whitespace-only env value doesn't override a deliberate
+        baseline with a leading-space string). Tests around the
+        project-name fallback path (TB-280) pin this contract.
       - existing is None → heuristic cascade: truthy/falsy bool literals
         first, then int, then float, then raw string. The no-existing
         case fires on the flat back-compat path when the TOML omits the
@@ -319,7 +325,19 @@ def _coerce(env_val: str, *, existing: Any = None) -> Any:
         except ValueError:
             return existing
     if isinstance(existing, str):
-        return env_val
+        # Strip-and-fallback semantics matching `_load_env_path` for
+        # `AP2_PROJECT_NAME` (TB-280) and `AP2_VERIFY_CMD`: a
+        # whitespace-only env value is "unset", not an override that
+        # paints a leading-space string into a deliberate baseline. A
+        # non-empty stripped value is applied stripped — the
+        # `_load_env_path` body for project_name calls out the strip
+        # explicitly (a leading-space env value shouldn't render a
+        # leading space in the bracketed status headline); the same
+        # intent applies uniformly here.
+        stripped = env_val.strip()
+        if not stripped:
+            return existing
+        return stripped
     if existing is not None:
         # Unknown / structural existing type — don't try to coerce.
         return env_val

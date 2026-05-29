@@ -2355,6 +2355,227 @@ to the component's `_mm_post`) so pre-TB-312 tests monkeypatching
 polarity note in `## Configuration knobs` → Mattermost above for the
 enable / disable rules.
 
+## Config keys (TOML)
+
+The **structured-config (env → TOML)** focus (goal.md L266-403) is
+migrating the per-project tunable surface from the flat
+`AP2_*` env-knob set above to typed TOML keys declared on each
+component's `Manifest.config_schema`. The reference below enumerates
+every key TB-321/322 landed; `ap2 init` writes the same set to
+`<project>/.cc-autopilot/config.toml` as commented-out lines (the
+`ap2.init.CONFIG_TEMPLATE` constant, rendered at module-import time
+from `aggregate_schemas(default_registry())` so the scaffold stays
+in lock-step with the schema). The
+`test_every_config_key_documented` gate in
+`ap2/tests/test_docs_drift.py` fails CI if a new `ConfigKey` is
+declared and not listed here OR in
+`ap2.init._CONFIG_TEMPLATE_EXEMPT_KEYS`.
+
+**TOML layout** (goal.md L307-310):
+
+    [core.<field>]              # non-component tunables (verifier,
+                                # ideation, watchdog, etc.) — schema
+                                # deferred to a future axis; current
+                                # round-trip is shape-only.
+    [components.<name>.<key>]   # per-component knobs declared on
+                                # `Manifest.config_schema`.
+
+**Precedence** (high → low, applied by
+`ap2.config_compat.apply_env_overrides` at daemon-start):
+
+    sectioned env (`AP2_<SECTION>_<KEY>`)
+      > flat env  (`AP2_<FLAT>`, back-compat per `FLAT_TO_SECTIONED`)
+      > this TOML file (`.cc-autopilot/config.toml`)
+      > in-source defaults.
+
+`ap2/config_compat.FLAT_TO_SECTIONED` is the operator-facing back-
+compat map: every `AP2_*` flat name in `## Configuration knobs` above
+that has a TOML counterpart routes through that map (and emits a
+one-shot `env_deprecated` event so the audit trail surfaces the
+migration). The flat surface stays read-supported indefinitely; the
+TOML surface is the forward-canonical authoring shape.
+
+The hot-reload watcher (TB-271 extended by TB-323) tracks
+`.cc-autopilot/config.toml`'s mtime alongside `.cc-autopilot/env`,
+so a bumped tunable propagates on the next tick (≤30s) for
+hot-reloadable keys; non-hot keys still need `ap2 stop && ap2 start`.
+
+### `[components.attention]` — proactive operator-attention detector
+
+The `attention/` component (TB-282 / TB-287 / TB-290 / TB-297)
+surfaces `attention_raised` events for stuck / frozen / cost-cap-
+approaching conditions. The status-report cron is the routine push
+channel; `immediate_push` opts into per-event Mattermost posts.
+
+- `components.attention.cost_approach_pct` — int, default `75`
+  (hot-reloadable). Pre-trip `cost_cap_approach` detector threshold
+  as percent of `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` (TB-290); fires
+  when the rolling 24h auto-approved token sum is ≥ this percent of
+  the cap. Mirrors `AP2_AUTO_APPROVE_COST_APPROACH_PCT`.
+- `components.attention.debounce_s` — int, default `21600`
+  (hot-reloadable). Per-(type, key) debounce window (seconds) for
+  repeated `attention_raised` emissions (TB-282). Default ~6h so a
+  still-stuck task re-fires roughly once per operator workday.
+  Mirrors `AP2_ATTENTION_DEBOUNCE_S`.
+- `components.attention.immediate_push` — bool, default `false`
+  (hot-reloadable). Opt-in: post an immediate Mattermost message on
+  each `attention_raised` event (TB-297). Default off so the
+  status-report cron stays the routine push surface. Mirrors
+  `AP2_ATTENTION_IMMEDIATE_PUSH`.
+- `components.attention.task_frozen_recency_s` — int, default `86400`
+  (hot-reloadable). Recency window (seconds) for `task_frozen`
+  attention emission — a Frozen task whose most-recent
+  `retry_exhausted` / `task_failed` event is within this window
+  surfaces as a fresh attention condition (TB-287). Mirrors
+  `AP2_TASK_FROZEN_RECENCY_S`.
+- `components.attention.task_stuck_threshold_s` — int, default
+  `14400` (hot-reloadable). Seconds an Active task may sit without
+  progress before a `task_stuck` attention condition fires (TB-282).
+  Mirrors `AP2_TASK_STUCK_THRESHOLD_S`.
+
+### `[components.auto_approve]` — autonomous board-edit gate (TB-223)
+
+Walk-away semantics: when enabled, ideation-authored backlog adds
+auto-promote without operator review. The token caps + freeze
+threshold provide the hard stop / cost ceiling pair.
+
+- `components.auto_approve.dry_run` — bool, default `false`
+  (hot-reloadable). Monitor-only mode (TB-232): runs the
+  gate-evaluation path and emits `would_auto_approve` instead of
+  applying the queued board-edit. Mirrors `AP2_AUTO_APPROVE_DRY_RUN`.
+- `components.auto_approve.enabled` — bool, default `false`
+  (hot-reloadable). Opt-in master switch for autonomous board-edit
+  auto-approval (TB-223). Default off so a fresh install keeps
+  operator-in-the-loop semantics. Mirrors `AP2_AUTO_APPROVE`.
+- `components.auto_approve.freeze_threshold` — int, default `3`
+  (hot-reloadable). Number of consecutive failed `task_complete`
+  events that trips the auto-approve circuit-breaker (TB-223). 0 or
+  negative disables the circuit breaker. Mirrors
+  `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`.
+- `components.auto_approve.per_task_token_cap` — int, default `0`
+  (hot-reloadable). Per-task token cap for auto-approved tasks
+  (TB-224). 0 disables the cap; positive values trip the per-task
+  halt path. Mirrors `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`.
+- `components.auto_approve.window_token_cap` — int, default `0`
+  (hot-reloadable). 24h rolling-window token cap across all
+  auto-approved tasks (TB-224). 0 disables the cap; positive values
+  trip the window halt path and require `ap2 ack
+  auto_approve_window_resume`. Mirrors
+  `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`.
+
+### `[components.auto_unfreeze]` — briefing-shape auto-patch sweep (TB-225)
+
+When a task lands Frozen with a `BriefingFix:` line whose shape sits
+in the allowlist, the sweep patches the briefing in place and
+re-dispatches without operator-manual `ap2 unfreeze`.
+
+- `components.auto_unfreeze.disabled` — bool, default `false`
+  (hot-reloadable). Kill switch for the auto-unfreeze sweep
+  (TB-320). True short-circuits `_maybe_auto_unfreeze` entirely.
+  Mirrors `AP2_AUTO_UNFREEZE_DISABLED`.
+- `components.auto_unfreeze.dry_run` — bool, default `false`
+  (hot-reloadable). Monitor-only on-ramp (TB-233). When True
+  alongside a non-empty `fix_shapes`, the sweep runs the entire
+  guard chain but emits `would_auto_unfreeze` instead of patching
+  the briefing. Mirrors `AP2_AUTO_UNFREEZE_DRY_RUN`.
+- `components.auto_unfreeze.fix_shapes` — str, default `""`
+  (hot-reloadable). Comma-separated allowlist of fix-shape tokens
+  (TB-225). Non-empty enables auto-unfreeze attempts for the listed
+  shapes; default empty means the feature is off. Mirrors
+  `AP2_AUTO_UNFREEZE_FIX_SHAPES`.
+- `components.auto_unfreeze.max_per_day` — int, default `3`
+  (hot-reloadable). Per-day cap on total auto-unfreeze applications
+  across all tasks (rolling 24h window). Mirrors
+  `AP2_AUTO_UNFREEZE_MAX_PER_DAY`; 0 disables the cap.
+- `components.auto_unfreeze.max_per_task` — int, default `1`
+  (hot-reloadable). Per-task cap on auto-unfreeze applications
+  across the rolling 24h window (TB-225). A task that's been
+  auto-unfrozen `max_per_task` times falls back to manual `ap2
+  unfreeze`. Mirrors `AP2_AUTO_UNFREEZE_MAX_PER_TASK`; 0 disables
+  the cap.
+
+### `[components.focus_advance]` — focus-pointer auto-advance (TB-226)
+
+Advances the `## Current focus:` pointer in goal.md when the active
+focus has produced enough consecutive empty ideation cycles to
+suggest exhaustion. Operator always retains `ap2 rewind-focus` as
+the corrective.
+
+- `components.focus_advance.auto_advance_disabled` — bool, default
+  `false` (hot-reloadable). Kill switch for focus-pointer
+  auto-advance. True short-circuits `_maybe_advance_focus` even
+  when the empty-cycles heuristic would otherwise fire. Mirrors
+  `AP2_FOCUS_AUTO_ADVANCE_DISABLED`.
+- `components.focus_advance.empty_cycles` — int, default `3`
+  (hot-reloadable). Number of consecutive empty ideation cycles
+  before the focus pointer auto-advances (TB-292). Mirrors
+  `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`.
+
+### `[components.janitor]` — daemon-housekeeping cron (TB-309)
+
+Repo-state sweeps (stale lockfiles, oversized debug dirs, etc.). The
+chore-judge LLM call runs against findings the heuristic walk
+identifies.
+
+- `components.janitor.disabled` — bool, default `false`. Kill
+  switch for the janitor cron job. True suppresses every
+  `run_janitor` invocation (CLI status block keeps showing the
+  component as off). Mirrors `AP2_JANITOR_DISABLED`; TB-323 wires
+  the env-override back-compat map so the env var keeps overriding
+  the TOML value during the migration window.
+
+### `[components.mattermost]` — operator chat integration
+
+The Mattermost adapter handles `@bot`-mention polling on the
+inbound side and routes outbound digests / status-reports /
+attention pushes on the outbound side. Channel + bot identity are
+authentication-bearing; they sit on the env-only side per goal.md
+L356-358 (the `_KNOBS_STAYING_ENV_ONLY` partition).
+
+- `components.mattermost.bot_user_id` — str, default `""`.
+  Mattermost user ID for the bot account; used to filter the bot's
+  own posts out of the inbound poll. Mirrors `AP2_MM_BOT_USER_ID`;
+  not in `HOT_RELOADABLE_KNOBS`.
+- `components.mattermost.channels` — str, default `""`.
+  Comma-separated Mattermost channel IDs the daemon polls for
+  inbound mentions and posts outbound messages to. Unset/empty
+  disables the mattermost component entirely. Mirrors
+  `AP2_MM_CHANNELS`; listed in `env_reload.FIXED_KNOBS` so a change
+  requires `ap2 stop && ap2 start`.
+- `components.mattermost.mention` — str, default `"@claude-bot"`.
+  Mention token (e.g. `@claude-bot`) the bot recognizes as
+  addressing it in poll content. Mirrors `AP2_MM_MENTION`; not in
+  `HOT_RELOADABLE_KNOBS`.
+
+### `[components.validator_judge]` — briefing dep-coherence judge (TB-235)
+
+Haiku judge that runs as check #7 in
+`_validate_briefing_structure`, identifying hard predecessor
+dependencies a briefing's prose implies but its `@blocked:`
+codespan omits. Fail-open by design.
+
+- `components.validator_judge.disabled` — bool, default `false`
+  (hot-reloadable). Kill switch for the LLM-driven dep-coherence
+  check (TB-235). True short-circuits the validator inside
+  `_check_dependency_coherence` and (at the manifest env_flag
+  layer) drops the component from `registry.briefing_validators()`.
+  Mirrors `AP2_VALIDATOR_JUDGE_DISABLED`.
+- `components.validator_judge.max_tokens` — int, default `500`.
+  TB-249 deprecated alias for `max_turns`; honored (ceiling-capped
+  at 5) when `max_turns` is unset so operators with stale
+  `AP2_VALIDATOR_JUDGE_MAX_TOKENS` exports don't break. Mirrors
+  `AP2_VALIDATOR_JUDGE_MAX_TOKENS`; not in `HOT_RELOADABLE_KNOBS`
+  (deprecated knob — operators should migrate to `max_turns`).
+- `components.validator_judge.max_turns` — int, default `2`
+  (hot-reloadable). Per-call max-turns budget for the dep-coherence
+  judge (TB-249). Default 2 — one verdict message plus one optional
+  Read/Grep tool call. Mirrors `AP2_VALIDATOR_JUDGE_MAX_TURNS`.
+- `components.validator_judge.timeout_s` — float, default `60.0`
+  (hot-reloadable). Per-call timeout (seconds) for the dep-coherence
+  SDK invocation (TB-235). Default 60s — short enough to keep `ap2
+  add` responsive, long enough for a Haiku judge round-trip.
+  Mirrors `AP2_VALIDATOR_JUDGE_TIMEOUT_S`.
+
 ## Sandbox model
 
 The daemon runs as a separate OS user (`claude-agent` by default) so

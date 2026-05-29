@@ -12,8 +12,10 @@ progress.md / CLAUDE.md content (only writes if missing or appends a new
 from __future__ import annotations
 
 import re
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .config import (
     AUTOPILOT_DIR_NAME,
@@ -424,6 +426,183 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
 })
 
 
+# ---------------------------------------------------------------------------
+# TB-325: structured-config TOML scaffold (axis 6 of the structured-config
+# focus).
+#
+# `CONFIG_TEMPLATE` is the sibling of `ENV_TEMPLATE` above: a TOML-rendered
+# tree of every key declared in `aggregate_schemas(default_registry())`,
+# with each key shown commented-out at its in-source default so the file
+# documents-by-default without overriding code defaults. `ap2 init` writes
+# this template to `<project>/.cc-autopilot/config.toml` on fresh projects
+# (idempotent + non-clobbering — see `_ensure_file` below).
+#
+# Generation runs at module-import time (parallel to `ENV_TEMPLATE`'s
+# f-string interpolation) by walking the live component schema union.
+# That means a future component-manifest schema addition flows into the
+# rendered template the next `ap2 init` writes — no manual template edit
+# required. The `test_every_config_key_documented` gate in
+# `ap2/tests/test_docs_drift.py` pins the contract: every aggregated-
+# schema key path must be referenced in `ap2/howto.md`'s `## Config keys
+# (TOML)` block OR listed in `_CONFIG_TEMPLATE_EXEMPT_KEYS` below.
+#
+# The `[core.*]` section is NOT rendered today — TB-321's docstring
+# explicitly defers a typed core schema to a later axis (the existing
+# `core.<field>` round-trip path in `config_loader.from_toml` is shape-
+# only). Once a core schema lands, `_render_config_template` extends to
+# walk it too without a callsite change.
+# ---------------------------------------------------------------------------
+
+
+def _toml_value_repr(value: Any) -> str:
+    """Render `value` as the TOML scalar an operator would type by hand.
+
+    Matches the `config_writer._render_value` shape (bool → lowercase
+    `true`/`false`, str → double-quoted with the four required escapes,
+    int/float → plain stringification) but inlined here so this module
+    avoids importing `config_writer` (keeps the import graph for
+    `ap2.init` shallow; the same renderer logic exists in two places by
+    intentional duplication — neither is the canonical source for the
+    other, both are scoped to their own caller's needs).
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        escaped = (
+            value.replace("\\", "\\\\")
+                 .replace("\"", "\\\"")
+                 .replace("\n", "\\n")
+                 .replace("\r", "\\r")
+        )
+        return f"\"{escaped}\""
+    # Defensive: a future schema-type addition that lands a structural
+    # default (list/dict/None) should add an explicit branch here. Bare
+    # `repr` is the safest fallback — surfaces as an unintentionally-
+    # bracketed comment line so the operator notices.
+    return repr(value)
+
+
+def _render_config_template() -> str:
+    """Build the `CONFIG_TEMPLATE` body from the live component schema union.
+
+    Walks `aggregate_schemas(default_registry())` and emits one
+    `[components.<name>]` block per component, with each `ConfigKey`'s
+    description rendered as a `# `-fenced wrapped comment followed by a
+    commented-out `# key = <default>` line. The operator uncomments to
+    override.
+
+    Generation at module-import time is load-bearing for the test
+    contract: the docs-drift gate's "every key is referenced" check
+    walks the same schema union as this renderer, so a missing-from-
+    template hit is the same shape as a missing-from-howto hit. Future
+    schema additions land in both surfaces by adding one ConfigKey on a
+    manifest — no separate template edit.
+
+    Lazy registry import avoids a cycle at module-load time: `ap2.init`
+    is imported by CLI / test setup paths long before the components
+    package is exercised. The registry's `default_registry()` is itself
+    lazy + cached, so the discovery walk fires once per process at the
+    first `CONFIG_TEMPLATE` build (i.e. import time of this module).
+    """
+    # Lazy imports keep `ap2.init` light at import-time and avoid a
+    # static dependency on `ap2.components.*` modules (mirrors the
+    # registry's filesystem-discovery contract: `ap2.init` should never
+    # care which components exist).
+    from .config_loader import aggregate_schemas
+    from .registry import default_registry
+
+    schemas = aggregate_schemas(default_registry())
+
+    header = (
+        "# .cc-autopilot/config.toml — structured per-project tunables for the\n"
+        "# ap2 daemon (TB-321/322/325, structured-config focus).\n"
+        "#\n"
+        "# TOML layout (goal.md L307-310):\n"
+        "#   [core.<field>]              — non-component tunables (verifier,\n"
+        "#                                  ideation, watchdog, etc.).\n"
+        "#   [components.<name>.<key>]   — component-owned knobs declared on\n"
+        "#                                  each component's `Manifest.config_schema`.\n"
+        "#\n"
+        "# Every key below is commented out — the in-source default (shown\n"
+        "# inline on the `# key = <default>` line) applies unless you\n"
+        "# uncomment. Uncomment a key + value to override; the daemon picks\n"
+        "# the change up on the next tick for hot-reloadable knobs (the same\n"
+        "# `.cc-autopilot/env` hot-reload watcher extends to this file —\n"
+        "# TB-323).\n"
+        "#\n"
+        "# Precedence (high → low, matches the env-override layer in\n"
+        "# `ap2/config_compat.py`):\n"
+        "#\n"
+        "#   sectioned env (`AP2_<SECTION>_<KEY>`)\n"
+        "#     > flat env (`AP2_<FLAT>`, back-compat per `FLAT_TO_SECTIONED`)\n"
+        "#     > this TOML file\n"
+        "#     > in-source defaults.\n"
+        "#\n"
+        "# See `ap2/howto.md` `## Config keys (TOML)` for the full list with\n"
+        "# descriptions, and the per-component `Manifest.config_schema`\n"
+        "# declarations under `ap2/components/<name>/manifest.py` for the\n"
+        "# source-of-truth `ConfigKey` definitions (type, default,\n"
+        "# hot_reloadable flag).\n"
+    )
+
+    chunks: list[str] = [header]
+    for comp_name in sorted(schemas):
+        chunks.append("")  # blank line between sections
+        chunks.append(f"[components.{comp_name}]")
+        for key_name in sorted(schemas[comp_name]):
+            spec = schemas[comp_name][key_name]
+            # Word-wrap the description into `# `-fenced comment lines so
+            # the file stays readable at typical 80-col widths without
+            # forcing the operator to scroll horizontally.
+            collapsed = " ".join(spec.description.split())
+            for line in textwrap.wrap(
+                collapsed,
+                width=72,
+                break_long_words=False,
+                break_on_hyphens=False,
+            ) or [""]:
+                chunks.append(f"# {line}")
+            chunks.append(
+                f"# {key_name} = {_toml_value_repr(spec.default)}"
+            )
+    chunks.append("")  # trailing newline
+    return "\n".join(chunks)
+
+
+# Built once at module-import time. The function is exposed for tests
+# that want to re-render against a synthetic registry.
+CONFIG_TEMPLATE = _render_config_template()
+
+
+# TB-325: config keys intentionally absent from `ap2/howto.md`'s `##
+# Config keys (TOML)` block. Each entry MUST carry an inline `# reason: ...`
+# comment categorizing why the key is exempt — deprecated, test-only,
+# integration-secret-style (covered elsewhere), etc. The
+# `test_every_config_key_documented` CI gate
+# (`ap2/tests/test_docs_drift.py`) asserts every aggregated-schema key
+# path is EITHER referenced verbatim in howto.md OR a member of this
+# set. The `# reason:` comment is the audit trail for a future reader
+# asking "should this graduate to documentation?"
+#
+# Pattern parallels `_TEMPLATE_EXEMPT_KNOBS` above (which exempts env-
+# knob names from the env-template). Living next to its sibling keeps
+# the template-vs-exempt decision a one-file edit for the schema-adder.
+#
+# Empty at launch: TB-322 populated descriptions for every key in the
+# schema union, so all 25 keys land in howto.md verbatim. Future
+# deprecations or test-only knobs land entries here rather than
+# stripping the howto.md row — keeps the audit trail.
+_CONFIG_TEMPLATE_EXEMPT_KEYS: frozenset[str] = frozenset({
+    # Empty by design — every current key declared via TB-322 carries a
+    # description and is rendered in `ap2/howto.md` `## Config keys (TOML)`.
+    # A future deprecation lands here with `# reason: deprecated alias for
+    # ...` rather than removing the howto.md row, so the audit trail is
+    # preserved.
+})
+
+
 # Lines that go into <project>/.cc-autopilot/.gitignore. Grouped by purpose so
 # diffs against an existing file are minimal and readable.
 NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
@@ -526,6 +705,11 @@ class InitReport:
     # env file (the template MUST NOT clobber operator secrets / channel
     # IDs); True only on first init of a fresh project.
     env_template_created: bool = False
+    # TB-325: track whether `.cc-autopilot/config.toml` got the schema-
+    # rendered TOML template this run. False on re-init when the operator
+    # already has an authored config.toml (parallels env_template_created
+    # — never clobber); True only on first init of a fresh project.
+    config_template_created: bool = False
 
     def print(self) -> None:
         if self.nested_gitignore_added:
@@ -547,6 +731,7 @@ class InitReport:
         print(f"  .cc-autopilot/ideation_state.md: {'created (placeholder)' if self.ideation_state_md_created else 'exists'}")
         print(f"  .cc-autopilot/insights/: {'created (placeholder index)' if self.insights_dir_created else 'exists'}")
         print(f"  .cc-autopilot/env: {'created (commented template)' if self.env_template_created else 'exists (kept)'}")
+        print(f"  .cc-autopilot/config.toml: {'created (schema-rendered template)' if self.config_template_created else 'exists (kept)'}")
         if self.claude_md_created:
             print(f"  CLAUDE.md: created (with ## Autopilot)")
         elif self.claude_md_autopilot_added:
@@ -666,6 +851,16 @@ def init_project(project_root: Path) -> InitReport:
     # overrides on every re-init. The path itself is gitignored
     # (`NESTED_GITIGNORE_BLOCKS`); the TEMPLATE source above is committed.
     env_template_created = _ensure_file(autopilot_dir / "env", ENV_TEMPLATE)
+    # TB-325 (axis 6): scaffold the schema-rendered `.cc-autopilot/config.toml`
+    # ONLY when the file is absent. Same idempotency contract as the env
+    # template — never clobber an authored config (operators land tuned
+    # values; init re-runs must preserve them). The template body is
+    # generated at module-import time from
+    # `aggregate_schemas(default_registry())`, so a future component
+    # schema addition flows into the next-init scaffold automatically.
+    config_template_created = _ensure_file(
+        autopilot_dir / "config.toml", CONFIG_TEMPLATE,
+    )
     claude_md_created, autopilot_added = _ensure_claude_md_autopilot(project_root / "CLAUDE.md")
 
     return InitReport(
@@ -681,4 +876,5 @@ def init_project(project_root: Path) -> InitReport:
         ideation_state_md_created=ideation_state_md_created,
         insights_dir_created=insights_dir_created,
         env_template_created=env_template_created,
+        config_template_created=config_template_created,
     )
