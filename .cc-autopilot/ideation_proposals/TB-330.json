@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-322,TB-323,TB-326",
   "briefing_path": ".cc-autopilot/tasks/migrate-janitor-knob-cluster-to-cfg-comp.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "a25507f",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-29T04:38:18Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-29T02:27:28Z",
   "tb_id": "TB-330",
   "why_now": "TB-326's pilot template is proven and explicitly named this\ncluster in its Out-of-scope list (\"Migrating the other 6 component\nclusters (attention, focus_advance, auto_unfreeze, mattermost,\nvalidator_judge, janitor) \u2014 separate TB-N per cluster post-pilot\").\nGoal.md Progress signal at L398-399 (\"\u226580% of source-side\n`os.environ.get('AP2_*')` calls migrated to `cfg.<path>.<key>` reads\")\nis currently at ~3/N migrated; each cluster moves the needle."
