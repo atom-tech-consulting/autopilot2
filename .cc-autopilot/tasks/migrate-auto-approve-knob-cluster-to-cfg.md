@@ -117,3 +117,10 @@ config keys.
   with observable-behavior risk and is explicitly deferred).
 - Changes to `env_deprecated` event semantics — TB-323's
   one-shot-per-process behavior is preserved verbatim.
+## Attempts
+
+### 2026-05-29 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `uv run python -m ap2 status --project .` exits 0 and the`## Components` block still renders `auto_approve` correctly(sa; [fail] `uv run pytest -q ap2/tests/test_tb318_auto_approve_migration.py`— existing auto_approve migration test passes unchanged
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T005835Z-TB-326.prompt.md`, `stream: .cc-autopilot/debug/20260529T005835Z-TB-326.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T005835Z-TB-326.messages.jsonl`

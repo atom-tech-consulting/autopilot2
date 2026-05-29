@@ -8,8 +8,8 @@
 
 ## Backlog
 
-- [ ] **TB-326** **Migrate `auto_approve` knob cluster to `cfg.components.auto_approve` reads (axis 5 pilot)** `#autopilot` `#components` `#config` `#axis-5` `#auto-approve` `#migration` `#pilot` `@blocked:TB-321,TB-322,TB-323` — Axis (5) pilot cluster of the structured-config focus: switch the 9 AP2_AUTO_APPROVE_* knob reads in ap2/components/auto_approve/ from os.environ.get(...) to cfg-based component reads. First cluster of the long-tail migration per goal.md L353-364 — proves the template for the remaining 6 component clusters. [→ brief](.cc-autopilot/tasks/migrate-auto-approve-knob-cluster-to-cfg.md)
 - [ ] **TB-324** **`ap2 config list / get / set / validate` CLI surface (axis 4)** `#autopilot` `#components` `#config` `#cli` `#operator-legible` `#axis-4` `@blocked:TB-321,TB-322,TB-323` — Axis (4) of the structured-config focus: ship the `ap2 config` subcommand with `list` (enumerate every key with current value + source), `get <path>`, `set <path> <value>` (operator-queue-routed), and `validate` (dry-run schema check). Closes goal.md L342-351 + the L394-395 Progress signal. [→ brief](.cc-autopilot/tasks/ap2-config-list-get-set-validate-cli-sur.md)
+- [ ] **TB-326** **Migrate `auto_approve` knob cluster to `cfg.components.auto_approve` reads (axis 5 pilot)** `#autopilot` `#components` `#config` `#axis-5` `#auto-approve` `#migration` `#pilot` `@blocked:TB-321,TB-322,TB-323` — Axis (5) pilot cluster of the structured-config focus: switch the 9 AP2_AUTO_APPROVE_* knob reads in ap2/components/auto_approve/ from os.environ.get(...) to cfg-based component reads. First cluster of the long-tail migration per goal.md L353-364 — proves the template for the remaining 6 component clusters. [→ brief](.cc-autopilot/tasks/migrate-auto-approve-knob-cluster-to-cfg.md)
 
 ## Pipeline Pending
 

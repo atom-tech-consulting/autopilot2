@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-321,TB-322,TB-323",
   "briefing_path": ".cc-autopilot/tasks/migrate-auto-approve-knob-cluster-to-cfg.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "b3eba54",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-29T01:21:43Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-29T00:18:36Z",
   "tb_id": "TB-326",
   "why_now": "TB-321 + TB-322 + TB-323 landed the full foundation\n(parser, schemas, override layer) this cycle. The 0% migration\ncount is currently the largest gap to the Progress signal at\nL398-399. Pilot-first is the right shape \u2014 once the pattern\nproves out (test fixture, kill-switch interaction, env-only knob\nhandling, `env_deprecated` interplay), the remaining 6 clusters\n(attention, focus_advance, auto_unfreeze, mattermost,\nvalidator_judge, janitor, core) become near-identical follow-up\nTB-Ns. Without the pilot, queueing all 6 clusters now risks\n6 identical fixups if a template gap surfaces."
