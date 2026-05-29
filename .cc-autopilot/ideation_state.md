@@ -1,139 +1,147 @@
 # Ideation State
 
-_Last updated: 2026-05-29T02:19:18Z by ideation cron_
+_Last updated: 2026-05-29T04:38:18Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 0B / 0P / 198C / 0F. The three prior-cycle
-proposals all landed (with one fix-forward each): TB-324 (axis 4 — `ap2
-config list / get / set / validate` CLI, bf4168d → 2ebe1a6 closing the
-exit-code-on-unknown-path bullet gap), TB-325 (axis 6 — `CONFIG_TEMPLATE`
-+ `test_every_config_key_documented`, 2eb899c), TB-326 (axis 5 pilot —
-`auto_approve` cluster via `Config.get_component_value("auto_approve",
-<key>)`, b3eba54 → 60bdb1f closing two pre-existing latent bugs the
-migration's walk surfaced). End-of-arc gate held: pytest green after each
-fix-forward. The axis-5 pilot template (option 2 from TB-326 briefing —
-helper on `Config`) is now proven; the 5 remaining component clusters
-named in TB-326 Out-of-scope are the natural long-tail seed this cycle.
+Cycle entry: board 0A / 0R / 1B / 0P / 202C / 0F. Of last cycle's 5
+per-component proposals (TB-327..331), 4 landed (TB-327 auto_unfreeze
+48ab4a8, TB-328 attention 980da5e, TB-329 focus_advance 17deb25,
+TB-330 janitor a25507f); TB-331 validator_judge is still the lone
+Backlog row, dispatch imminent. The TB-326 pilot template
+(`Config.get_component_value("<name>", <key>)` + `cfg`-kwarg-with-
+TypeError-guard back-compat on helpers) carried verbatim across all
+four landed clusters with zero retry friction. The remaining
+slack against the L398-399 progress signal ("≥80% of source-side
+`os.environ.get('AP2_*')` calls migrated to `cfg.<path>.<key>`")
+lives in TWO surfaces the per-component briefs explicitly scoped out:
+(a) cross-package consumers of the same per-component knobs that sit
+OUTSIDE `ap2/components/<name>/` and (b) the ~20 core
+(non-component) knobs.
 
 ## Current focus assessment
 
 - **Current focus: structured config (env → TOML)**
   - Progress so far:
-    - Axis 1 shipped (TB-321, f5b0f0c): tomllib parser, `ConfigKey`,
-      `aggregate_schemas`, `Config.from_toml`, `Manifest.config_schema`,
-      daemon-start `validate_config` fail-fast gate.
-    - Axis 2 shipped (TB-323, a50e686): `config_compat.py`
-      FLAT_TO_SECTIONED (62 entries) + `_KNOBS_STAYING_ENV_ONLY`
-      12-factor exemption + sectioned-env > flat-env > TOML precedence +
-      one-shot `env_deprecated` event + TOML mtime hot-reload.
-    - Axis 3 shipped (TB-322, e38bb38): `config_schema` declared on all
-      6 remaining component manifests; 25-entry union pinned.
-    - Axis 4 shipped (TB-324, bf4168d + 2ebe1a6): `ap2 config list / get
-      / set / validate` CLI with source attribution (file / env-override
-      / default), operator-queue-routed writes, audit events.
-    - Axis 6 shipped (TB-325, 2eb899c): `CONFIG_TEMPLATE` rendered from
-      `aggregate_schemas` at module-import (25 keys / 7 components, all
-      commented-out at defaults), `_CONFIG_TEMPLATE_EXEMPT_KEYS` analogue,
-      `test_every_config_key_documented` docs-drift gate.
-    - Axis 5 pilot shipped (TB-326, b3eba54 + 60bdb1f): 3 auto_approve
-      env reads in `ap2/components/auto_approve/` switched to
-      `Config.get_component_value("auto_approve", <key>)`; pattern doc'd
-      in the manifest; two pre-existing latent bugs exposed by the
-      migration's walk also closed.
+    - Axis 1 shipped (TB-321, f5b0f0c): parser, `ConfigKey`, validator.
+    - Axis 2 shipped (TB-323, a50e686): FLAT_TO_SECTIONED (62 entries)
+      + sectioned-env > flat-env > TOML precedence + one-shot
+      `env_deprecated` + TOML mtime hot-reload.
+    - Axis 3 shipped (TB-322, e38bb38): `config_schema` declared on
+      all 7 component manifests; 25-entry union pinned.
+    - Axis 4 shipped (TB-324, bf4168d + 2ebe1a6): `ap2 config list /
+      get / set / validate` CLI.
+    - Axis 6 shipped (TB-325, 2eb899c): `CONFIG_TEMPLATE` +
+      `test_every_config_key_documented`.
+    - Axis 5 component-BODY tail shipped (TB-326 b3eba54 / TB-327
+      48ab4a8 / TB-328 980da5e / TB-329 17deb25 / TB-330 a25507f);
+      TB-331 in Backlog closes the 5th of 5 component clusters.
   - Gaps:
-    - **Axis 5 long tail — 5 component clusters unmigrated** (goal.md
-      L353-364). FLAT_TO_SECTIONED enumerates the per-component knobs:
-      `auto_unfreeze` (5 knobs), `attention` (4 knobs), `focus_advance`
-      (2 knobs), `janitor` (4 knobs), `validator_judge` (5 knobs). Each
-      component body still calls `os.environ.get("AP2_<CLUSTER>_*")`
-      directly even though TB-322 declared the schemas and TB-323 plumbed
-      the override layer. Goal.md L398-399 progress signal "≥80% of
-      source-side `os.environ.get('AP2_*')` calls migrated to
-      `cfg.<path>.<key>` reads" sits at ~3/N migrated post-pilot.
-    - **Core (non-component) cluster — ~20 `AP2_*` core knobs
-      unmigrated** (goal.md L353-364 "auto_approve, auto_unfreeze,
-      attention, etc."). FLAT_TO_SECTIONED maps `AP2_TICK_S`,
-      `AP2_AGENT_MODEL`, `AP2_AGENT_EFFORT`, `AP2_TASK_MAX_TURNS`, etc.
-      to `core.<key>`. Read paths in `ap2/config.py` / `ap2/daemon.py` /
-      `ap2/verify.py` still consult `os.environ.get` directly. Lower
-      priority than the per-component long tail this cycle — fewer
-      readers per knob, no schema sprawl gain, and the pilot's component
-      template doesn't transfer directly (core knobs have no
-      `get_component_value("core", ...)` equivalent — needs a sibling
-      accessor or use of `cfg.core.<key>` field access already plumbed).
+    - **Cross-package readers of per-component knobs** (goal.md
+      L398-399). `AP2_AUTO_APPROVE*` / `AP2_AUTO_UNFREEZE_*` /
+      `AP2_VALIDATOR_JUDGE_*` are still read by direct
+      `os.environ.get` calls in `ap2/automation_status.py`,
+      `ap2/board_edits.py`, `ap2/operator_queue.py`, `ap2/doctor.py`,
+      `ap2/ideation.py`, `ap2/cli_daemon.py`, `ap2/tests/conftest.py`.
+      `grep -rn 'os\.environ\.get(\s*['\''\"']AP2_' ap2/` reports 70
+      reads outside `ap2/components/` versus 11 inside — the bulk of
+      the residual count is consumers that the per-component briefs
+      explicitly scoped to component bodies only. Each of these
+      consumers can adopt `cfg.get_component_value("<name>", <key>)`
+      with the same `cfg`-kwarg-+-TypeError-guard back-compat shape
+      TB-327's `should_suppress` / TB-328's analogues already use.
+    - **Core (non-component) cluster — no helper yet + ~12-15 reads
+      still direct** (goal.md L353-364 "auto_approve, auto_unfreeze,
+      attention, etc.", schema sectioned `[core.*]` per L308). TB-323
+      mapped `AP2_AGENT_MODEL` / `AP2_AGENT_EFFORT` /
+      `AP2_TASK_MAX_TURNS` / `AP2_CONTROL_MAX_TURNS` /
+      `AP2_VERIFY_JUDGE_MAX_TURNS` / `AP2_IDEATION_*` / `AP2_WEB_*`
+      to `core.<key>` paths in FLAT_TO_SECTIONED (`ap2/config_compat.py`
+      L100-115), but no `Config.get_core_value` sibling to
+      `get_component_value` exists yet, and the readers in
+      `ap2/daemon.py` (L223,226,227,775,868,903), `ap2/verify.py`
+      (L564,573,575), `ap2/status_report.py` (L2024),
+      `ap2/components/janitor/__init__.py` (L214,789) still call
+      `os.environ.get` directly. The pilot proved adding a helper +
+      flipping reads keeps blast radius tight; the same shape transfers.
+    - **Ideation cluster** (subset of core but distinct shape).
+      `ap2/ideation.py` reads `AP2_IDEATION_COOLDOWN_S` (L566),
+      `AP2_IDEATION_TRIGGER_TASK_COUNT` (L584), `AP2_IDEATION_MAX_TURNS`
+      (L789), `AP2_IDEATION_DISABLED` (L929); `ap2/ideation_scrub.py`
+      reads `AP2_IDEATION_SCRUB_MODEL` (L166). All mapped to `core.*`
+      in FLAT_TO_SECTIONED but not yet read via cfg.
   - Status: `in-progress`
 
 ## Non-goal risk check
 
-None. All 5 proposed tasks sit squarely in goal.md L353-364 (axis 5
-migration of existing knobs) and follow the TB-326 pilot template
-verbatim. Pure read-path swaps, bit-identical observable behavior, env
-back-compat preserved per TB-323. No drift into Non-goals at L405-447
-(no env-knob renames, no behavior deletions, no API-stability
-commitments).
+None. All 4 proposals continue the read-path swap that L406-410
+explicitly green-lights ("does this migrate a previously-env-only
+knob into the config schema without losing back-compat?"). No env
+renames, no API stability commitments, no behavior changes — same
+TB-326 pilot template across the board.
 
 ## Considered & deferred this cycle
 
-- **Core (non-component) knob cluster migration**: ~20 `AP2_TICK_S`,
-  `AP2_AGENT_MODEL`, etc. reads in `ap2/config.py` / `ap2/daemon.py`. Real
-  scope, but the read-shape differs from the per-component pilot
-  (component pattern uses `Config.get_component_value("auto_approve",
-  key)`; core knobs need either a `get_core_value` sibling or use of the
-  existing `cfg.<field>` dataclass attributes). Defer one cycle — let the
-  5 per-component cluster migrations land first to surface any shape
-  issues; the core cluster benefits from any helper extracted post-batch.
-- **Mattermost cluster migration**: ZERO scope. All `AP2_MM_*` knobs are
-  in `_KNOBS_STAYING_ENV_ONLY` per TB-323 (deployment identity, channel
-  identity, secrets — true 12-factor). No briefing to write; goal.md
-  L400-403 explicitly carves these out.
-- **Per-cluster Verification redundancy**: each migration brief reuses
-  the TB-326 verification shape (regression-gate pytest + cluster-scoped
-  grep-walk + new behavioral test). Considered consolidating into a
-  single "migrate all 5 clusters" task; rejected because (a) goal.md L361
-  says "one TB-N per logical cluster" verbatim and (b) per-cluster
-  isolation lets the agent ship one and verify before touching the next.
+- **`ap2/howto.md ## Configuration knobs` tree-render rewrite**
+  (goal.md L366-376 axis 6). TB-325 shipped the
+  `test_every_config_key_documented` gate but the howto section is
+  still a flat env-var list, not a tree-of-paths render. Deferred
+  one cycle — the cross-package + core-helper migrations have
+  higher progress-signal leverage this cycle and the docs rewrite
+  benefits from migration stabilization first.
+- **`_KNOBS_STAYING_ENV_ONLY` curation pass**. The 12-factor exempt
+  list in `config_compat.py` is currently a hand-curated dozen. A single-shot audit can
+  re-verify the cut line. Deferred — premature before the migrations
+  expose the remaining true-env-only set.
+- **Cross-component readers BUNDLED into one task vs split into
+  three**. Considered a single "migrate all cross-package
+  AP2_AUTO_APPROVE/UNFREEZE/JUDGE reads" task. Rejected: 24-28
+  call sites across 7 files in one task hits the "scope-too-large"
+  failure mode the failure-review heuristic flags (TB-78-stoch
+  anti-pattern); splitting by upstream cluster keeps each task's
+  blast radius scoped and verifiable.
 - **Recurring rejection-pattern check (carried, re-justified)**:
-  operator vetoes TB-185/184 (meta-polish unconnected to focus), TB-175
-  (premature aggregation), TB-231/240 (symptom-patching / validator
-  whack-a-mole). None of the 5 proposed tasks match — each is direct
-  goal.md axis-5 build-out with a named delete-test and a proven pilot
-  template. Pattern carried so future cycles re-verify alignment as the
-  long tail drains.
+  operator vetoes TB-185/184 (utility unaligned with focus / parallel
+  surface eroding goal.md authority), TB-175 (premature aggregation),
+  TB-231/240 (symptom-patching / validator whack-a-mole). None of the
+  4 proposals match — each is goal.md axis-5 build-out, named
+  delete-test, proven template. Pattern carried so future cycles
+  re-verify alignment as the focus drains.
 
 ## Cycle observations
 
-- The TB-326 fix-forward (60bdb1f closed "two pre-existing latent bugs
-  the migration's walk exposed") confirms the migration walk has
-  diagnostic value beyond the read-path swap — the agent's
-  cfg-attribution audit surfaces real defects. Carry into per-cluster
-  briefings as an expected side-effect (no scope change; just don't be
-  surprised if a follow-up commit closes an unrelated gap).
-- The axis-5 long tail is now mechanically near-identical per cluster.
+- TB-326's "migration walk surfaces latent bugs" pattern recurred on
+  TB-330 (manifest config_schema gained 2 keys to close a 1-vs-3
+  schema mismatch) — confirms the migration walk has diagnostic
+  value; expect the same on the cross-package readers since
+  automation_status.py / doctor.py have higher branching density
+  than the per-component bodies. Carry into briefings as expected
+  side-effect (no scope change).
 
 ## Decisions needed from operator
 
-(none — the 5 proposed tasks are direct build-out of operator-authored
-goal.md L353-364 axis-5 long tail with explicit delete-tests and a
-proven pilot template (TB-326). Operator approval via `ap2 approve
-TB-N` is the standard review-gate path; auto-approve will likely fire
-for these per the `#axis-5` `#migration` tag pattern that auto-approved
-TB-326.)
+(none — the 4 proposed tasks are direct axis-5 build-out closing
+the cross-package + core remaining tail with the proven TB-326
+helper-pilot template. Operator approval via `ap2 approve TB-N` is
+the standard review-gate path; auto-approve will likely fire for
+these per the `#axis-5` `#migration` tag pattern that auto-approved
+TB-326..331.)
 
 ## Proposals this cycle
 
-- TB-327 (axis 5 — auto_unfreeze cluster): migrate 5
-  `AP2_AUTO_UNFREEZE_*` env reads in
-  `ap2/components/auto_unfreeze/` to cfg-based reads via the TB-326
-  `Config.get_component_value` helper.
-- TB-328 (axis 5 — attention cluster): migrate 4 `AP2_ATTENTION_*` /
-  `AP2_TASK_STUCK_THRESHOLD_S` / `AP2_TASK_FROZEN_RECENCY_S` reads in
-  `ap2/components/attention/`.
-- TB-329 (axis 5 — focus_advance cluster): migrate 2
-  `AP2_FOCUS_AUTO_ADVANCE_DISABLED` / `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
-  reads in `ap2/components/focus_advance/`.
-- TB-330 (axis 5 — janitor cluster): migrate 4 `AP2_JANITOR_*` reads
-  in `ap2/components/janitor/`.
-- TB-331 (axis 5 — validator_judge cluster): migrate 5
-  `AP2_VALIDATOR_JUDGE_*` reads in
-  `ap2/components/validator_judge/`.
+- TB-332 (axis 5 — cross-package `auto_approve` reads): migrate
+  `AP2_AUTO_APPROVE*` reads in `automation_status.py`, `board_edits.py`,
+  `operator_queue.py`, `doctor.py`, `ideation.py`, `cli_daemon.py`,
+  `tests/conftest.py` to `cfg.get_component_value("auto_approve", <k>)`.
+- TB-333 (axis 5 — cross-package `auto_unfreeze` + `validator_judge`
+  reads): migrate `AP2_AUTO_UNFREEZE_*` + `AP2_VALIDATOR_JUDGE_*`
+  reads outside their component bodies (automation_status.py,
+  doctor.py, _shared.py, briefing_validators.py, conftest.py).
+- TB-334 (axis 5 — core agent-runtime cluster): add
+  `Config.get_core_value` helper paralleling `get_component_value`,
+  migrate `AP2_AGENT_MODEL` / `AP2_AGENT_EFFORT` / `AP2_TASK_MAX_TURNS`
+  / `AP2_CONTROL_MAX_TURNS` / `AP2_VERIFY_JUDGE_MAX_TURNS` reads in
+  `daemon.py`, `verify.py`, `status_report.py`, `components/janitor/`.
+- TB-335 (axis 5 — core ideation cluster): migrate
+  `AP2_IDEATION_*` reads in `ideation.py` + `ideation_scrub.py`
+  using the new `get_core_value` helper from TB-334.

@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-326",
+  "briefing_path": ".cc-autopilot/tasks/migrate-cross-package-auto-approve-knob.md",
+  "focus_anchor": "current focus structured config env toml",
+  "proposed_at": "2026-05-29T04:44:42Z",
+  "tb_id": "TB-332",
+  "why_now": "TB-326..331 settled the per-component template and the\ncross-package leak is the largest remaining axis-5 deficit \u2014 the\n70-vs-11 grep ratio (outside vs inside `ap2/components/`) is\ndriven mostly by these cross-package readers, and operator-facing\nsurfaces (`ap2 status`, the cron status-report) all touch\n`automation_status.py` so an inconsistent shape there is visible\non every tick. Deferring lets the residual env-read sprawl grow\nas new features land."
+}

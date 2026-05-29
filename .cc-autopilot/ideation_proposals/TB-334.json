@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-322,TB-323",
+  "briefing_path": ".cc-autopilot/tasks/add-config-get-core-value-helper-migrate.md",
+  "focus_anchor": "current focus structured config env toml",
+  "proposed_at": "2026-05-29T04:47:18Z",
+  "tb_id": "TB-334",
+  "why_now": "without `get_core_value`, every core-cluster reader has to\neither (a) keep direct `os.environ.get` (defeats the migration) or\n(b) hand-roll the precedence chain \u2014 neither scales. Adding the\nhelper here is one-touch and unlocks both TB-335 and the\n~remaining core readers (AP2_WEB_*, AP2_AUTO_DIAGNOSE_*). The\nagent-runtime knobs are dispatched on every task / verify / janitor\ntick \u2014 visible cost surface."
+}

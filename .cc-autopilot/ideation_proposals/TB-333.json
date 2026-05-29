@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-327,TB-331",
+  "briefing_path": ".cc-autopilot/tasks/migrate-cross-package-auto-unfreeze-vali.md",
+  "focus_anchor": "current focus structured config env toml",
+  "proposed_at": "2026-05-29T04:45:41Z",
+  "tb_id": "TB-333",
+  "why_now": "same as TB-332 \u2014 finish the cross-package leak for these\ntwo clusters so the L398-399 progress signal lifts another ~14\nreaders off direct env. `automation_status.py` and `doctor.py` are\noperator-facing surfaces (`ap2 status` block, `ap2 doctor` exit\ncodes); inconsistent shape there is visible on every tick / doctor\nrun. Deferring lets sprawl compound as new operator surfaces add\nknob references."
+}
