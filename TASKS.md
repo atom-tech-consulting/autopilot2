@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-340** **Fix `ack roadmap_complete` semantics: dismiss-the-notice, never resume-ideation** `#autopilot` `#bug` `#roadmap-complete` `#focus-advance` `#ideation` `#operator-ux` [→ brief](.cc-autopilot/tasks/fix-ack-roadmap-complete-semantics-dismi.md)
 
 ## Pipeline Pending
 
