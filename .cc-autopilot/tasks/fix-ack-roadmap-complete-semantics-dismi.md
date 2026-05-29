@@ -195,3 +195,16 @@ is a correctness + UX + cost bug in one. Operator-directed fix
 - The structured-config TOML migration of any
   roadmap/focus knobs (separate focus, already shipped where
   applicable).
+## Attempts
+
+### 2026-05-29 — error
+(no summary)
+- **error:** Exception: Command failed with exit code 1 (exit code: 1)
+Error output: Check stderr output for details
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T211358Z-TB-340.prompt.md`, `stream: .cc-autopilot/debug/20260529T211358Z-TB-340.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T211358Z-TB-340.messages.jsonl`
+### 2026-05-29 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `uv run pytest -q` — full suite passes.
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T211645Z-TB-340.prompt.md`, `stream: .cc-autopilot/debug/20260529T211645Z-TB-340.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T211645Z-TB-340.messages.jsonl`
