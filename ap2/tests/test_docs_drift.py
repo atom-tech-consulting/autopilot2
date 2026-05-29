@@ -294,13 +294,16 @@ def test_every_config_key_documented():
     `## Config keys (TOML)` heading so a future refactor that moves the
     block (or removes it entirely) trips here.
 
-    `[core.*]` keys are NOT walked yet — TB-321's docstring explicitly
-    defers a typed core schema to a later axis (the `[core.<field>]`
-    round-trip path exists shape-only). When a core schema lands, this
-    test extends to walk it too without a callsite change here.
+    TB-337 (axis-1 completion) extends the walk to `[core.*]` keys via
+    `ap2.core_config_schema.CORE_CONFIG_SCHEMA`. Pre-TB-337 the test
+    only covered per-component manifests because the core surface was
+    declared "schema deferred to a future axis" in `howto.md` L2376-2379;
+    that gap is now closed and the gate enforces docs-drift parity
+    across both surfaces in one walk.
     """
     from ap2.init import _CONFIG_TEMPLATE_EXEMPT_KEYS
     from ap2.config_loader import aggregate_schemas
+    from ap2.core_config_schema import CORE_CONFIG_SCHEMA
     from ap2.registry import default_registry
 
     howto = HOWTO_PATH.read_text()
@@ -313,7 +316,14 @@ def test_every_config_key_documented():
         "declarations."
     )
 
-    schemas = aggregate_schemas(default_registry())
+    # TB-337: include CORE_CONFIG_SCHEMA in the aggregate walk so the
+    # `[core.*]` keys land on the docs-drift gate too. The returned
+    # dict carries `"core"` as a reserved namespace alongside the
+    # per-component entries; we re-bind each side to its own emit
+    # prefix (`core.<key>` vs `components.<name>.<key>`).
+    schemas = aggregate_schemas(
+        default_registry(), core_schema=CORE_CONFIG_SCHEMA,
+    )
     assert schemas, (
         "no component config schemas found — registry walk or "
         "aggregate_schemas regressed; the docs-drift gate would pass "
@@ -321,9 +331,10 @@ def test_every_config_key_documented():
     )
 
     paths: list[str] = []
-    for comp_name in sorted(schemas):
-        for key_name in sorted(schemas[comp_name]):
-            paths.append(f"components.{comp_name}.{key_name}")
+    for namespace in sorted(schemas):
+        prefix = "core" if namespace == "core" else f"components.{namespace}"
+        for key_name in sorted(schemas[namespace]):
+            paths.append(f"{prefix}.{key_name}")
 
     missing = sorted(
         p for p in paths
@@ -358,32 +369,46 @@ def test_every_config_key_in_template():
     Parallel to `test_every_env_knob_in_template_or_exempt` for the env
     template surface, this test pins the template's "renders the full
     schema union" contract. The template body is generated at module-
-    import time from `aggregate_schemas(default_registry())`, so this
-    assertion would only fire if the renderer's walk regressed (e.g.
-    a future refactor that hardcoded a partial section list). No exempt
-    set is consulted here — by construction, every schema key MUST
-    appear in the rendered template; the operator-facing exemption is
+    import time from `aggregate_schemas(default_registry(),
+    core_schema=CORE_CONFIG_SCHEMA)`, so this assertion would only fire
+    if the renderer's walk regressed (e.g. a future refactor that
+    hardcoded a partial section list). No exempt set is consulted here
+    — by construction, every schema key MUST appear in the rendered
+    template; the operator-facing exemption is
     `_CONFIG_TEMPLATE_EXEMPT_KEYS` (covered by
     `test_every_config_key_documented` above), which gates documentation
     presence, not template inclusion.
+
+    TB-337 (axis-1 completion) extends the walk to `[core.*]` keys —
+    the `"core"` reserved namespace in the aggregated dict renders as
+    a top-level `[core]` block (NOT `[components.core]`); per-component
+    blocks still render as `[components.<name>]` as before.
     """
     from ap2.init import CONFIG_TEMPLATE
     from ap2.config_loader import aggregate_schemas
+    from ap2.core_config_schema import CORE_CONFIG_SCHEMA
     from ap2.registry import default_registry
 
-    schemas = aggregate_schemas(default_registry())
+    schemas = aggregate_schemas(
+        default_registry(), core_schema=CORE_CONFIG_SCHEMA,
+    )
     assert schemas, (
         "no component config schemas found — registry walk regressed; "
         "the template-coverage gate would pass vacuously"
     )
 
     missing: list[str] = []
-    for comp_name in sorted(schemas):
-        section_marker = f"[components.{comp_name}]"
+    for namespace in sorted(schemas):
+        # TB-337: `"core"` renders as `[core]` at the top; other
+        # entries render as `[components.<name>]`.
+        section_marker = (
+            "[core]" if namespace == "core" else f"[components.{namespace}]"
+        )
         if section_marker not in CONFIG_TEMPLATE:
             missing.append(section_marker)
             continue
-        for key_name in sorted(schemas[comp_name]):
+        prefix = "core" if namespace == "core" else f"components.{namespace}"
+        for key_name in sorted(schemas[namespace]):
             # The renderer emits the key as `# <key> = <default>` so we
             # match the commented-out form to avoid false positives on
             # description-prose mentions.
@@ -392,15 +417,15 @@ def test_every_config_key_in_template():
             # full template is enough: the key names are unique within a
             # well-formed schema and tightly fenced by the comment prefix.
             if needle not in CONFIG_TEMPLATE:
-                missing.append(f"components.{comp_name}.{key_name}")
+                missing.append(f"{prefix}.{key_name}")
 
     assert not missing, (
         f"config key(s) declared on a component manifest "
-        f"`config_schema` but missing from `ap2.init.CONFIG_TEMPLATE`: "
-        f"{missing}. The template body is generated at module-import "
-        f"time from `aggregate_schemas(default_registry())` — if this "
-        f"test trips, the renderer (`_render_config_template`) has "
-        f"regressed and is no longer walking the full schema union."
+        f"`config_schema` or in `CORE_CONFIG_SCHEMA` but missing from "
+        f"`ap2.init.CONFIG_TEMPLATE`: {missing}. The template body is "
+        f"generated at module-import time from `aggregate_schemas(...)` "
+        f"— if this test trips, the renderer (`_render_config_template`) "
+        f"has regressed and is no longer walking the full schema union."
     )
 
 

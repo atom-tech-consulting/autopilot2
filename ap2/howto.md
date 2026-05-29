@@ -2374,9 +2374,11 @@ declared and not listed here OR in
 **TOML layout** (goal.md L307-310):
 
     [core.<field>]              # non-component tunables (verifier,
-                                # ideation, watchdog, etc.) — schema
-                                # deferred to a future axis; current
-                                # round-trip is shape-only.
+                                # ideation, watchdog, etc.) — typed by
+                                # `ap2.core_config_schema.CORE_CONFIG_SCHEMA`
+                                # (TB-337). `validate_config` rejects
+                                # unknown `[core.*]` keys at daemon-start
+                                # with a clear "did you mean ...?" hint.
     [components.<name>.<key>]   # per-component knobs declared on
                                 # `Manifest.config_schema`.
 
@@ -2399,6 +2401,124 @@ The hot-reload watcher (TB-271 extended by TB-323) tracks
 `.cc-autopilot/config.toml`'s mtime alongside `.cc-autopilot/env`,
 so a bumped tunable propagates on the next tick (≤30s) for
 hot-reloadable keys; non-hot keys still need `ap2 stop && ap2 start`.
+
+### [core] — non-component cluster tunables (TB-337)
+
+The `[core.*]` namespace carries the 21 non-component knobs the
+daemon's runtime needs: tick intervals, per-call timeouts, retry
+budgets, agent runtime (model + effort + max-turns), the ideation
+cluster, project identity, and the web server's lifecycle pair.
+Schema declared in `ap2/core_config_schema.py::CORE_CONFIG_SCHEMA`;
+`validate_config` walks both `[core.*]` and `[components.<name>.*]`
+sub-tables against the union at daemon-start and rejects unknown /
+mistyped keys with a clear named-path error (e.g. `[core] web_prot
+= 8080: unknown key (did you mean \`core.web_port\`?)`).
+
+Hot-reloadability mirrors `env_reload.HOT_RELOADABLE_KNOBS` /
+`FIXED_KNOBS`: lifecycle knobs (`core.web_port`, `core.web_disabled`)
+wire a stateful resource at daemon-start and need `ap2 stop && ap2
+start`; everything else propagates on the next tick after a
+`.cc-autopilot/env` or `.cc-autopilot/config.toml` mtime bump.
+
+- `core.agent_effort` — str, default `""` (hot-reloadable). Global
+  reasoning-effort label (`low` | `medium` | `high` | `xhigh` |
+  `max`) passed as `extra_args={"effort": <value>}` to the SDK
+  options. Per-job sub-knobs (`AP2_STATUS_REPORT_EFFORT`,
+  `AP2_VERIFY_JUDGE_EFFORT`, `AP2_JANITOR_JUDGE_EFFORT`) override for
+  their respective agents. Mirrors `AP2_AGENT_EFFORT`.
+- `core.agent_model` — str, default `""` (hot-reloadable). Model
+  name passed to `ClaudeAgentOptions` for task / control / verifier /
+  janitor agents. Empty default falls through to the SDK's own
+  default; project convention is `claude-opus-4-7`. Mirrors
+  `AP2_AGENT_MODEL`; read fresh from `os.environ` at each SDK
+  invocation so hot-reload propagates immediately.
+- `core.control_max_turns` — int, default `15` (hot-reloadable). Max
+  turns per control-agent (mattermost / cron) SDK query. Tighter
+  than `core.task_max_turns` because control agents do focused
+  decide-then-route work, not implementation. Mirrors
+  `AP2_CONTROL_MAX_TURNS`.
+- `core.control_timeout_s` — int, default `1200` (hot-reloadable).
+  Per-control-agent (mattermost / cron / ideation) SDK query timeout
+  in seconds. Default raised to 20min in TB-278 after xhigh-effort
+  ideation cycles routinely blew the old 5-min wall. Mirrors
+  `AP2_CONTROL_TIMEOUT_S`.
+- `core.event_context_size` — int, default `50` (hot-reloadable).
+  Number of most-recent events from `.cc-autopilot/events.jsonl` the
+  daemon injects into each agent briefing as the `Recent events`
+  context tail. Mirrors `AP2_EVENT_CONTEXT`.
+- `core.ideation_cooldown_s` — int, default `7200` (hot-reloadable).
+  Minimum seconds between ideation cron fires when the board stays
+  empty. Throttles the cycle so the agent isn't hammered every tick
+  on a quiet project. Mirrors `AP2_IDEATION_COOLDOWN_S`.
+- `core.ideation_disabled` — bool, default `false` (hot-reloadable).
+  Kill switch for the empty-board ideation cron. Truthy value opts
+  the project out of automatic backlog refill. Mirrors
+  `AP2_IDEATION_DISABLED`.
+- `core.ideation_max_turns` — int, default `100` (hot-reloadable).
+  Max turns per ideation-agent SDK query. Default raised 30 → 100
+  in TB-278 after a goal.md rewrite mid-cycle hit `error_max_turns`
+  at 31. Mirrors `AP2_IDEATION_MAX_TURNS`.
+- `core.ideation_scrub_model` — str, default
+  `"claude-haiku-4-5-20251001"` (hot-reloadable). Model name for
+  `ideation_scrub.py`'s post-write filter that strips
+  exhaustion-asserting sentences from `ideation_state.md` after each
+  ideation cycle. Mirrors `AP2_IDEATION_SCRUB_MODEL`.
+- `core.ideation_trigger_task_count` — int, default `3`
+  (hot-reloadable). Fire ideation when Ready+Backlog count is BELOW
+  this threshold AND Active is empty. Doubles as the per-cycle
+  proposal-slot budget. Set to 1 for the legacy "fire only when
+  working queue is fully empty" behavior. Mirrors
+  `AP2_IDEATION_TRIGGER_TASK_COUNT`.
+- `core.max_retries` — int, default `3` (hot-reloadable). Number of
+  retry attempts per task before it lands Frozen and routes through
+  the auto-unfreeze / operator-ack path. Mirrors `AP2_MAX_RETRIES`.
+- `core.mm_tick_interval_s` — int, default `10` (hot-reloadable).
+  Mattermost polling tick interval in seconds. The `_mm_loop` runs
+  in its own coroutine at a faster tempo than the main tick so
+  operator pause / add / delete @bot mentions don't sit behind a
+  30s `core.tick_interval_s`. Mirrors `AP2_MM_TICK_S`.
+- `core.project_name` — str, default `""` (hot-reloadable).
+  Operator-facing project name. Leads every status-report Mattermost
+  headline (`**[<project_name>] Autopilot Status Report**`) so a
+  multi-project operator can identify a post's source. Empty default
+  falls back to `project_root.name`. Mirrors `AP2_PROJECT_NAME`.
+- `core.task_max_turns` — int, default `200` (hot-reloadable). Max
+  turns per task-agent SDK query. Default raised from 50 → 200 in
+  TB-278 after TB-122 hit the old wall at 51 turns; bump further
+  (e.g. 500) for heavy-refactor projects. Mirrors
+  `AP2_TASK_MAX_TURNS`.
+- `core.task_timeout_s` — int, default `1200` (hot-reloadable).
+  Per-task SDK query timeout in seconds. Bumped from 5min to 20min
+  in TB-278 after xhigh-effort tasks routinely blew the wall.
+  Mirrors `AP2_TASK_TIMEOUT_S`.
+- `core.tick_interval_s` — int, default `30` (hot-reloadable). Main
+  daemon tick interval in seconds. The `_main_tick_loop` fires
+  roughly once per `tick_interval_s` to walk cron, pipeline sweep,
+  task dispatch, ideation, and watchdog. Lower values shorten
+  reaction time at the cost of more loop overhead. Mirrors
+  `AP2_TICK_S`.
+- `core.verify_cmd` — str, default `""` (hot-reloadable).
+  Project-wide regression gate shell command. Runs after every
+  successful task-agent commit; failure routes the task through
+  retry like any other crash. Empty default = no project-wide gate.
+  Mirrors `AP2_VERIFY_CMD`.
+- `core.verify_judge_max_turns` — int, default `20` (hot-reloadable).
+  Max turns per verify-judge SDK query (the per-task verifier's
+  optional LLM judge step). Default 20 — enough for a Read + verdict
+  round-trip without runaway. Mirrors `AP2_VERIFY_JUDGE_MAX_TURNS`.
+- `core.verify_timeout_s` — int, default `600` (hot-reloadable).
+  Timeout in seconds for the `core.verify_cmd` regression gate.
+  `ap2 doctor` warns when set below observed-typical successful
+  verify duration. Mirrors `AP2_VERIFY_TIMEOUT_S`.
+- `core.web_disabled` — bool, default `false`. Kill switch for the
+  daemon-spawned web server. Truthy value skips the web task
+  entirely (useful for headless / sandbox runs). Lifecycle knob
+  (`env_reload.FIXED_KNOBS`): consulted once at daemon-start, so
+  changes require `ap2 stop && ap2 start`. Mirrors `AP2_WEB_DISABLED`.
+- `core.web_port` — int, default `8729`. TCP port the
+  daemon-spawned web server binds to. Stable across restarts so
+  bookmarks survive. Lifecycle knob (`env_reload.FIXED_KNOBS`):
+  changes require `ap2 stop && ap2 start`. Mirrors `AP2_WEB_PORT`.
 
 ### `[components.attention]` — proactive operator-attention detector
 

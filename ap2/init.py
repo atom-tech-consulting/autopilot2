@@ -526,17 +526,33 @@ def _render_config_template() -> str:
     # registry's filesystem-discovery contract: `ap2.init` should never
     # care which components exist).
     from .config_loader import aggregate_schemas
+    from .core_config_schema import CORE_CONFIG_SCHEMA
     from .registry import default_registry
 
-    schemas = aggregate_schemas(default_registry())
+    # TB-337 (axis-1 completion): the renderer now walks BOTH the
+    # per-component schema union AND the typed `[core.*]` schema. The
+    # `core_schema` kwarg surfaces the latter under the reserved
+    # `"core"` key in the returned dict; we pop it and render it as a
+    # top-level `[core]` block before the component blocks so the file
+    # follows the conventional `[core.*]` → `[components.<name>.*]`
+    # ordering the operator sees in `howto.md`'s `## Config keys (TOML)`.
+    schemas = aggregate_schemas(
+        default_registry(), core_schema=CORE_CONFIG_SCHEMA,
+    )
+    core_block = schemas.pop("core", {})
 
     header = (
         "# .cc-autopilot/config.toml — structured per-project tunables for the\n"
-        "# ap2 daemon (TB-321/322/325, structured-config focus).\n"
+        "# ap2 daemon (TB-321/322/325/337, structured-config focus).\n"
         "#\n"
         "# TOML layout (goal.md L307-310):\n"
         "#   [core.<field>]              — non-component tunables (verifier,\n"
         "#                                  ideation, watchdog, etc.).\n"
+        "#                                  Typed by `CORE_CONFIG_SCHEMA`\n"
+        "#                                  (TB-337) — `validate_config` at\n"
+        "#                                  daemon-start rejects unknown\n"
+        "#                                  `[core.*]` keys with a clear\n"
+        "#                                  error naming the bad key path.\n"
         "#   [components.<name>.<key>]   — component-owned knobs declared on\n"
         "#                                  each component's `Manifest.config_schema`.\n"
         "#\n"
@@ -556,21 +572,27 @@ def _render_config_template() -> str:
         "#     > in-source defaults.\n"
         "#\n"
         "# See `ap2/howto.md` `## Config keys (TOML)` for the full list with\n"
-        "# descriptions, and the per-component `Manifest.config_schema`\n"
-        "# declarations under `ap2/components/<name>/manifest.py` for the\n"
+        "# descriptions, the per-component `Manifest.config_schema`\n"
+        "# declarations under `ap2/components/<name>/manifest.py`, and\n"
+        "# `ap2/core_config_schema.py` for the `[core.*]` schema — the\n"
         "# source-of-truth `ConfigKey` definitions (type, default,\n"
         "# hot_reloadable flag).\n"
     )
 
     chunks: list[str] = [header]
-    for comp_name in sorted(schemas):
+
+    def _emit_section(section_header: str, keys: dict) -> None:
+        """Append one `[section_header]` block with each key's description
+        wrapped + the commented `# key = default` line.
+
+        Shared between the [core] block and the per-component blocks so
+        the rendering shape (description-wrap + comment fence) stays in
+        one place.
+        """
         chunks.append("")  # blank line between sections
-        chunks.append(f"[components.{comp_name}]")
-        for key_name in sorted(schemas[comp_name]):
-            spec = schemas[comp_name][key_name]
-            # Word-wrap the description into `# `-fenced comment lines so
-            # the file stays readable at typical 80-col widths without
-            # forcing the operator to scroll horizontally.
+        chunks.append(f"[{section_header}]")
+        for key_name in sorted(keys):
+            spec = keys[key_name]
             collapsed = " ".join(spec.description.split())
             for line in textwrap.wrap(
                 collapsed,
@@ -582,6 +604,14 @@ def _render_config_template() -> str:
             chunks.append(
                 f"# {key_name} = {_toml_value_repr(spec.default)}"
             )
+
+    # TB-337: render [core] first so the operator sees the non-component
+    # tunables (tick intervals, agent runtime, ideation cluster, web
+    # port) before the alphabetically-sorted per-component blocks.
+    if core_block:
+        _emit_section("core", core_block)
+    for comp_name in sorted(schemas):
+        _emit_section(f"components.{comp_name}", schemas[comp_name])
     chunks.append("")  # trailing newline
     return "\n".join(chunks)
 

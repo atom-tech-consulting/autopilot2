@@ -121,7 +121,11 @@ def parse_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(text)
 
 
-def aggregate_schemas(registry: "Registry") -> dict[str, dict[str, ConfigKey]]:
+def aggregate_schemas(
+    registry: "Registry",
+    *,
+    core_schema: "dict[str, ConfigKey] | None" = None,
+) -> dict[str, dict[str, ConfigKey]]:
     """Walk `registry.components` and return the union of per-component schemas.
 
     Shape: `{component_name: {key_name: ConfigKey}}`. Components
@@ -131,12 +135,33 @@ def aggregate_schemas(registry: "Registry") -> dict[str, dict[str, ConfigKey]]:
     dict is the safe default so the six non-canary manifests
     continue to load until TB-322 fills them in.
 
+    TB-337 (axis-1 completion) adds the optional `core_schema` kwarg.
+    When provided, the returned dict carries an additional reserved
+    entry under the key ``"core"`` whose value is the supplied
+    ``dict[str, ConfigKey]`` mapping. The `"core"` namespace is
+    structurally distinct from the `[components.<name>]` tree
+    (goal.md L307-310): no registered component may be named `"core"`,
+    and downstream walkers (`validate_config`, the
+    `_render_config_template` renderer in `ap2.init`, the
+    `test_every_config_key_documented` docs-drift gate) detect the
+    `"core"` key and emit `[core.<key>]` paths rather than the
+    `[components.<name>.<key>]` shape used for component entries.
+
+    Default `core_schema=None` preserves the pre-TB-337 return shape
+    (per-component only) so existing call sites that don't care about
+    the core schema keep working unchanged; daemon-start
+    (`_validate_toml_config_at_start`), the template renderer, and the
+    docs-drift test all opt in explicitly by passing
+    ``core_schema=CORE_CONFIG_SCHEMA``.
+
     Used by `validate_config` (this module) and by axis-4's
     `ap2 config list` (a future TB). The function is deliberately
     pure — no env reads, no side effects — so it can be exercised
     from a unit test with a synthetic registry.
     """
     out: dict[str, dict[str, ConfigKey]] = {}
+    if core_schema:
+        out["core"] = dict(core_schema)
     for manifest in registry.components:
         schema = getattr(manifest, "config_schema", None) or {}
         if schema:
@@ -161,28 +186,49 @@ def _type_matches(value: Any, expected: type) -> bool:
     return isinstance(value, expected)
 
 
+def _suggest_close_key(bad_key: str, known: list[str]) -> str | None:
+    """Best-effort "did you mean ...?" hint for an unknown key (TB-337).
+
+    Uses `difflib.get_close_matches` with cutoff 0.6 — high enough to
+    avoid noise on truly novel keys, low enough to catch single-char
+    typos (`web_prot` → `web_port`, `tcik_s` → `tick_s`). Returns the
+    best single match (or None) so the validator's error message can
+    name a likely fix without committing to a fuzzy-match policy
+    beyond stdlib semantics.
+    """
+    import difflib
+    matches = difflib.get_close_matches(bad_key, known, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
 def validate_config(loaded_toml: dict[str, Any], registry: "Registry") -> None:
     """Validate a parsed TOML config against the registry's aggregated schemas.
 
-    Walks `[components.<name>]` sub-tables in `loaded_toml` and
-    asserts every key is declared in some manifest's `config_schema`
-    with a matching type. Raises `ConfigSchemaError` on the first
-    mismatch; the message names the bad key path so the operator can
-    grep their config file directly:
+    Walks `[components.<name>]` sub-tables AND the `[core.*]` table in
+    `loaded_toml`, asserting every key is declared in some manifest's
+    `config_schema` (for the component side) or in
+    `ap2.core_config_schema.CORE_CONFIG_SCHEMA` (for the core side,
+    via TB-337) with a matching type. Raises `ConfigSchemaError` on
+    the first mismatch; the message names the bad key path so the
+    operator can grep their config file directly:
 
         [components.janitor] disabled = 'yes': expected bool, got str
+        [core] tick_interval_s = 'thirty': expected int, got str
+        [core] web_prot = 8080: unknown key (did you mean `web_port`?)
 
     Fail-fast shape; the daemon does NOT auto-correct typos
     (goal.md L312-313 — operator-fix-first). The daemon-start hook
     in `daemon.main_loop` catches the raise, prints the message, and
     refuses to start.
 
-    `[core.*]` keys are NOT validated here — TB-321 ships per-
-    component schema declarations on manifests; core knobs (verifier,
-    ideation, cron, etc.) move to a dedicated `[core.*]` schema in a
-    later axis. Today they round-trip through `from_toml` as
+    TB-337 (axis-1 completion) closes the deferred core schema gap —
+    pre-TB-337 `[core.*]` keys round-tripped through `from_toml` as
     free-form keys mapped to existing `Config` dataclass fields by
-    name — a typo silently keeps the env-path default.
+    name, and a typo (e.g. `[core.web_prot]`) silently kept the
+    env-path default (`howto.md` L2376-2379 flagged the asymmetry).
+    The walk now consults `CORE_CONFIG_SCHEMA`'s 21 typed entries
+    and produces the same named-path error message shape as the
+    component side.
 
     Reject-unknown-component path: if `[components.foo]` appears in
     the loaded TOML but no manifest declares a `config_schema` for
@@ -202,7 +248,15 @@ def validate_config(loaded_toml: dict[str, Any], registry: "Registry") -> None:
             f"[components] must be a TOML table; got "
             f"{type(components_section).__name__}"
         )
-    schemas = aggregate_schemas(registry)
+    # TB-337: lazy-import CORE_CONFIG_SCHEMA so the validator carries
+    # the typed core surface alongside the per-component union. The
+    # import lives inside the function to keep `config_loader.py`'s
+    # module-load free of the core-schema body (mirrors how
+    # `from_toml` lazy-imports `Config`); the cost is negligible
+    # because `validate_config` fires once per daemon-start.
+    from .core_config_schema import CORE_CONFIG_SCHEMA
+    schemas = aggregate_schemas(registry, core_schema=CORE_CONFIG_SCHEMA)
+    core_schema = schemas.pop("core", {})
     for component_name, knobs in components_section.items():
         if not isinstance(knobs, dict):
             raise ConfigSchemaError(
@@ -227,6 +281,36 @@ def validate_config(loaded_toml: dict[str, Any], registry: "Registry") -> None:
             if not _type_matches(value, spec.type):
                 raise ConfigSchemaError(
                     f"[components.{component_name}] {key_name} = {value!r}: "
+                    f"expected {spec.type.__name__}, got "
+                    f"{type(value).__name__}"
+                )
+
+    # TB-337: walk the [core.*] table against CORE_CONFIG_SCHEMA. Same
+    # named-path error shape as the component walk above — `[core] <key>
+    # = <value>: ...` — so an operator's grep finds the bad row in
+    # `config.toml` directly. An empty / missing [core] section is a
+    # no-op (consistent with the empty-components case).
+    core_section = loaded_toml.get("core") or {}
+    if not isinstance(core_section, dict):
+        raise ConfigSchemaError(
+            f"[core] must be a TOML table; got {type(core_section).__name__}"
+        )
+    if core_schema and core_section:
+        known_core_keys = sorted(core_schema)
+        for key_name, value in core_section.items():
+            spec = core_schema.get(key_name)
+            if spec is None:
+                hint = _suggest_close_key(key_name, known_core_keys)
+                hint_phrase = (
+                    f" (did you mean `core.{hint}`?)" if hint else ""
+                )
+                raise ConfigSchemaError(
+                    f"[core] {key_name} = {value!r}: unknown key"
+                    f"{hint_phrase} (known: {known_core_keys})"
+                )
+            if not _type_matches(value, spec.type):
+                raise ConfigSchemaError(
+                    f"[core] {key_name} = {value!r}: "
                     f"expected {spec.type.__name__}, got "
                     f"{type(value).__name__}"
                 )

@@ -490,6 +490,16 @@ class Config:
              Values here are the TOML-parsed types (int / bool / str)
              ready for the caller to use directly.
           4. ``default`` — when none of the above carry a value.
+             TB-337 extension: when the caller passes ``default=None``
+             AND the key is declared in ``CORE_CONFIG_SCHEMA`` with a
+             non-None default, the schema's default wins over ``None``.
+             This makes the schema the single source of truth for
+             default values — a future bump to a `DEFAULT_*` constant
+             in `ap2/config.py` propagates through the schema to every
+             call site that didn't supply its own explicit default.
+             Callers that pass an explicit ``default=...`` still win
+             for back-compat (the pre-TB-337 contract is preserved bit
+             for bit for migrated readers).
 
         Why call-time env-first (matching ``get_component_value``): the
         pre-migration ``os.environ.get('AP2_AGENT_MODEL')`` /
@@ -535,7 +545,16 @@ class Config:
         # 3) cfg snapshot (TOML overlay).
         if isinstance(self.core_config, dict) and key in self.core_config:
             return self.core_config[key]
-        # 4) Default.
+        # 4) Default. TB-337: when the caller didn't supply one, fall
+        #    back to the schema's declared default if any. Lazy import
+        #    to avoid a startup-time `config.py` ↔ `core_config_schema`
+        #    cycle (the schema module imports DEFAULT_* constants from
+        #    config.py for its `default=` values).
+        if default is None:
+            from .core_config_schema import CORE_CONFIG_SCHEMA
+            spec = CORE_CONFIG_SCHEMA.get(key)
+            if spec is not None:
+                return spec.default
         return default
 
 
