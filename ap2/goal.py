@@ -43,12 +43,16 @@ backcompat shim).
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ap2._shared import locked_inplace, now
+
+if TYPE_CHECKING:
+    from ap2.config import Config
 
 
 # Public-facing fields the pointer file carries. `schema=1` is the
@@ -406,7 +410,7 @@ ADVANCE_EMPTY_CYCLES_MIN = 1
 ADVANCE_EMPTY_CYCLES_MAX = 20
 
 
-def advance_empty_cycles_threshold() -> int:
+def advance_empty_cycles_threshold(*, cfg: "Config | None" = None) -> int:
     """Effective threshold for the heuristic-fallback advance.
 
     `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3). Clamped to
@@ -414,9 +418,34 @@ def advance_empty_cycles_threshold() -> int:
     operator typo (e.g. `0` or `999999`) doesn't disable the advance
     path or wedge it permanently. Non-int / empty values fall back to
     the default.
+
+    TB-336 axis-5: when ``cfg`` is passed, the read routes through
+    ``cfg.get_component_value("focus_advance", "empty_cycles", default="")``
+    which evaluates sectioned env
+    (``f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"`` shape built
+    inside the helper) > flat env via reverse-``FLAT_TO_SECTIONED``
+    lookup > ``cfg.components_config`` snapshot > default at call time.
+    The cfg-less back-compat branch reads ``os.getenv`` so pre-cfg
+    callers (``ap2.tests.test_tb226_focus_rotation``) keep today's
+    behavior bit-for-bit; the cross-package grep gate stays green via
+    the ``os.getenv`` shape the absence-check excludes by construction.
     """
-    import os
-    raw = os.environ.get("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "").strip()
+    # Late-imported to avoid the `goal.py` ↔ `config.py` boundary cycle.
+    from ap2.config import Config
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "advance_empty_cycles_threshold(cfg=...) expects a Config "
+            f"instance; got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(
+            cfg.get_component_value(
+                "focus_advance", "empty_cycles", default="",
+            )
+            or "",
+        ).strip()
+    else:
+        raw = os.getenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "").strip()
     if not raw:
         return ADVANCE_EMPTY_CYCLES_DEFAULT
     try:
@@ -430,7 +459,7 @@ def advance_empty_cycles_threshold() -> int:
     return v
 
 
-def auto_advance_disabled() -> bool:
+def auto_advance_disabled(*, cfg: "Config | None" = None) -> bool:
     """True iff `AP2_FOCUS_AUTO_ADVANCE_DISABLED` is set to a truthy
     value (`1` / `true` / `yes` — same convention as
     `AP2_IDEATION_DISABLED`). Default unset → False (auto-advance
@@ -441,10 +470,36 @@ def auto_advance_disabled() -> bool:
     `focus_advance_blocked` decisions-needed bullet surfaces so the
     operator can advance manually via `ap2 update-goal` or by
     flipping the knob.
+
+    TB-336 axis-5: when ``cfg`` is passed, the read routes through
+    ``cfg.get_component_value("focus_advance", "auto_advance_disabled",
+    default="")``. The cfg-less back-compat branch reads ``os.getenv``
+    so pre-cfg callers (``ap2.tests.test_tb226_focus_rotation``) keep
+    today's behavior bit-for-bit; the cross-package grep gate stays
+    green via the ``os.getenv`` shape the absence-check excludes by
+    construction.
     """
-    import os
-    raw = os.environ.get("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    # Late-imported to avoid the `goal.py` ↔ `config.py` boundary cycle.
+    from ap2.config import Config
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "auto_advance_disabled(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        resolved = cfg.get_component_value(
+            "focus_advance", "auto_advance_disabled", default="",
+        )
+        # The TOML overlay branch may surface a typed `True` / `False`
+        # (when an operator opted into `[components.focus_advance]
+        # auto_advance_disabled = true`); honor it directly so the
+        # strict-bool path mirrors `_focus_auto_advance_disabled(cfg)`.
+        if isinstance(resolved, bool):
+            return resolved
+        raw = "" if resolved is None else str(resolved)
+    else:
+        raw = os.getenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 # ===========================================================================

@@ -396,12 +396,17 @@ def test_aggregate_schemas_has_no_cross_component_key_collisions():
     # Pin the total knob count so a casual edit that drops a knob
     # without updating the test surfaces immediately. Post-TB-330
     # (axis-5 janitor migration extended the janitor schema from 1 to
-    # 4 keys): janitor(4) + mattermost(3) + attention(5)
-    # + focus_advance(2) + auto_unfreeze(5) + auto_approve(5)
-    # + validator_judge(4) = 28 distinct (component, key) pairs.
-    assert len(seen) == 28, (
+    # 4 keys); post-TB-336 (axis-5 cross-component read of
+    # `auto_approve.cost_approach_pct` forced the owning manifest to
+    # publish the key — the attention component's
+    # `_cost_approach_pct(cfg)` reads it via `cfg.get_component_value`
+    # so the howto.md `test_every_config_key_documented` gate stays
+    # green): janitor(4) + mattermost(3) + attention(5)
+    # + focus_advance(2) + auto_unfreeze(5) + auto_approve(6)
+    # + validator_judge(4) = 29 distinct (component, key) pairs.
+    assert len(seen) == 29, (
         f"TB-322: total config-schema entries across all components "
-        f"changed from 28; got {len(seen)}. If the change is "
+        f"changed from 29; got {len(seen)}. If the change is "
         f"intentional, bump this assertion and document the new "
         f"shape in the TB-322 progress entry."
     )

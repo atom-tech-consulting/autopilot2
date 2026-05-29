@@ -399,7 +399,7 @@ def test_pct_env_override_fires_at_50_percent(
     """
     monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "50")
-    assert _cost_approach_pct() == 50
+    assert _cost_approach_pct(cfg) == 50
 
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=500, now=now)
@@ -673,27 +673,28 @@ def test_render_attention_section_includes_cost_cap_approach(
 # ===========================================================================
 
 
-def test_cost_approach_pct_default_when_unset(monkeypatch):
+def test_cost_approach_pct_default_when_unset(cfg: Config, monkeypatch):
     """`AP2_AUTO_APPROVE_COST_APPROACH_PCT` unset → resolver returns
-    the documented default (75). Pin the fresh-read-each-call
-    contract so env-reload propagates without re-threading state.
+    the documented default (75). Pin the call-time-env-first
+    contract (TB-336: cfg helper) so env-reload propagates without
+    re-threading state.
     """
     monkeypatch.delenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", raising=False)
-    assert _cost_approach_pct() == 75
+    assert _cost_approach_pct(cfg) == 75
 
 
-def test_cost_approach_pct_invalid_falls_back(monkeypatch):
+def test_cost_approach_pct_invalid_falls_back(cfg: Config, monkeypatch):
     """Non-int / empty / negative env value → resolver falls back to
     the default. Pin the parse-defensive shape (mirrors
     `_task_stuck_threshold_s` / `_task_frozen_recency_s`).
     """
     monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "not-a-number")
-    assert _cost_approach_pct() == 75
+    assert _cost_approach_pct(cfg) == 75
     monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "-5")
-    assert _cost_approach_pct() == 75
+    assert _cost_approach_pct(cfg) == 75
 
 
-def test_cost_approach_pct_clamps_above_99(monkeypatch):
+def test_cost_approach_pct_clamps_above_99(cfg: Config, monkeypatch):
     """Values >= 100 are clamped to 99. A 100%-of-cap approach
     coincides with the trip line (which the post-trip surface
     owns), so the briefing's "trip-not-approach" semantics for >=
@@ -701,9 +702,9 @@ def test_cost_approach_pct_clamps_above_99(monkeypatch):
     raising.
     """
     monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "100")
-    assert _cost_approach_pct() == 99
+    assert _cost_approach_pct(cfg) == 99
     monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "150")
-    assert _cost_approach_pct() == 99
+    assert _cost_approach_pct(cfg) == 99
 
 
 # ===========================================================================

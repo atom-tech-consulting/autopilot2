@@ -243,5 +243,34 @@ MANIFEST = Manifest(
             ),
             hot_reloadable=True,
         ),
+        # TB-336 axis-5 (TB-330 precedent): the attention component's
+        # `_detect_cost_cap_approach` reads this cross-component knob
+        # via `cfg.get_component_value("auto_approve", "cost_approach_pct")`
+        # (the migration moved the read from `os.environ.get` at the
+        # detector to the cfg helper). Declared here so the schema +
+        # howto.md + `test_every_config_key_documented` gate all agree,
+        # mirroring how `freeze_threshold` / `per_task_token_cap` /
+        # `window_token_cap` are owned by this manifest while their
+        # actual reads happen in callsites that already have `cfg` in
+        # scope.
+        "cost_approach_pct": ConfigKey(
+            name="cost_approach_pct",
+            type=int,
+            default=75,
+            description=(
+                "Pre-trip approach percentage for the rolling-24h "
+                "auto-approved token window cap (TB-290). When the "
+                "rolling-window sum reaches "
+                "`cost_approach_pct / 100 * window_token_cap` (and "
+                "`window_token_cap > 0`), the attention detector "
+                "raises a `cost_cap_approach` bullet so the "
+                "walk-away operator can react before the post-trip "
+                "`auto_approve_paused` surface fires. Values >= 100 "
+                "are clamped to 99 (the trip line is owned by the "
+                "post-trip detector). Mirrors "
+                "`AP2_AUTO_APPROVE_COST_APPROACH_PCT`."
+            ),
+            hot_reloadable=True,
+        ),
     },
 )

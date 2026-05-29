@@ -213,10 +213,10 @@ def _task_frozen_recency_s(cfg: Config) -> int:
     return val
 
 
-def _cost_approach_pct() -> int:
+def _cost_approach_pct(cfg: Config) -> int:
     """Resolve `AP2_AUTO_APPROVE_COST_APPROACH_PCT` with the documented
     default + invalid-value fallback (TB-290). Mirrors
-    `_task_frozen_recency_s` — fresh-read-each-call from `os.environ`
+    `_task_frozen_recency_s` — call-time env-first via the cfg helper
     so env-reload propagates without re-threading state.
 
     Clamp semantics: any non-int / empty / negative value falls back
@@ -230,9 +230,25 @@ def _cost_approach_pct() -> int:
     token spend while the cap is set) but is unusual; the cap itself
     (`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`) is the operator-facing
     opt-in.
+
+    TB-336 axis-5 (cross-component): the read of the auto_approve-
+    cluster knob `cost_approach_pct` now routes through
+    `cfg.get_component_value("auto_approve", "cost_approach_pct",
+    default="")`. The auto_approve manifest's `config_schema` carries
+    the matching `ConfigKey` declaration so the howto.md TOML
+    reference and the `test_every_config_key_documented` gate stay in
+    sync. Sectioned env
+    (`f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"` shape built
+    inside the helper) wins over flat env
+    (`AP2_AUTO_APPROVE_COST_APPROACH_PCT`) wins over the
+    `cfg.components_config["auto_approve"]["cost_approach_pct"]`
+    snapshot wins over the default — same precedence the
+    `_window_token_cap` / `_per_task_token_cap` siblings already use.
     """
-    raw = os.environ.get("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "")
-    if not raw:
+    raw = cfg.get_component_value(
+        "auto_approve", "cost_approach_pct", default="",
+    )
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT
     try:
         val = int(raw)
@@ -752,7 +768,7 @@ def _detect_cost_cap_approach(
     cap = _window_token_cap(cfg)
     if cap <= 0:
         return []
-    approach_pct = _cost_approach_pct()
+    approach_pct = _cost_approach_pct(cfg)
     # Exact integer-arithmetic threshold check: `total >= pct * cap / 100`
     # rewritten as `total * 100 >= approach_pct * cap` to avoid
     # floor-division surprises near the boundary (e.g. cap=1000,

@@ -923,7 +923,17 @@ async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
         include_board=False, include_commits=False,
         include_types=IDEATION_RELEVANT_EVENT_TYPES,
     )
-    max_turns = int(os.environ.get("AP2_IDEATION_MAX_TURNS", IDEATION_MAX_TURNS_DEFAULT))
+    # TB-336 axis-5 straggler (TB-334 core-cluster tail): the read routes
+    # through `cfg.get_core_value("ideation_max_turns", default=…)`
+    # which evaluates sectioned env (`AP2_CORE_<KEY>`) > flat env
+    # (`AP2_IDEATION_MAX_TURNS` via reverse-`FLAT_TO_SECTIONED` lookup)
+    # > `cfg.core_config` snapshot > default at call time. Same
+    # call-time env-first contract as the TB-334 agent-runtime cluster.
+    max_turns = int(
+        cfg.get_core_value(
+            "ideation_max_turns", default=IDEATION_MAX_TURNS_DEFAULT,
+        )
+    )
     # TB-126: snapshot the state surface before ideation runs so the post-
     # run state commit only stages paths ideation actually touched (new
     # briefings, ideation_state.md, TASKS.md / CLAUDE.md from add_backlog,

@@ -1554,7 +1554,7 @@ async def main_loop(cfg: Config) -> None:
     # `_web_loop_for_daemon`, with bind errors logged as `web_error` and
     # otherwise swallowed so a port collision can't take the daemon down.
     web_task: asyncio.Task | None = None
-    if not web.is_web_disabled():
+    if not web.is_web_disabled(cfg=cfg):
         web_task = asyncio.create_task(_web_loop_for_daemon(cfg))
 
     try:
@@ -1600,7 +1600,7 @@ async def _web_loop_for_daemon(cfg: Config) -> None:
     one so post-mortem can spot the silent enumeration.
     """
     host = "127.0.0.1"
-    start_port = web.daemon_web_port()
+    start_port = web.daemon_web_port(cfg=cfg)
     # Captured by `_on_bind` so the `web_stop` event in the finally block
     # reflects the actual bound port even after auto-enumeration. If the
     # bind itself fails (range exhausted), these stay at the requested

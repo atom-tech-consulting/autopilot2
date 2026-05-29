@@ -2439,6 +2439,15 @@ Walk-away semantics: when enabled, ideation-authored backlog adds
 auto-promote without operator review. The token caps + freeze
 threshold provide the hard stop / cost ceiling pair.
 
+- `components.auto_approve.cost_approach_pct` — int, default `75`
+  (hot-reloadable). Pre-trip approach percentage for the rolling-24h
+  auto-approved token window cap (TB-290). When the rolling-window
+  sum reaches `cost_approach_pct / 100 * window_token_cap` (and
+  `window_token_cap > 0`), the attention detector raises a
+  `cost_cap_approach` bullet so the walk-away operator can react
+  before the post-trip `auto_approve_paused` surface fires. Values
+  >= 100 are clamped to 99 (the trip line is owned by the post-trip
+  detector). Mirrors `AP2_AUTO_APPROVE_COST_APPROACH_PCT`.
 - `components.auto_approve.dry_run` — bool, default `false`
   (hot-reloadable). Monitor-only mode (TB-232): runs the
   gate-evaluation path and emits `would_auto_approve` instead of

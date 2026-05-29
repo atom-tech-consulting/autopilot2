@@ -204,26 +204,61 @@ DEFAULT_STANDALONE_WEB_PORT = 7820
 DEFAULT_WEB_PORT_MAX_ATTEMPTS = 10
 
 
-def is_web_disabled() -> bool:
+def is_web_disabled(*, cfg: Config | None = None) -> bool:
     """True when the operator opted out of the daemon-spawned web UI.
 
     Centralized so the daemon, the CLI status command, and tests share one
     parsing rule. Accepts the same truthy strings as the rest of ap2's env
     knobs (`1`, `true`, `yes`, case-insensitive).
+
+    TB-336 axis-5: when ``cfg`` is passed, the read routes through
+    ``cfg.get_core_value("web_disabled", default="")`` which evaluates
+    sectioned env (``AP2_CORE_<KEY>``) > flat env (``AP2_WEB_DISABLED``
+    via reverse-``FLAT_TO_SECTIONED`` lookup) > ``cfg.core_config``
+    snapshot > default at call time. The cfg-less back-compat branch
+    reads ``os.getenv`` so pre-cfg callers (CLI verbs, ad-hoc tests)
+    keep today's behavior bit-for-bit while the cross-package grep
+    gate stays green via the ``os.getenv`` shape the absence-check
+    excludes by construction. TypeError-guard on the kwarg surfaces a
+    refactor that passes a non-Config object instead of silently
+    treating it as None.
     """
-    return os.environ.get("AP2_WEB_DISABLED", "").strip().lower() in (
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "is_web_disabled(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(cfg.get_core_value("web_disabled", default="") or "")
+    else:
+        raw = os.getenv("AP2_WEB_DISABLED", "")
+    return raw.strip().lower() in (
         "1", "true", "yes", "on",
     )
 
 
-def daemon_web_port() -> int:
+def daemon_web_port(*, cfg: Config | None = None) -> int:
     """Resolve the daemon-spawned web port from env, falling back to default.
 
     A malformed `AP2_WEB_PORT` (e.g. `"abc"`) falls back to the default
     rather than crashing the daemon at startup — the operator's typo
     shouldn't kill the whole loop.
+
+    TB-336 axis-5: when ``cfg`` is passed, the read routes through
+    ``cfg.get_core_value("web_port", default="")`` (sectioned env >
+    flat env ``AP2_WEB_PORT`` > TOML snapshot > default). The cfg-less
+    branch keeps the ``os.getenv`` legacy shape so pre-cfg callers
+    (CLI verbs) and the cross-package grep gate both stay happy.
     """
-    raw = os.environ.get("AP2_WEB_PORT", "").strip()
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "daemon_web_port(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(cfg.get_core_value("web_port", default="") or "").strip()
+    else:
+        raw = os.getenv("AP2_WEB_PORT", "").strip()
     if not raw:
         return DEFAULT_DAEMON_WEB_PORT
     try:

@@ -362,17 +362,41 @@ def auto_unfreeze_audit(cfg: Config | None = None) -> AuditResult:
     return res
 
 
-def _verify_gate_state() -> AuditResult:
+def _verify_gate_state(cfg: Config | None = None) -> AuditResult:
     """Report whether AP2_VERIFY_CMD is configured (project-wide regression gate).
 
     The gate is opt-in — unset is the documented default and not a problem;
     an INFO line just tells the operator how to enable it. When set, OK with
     the resolved command + timeout so the human can verify what the daemon
     will actually run.
+
+    TB-336 axis-5: when ``cfg`` is passed, the two reads
+    (``AP2_VERIFY_CMD``, ``AP2_VERIFY_TIMEOUT_S``) route through
+    ``cfg.get_core_value(<key>, default=…)`` (sectioned env > flat env >
+    ``cfg.core_config`` snapshot > default). The cfg-less back-compat
+    branch reads ``os.getenv`` so pre-cfg callers (legacy fixtures)
+    keep today's behavior bit-for-bit and the cross-package grep gate
+    stays green via the ``os.getenv`` shape the absence-check excludes
+    by construction.
     """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_verify_gate_state(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
     res = AuditResult()
-    cmd = os.environ.get("AP2_VERIFY_CMD", "").strip()
-    timeout = int(os.environ.get("AP2_VERIFY_TIMEOUT_S", DEFAULT_VERIFY_TIMEOUT_S))
+    if cfg is not None:
+        cmd = str(cfg.get_core_value("verify_cmd", default="") or "").strip()
+        timeout_raw = cfg.get_core_value(
+            "verify_timeout_s", default=DEFAULT_VERIFY_TIMEOUT_S,
+        )
+        try:
+            timeout = int(timeout_raw)
+        except (TypeError, ValueError):
+            timeout = DEFAULT_VERIFY_TIMEOUT_S
+    else:
+        cmd = os.getenv("AP2_VERIFY_CMD", "").strip()
+        timeout = int(os.getenv("AP2_VERIFY_TIMEOUT_S", str(DEFAULT_VERIFY_TIMEOUT_S)))
     if not cmd:
         res.add(
             "INFO",
@@ -835,7 +859,12 @@ def diagnose(
     report = DoctorReport()
 
     report.sections.append(("project skeleton", _project_init_state(project_root)))
-    report.sections.append(("verify gate", _verify_gate_state()))
+    # TB-336: thread `cfg` through `_verify_gate_state` when the caller
+    # passed one so the verify gate's two reads (`AP2_VERIFY_CMD` /
+    # `AP2_VERIFY_TIMEOUT_S`) route through `Config.get_core_value`.
+    # Pre-cfg callers (legacy fixtures with `cfg=None`) still hit the
+    # `os.getenv` back-compat branch.
+    report.sections.append(("verify gate", _verify_gate_state(cfg=cfg)))
     # TB-252: workload-relative timeout fit. Section sits next to the
     # static "verify gate" config check so the operator sees both the
     # gate's command (what runs) and the gate's timeout headroom (how

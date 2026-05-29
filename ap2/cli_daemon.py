@@ -882,7 +882,7 @@ def _resolve_web_url(cfg: Config) -> str | None:
     from . import events as _events
     from . import web as _web
 
-    if _web.is_web_disabled():
+    if _web.is_web_disabled(cfg=cfg):
         return None
 
     # Walk events.jsonl backward looking for the most recent web lifecycle
@@ -917,7 +917,7 @@ def _resolve_web_url(cfg: Config) -> str | None:
             if port:
                 return f"http://{host}:{port}/"
 
-    port = _web.daemon_web_port()
+    port = _web.daemon_web_port(cfg=cfg)
     return f"http://127.0.0.1:{port}/"
 
 
