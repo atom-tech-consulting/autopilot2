@@ -133,6 +133,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("status", help="show daemon + board status")
     s.add_argument("--json", action="store_true")
+    # TB-326 sidecar: mirror the top-level `--project` on the subparser
+    # so `ap2 status --project <path>` (operator-conventional, also the
+    # shape briefings cite as a sanity check) works alongside the
+    # documented `ap2 --project <path> status`. Matches the pattern the
+    # `config` subverbs already use (cli.py L628 / L641 / L659 / L673).
+    s.add_argument("--project", default=None, help="project root (default: cwd)")
     s.set_defaults(func=cmd_status)
 
     s = sub.add_parser(

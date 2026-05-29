@@ -504,7 +504,22 @@ def _render_config_template() -> str:
     is imported by CLI / test setup paths long before the components
     package is exercised. The registry's `default_registry()` is itself
     lazy + cached, so the discovery walk fires once per process at the
-    first `CONFIG_TEMPLATE` build (i.e. import time of this module).
+    first `CONFIG_TEMPLATE` access.
+
+    TB-326 sidecar fix: building `CONFIG_TEMPLATE` at module-load time
+    triggered a second `Registry.discover()` walk re-entrantly inside
+    component `__init__.py` files that import `ap2.tools` (the
+    `from ap2 import events, tools` chain in
+    `ap2/components/auto_unfreeze/__init__.py` runs while its package
+    `__init__.py` is partially initialized; the recursive discover
+    re-entered the same partially-loaded package and tripped
+    `ImportError: cannot import name X from partially initialized
+    module`). The lazy `__getattr__` below defers the discovery walk
+    past the point where the component packages have finished loading,
+    so the cycle never forms. Behavioral contract for
+    `test_docs_drift::test_every_config_template_key_emitted` is
+    preserved: `from ap2.init import CONFIG_TEMPLATE` still resolves
+    to the rendered string via PEP-562 `__getattr__`.
     """
     # Lazy imports keep `ap2.init` light at import-time and avoid a
     # static dependency on `ap2.components.*` modules (mirrors the
@@ -571,9 +586,34 @@ def _render_config_template() -> str:
     return "\n".join(chunks)
 
 
-# Built once at module-import time. The function is exposed for tests
-# that want to re-render against a synthetic registry.
-CONFIG_TEMPLATE = _render_config_template()
+# Lazy-built on first access (TB-326 sidecar — see the
+# `_render_config_template` docstring for the circular-import rationale).
+# Cached so the discovery walk fires once per process. Tests that
+# re-render against a synthetic registry call `_render_config_template`
+# directly; the public `CONFIG_TEMPLATE` name is resolved by the module
+# `__getattr__` below.
+_CONFIG_TEMPLATE_CACHE: str | None = None
+
+
+def _config_template() -> str:
+    """Return the cached `CONFIG_TEMPLATE` body, rendering on first call."""
+    global _CONFIG_TEMPLATE_CACHE
+    if _CONFIG_TEMPLATE_CACHE is None:
+        _CONFIG_TEMPLATE_CACHE = _render_config_template()
+    return _CONFIG_TEMPLATE_CACHE
+
+
+def __getattr__(name: str) -> str:
+    """PEP-562 module-level lazy attribute for `CONFIG_TEMPLATE`.
+
+    `from ap2.init import CONFIG_TEMPLATE` resolves through this hook
+    so the discovery walk doesn't fire until something actually reads
+    the template, breaking the auto_unfreeze-package recursive-import
+    chain documented on `_render_config_template`.
+    """
+    if name == "CONFIG_TEMPLATE":
+        return _config_template()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # TB-325: config keys intentionally absent from `ap2/howto.md`'s `##
@@ -859,7 +899,7 @@ def init_project(project_root: Path) -> InitReport:
     # `aggregate_schemas(default_registry())`, so a future component
     # schema addition flows into the next-init scaffold automatically.
     config_template_created = _ensure_file(
-        autopilot_dir / "config.toml", CONFIG_TEMPLATE,
+        autopilot_dir / "config.toml", _config_template(),
     )
     claude_md_created, autopilot_added = _ensure_claude_md_autopilot(project_root / "CLAUDE.md")
 
