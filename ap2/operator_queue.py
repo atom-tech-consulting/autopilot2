@@ -64,6 +64,23 @@ from .config import Config, bump_next_task_id
 # direct-import path to work without an external tools-prime step.
 
 
+def _value_matches_type(value: Any, expected: type) -> bool:
+    """Type-match helper for TB-324 `config_set` validation.
+
+    Same bool-vs-int discrimination as `config_loader._type_matches` —
+    a key declared `int` must reject `True`/`False` (Python's `bool`
+    subclasses `int`, so naive `isinstance(v, int)` admits booleans).
+    Re-declared here (rather than imported) to avoid a top-of-module
+    `from .config_loader import _type_matches` that would entangle the
+    two modules' load orders; the duplication is two lines.
+    """
+    if expected is bool:
+        return isinstance(value, bool)
+    if expected is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, expected)
+
+
 def _allocate_id(board: Board, cfg: Config) -> str:
     """Pure: pick the next TB-N from the existing high-water marks.
 
@@ -479,6 +496,21 @@ OPERATOR_QUEUE_OPS = (
     # recent `focus_advanced to=<focus_title>` event to set its
     # cutoff_idx; with no rewind event, cutoff_idx = -1).
     "rewind_focus",
+    # TB-324 (axis 4): operator-CLI `ap2 config set <path> <value>`. The
+    # op carries `path` (`core.<field>` or `components.<name>.<key>`)
+    # and `value` (raw string; the drain-side coerces against the
+    # schema's declared type via `config_compat._coerce`). Drain-side
+    # writes the resolved value back into `.cc-autopilot/config.toml`
+    # under `board_file_lock` using a minimal in-tree TOML writer
+    # (`config_writer.dump_config_toml`), then emits a `config_updated`
+    # event. Routed through the queue (rather than the CLI writing
+    # config.toml synchronously) for the same reason TB-201
+    # retrofitted `ack` to the queue: config.toml shares fate with the
+    # rest of `.cc-autopilot/`'s state surface during in-flight task
+    # runs, and queue-routing keeps the write at a tick boundary
+    # under `board_file_lock`. Operator-CLI-only by design — there's
+    # no MCP exposure to task agents (TB-324 Out-of-scope).
+    "config_set",
 )
 
 
@@ -832,6 +864,60 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
         if loc is None:
             return _err(f"{task_id} not on board")
         rec_args = {"task_id": task_id, "reason": reason}
+    elif op == "config_set":
+        # TB-324 (axis 4): `ap2 config set <path> <value>`. Validate the
+        # path resolves against `aggregate_schemas(default_registry())`
+        # or the core dataclass fields, and for typed component paths
+        # validate the value coerces to the declared type. Catch the
+        # obvious operator errors (typo'd path, `tick_interval_s =
+        # "lots"`) at append time so the queue file doesn't accumulate
+        # records the drain side will silently `operator_queue_error`
+        # against next tick.
+        from . import config_introspect
+        from .config_compat import _coerce
+        from .registry import default_registry
+        path = (args.get("path") or "").strip()
+        if not path:
+            return _err("path is required for config_set")
+        raw_value = args.get("value")
+        if raw_value is None:
+            return _err("value is required for config_set")
+        # Snapshot the known-paths list under the registry so the
+        # rejection naming the bad path renders a helpful candidate set.
+        known_paths = set(
+            config_introspect.list_known_paths(cfg, default_registry())
+        )
+        if path not in known_paths:
+            return _err(
+                f"unknown config path {path!r}. Known paths come from "
+                f"`aggregate_schemas(default_registry())` + the core "
+                f"contract surface in FLAT_TO_SECTIONED — run "
+                f"`ap2 config list` to enumerate."
+            )
+        # Type validation: prefer the schema-declared type (component
+        # paths), fall back to the existing Config dataclass field's
+        # type (core paths). A failed coerce on an int/float keeps the
+        # raw string here — that's an operator error worth surfacing
+        # now, not at drain time.
+        spec = config_introspect.lookup_spec(path, default_registry())
+        if spec is not None:
+            try:
+                coerced = _coerce(str(raw_value), existing=spec.default)
+            except Exception as e:  # noqa: BLE001
+                return _err(
+                    f"config_set value {raw_value!r} could not be "
+                    f"coerced for {path}: {type(e).__name__}: {e}"
+                )
+            # Defensive type check — `_coerce` falls back to the raw
+            # string for unparseable int/float; treat that as a hard
+            # rejection rather than a silent string-stash.
+            if not _value_matches_type(coerced, spec.type):
+                return _err(
+                    f"config_set value {raw_value!r} for {path} does "
+                    f"not parse as {spec.type.__name__} "
+                    f"(coerced to {type(coerced).__name__})"
+                )
+        rec_args = {"path": path, "value": str(raw_value)}
     elif op == "rewind_focus":
         # TB-295: operator-CLI-only verb. Validates the title against
         # goal.md's current `## Current focus:` headings at append
@@ -1292,6 +1378,12 @@ def drain_operator_queue(cfg: Config) -> dict:
                 # try to stage a clean working copy of it.
                 if rec.get("op") == "update_goal":
                     touched.add("goal.md")
+                # TB-324 (axis 4): `config_set` writes
+                # `.cc-autopilot/config.toml` — surface the path so
+                # the drain-side state commit picks up the new file
+                # alongside the operator-queue applied-state bumps.
+                if rec.get("op") == "config_set":
+                    touched.add(".cc-autopilot/config.toml")
                 # TB-141: track the highest preallocated TB-N across the
                 # drain so we can bump CLAUDE.md once at the end (instead
                 # of once per `_allocate_id` call inside
@@ -1885,6 +1977,69 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             new_index=target_idx,
             total_foci=len(foci),
             reason=reason,
+        )
+        return
+    if op == "config_set":
+        # TB-324 (axis 4): write the operator's requested
+        # `<path>=<value>` into `.cc-autopilot/config.toml`. The drain
+        # already holds `board_file_lock` for the full pass, so the
+        # rename + the `state: drained N operator op(s)` commit form a
+        # single observable transition for any subsequent reader.
+        #
+        # We re-coerce the value here (rather than trust the append-
+        # time coerced value) because the queue record stores `value`
+        # as a string for forward compatibility — schema changes
+        # between append and drain (a daemon restart picking up a new
+        # schema declaration) should re-evaluate the coercion against
+        # the current schema, not the snapshot one. For unknown core
+        # paths the coerce falls back to the Config dataclass's
+        # existing value as the type hint.
+        from . import config_introspect, config_writer
+        from .config_compat import _coerce
+        from .registry import default_registry
+        path = (args.get("path") or "").strip()
+        raw_value = args.get("value")
+        if not path:
+            raise RuntimeError("config_set op missing path")
+        if raw_value is None:
+            raise RuntimeError("config_set op missing value")
+        parts = path.split(".")
+        # Re-resolve the existing value for type-inference fallback.
+        registry = default_registry()
+        spec = config_introspect.lookup_spec(path, registry)
+        if spec is not None:
+            existing = spec.default
+        elif len(parts) == 2 and parts[0] == "core":
+            existing = getattr(cfg, parts[1], None)
+        else:
+            existing = None
+        coerced = _coerce(str(raw_value), existing=existing)
+        # Atomic write: read the current TOML (empty dict if absent),
+        # set the path, dump back with the in-tree writer, replace via
+        # tmpfile + os.replace so a concurrent reader can't see a
+        # partial file. The mtime bump propagates the new value on the
+        # next env_reload tick (TB-271).
+        toml_path = cfg.project_root / ".cc-autopilot" / "config.toml"
+        toml_path.parent.mkdir(parents=True, exist_ok=True)
+        if toml_path.exists():
+            from .config_loader import parse_toml
+            try:
+                current = parse_toml(toml_path)
+            except Exception:  # noqa: BLE001
+                current = {}
+        else:
+            current = {}
+        config_writer.set_path_in_doc(current, parts, coerced)
+        new_text = config_writer.dump_config_toml(current)
+        tmp = toml_path.with_suffix(toml_path.suffix + ".tmp")
+        tmp.write_text(new_text)
+        import os
+        os.replace(tmp, toml_path)
+        events.append(
+            cfg.events_file,
+            "config_updated",
+            path=path,
+            value=coerced,
         )
         return
     raise RuntimeError(f"unknown op {op!r}")

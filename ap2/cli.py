@@ -85,6 +85,12 @@ from .cli_diagnostic import (  # noqa: F401
     cmd_init,
     cmd_logs,
 )
+from .cli_config import (  # noqa: F401
+    cmd_config_get,
+    cmd_config_list,
+    cmd_config_set,
+    cmd_config_validate,
+)
 
 
 def _add_mm_url_token_args(p: argparse.ArgumentParser) -> None:
@@ -603,6 +609,61 @@ def build_parser() -> argparse.ArgumentParser:
                    help="bind port (default: 7820); enumeration start — "
                         "if busy, walks forward up to 10 ports (TB-155)")
     s.set_defaults(func=cmd_web)
+
+    s = sub.add_parser(
+        "config",
+        help="introspect / mutate `.cc-autopilot/config.toml` "
+             "(TB-324). Subverbs: `list` (enumerate every key with "
+             "value + source — file / env-override / default), `get "
+             "<path>` (single-key lookup), `set <path> <value>` "
+             "(operator-queue-routed write; lands at the next daemon "
+             "tick), `validate` (dry-run schema check).",
+    )
+    sub_config = s.add_subparsers(dest="config_cmd", required=True)
+    sc = sub_config.add_parser(
+        "list",
+        help="enumerate every config key + current value + source "
+             "(file / env-override / default)",
+    )
+    sc.add_argument("--project", default=None,
+                    help="project root (default: cwd). Mirrors the "
+                         "top-level `--project` so operators can use "
+                         "the conventional `ap2 config list --project "
+                         "<path>` invocation order.")
+    sc.add_argument("--json", action="store_true",
+                    help="emit JSON instead of a text table")
+    sc.set_defaults(func=cmd_config_list)
+    sc = sub_config.add_parser(
+        "get",
+        help="print the current value at <path> "
+             "(e.g. components.janitor.disabled)",
+    )
+    sc.add_argument("--project", default=None, help="project root (default: cwd)")
+    sc.add_argument("path",
+                    help="dotted config path "
+                         "(core.<field> | components.<name>.<key>)")
+    sc.set_defaults(func=cmd_config_get)
+    sc = sub_config.add_parser(
+        "set",
+        help="queue a `config_set` op for the daemon to apply at the "
+             "next tick — writes <value> to <path> in config.toml",
+    )
+    sc.add_argument("--project", default=None, help="project root (default: cwd)")
+    sc.add_argument("path",
+                    help="dotted config path "
+                         "(core.<field> | components.<name>.<key>)")
+    sc.add_argument("value",
+                    help="new value (parsed against the schema's "
+                         "declared type — bool: 1/0/true/false/yes/no, "
+                         "int / float: numeric literal, str: verbatim)")
+    sc.set_defaults(func=cmd_config_set)
+    sc = sub_config.add_parser(
+        "validate",
+        help="dry-run schema check on the current config.toml + env "
+             "overlay (same check the daemon runs at startup)",
+    )
+    sc.add_argument("--project", default=None, help="project root (default: cwd)")
+    sc.set_defaults(func=cmd_config_validate)
 
     s = sub.add_parser("cron", help="cron utilities")
     sub_cron = s.add_subparsers(dest="cron_cmd", required=True)

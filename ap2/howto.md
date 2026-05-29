@@ -673,6 +673,10 @@ never the operator.
 | `ap2 web [--host H] [--port P]` | Start the read-only HTTP UI at `127.0.0.1:7820` with `/events`, `/tasks`, `/task/<TB-N>`, `/pipelines`, `/insights`, `/ideation_state`, `/commits` pages. | Useful when scanning visually beats asking the session for a summary; the daemon also spawns this automatically on `ap2 start` unless `AP2_WEB_DISABLED` is set. |
 | `ap2 cron list` | List the cron jobs registered in `cron.yaml` with their next-fire timestamps. | The diagnostic for "why isn't the X routine firing?" — pair with `tail .cc-autopilot/cron_state.json` to confirm the last-fire timestamp. |
 | `ap2 cron edit ACTION NAME [--interval I] [--prompt P] [--active-when E] [--max-turns N]` | Add / remove / update a cron job in `cron.yaml`. | Operator-CLI-only since TB-146 retired the agent-side `cron_edit` tool; the TB-202 refuse-if-active gate prevents a mid-task invocation from racing the fenced cron.yaml write against the task agent's snapshot window. |
+| `ap2 config list [--json]` | Enumerate every known config key with its current value + source (`file` / `env-override` / `default`). | The operator's introspection surface for the structured-config focus (TB-324, axis 4). Walks `aggregate_schemas(default_registry())` + the `FLAT_TO_SECTIONED` core contract surface; the source column tells you whether a value came from `.cc-autopilot/config.toml`, an `AP2_*` env override, or the in-source default. Use `--json` for scripting (the JSON form carries `type` + `hot_reloadable` per row alongside the four text-mode columns). |
+| `ap2 config get PATH` | Print the current value at PATH. | Single-key lookup; non-zero exit with a did-you-mean suggestion on an unknown path (e.g. typo'd `components.janior.disabled`). |
+| `ap2 config set PATH VALUE` | Queue a `config_set` op for the daemon to drain at the next tick — writes VALUE to PATH in config.toml. | Operator-CLI-only by design (TB-324 Out-of-scope — no MCP exposure to task agents). Validates PATH against the schema and coerces VALUE against the declared type (`bool` knob set to `"1"` lands as `true`). Routed through the operator queue so the write lands under `board_file_lock`, never inside a task agent's snapshot window. The next `env_reload` tick picks up the file's new mtime and propagates the value to hot-reloadable `Config` fields. |
+| `ap2 config validate` | Dry-run schema check — load `.cc-autopilot/config.toml` + env overrides and run the same `validate_config` the daemon runs at startup. | Exits 0 on pass, non-zero with the validator's named-path error on a typed mismatch (e.g. `[components.janitor] disabled = "yes": expected bool, got str`). Useful pre-flight before `ap2 start` after hand-editing config.toml. |
 | `ap2 sandbox user-audit [USER]` | Verify the sandbox user has no creds beyond `CLAUDE_CODE_OAUTH_TOKEN` (and optional Mattermost env). | The pre-flight before letting the daemon run code as that user — the sandbox model only holds if the user can't reach the human's `~/.ssh`, keychain, or other repos. |
 | `ap2 sandbox user-setup [USER] [-y] [--skip-token] [--skip-statusline] [--mm-url/--mm-token]` | Create the sandbox user (prompts before running sudo). | One-time per machine; pairs with `install-token` / `sync-assets` / `install-mm` to fill in creds + per-user config (TB-276 folded the prior `install-howto` step into `sync-assets`). Skip flags exist for partial setups. |
 | `ap2 sandbox install-token [USER] [--token-env VAR]` | Install `CLAUDE_CODE_OAUTH_TOKEN` into `~<user>/.zshenv`. | Run after `claude setup-token`; the daemon refuses to start without the token in its env (TB-79), and the macOS keychain is locked for non-GUI shells so token-via-keychain doesn't work. |
@@ -1050,6 +1054,14 @@ override path nor for knobs in
 `config_compat._KNOBS_STAYING_ENV_ONLY` — the 12-factor exemption set
 (Mattermost auth / channel identity, integration secrets, deployment
 paths) doesn't migrate to TOML by design),
+`config_updated` (TB-324 — operator-CLI `ap2 config set <path>
+<value>` was drained by the daemon and wrote the resolved value into
+`.cc-autopilot/config.toml` under `board_file_lock`; fires once per
+drained `config_set` op (not per process, like `env_deprecated`),
+payload `path` (full dotted config path — `core.<field>` or
+`components.<name>.<key>`) + `value` (resolved value AFTER coercion
+against the schema's declared type, so a `bool` knob set to `"1"`
+lands as `true` here, not the raw string)),
 `state_commit_error`, `rollback_error`, `web_error`,
 `pipeline_pending_sweep_error`, `operator_queue_error` /
 `operator_queue_drain_error`, `auto_diagnose_error` /

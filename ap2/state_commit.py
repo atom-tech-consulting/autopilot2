@@ -78,6 +78,15 @@ _STATE_FILE_NAMES = (
     # eliminates an entire class of "operator forgot to commit goal.md"
     # footgun).
     "goal.md",
+    # TB-324 (axis 4): `.cc-autopilot/config.toml` becomes daemon-
+    # mutable via the `config_set` operator-queue op. Same rollback-
+    # cohesion rationale as `goal.md` above — once mutable, the file
+    # must be in the snapshot baseline so an `ap2 rollback` past a
+    # `config_set` commit reverts the structured-config state along
+    # with everything else. Out-of-band edits during a pause also get
+    # auto-picked up by the next snapshot/diff cron commit (same
+    # acceptable trade-off as goal.md).
+    ".cc-autopilot/config.toml",
 )
 # Directories whose contents are also daemon-owned audit trail. Staged with
 # `git add <dir>` so new briefings (from `add_backlog` auto-fill, ideation

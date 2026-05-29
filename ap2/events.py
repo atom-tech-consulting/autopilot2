@@ -211,6 +211,19 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     exemption set — Mattermost auth, channel identity, integration
     secrets, deployment paths) ALSO never emit this event even when
     present in env, because they don't migrate to TOML by design.
+  - `config_updated` (TB-324) — operator-CLI `ap2 config set <path>
+    <value>` was drained by the daemon and wrote the resolved value
+    into `.cc-autopilot/config.toml` under `board_file_lock`. Fires
+    once per drained `config_set` op (not per process, like
+    `env_deprecated`) — each `set` call gets its own audit trail
+    entry so a post-mortem can reconstruct which knob the operator
+    touched and when. Payload: `path` (the full dotted config path,
+    e.g. `components.janitor.disabled` or `core.tick_interval_s`),
+    `value` (the resolved value AFTER coercion against the schema's
+    declared type — so a `bool` knob set to `"1"` lands as `true`
+    here, not the raw string). The companion CLI surface (`ap2
+    config list`) reads back the new value's `source=file` on the
+    next invocation, completing the operator's introspection loop.
   - `verify_passed` (TB-252) — project-wide `AP2_VERIFY_CMD` ran to
     completion AND exited zero (the successful sibling of
     `verification_failed`). Emitted from daemon.py's
