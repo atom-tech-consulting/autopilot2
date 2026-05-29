@@ -1179,3 +1179,9 @@
 - **Summary:** Migrated the 5 AP2_AUTO_UNFREEZE_* env reads in ap2/components/auto_unfreeze/ to Config.get_component_value("auto_unfreeze", <key>) per the TB-326 pilot pattern; 5 helpers (_is_auto_unfreeze_disabled, _auto_unfreeze_allowlist, _auto_unfreeze_dry_run, _auto_unfreeze_max_per_task, _auto_unfreeze_max_per_day) now take cfg, _maybe_auto_unfreeze threads it through, the manifest docstring documents the TB-327 access shape, existing TB-225/233/320 unit pins gained cfg+env-strip fixtures, and a new test_tb327_auto_unfreeze_cfg_reads.py holds 5 cleavages (grep-absence, TOML-first, flat-env back-compat, parser defaults, manifest doc + FLAT_TO_SECTIONED sanity). Full suite 2449 passed; grep-absence verified; ap2 status renders auto_unfreeze correctly.
 - **Files:** ap2/components/auto_unfreeze/__init__.py, ap2/components/auto_unfreeze/manifest.py, ap2/tests/test_tb225_auto_unfreeze.py, ap2/tests/test_tb233_auto_unfreeze_dry_run.py, ap2/tests/test_tb327_auto_unfreeze_cfg_reads.py
 - **Tests:** pass
+
+## [2026-05-29] TB-328: Migrate `attention` knob cluster to `cfg.components.attention` reads (axis 5)
+- **Commit:** `980da5e`
+- **Summary:** Migrated 4 attention knob reads to Config.get_component_value("attention", key); should_suppress gained cfg kwarg with TypeError guard; 31-test regression pin added; full suite 2480 passed.
+- **Files:** ap2/components/attention/__init__.py, ap2/components/attention/manifest.py, ap2/tests/test_tb328_attention_cfg_reads.py
+- **Tests:** pass
