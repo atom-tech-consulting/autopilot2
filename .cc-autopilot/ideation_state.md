@@ -1,130 +1,120 @@
 # Ideation State
 
-_Last updated: 2026-05-29T13:59:41Z by ideation cron_
+_Last updated: 2026-05-29T16:04:00Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 1B (TB-339, task_error stuck) / 0P / 210C
-/ 0F. Last 5 Completes all drove structured-config focus: TB-333
-(cross-package auto_unfreeze + validator_judge, 3750f32), TB-336
-(axis-5 tail across web/goal/doctor/ideation/attention, 3cf0173),
-TB-337 (CORE_CONFIG_SCHEMA 21 typed keys + did-you-mean,
-deecdca), TB-338 (12-factor cut-line CI gate via AST walker +
-documented _PENDING_MIGRATION_KNOBS debt set, 2c629a4) — mission
-alignment intact, all five inside focus charter, no Non-goal drift.
+Cycle entry: board fully drained — 0A / 0R / 0B / 0P / 0F.
+The last 4 Completes all closed the structured-config focus:
+TB-336 (axis-5 cross-package tail, 3cf0173), TB-337 (core-section
+ConfigKey schema, deecdca), TB-338 (12-factor cut-line CI gate,
+2c629a4), TB-339 (drained `_PENDING_MIGRATION_KNOBS` to empty —
+declared verify_judge_effort + status_report_effort in
+CORE_CONFIG_SCHEMA, swapped the two direct env reads, 560bebd).
+Last cycle's blocker resolved: the TB-339 `auto_approve_halted`
+sticky was a transient Anthropic API-500 mid-run, not a code/
+briefing fault — operator acked `auto_approve_window_resume`
+(operator_log 2026-05-29T14:04:05Z), the daemon restarted on
+Opus 4.8, and TB-339 ran to completion (task_complete 14:22:36Z).
+Mission alignment intact; every recent Complete sits inside the
+focus charter; no Non-goal drift.
 
 ## Current focus assessment
 
+goal.md carries two `## Current focus:` headings; both are now
+shipped. The focus_advance pointer is on the structured-config
+heading (operator rewind 2026-05-28T20:33:50Z).
+
 - **Current focus: structured config (env → TOML)**
-  - Progress so far:
-    - Axis 1 (TOML schema + parser): TB-321 (parser+`Config.from_toml`+
-      `Manifest.config_schema`), TB-337 (CORE_CONFIG_SCHEMA closes
-      the deferred validation gap with 21 typed keys + did-you-mean).
-    - Axis 2 (env-override layer): TB-323 (FLAT_TO_SECTIONED map +
-      `env_deprecated` one-shot event + config.toml mtime watch).
-    - Axis 3 (per-component schemas): TB-322 (6 component manifests
-      gain `config_schema`).
+  - Progress so far: all six axes shipped, all six Progress
+    signals (goal.md L391-403) met.
+    - Axis 1 (TOML schema + parser): TB-321 (`Config.from_toml` +
+      `Manifest.config_schema` + janitor canary), TB-337 (21-key
+      CORE_CONFIG_SCHEMA closes the deferred core-validation gap).
+    - Axis 2 (env-override layer): TB-323 (FLAT_TO_SECTIONED +
+      `env_deprecated` one-shot + config.toml mtime watch).
+    - Axis 3 (per-component schemas): TB-322 (6 manifests).
     - Axis 4 (CLI surface): TB-324 (`ap2 config list/get/set/validate`).
-    - Axis 5 component bodies: TB-326..TB-331 (auto_approve /
-      auto_unfreeze / attention / focus_advance / janitor /
-      validator_judge — 6/6 closed).
-    - Axis 5 cross-package + core: TB-332 (auto_approve),
-      TB-333 (auto_unfreeze + validator_judge), TB-334
-      (`Config.get_core_value` + 11 agent-runtime reads), TB-335
-      (ideation cluster), TB-336 (axis-5 tail).
-    - Axis 6 (docs-drift + cut-line): TB-325 (CONFIG_TEMPLATE +
-      `test_every_config_key_documented`), TB-338 (AST cut-line gate
-      with `FLAT_TO_SECTIONED ∩ _KNOBS_STAYING_ENV_ONLY = ∅` pin).
-  - Gaps:
-    - **TB-339 stuck behind a one-off API-500 mid-run** — the auto-
-      approved task started at 11:59:44Z, ran for 12 min ($3.25),
-      and exited via `Exception: Command failed with exit code 1`
-      from an upstream `API Error: 500 Internal server error` at
-      seq=163 (events.jsonl 12:11:49Z). The `task_error` flipped
-      auto-approve into `auto_approve_halted` (12:12:21Z); the
-      daemon has emitted `auto_approve_skipped` every 32s since
-      (~210 events as of 13:59:41Z). Implementation correctness
-      can't be inferred from the failed run — most of the agent's
-      work was diff-staged but the run aborted mid-debug-loop. Only
-      the operator can resume via `ap2 ack
-      auto_approve_window_resume`; ideation can't unblock.
-  - Status: `in-progress`
-  - Reasoning: The only remaining axis-5 residual (2 knobs in `_PENDING_MIGRATION_KNOBS`,
-    documented carve-out at core_config_schema.py L14-20) is what
-    TB-339 was authored to drain. While TB-339 sits in stuck-Backlog,
-    the focus has exactly one in-flight thread and no headroom for
-    additional axis work — proposing siblings would either duplicate
-    TB-339 or drift into ap2-meta polish (Non-goal).
+    - Axis 5 (knob migration): TB-326..TB-336 component + cross-
+      package clusters, TB-334/335 core clusters, TB-339 final
+      cleanup draining `_PENDING_MIGRATION_KNOBS` to `frozenset()`.
+    - Axis 6 (docs + drift-gate): TB-325 (CONFIG_TEMPLATE +
+      `test_every_config_key_documented`), TB-338 (AST cut-line
+      gate, `FLAT_TO_SECTIONED ∩ _KNOBS_STAYING_ENV_ONLY = ∅`).
+  - Gaps: none inside the focus charter. The ≥80% migration signal
+    is exceeded (TB-338's CI gate mechanically enforces 100% of
+    non-exempt knobs migrated; `_PENDING_MIGRATION_KNOBS` is empty
+    per TB-339). The only remaining work is the downstream OSS-
+    distribution focus (goal.md L292-296), which is operator-owned
+    and not yet scoped as a `## Current focus:` heading.
+  - Reasoning: the next step is an operator focus-rotation decision, not ideation.
+
+- **Current focus: refactor features into opt-in components**
+  - Progress so far: shipped TB-309→TB-320 (registry, tick-hook
+    protocol, channel-adapter, validator pipeline, all 7 component
+    migrations, disabled-config test, import-direction CI gate,
+    `ap2 status` component enumeration TB-319). All Progress
+    signals (goal.md L251-264) met.
+  - Gaps: none; the env→TOML focus was the natural successor.
 
 ## Non-goal risk check
 
-None. TB-339 stays inside the focus charter (read-path swap +
-schema-declaration per goal.md L384-389). No additional proposals
-this cycle means zero new surface to risk-check.
+None. 0 proposals this cycle ⇒ zero new surface to risk-check.
+The only candidate next-work (OSS distribution) is explicitly
+operator-owned per Non-goal "operator owns goal.md"; ideation
+does not pre-scope it.
 
 ## Considered & deferred this cycle
 
-- **Re-propose a TB-339 variant with a Plan B (delete + permanent
-  carve-out)**: deferred — would be symptom-patching shape (a
-  rejection pattern: TB-231/240). The TB-339 failure was an upstream
-  API-500, not a design flaw in the briefing; resuming the existing
-  task is cheaper than authoring a fork. Operator can choose at
-  resume time.
-- **Pre-emptive proposals for the next focus** (e.g. OSS-distribution
-  prep, packaging extras, deferred `config_schema` types for nested
-  knobs). Deferred — operator owns focus rotation (goal.md Non-goal:
-  "operator owns goal.md"; rejection pattern TB-184 parallel surfaces
-  erodes that). Surfacing focus rotation as an operator decision is
-  the right shape.
-- **TB-175-shape ideation-quality aggregator**: defer per operator
-  log 2026-05-07T01:57:58Z — still tracking, but the more pressing
-  observation is that the current rejection pattern (TB-231/240/184/
-  185/175/172) clusters around symptom-patching, parallel surfaces,
-  premature aggregation, and verifier whack-a-mole.
+- **OSS-distribution prep / packaging extras**: deferred — operator
+  owns focus rotation (Non-goal: "operator owns goal.md"). goal.md
+  L123-126 + L292-296 flag it as a downstream focus needing
+  operator-authored scope before ideation can rank against it.
+- **ap2-meta polish (noise-suppression, nested-knob schema types,
+  etc.)**: deferred — would fail the focus delete-test (no
+  in-charter gap left) and matches the operator's recurring
+  rejection cluster (TB-231/240 symptom-patching; TB-184/185
+  parallel-surface / not-aligned-with-focus; TB-172 verifier
+  whack-a-mole). Proposing these now repeats exactly the shape
+  the operator keeps vetoing.
+- **TB-175-shape ideation-quality aggregator**: deferred — no
+  longer goal-aligned; focus has rotated several times away from
+  ideation-quality since the 2026-05-07 defer note, and it would
+  not pay rent against the (exhausted) structured-config charter.
 
 ## Cycle observations
 
-- The TB-339 stuck-Backlog state generates ~112 `auto_approve_skipped`
-  events/hour of pure noise. The `auto_approve_halted` sticky design
-  is correct (operator must resume), but the rolling 32s cadence
-  means by the time the operator engages tomorrow there may be ~2k
-  noise events in events.jsonl. Carrying as agent-internal because
-  it's a downstream-tooling observation, not an operator-actionable
-  ask — the right fix (if any) is either daemon-side backoff or
-  noise suppression once the halt sticky fires, and surfacing it as
-  a proposal would be the symptom-patching shape operator vetoes.
-- Drop-by-promotion (prior cycle's "TB-336/337/338 landed within a
-  90-min window" observation): situation has changed — TB-339's
-  single-run failure shows that even very-low-risk axis-5 follow-ups
-  can fail externally. The signal didn't compound the way it looked
-  like it would, so it's stale. Dropped.
+- Stale insight: `test-suite-slowness-2026-05-17.md` shows up in
+  `_index.md` with "(no tldr — needs update)" and no date — it's
+  the one insight file lacking front-matter. Not tied to a current-
+  focus gap (both foci exhausted), so it stays agent-internal
+  rather than a proposal; worth a refresh whenever the next focus
+  touches test infrastructure. Carried because it's the only
+  unresolved data-hygiene item and no structured section fits it.
 
 ## Decisions needed from operator
 
-- Decision needed: resume the stuck TB-339 auto-approve halt via
-  `ap2 ack auto_approve_window_resume` (or `ap2 delete TB-339` if
-  you'd rather accept the 2-knob `_PENDING_MIGRATION_KNOBS` carve-
-  out as permanent and rotate focus). Unblock-condition: either ack
-  restarts the dispatch path and the next tick re-promotes TB-339,
-  or delete drains Backlog and the next ideation cycle marks the
-  focus complete. While the halt sticks, the
-  daemon emits ~112 `auto_approve_skipped`/hour of noise and the
-  focus cannot advance.
-- Decision needed: prepare the next focus extension or declare the
-  roadmap complete? The structured-config focus has no remaining axis work — every
-  Progress signal (goal.md L391-403) is met at the structural level.
-  The natural successors flagged in goal.md (downstream OSS-
-  distribution focus, lines 123-126 and 295-296) need operator-
-  authored scope before ideation can rank against them. Unblock-
-  condition: a fresh `## Current focus:` block in goal.md (via
-  `ap2 update-goal`) or a `roadmap_complete` ack lets the next
-  cycle either re-derive an assessment against the new charter or
-  cleanly enter exhausted-needs-operator state.
+- Decision needed: extend the roadmap with the next focus
+  (downstream OSS distribution — goal.md L123-126 / L292-296) via
+  `ap2 update-goal`, OR declare the roadmap complete via a
+  `roadmap_complete` ack? Both operator-defined current foci have
+  shipped with every Progress signal met,
+  `_PENDING_MIGRATION_KNOBS` drained to empty (TB-339, 560bebd),
+  and the board fully empty. Unblock-condition: a fresh
+  `## Current focus:` block lets the next cycle re-derive an
+  assessment against the new charter; absent that, every non-forced
+  ideation cycle exits 0-proposal and the empty-cycles counter has
+  no legitimate focus to advance toward. (Carried from last cycle,
+  re-articulated: TB-339 — the prior blocker on this decision —
+  has now landed, so the only thing standing between the project
+  and the next arc is this rotation choice.)
 
 ## Proposals this cycle
 
-0 proposals. Backlog has exactly one item (TB-339) which is the
-correct residual for this focus; it's blocked on an operator-only
-resume-ack, not on additional ideation. Adding sibling axis-5 work
-would duplicate scope; adding next-focus work would violate the
-operator-owns-goal.md Non-goal.
+0 proposals. Both current foci are awaiting operator rotation; all
+Progress signals met; Backlog is empty for the right reason (focus
+complete, awaiting operator rotation). Any structured-config or
+component proposal would fail the focus delete-test; any OSS-
+distribution proposal would violate the operator-owns-goal.md
+Non-goal. Surfacing the focus-rotation decision is the correct
+action, not inventing in-charter work that doesn't exist.
