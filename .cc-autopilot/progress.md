@@ -1239,3 +1239,9 @@
 - **Summary:** Declared CORE_CONFIG_SCHEMA (21 typed core keys) in new ap2/core_config_schema.py, wired it into aggregate_schemas/validate_config (rejects unknown [core.*] keys with did-you-mean hint + bad types), extended Config.get_core_value to fall back to schema default, added [core] block to ap2 init's CONFIG_TEMPLATE + howto.md ### [core] subsection, extended docs-drift gate to walk both surfaces, plus 40 regression tests in test_tb337_core_schema.py. Full suite (2817) passes.
 - **Files:** ap2/core_config_schema.py, ap2/config.py, ap2/config_loader.py, ap2/init.py, ap2/howto.md, ap2/tests/test_docs_drift.py, ap2/tests/test_tb337_core_schema.py
 - **Tests:** pass
+
+## [2026-05-29] TB-338: Enforce _KNOBS_STAYING_ENV_ONLY 12-factor exempt-list cut-line via a CI gate
+- **Commit:** `2c629a4`
+- **Summary:** Added test_tb338_env_only_cut_line.py with AST-based env-read walker enforcing disjointness (FLAT_TO_SECTIONED ∩ _KNOBS_STAYING_ENV_ONLY = ∅) and source-level cut-line (every os.environ.get("AP2_…") must be in the exempt set, in the ap2/config.py/env_reload.py bootstrap allowlist, or in a small documented _PENDING_MIGRATION_KNOBS debt set holding TB-334-deferred AP2_VERIFY_JUDGE_EFFORT + AP2_STATUS_REPORT_EFFORT residuals); cross-referenced from the _KNOBS_STAYING_ENV_ONLY comment block in config_compat.py and from the ## Configuration knobs section of howto.md. Full suite: 2822 passed.
+- **Files:** ap2/tests/test_tb338_env_only_cut_line.py, ap2/config_compat.py, ap2/howto.md
+- **Tests:** pass
