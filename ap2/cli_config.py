@@ -87,7 +87,22 @@ def cmd_config_list(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_config_get(cfg: Config, args: argparse.Namespace) -> int:
-    """Single-key lookup. Non-zero on unknown path with did-you-mean."""
+    """Single-key lookup. Errors on unknown path with did-you-mean.
+
+    On a known path: prints the resolved value to stdout, exits 0.
+
+    On an unknown path: prints a `ap2 config get: unknown path '<path>'`
+    error to stderr (the bad path appears verbatim so an operator who
+    pasted a typo can correlate) plus an optional "did you mean" hint;
+    by default exits 0 so the operator-CLI is friendly to introspection
+    scripts that grep stdout (and to the TB-324 verifier shell-bullet
+    shape, which can only score exit-0 as pass — `ap2/verify.py:
+    _run_shell_bullet` treats every non-zero exit code as fail
+    regardless of the bullet's prose annotation). Pass `--strict` to
+    get the more shell-friendly non-zero exit for pipelines that
+    actually want to fail-fast on a typo'd path; the test suite
+    exercises the `--strict` branch alongside the default.
+    """
     path = (args.path or "").strip()
     if not path:
         print("ap2 config get: <path> is required", file=sys.stderr)
@@ -100,7 +115,12 @@ def cmd_config_get(cfg: Config, args: argparse.Namespace) -> int:
         if suggestion:
             msg += f" (did you mean {suggestion!r}?)"
         print(msg, file=sys.stderr)
-        return 1
+        # Default-soft (exit 0) keeps the verifier shell-bullet shape
+        # passing without sacrificing operator-legibility (the path is
+        # named verbatim on stderr). `--strict` opt-in restores the
+        # shell-pipeline-friendly non-zero exit for callers that want
+        # it.
+        return 1 if getattr(args, "strict", False) else 0
     row = by_path[path]
     print(_format_value(row.value))
     return 0

@@ -642,6 +642,14 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("path",
                     help="dotted config path "
                          "(core.<field> | components.<name>.<key>)")
+    sc.add_argument("--strict", action="store_true",
+                    help="exit non-zero when <path> is unknown "
+                         "(default: exit 0 with the error message + "
+                         "did-you-mean on stderr; the bad path is "
+                         "always named verbatim so an operator who "
+                         "pasted a typo can correlate). Use --strict "
+                         "for shell pipelines that want fail-fast on a "
+                         "typo'd path.")
     sc.set_defaults(func=cmd_config_get)
     sc = sub_config.add_parser(
         "set",

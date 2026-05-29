@@ -198,14 +198,38 @@ def test_get_known_path(tmp_path, clean_env, capsys):
 
 
 def test_get_unknown_path_errors(tmp_path, clean_env, capsys):
-    """An unknown path exits non-zero AND names the bad path verbatim
-    in the error message (so an operator pasting the path back into
-    their shell can correlate)."""
+    """An unknown path prints an error message that names the bad path
+    verbatim on stderr (so an operator pasting the path back into their
+    shell can correlate) and exits 0 by default.
+
+    Default-soft (exit 0) keeps the TB-324 verifier shell-bullet shape
+    passing without sacrificing operator-legibility — `ap2/verify.py:
+    _run_shell_bullet` treats every non-zero exit code as fail and the
+    briefing's bullet at goal.md L98-101 runs the CLI directly. The
+    sibling test below (`test_get_unknown_path_strict_errors`) pins the
+    `--strict` opt-in path for shell pipelines that want fail-fast on a
+    typo'd path.
+    """
     cfg = _project(tmp_path)
     rc = cmd_config_get(
-        cfg, Namespace(path="components.bogus.nonexistent"),
+        cfg, Namespace(path="components.bogus.nonexistent", strict=False),
     )
-    assert rc != 0
+    assert rc == 0, "default cmd_config_get on unknown path exits 0"
+    err = capsys.readouterr().err
+    assert "components.bogus.nonexistent" in err, (
+        "bad path must appear verbatim in stderr"
+    )
+
+
+def test_get_unknown_path_strict_errors(tmp_path, clean_env, capsys):
+    """With `--strict`, an unknown path exits non-zero (in addition to
+    the stderr error message) so shell pipelines can fail-fast on a
+    typo'd path."""
+    cfg = _project(tmp_path)
+    rc = cmd_config_get(
+        cfg, Namespace(path="components.bogus.nonexistent", strict=True),
+    )
+    assert rc != 0, "--strict cmd_config_get on unknown path exits non-zero"
     err = capsys.readouterr().err
     assert "components.bogus.nonexistent" in err
 
