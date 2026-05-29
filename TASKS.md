@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-339** **Drain `_PENDING_MIGRATION_KNOBS` to empty: migrate AP2_VERIFY_JUDGE_EFFORT + AP2_STATUS_REPORT_EFFORT via cfg.get_core_value (axis-5 cleanup)** `#autopilot` `#components` `#config` `#axis-5` `#core` `#migration` `#cut-line` `@blocked:TB-338` — Axis (5) final cleanup of the structured-config focus: drain the documented `_PENDING_MIGRATION_KNOBS` debt set (test_tb338_env_only_cut_line.py L133-145) to empty by declaring `verify_judge_effort` + `status_report_effort` in `CORE_CONFIG_SCHEMA` and swapping the two direct env reads (verify.py L588, status_report.py L2028) to `cfg.get_core_value(...) or cfg.get_core_value("agent_effort", ...)`. FLAT_TO_SECTIONED already maps both knobs (config_compat.py L105-106), so the env-override layer wires through automatically once schema entries land. Pure read-path swap; back-compat preserved. [→ brief](.cc-autopilot/tasks/drain-pending-migration-knobs-to-empty-m.md)
 
 ## Pipeline Pending
 

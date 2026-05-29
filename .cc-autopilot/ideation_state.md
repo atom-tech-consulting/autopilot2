@@ -1,94 +1,100 @@
 # Ideation State
 
-_Last updated: 2026-05-29T09:49:26Z by ideation cron_
+_Last updated: 2026-05-29T11:51:38Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 4B / 0P / 206C / 0F. The 3 proposals from
-the 07:13Z cycle (TB-336/337/338) all landed in Backlog and auto-approved
-(`auto-approve: 24h: 20 approved`). TB-335 (core ideation cluster from
-the cycle before) closed clean at 09:49Z (df35bc1) — migrated 4 ideation
-knobs via `cfg.get_core_value` + Config-kwarg-+-TypeError-guard helpers,
-59-test regression pin, suite 2718 passed. TB-333's verification-bullet
-fix is queued (operator `update` op f5c8421e at 06:40:41Z) — drains next
-tick, re-dispatches automatically; no ideation fix-task needed. Backlog
-now carries 4 workable axis-5 / axis-1 / progress-signal-6 items, all on
-the structured-config focus.
+Cycle entry: board 0A / 0R / 0B / 0P / 210C / 0F. All 4 Backlog items
+from prior cycle landed: TB-333 (cross-package auto_unfreeze +
+validator_judge, 3750f32, briefing-bullet fix from operator update
+06:40:41Z), TB-336 (axis-5 tail, 3cf0173 — 8 reads in
+web/goal/doctor/ideation/attention), TB-337 (core ConfigKey schema —
+21 typed keys + did-you-mean hint, deecdca), TB-338 (12-factor
+cut-line CI gate via AST walker + _PENDING_MIGRATION_KNOBS debt set,
+2c629a4). Last 4 Completes all drove the structured-config focus — mission alignment intact, no drift into Non-goals (no API commitments, no env renames, no ap2-meta polish).
 
 ## Current focus assessment
 
 - **Current focus: structured config (env → TOML)**
   - Progress so far:
-    - Axes 1 (TB-321), 2 (TB-323), 3 (TB-322), 4 (TB-324), 6 (TB-325)
-      shipped.
-    - Axis 5 component bodies: TB-326..331 closed 6 of 7 components
-      (auto_approve, auto_unfreeze, attention, focus_advance, janitor,
-      validator_judge); mattermost stays env-only per
-      `_KNOBS_STAYING_ENV_ONLY` (config_compat.py L207-212).
-    - Axis 5 cross-package: TB-332 (auto_approve, f1a6176) + TB-334
-      (core agent-runtime + `get_core_value` helper, d4404ef) +
-      TB-335 (core ideation cluster, df35bc1).
-  - Gaps (all covered by current Backlog):
-    - **Cross-package strays (~8 reads)** — covered by **TB-336**:
-      web.py L214/L226, goal.py L419/L446, doctor.py L374/L375,
-      ideation.py L845 (TB-334 straggler), components/attention/
-      L234 (cross-COMPONENT auto_approve read).
-    - **`[core.*]` ConfigKey schema missing** — covered by **TB-337**:
-      Config.core_config stays an untyped `dict[str, Any]` after
-      TB-334; asymmetric with axis-3 per-component
-      `Manifest.config_schema`. 21 known core keys via
-      `FLAT_TO_SECTIONED`; howto.md L2376-2379 flags as deferred.
-    - **`_KNOBS_STAYING_ENV_ONLY` cut-line has no enforcement test**
-      — covered by **TB-338**: comment block at config_compat.py
-      L193-212 documents the exempt set but no CI gate keeps new
-      `os.environ.get("AP2_*")` reads outside it; parallels TB-305
-      (env-knob docs-drift) and TB-325 (config-key docs-drift).
-    - **TB-333 cross-package auto_unfreeze + validator_judge tail**
-      — covered by **TB-333** (Backlog, blockers TB-327+TB-331 both
-      complete; operator update queued to fix the last
-      verification bullet's CLI arg order).
+    - Axes 1 + 6: TB-321 (parser+`Config.from_toml`+`Manifest.config_schema`),
+      TB-325 (`CONFIG_TEMPLATE`+`test_every_config_key_documented`),
+      TB-337 (CORE_CONFIG_SCHEMA closes axis-1 deferred validation).
+    - Axes 2 + 3: TB-322 (6-component config_schema), TB-323
+      (env-override + FLAT_TO_SECTIONED + `env_deprecated` events).
+    - Axis 4: TB-324 (`ap2 config list/get/set/validate` CLI).
+    - Axis 5 component bodies: TB-326..TB-331 (auto_approve /
+      auto_unfreeze / attention / focus_advance / janitor /
+      validator_judge — 6 of 6 closed; mattermost stays env-only per
+      `_KNOBS_STAYING_ENV_ONLY` L207-212).
+    - Axis 5 cross-package + core: TB-332 (auto_approve), TB-333
+      (auto_unfreeze+validator_judge), TB-334 (`get_core_value`+11
+      agent-runtime reads), TB-335 (ideation cluster), TB-336
+      (axis-5 tail).
+    - Progress-signal-6 enforcement: TB-338 (AST cut-line gate,
+      FLAT_TO_SECTIONED ∩ _KNOBS_STAYING_ENV_ONLY = ∅ pinned).
+  - Gaps:
+    - **`_PENDING_MIGRATION_KNOBS` debt set non-empty (2 entries)** —
+      AP2_VERIFY_JUDGE_EFFORT (verify.py L588) +
+      AP2_STATUS_REPORT_EFFORT (status_report.py L2028). Both wrap a
+      `cfg.get_core_value("agent_effort", default=…)` lookup with a
+      per-site env override; TB-334 deferred them because the fallback
+      value depends on a cfg read. FLAT_TO_SECTIONED already maps
+      both (config_compat.py L105-106) but
+      `CORE_CONFIG_SCHEMA` doesn't declare them (carve-out documented
+      at core_config_schema.py L14-20). Closing this drains the debt
+      set to empty + takes Progress signal 4 to ~100%.
   - Status: `in-progress`
+  - Reasoning: 5 of 6 axes complete; axis-5 is 95% with only the
+      documented 2-knob debt remaining. Post-fix, all 6 progress
+      signals are enforced rather than aspirational.
 
 ## Non-goal risk check
 
-None. All 4 Backlog items are read-path swap or test-gate addition that
-goal.md L384-389 explicitly green-lights. No env renames; no API
-stability commitments; no behavior changes.
+None. The proposed residual is a read-path swap + schema-declaration
+inside the focus charter (goal.md L384-389 explicitly green-lights
+read-path swaps that move env-only knobs into schema). No new
+operator-visible behavior, no env renames, no API surface change.
 
 ## Considered & deferred this cycle
 
-- **Any new axis-5 / axis-1 / progress-signal-6 proposal**. Backlog
-  already covers all 3 named gaps + the TB-333 cross-package tail.
-- **TB-333 fix-task remediation**. The failed last bullet
-  (`ap2 doctor --project .` — wrong CLI arg order; correct is
-  `ap2 --project . doctor`) is already in flight via operator's
-  queued `update` op (events.jsonl 06:40:41Z, uuid f5c8421e).
-- **Mattermost component-body migration**. All 5 MM knobs (channels/bot_user_id/mention/team_id/report_channel)
-  stay verbatim in `_KNOBS_STAYING_ENV_ONLY` at config_compat.py L207-212.
-- **Howto.md `## Configuration knobs` flat-list deprecation**.
-  Deferred per L2391-2395 ("flat surface stays
-  read-supported indefinitely; TOML surface is forward-canonical").
+- **Speculative axes-1..6 extensions** (e.g. typed enum schemas,
+  per-component CLI verbs, schema diff/migration tooling). Operator
+  rejection pattern (TB-185/184 parallel-surface erosion, TB-175
+  premature aggregation, TB-231/240 symptom-patching/verifier
+  whack-a-mole, TB-172 linter whack-a-mole) — each would dilute the
+  focus charter past its scope. Deferred.
+- **Mattermost knob migration into TOML.** Stays in
+  `_KNOBS_STAYING_ENV_ONLY` per the 12-factor exempt-set rationale
+  (Mattermost auth tokens + channel/team/bot identity); TB-338 now
+  enforces it as a cut-line invariant. Not a gap.
 - **Recurring rejection-pattern check (carried, re-justified)**:
-  operator vetoes TB-185/184 (utility unaligned / parallel surface
-  eroding goal.md authority), TB-175 (premature aggregation),
-  TB-231/240 (symptom-patching / verifier whack-a-mole), TB-172
-  (linter whack-a-mole).
+  operator vetoes still cluster around symptom-patching (TB-231/240),
+  parallel surfaces (TB-185/184), and premature aggregation (TB-175);
+  this cycle's proposal sits inside the named focus, follows the
+  TB-326 pilot template verbatim, and adds zero new operator-facing
+  surface.
 
 ## Cycle observations
 
-- TB-330's "migration walk surfaces latent bugs" pattern recurred on
-  TB-333 — except this time the latent bug was IN THE BRIEFING
-  (CLI arg-order on the last verification bullet), not in the
-  implementation. When authoring briefings that
-  invoke ap2 subcommands, prefer `ap2 --project <path> <verb>`
-  arg order.
+- TB-336/337/338 all landed within a 90-minute window (10:47 / 11:20
+  / 11:44Z), suggesting the axis-5 + axis-1-completion + cut-line-gate
+  trio compressed cleanly once the migration template was stable.
+  Useful signal that axis-5 follow-ups are very low-risk once the
+  ConfigKey + FLAT_TO_SECTIONED mapping is in place — applies to
+  this cycle's proposal too.
 
 ## Decisions needed from operator
 
-(none — Backlog covers every named gap; TB-333 operator update
-already drained-pending; no escalation surface this cycle.)
+(none — Backlog about to be populated; no escalation surface this
+cycle. Next cycle will likely surface the focus-advancement question
+once the 2-knob residual lands.)
 
 ## Proposals this cycle
 
-Backlog already populated. 4 workable items
-(TB-333 / TB-336 / TB-337 / TB-338) cover all gaps identified above.
+1 proposal: TB-339 (drain `_PENDING_MIGRATION_KNOBS` to empty by
+declaring `verify_judge_effort` + `status_report_effort` in
+CORE_CONFIG_SCHEMA and swapping the 2 call-site env reads). Closes
+goal.md L398 Progress signal 4 to ~100% migrated and goal.md
+L401-403 Progress signal 6's "clearly minimal" intent to its
+strictest reading.
