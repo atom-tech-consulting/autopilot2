@@ -224,19 +224,19 @@ def test_renderer_emits_multiple_focus_advanced_lines_in_order(
 # ===========================================================================
 
 
-def test_renderer_emits_roadmap_complete_line_with_ack_hint(
+def test_renderer_emits_roadmap_complete_line_with_three_verb_hint(
     cfg: Config,
 ):
-    """A `roadmap_complete` event in the window → the rendered
-    section carries the parked-ideation line `roadmap_complete:
-    all foci exhausted — ideation parked; `ap2 update-goal` to
-    resume or `ap2 ack roadmap_complete` to dismiss`. Both verbs
-    are rendered verbatim so the operator can copy-paste them
-    from the Mattermost post (parallel to TB-228's
-    `ap2 ack auto_approve_window_resume` line). TB-275: post-fix
-    the line names BOTH `ap2 update-goal` (resume ideation) and
-    `ap2 ack roadmap_complete` (dismiss notice) — `roadmap_complete`
-    is an ideation-trigger park, not a dispatch halt."""
+    """A `roadmap_complete` event in the window (notice NOT dismissed)
+    → the rendered section carries the parked-ideation line with the
+    TB-340 three-verb hint: `ap2 update-goal` (extend → resume on a
+    new focus), `ap2 rewind-focus <title>` (resume on an exhausted
+    focus), and `ap2 ack roadmap_complete` (dismiss the notice;
+    ideation stays parked). All verbs are rendered verbatim so the
+    operator can copy-paste them from the Mattermost post. TB-275:
+    `roadmap_complete` is an ideation-trigger park, not a dispatch
+    halt; TB-340: the ack DISMISSES (it does not resume — resume is a
+    pointer move)."""
     events.append(
         cfg.events_file, "roadmap_complete",
         exhausted_count=2, trigger="pointer_past_last",
@@ -247,9 +247,58 @@ def test_renderer_emits_roadmap_complete_line_with_ack_hint(
     assert section.startswith("## Focus rotation activity"), section
     assert (
         "- roadmap_complete: all foci exhausted — "
-        "ideation parked; `ap2 update-goal` to resume or "
-        "`ap2 ack roadmap_complete` to dismiss"
+        "ideation parked; `ap2 update-goal` to extend the roadmap "
+        "(resume on a new focus), `ap2 rewind-focus <title>` to "
+        "resume on an exhausted focus, or `ap2 ack roadmap_complete` "
+        "to dismiss this notice (ideation stays parked)"
     ) in section, section
+
+
+def test_renderer_suppresses_nag_when_notice_dismissed(
+    cfg: Config,
+):
+    """TB-340: once the operator has DISMISSED the current exhaustion
+    episode (the pointer's `roadmap_complete_ack_idx` == the foci
+    count), the digest still emits the `ideation parked` STATE line but
+    suppresses the actionable resume/dismiss hint — surfacing-vs-state
+    split. A window that both exhausted AND was acked doesn't re-nag."""
+    import json
+
+    # Two foci, pointer past the last → exhausted; mark dismissed.
+    (cfg.project_root / "goal.md").write_text(
+        "# Goal\n\n## Mission\n\n- m.\n\n"
+        "## Current focus: alpha\n\n- a.\n\n"
+        "## Current focus: beta\n\n- b.\n\n"
+    )
+    pointer_path = (
+        cfg.project_root / ".cc-autopilot" / "focus_pointer.json"
+    )
+    pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    pointer_path.write_text(json.dumps({
+        "schema": 1,
+        "active_index": 2,
+        "active_title": "",
+        "empty_cycles": 0,
+        "exhausted_titles": [],
+        "roadmap_complete_ack_idx": 2,  # dismissed THIS episode
+        "roadmap_complete_emitted": True,
+        "updated_ts": "2026-05-29T00:00:00Z",
+    }, indent=2, sort_keys=True) + "\n")
+
+    events.append(
+        cfg.events_file, "roadmap_complete",
+        exhausted_count=2, trigger="pointer_past_last",
+    )
+    section = render_focus_rotation_activity_section(
+        cfg, since_event_idx=_previous_status_report_idx(cfg),
+    )
+    assert (
+        "- roadmap_complete: all foci exhausted — "
+        "ideation parked (notice dismissed)"
+    ) in section, section
+    # The actionable hint is suppressed.
+    assert "rewind-focus" not in section, section
+    assert "to dismiss this notice" not in section, section
 
 
 def test_renderer_emits_mixed_advance_and_complete_in_order(

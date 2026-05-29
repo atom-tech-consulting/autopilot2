@@ -42,11 +42,13 @@ Behavioral cases pinned here:
     - `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits even
       when criteria are met
 
-  Halt + ack:
+  Halt + ack (TB-340 corrected semantics):
     - all-foci-exhausted → `roadmap_complete` event + decisions-
       needed bullet + `goal.roadmap_exhausted()` True
-    - operator_ack with `roadmap_complete` token in note clears
-      the halt → `goal.roadmap_exhausted()` False
+    - operator_ack with `roadmap_complete` token does NOT clear the
+      gate — `goal.roadmap_exhausted()` is a pure pointer predicate
+      and stays True; the ack only DISMISSES the operator nag (see
+      `test_roadmap_ack_semantics.py`). Resuming is a pointer move.
 
   Dispatch under roadmap_complete (TB-275):
     - the dispatch-path roadmap-exhaustion halt is REMOVED — a
@@ -681,9 +683,17 @@ def test_roadmap_complete_event_on_exhaustion(cfg, monkeypatch):
     assert len(rc) == 1, "roadmap_complete should not re-emit"
 
 
-def test_ack_clears_roadmap_complete_halt(cfg, monkeypatch):
-    """Operator ack with `roadmap_complete` token in the note clears
-    the halt. `goal.roadmap_exhausted` returns False after the ack."""
+def test_ack_does_not_clear_roadmap_complete_gate(cfg, monkeypatch):
+    """TB-340 expectation flip: an operator ack with the
+    `roadmap_complete` token does NOT clear the gate.
+
+    Pre-TB-340 this pin asserted `goal.roadmap_exhausted` returned
+    False after the ack (the ack un-parked ideation). The corrected
+    semantics make `roadmap_exhausted` a pure pointer predicate: while
+    the pointer is past the last focus it stays True regardless of any
+    ack. The ack only DISMISSES the operator nag — resuming ideation
+    is a pointer move (`rewind-focus` / `update-goal`), pinned in
+    `test_roadmap_ack_semantics.py`."""
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha")
     pointer = goal.load_pointer(cfg)
@@ -702,13 +712,17 @@ def test_ack_clears_roadmap_complete_halt(cfg, monkeypatch):
         "operator_ack",
         note="roadmap_complete: extended the roadmap with axis 5",
     )
-    assert goal.roadmap_exhausted(cfg) is False
+    # TB-340: the gate is a pure pointer predicate — the ack does NOT
+    # flip it. The pointer is still past the last focus.
+    assert goal.roadmap_exhausted(cfg) is True
 
 
 def test_ack_without_token_does_not_clear(cfg, monkeypatch):
     """Ack without the `roadmap_complete` token does NOT clear the
-    halt — the daemon scans for the specific token only (mirrors
-    `_auto_approve_paused`'s `auto_approve_unfreeze` shape)."""
+    gate. (Post-TB-340 NO ack clears the gate — the predicate is
+    pure pointer state — so this is the same verdict as the
+    token-bearing ack; the test is retained as a regression guard
+    that an unrelated operator decision never perturbs the gate.)"""
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha")
     pointer = goal.load_pointer(cfg)

@@ -20,8 +20,15 @@ advance path; TB-285 renamed the sub-block to reflect the new advisory
 semantics).
 
 When all foci exhaust, the daemon emits a `roadmap_complete` event +
-decisions-needed bullet and halts auto-promotion until the operator
-extends the roadmap and acks via `ap2 ack roadmap_complete`.
+decisions-needed bullet and parks the ideation trigger (task dispatch
+is unaffected — TB-275). Resuming ideation is a POINTER MOVE: `ap2
+update-goal` (extend the roadmap → pointer resets onto the new focus)
+or `ap2 rewind-focus <title>` (re-point at an exhausted focus). `ap2
+ack roadmap_complete` does NOT resume — it only DISMISSES the
+operator-facing nag while ideation stays parked (TB-340). The
+`roadmap_exhausted` gate is a pure function of the pointer; the
+dismissal marker is read only by `roadmap_complete_notice_dismissed`,
+which gates surfacing, not parking.
 
 The daemon NEVER mutates goal.md itself (goal.md L187-191 "Goal.md
 auto-rotation" Non-goal); the pointer is in-memory runtime state only.
@@ -552,79 +559,64 @@ ROADMAP_COMPLETE_ACK_TOKEN = "roadmap_complete"
 
 
 def roadmap_exhausted(cfg, foci: list[FocusItem] | None = None) -> bool:
-    """True iff the pointer has advanced past the last focus AND the
-    operator has NOT acked the `roadmap_complete` halt since the most
-    recent `roadmap_complete` event was emitted.
+    """True iff the focus pointer has advanced past the last focus.
 
-    Mirrors `_auto_approve_paused`'s events.jsonl-scan ack-reset shape:
-    looks for the most recent `roadmap_complete` event in the tail; if
-    a subsequent `operator_ack` event carries the
-    `roadmap_complete` token in its `note` field, the halt is cleared.
-    The ack-token check is substring-based on `note` (same shape
-    `_auto_approve_paused` uses for `auto_approve_unfreeze`) so the
-    operator can type `ap2 ack roadmap_complete --reason "extended the
-    roadmap with axis 5"` and the daemon recognizes the token amid
-    free-text rationale.
+    Pure function of pointer state: `total == 0 → False` (a pre-pivot
+    goal.md with no `## Current focus:` headings has nothing to
+    exhaust); else `pointer["active_index"] >= total`. No events-scan,
+    no `roadmap_complete_ack_idx` read — the operator ack does NOT
+    participate in this gate.
 
-    Side-effect: when the events-driven ack is detected, the pointer's
-    forensic `roadmap_complete_ack_idx` field is bumped to the current
-    foci count so a separate read of the pointer (e.g. `ap2 status` /
-    web UI) renders the cleared state without needing the events-scan.
+    This gate PARKS ideation (`_maybe_ideate` skips while it's True).
+    Resuming ideation is therefore a POINTER MOVE, never an ack:
+    `ap2 rewind-focus <title>` re-points `active_index` back inside
+    range → False naturally; `ap2 update-goal` calls
+    `reset_pointer_on_roadmap_extension` (resets `active_index` +
+    `roadmap_complete_emitted`) → False naturally. `ap2 ack
+    roadmap_complete` only DISMISSES the operator-facing nag (see
+    `roadmap_complete_notice_dismissed`); it never un-parks ideation.
+
+    TB-340 reduced this to the pure predicate. It previously folded an
+    events-scan + a forensic `roadmap_complete_ack_idx >= total`
+    fallback into the gate so an ack flipped it to False — wrongly
+    un-parking ideation against an already-exhausted roadmap, and
+    (worse) a stale `ack_idx` left by a PRIOR extend→re-exhaust episode
+    at the same foci count defeated the cheap-skip with no operator
+    action, so ideation auto-resumed full ~$1-3 SDK cycles every
+    cooldown. Both the events-scan and the forensic fallback are gone.
     """
-    from ap2 import events as _events  # local import to avoid cycle
     if foci is None:
         foci = read_focus_list(cfg)
-    pointer = load_pointer(cfg)
     total = len(foci)
     if total == 0:
-        # Pre-pivot goal.md with no focus headings: not exhausted —
-        # there's nothing to exhaust. The daemon's other gates handle
-        # this case (ideation prompt synthesizes from Mission/Done-when).
         return False
-    if pointer["active_index"] < total:
+    pointer = load_pointer(cfg)
+    return pointer["active_index"] >= total
+
+
+def roadmap_complete_notice_dismissed(
+    cfg, foci: list[FocusItem] | None = None
+) -> bool:
+    """True iff the roadmap is exhausted AND the operator has dismissed
+    THIS exhaustion episode's recurring notice.
+
+    The ONLY consumer of the `roadmap_complete_ack_idx` pointer field
+    (TB-340). It gates SURFACING — the actionable "extend the roadmap"
+    nag on `ap2 status` / web home / cron digest — never PARKING (which
+    is `roadmap_exhausted` alone). The marker is set to the current
+    foci count by the `ap2 ack roadmap_complete` drain handler
+    (`operator_queue._apply_operator_ack`) and cleared to `None` by
+    `focus_advance._maybe_advance_focus` on each fresh `roadmap_complete`
+    emit, so dismissal is strictly per-episode: a marker left by a prior
+    extend→re-exhaust episode at the same foci count can NOT suppress a
+    fresh episode's nag (the exact 2026-05-29 stale-state bug).
+    """
+    if foci is None:
+        foci = read_focus_list(cfg)
+    if not roadmap_exhausted(cfg, foci):
         return False
-    # Active index is past the last focus. Was the halt acked? Two
-    # signal sources (defense-in-depth): the events.jsonl scan AND
-    # the pointer's forensic ack_idx field. Either clears the halt.
-    if not cfg.events_file.exists():
-        # No events file → can't have acked yet.
-        return True
-    tail = _events.tail(cfg.events_file, 1000)
-    last_roadmap_idx = -1
-    last_ack_idx = -1
-    for i, e in enumerate(tail):
-        typ = e.get("type")
-        if typ == "roadmap_complete":
-            last_roadmap_idx = i
-        elif typ == "operator_ack":
-            note = str(e.get("note") or "")
-            if ROADMAP_COMPLETE_ACK_TOKEN in note:
-                last_ack_idx = i
-    if last_roadmap_idx == -1:
-        # Daemon hasn't emitted `roadmap_complete` yet but the pointer
-        # IS out-of-bounds. This is the first-tick window before
-        # `_maybe_advance_focus` runs. Treat as exhausted (the halt
-        # fires; the next tick's advance pass emits the event).
-        pass
-    elif last_ack_idx > last_roadmap_idx:
-        # Ack landed AFTER the most recent halt-emit → cleared.
-        # Bump the pointer's forensic field so status surfaces stay
-        # consistent. Best-effort: a write error doesn't change the
-        # cleared verdict.
-        if pointer.get("roadmap_complete_ack_idx") != total:
-            pointer["roadmap_complete_ack_idx"] = total
-            try:
-                save_pointer(cfg, pointer)
-            except OSError:
-                pass
-        return False
-    # Fallback to the pointer's forensic ack_idx: an operator who
-    # hand-edited the pointer (or a future migration that pre-sets it)
-    # can also clear the halt without an events-scan hit.
-    ack_idx = pointer.get("roadmap_complete_ack_idx")
-    if ack_idx is not None and ack_idx >= total:
-        return False
-    return True
+    pointer = load_pointer(cfg)
+    return pointer.get("roadmap_complete_ack_idx") == len(foci)
 
 
 def reset_pointer_on_roadmap_extension(cfg, foci: list[FocusItem]) -> dict[str, Any]:

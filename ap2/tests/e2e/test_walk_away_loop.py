@@ -602,8 +602,11 @@ def test_auto_unfreeze_briefingfix_repairs_frozen_task(
 # no `task_start` events fired (vacuously true here since no Backlog
 # task was seeded; TB-275 made dispatch UN-gated by roadmap state, so
 # the only thing roadmap_complete now blocks is the ideation trigger),
-# and an `operator_ack` with the `roadmap_complete` token clears the
-# gate. The TB-275 regression-pin
+# and (TB-340) an `operator_ack` with the `roadmap_complete` token
+# does NOT clear the gate — the gate is a pure pointer predicate, so
+# resuming is a pointer move (here we simulate `rewind-focus` /
+# `update-goal` by re-pointing `active_index` back in range). The
+# TB-275 regression-pin
 # `test_dispatch_promotes_when_roadmap_exhausted` in
 # `test_tb226_focus_rotation.py` asserts the inverse — that a
 # dispatchable Backlog task DOES auto-promote under roadmap_complete.
@@ -802,23 +805,38 @@ def test_focus_advance_and_roadmap_complete_across_ticks(
         f"got: {task_starts_after_halt}"
     )
 
-    # ----- Ack clears the halt: operator emits `operator_ack` with the
-    # `roadmap_complete` token in the note (same shape
-    # `test_ack_clears_roadmap_complete_halt` in
+    # ----- TB-340: ack does NOT clear the gate. The operator emits
+    # `operator_ack` with the `roadmap_complete` token in the note
+    # (same shape `test_ack_does_not_clear_roadmap_complete_gate` in
     # `test_tb226_focus_rotation.py` exercises). After the ack,
-    # `goal.roadmap_exhausted(cfg)` flips to False. -----
+    # `goal.roadmap_exhausted(cfg)` STAYS True — the gate is a pure
+    # pointer predicate; the ack only dismisses the operator nag. -----
     events.append(
         cfg.events_file,
         "operator_ack",
-        note="ack: roadmap_complete — extended roadmap with axis 5",
+        note="ack: roadmap_complete — dismissing the notice",
     )
+    assert goal.roadmap_exhausted(cfg) is True, (
+        "TB-340: the ack must NOT clear the gate — `roadmap_exhausted` "
+        "is a pure pointer predicate and the pointer is still past the "
+        "last focus"
+    )
+
+    # ----- Resume IS a pointer move: simulate `ap2 rewind-focus` /
+    # `ap2 update-goal` by re-pointing `active_index` back in range.
+    # Now (and only now) `goal.roadmap_exhausted(cfg)` flips to
+    # False. -----
+    resume_pointer = goal.load_pointer(cfg)
+    resume_pointer["active_index"] = 0
+    resume_pointer["roadmap_complete_emitted"] = False
+    goal.save_pointer(cfg, resume_pointer)
     assert goal.roadmap_exhausted(cfg) is False, (
-        "operator_ack with the `roadmap_complete` token must clear the "
-        "halt — `goal.roadmap_exhausted` still returns True"
+        "a pointer move back in range (rewind-focus / update-goal) must "
+        "clear the gate — `goal.roadmap_exhausted` still returns True"
     )
 
     # ----- Final ordering pin: `roadmap_complete` strictly precedes the
-    # clearing `operator_ack`. -----
+    # `operator_ack`. -----
     evts_after_ack = events.tail(cfg.events_file, 1000)
     idx_rc2 = next(
         i for i, e in enumerate(evts_after_ack)
@@ -830,6 +848,6 @@ def test_focus_advance_and_roadmap_complete_across_ticks(
         and "roadmap_complete" in str(e.get("note") or "")
     )
     assert idx_rc2 < idx_ack, (
-        f"roadmap_complete (idx {idx_rc2}) must precede the clearing "
+        f"roadmap_complete (idx {idx_rc2}) must precede the "
         f"operator_ack (idx {idx_ack})"
     )

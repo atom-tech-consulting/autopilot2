@@ -1123,10 +1123,13 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     # ~48 wasted SDK calls per 48h × 60-min cooldown). Uses the SAME
     # canonical predicate the dispatch + auto-approve gates use —
     # single source of truth, no new state file. `force_ideate`
-    # bypasses this gate so the operator's recovery path (`ap2 ack
-    # roadmap_complete && ap2 update-goal && ap2 ideate --force`)
-    # still works if the ack hasn't propagated to the pointer state
-    # yet.
+    # bypasses this gate so the operator's recovery path (`ap2
+    # update-goal && ap2 ideate --force`, or `ap2 rewind-focus <title>
+    # && ap2 ideate --force`) still works before the pointer move has
+    # landed at a tick boundary. TB-340: the dismiss verb is NOT part
+    # of resume — `ap2 ack roadmap_complete` only quiets the operator
+    # nag; ideation stays parked until a pointer move (update-goal /
+    # rewind-focus) lands.
     #
     # TB-284 deleted the predecessor focus-exhausted gate that read
     # `parse_focus_statuses(ideation_state.md)` and skipped when
@@ -1159,10 +1162,13 @@ async def force_ideate(cfg: Config, sdk, mcp_server) -> None:
     refreshing goal.md so the fresh focus has somewhere to land its
     first proposals), AND the TB-246 roadmap-complete gate (i.e.
     fires even when `goal.roadmap_exhausted(cfg)` is True — the
-    operator's standard recovery path is `ap2 ack roadmap_complete
-    && ap2 update-goal && ap2 ideate --force`, and the forced run
-    must work even when the ack hasn't yet propagated to the pointer
-    state). Does NOT bypass the Active hard gate — that check lives
+    operator's standard recovery path is `ap2 update-goal && ap2
+    ideate --force` (or `ap2 rewind-focus <title> && ap2 ideate
+    --force`), and the forced run must work even before the pointer
+    move has landed at a tick boundary. TB-340: `ap2 ack
+    roadmap_complete` is NOT part of resume — it only dismisses the
+    operator nag; resume is a pointer move). Does NOT bypass the
+    Active hard gate — that check lives
     at queue-append time in `do_operator_queue_append({"op":
     "ideate", ...})` and at drain time is implicit (the daemon won't
     dispatch the forced run while a task agent is sharing the SDK

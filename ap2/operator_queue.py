@@ -261,14 +261,20 @@ def _apply_operator_ack(cfg: Config, args: dict) -> dict:
         payload["task"] = task_id
     events.append(cfg.events_file, "operator_ack", **payload)
 
-    # TB-226: if the ack carries the `roadmap_complete` token, also
-    # bump the focus-pointer's forensic `roadmap_complete_ack_idx` to
-    # the current focus-list length so `ap2 status` / web UI render
-    # the cleared state without an events-scan side-effect. Best-
-    # effort: `goal.roadmap_exhausted` (the ideation-trigger gate
-    # post-TB-275) also consults the events.jsonl token directly, so
-    # a pointer-write failure here doesn't change the cleared verdict
-    # — defense in depth, not the canonical authority.
+    # TB-226 / TB-340: if the ack carries the `roadmap_complete`
+    # token, set the focus-pointer's `roadmap_complete_ack_idx` to the
+    # current focus-list length. This DISMISSES the recurring operator
+    # notice (`ap2 status` / web / cron digest stop showing the
+    # actionable "extend the roadmap" nag once
+    # `goal.roadmap_complete_notice_dismissed` reads this marker == the
+    # foci count); it does NOT resume ideation. Ideation stays PARKED
+    # — `goal.roadmap_exhausted` is now a pure pointer predicate that
+    # the ack no longer touches. Resuming is a separate pointer move:
+    # `ap2 update-goal` (extend the roadmap) or `ap2 rewind-focus
+    # <title>` (re-point at an exhausted focus). focus_advance clears
+    # this marker to None on each fresh `roadmap_complete` emit, so the
+    # dismissal is strictly per-episode (can't go stale across an
+    # extend→re-exhaust cycle).
     from ap2 import goal as _goal
     if _goal.ROADMAP_COMPLETE_ACK_TOKEN in note:
         try:

@@ -575,10 +575,13 @@ def _render_focus_card(cfg: Config) -> str:
     leaving the home page. Three shapes (mirrors the
     `cmd_status` text branch):
 
-      - halt state (pointer past last focus, no operator ack since
-        the most recent `roadmap_complete` event) → red-tinted
-        `is-paused` card with the `ap2 ack roadmap_complete` resume
-        verb rendered as `<code>`.
+      - halt state (pointer past last focus) → red-tinted
+        `is-paused` card. The card always renders the ROADMAP_COMPLETE
+        state while exhausted; the three-verb resume/dismiss hint
+        (`ap2 update-goal` / `ap2 rewind-focus` resume; `ap2 ack
+        roadmap_complete` dismisses) is rendered as `<code>` unless the
+        operator has dismissed THIS episode, in which case the body
+        collapses to `ideation parked (notice dismissed)` (TB-340).
       - multi-focus → green-tinted `is-healthy` card with
         `<title> (<idx+1> of <total>)`.
       - single-focus → green-tinted `is-healthy` card with `<title>`
@@ -597,8 +600,9 @@ def _render_focus_card(cfg: Config) -> str:
     Reads `goal.read_focus_list(cfg)`, `goal.active_focus(cfg)`, and
     `focus_pointer.json` (via `goal.load_pointer`) — no new state
     files, no daemon-side mutation. The halt branch reads
-    `goal.roadmap_exhausted` which itself walks the events tail for
-    the most recent `roadmap_complete` / `operator_ack` pair.
+    `goal.roadmap_exhausted` (a pure pointer predicate post-TB-340)
+    and `goal.roadmap_complete_notice_dismissed` (reads the pointer's
+    dismissal marker) — neither walks the events tail.
     """
     from . import goal as _goal
 
@@ -607,17 +611,30 @@ def _render_focus_card(cfg: Config) -> str:
         return ""
     focus_pointer = _goal.load_pointer(cfg)
     if _goal.roadmap_exhausted(cfg, foci):
-        # TB-275: roadmap_complete parks the ideation trigger only —
-        # task dispatch continues normally. Wording reflects that:
-        # extend the roadmap to resume IDEATION, or ack to dismiss
-        # the notice. `ap2 pause` is the explicit full-stop verb.
+        # TB-275/TB-340: roadmap_complete parks the ideation trigger
+        # only — task dispatch continues normally. The
+        # ROADMAP_COMPLETE state card always renders while exhausted;
+        # the actionable resume/dismiss nag is suppressed once the
+        # operator dismissed THIS episode (surfacing-vs-state split).
+        # Resume is a POINTER MOVE — `ap2 update-goal` (extend → resume
+        # on a new focus) or `ap2 rewind-focus <title>` (resume on an
+        # exhausted focus); `ap2 ack roadmap_complete` only DISMISSES
+        # this notice (ideation stays parked). `ap2 pause` is the
+        # explicit full-stop verb.
         klass = "automation-status is-paused"
         header = "Focus — ROADMAP_COMPLETE"
-        body = (
-            "ideation parked — "
-            "<code>ap2 update-goal</code> to resume or "
-            "<code>ap2 ack roadmap_complete</code> to dismiss"
-        )
+        if _goal.roadmap_complete_notice_dismissed(cfg, foci):
+            body = "ideation parked (notice dismissed)"
+        else:
+            body = (
+                "ideation parked — "
+                "<code>ap2 update-goal</code> to extend the roadmap "
+                "(resume on a new focus), "
+                "<code>ap2 rewind-focus &lt;title&gt;</code> to resume on "
+                "an exhausted focus, or "
+                "<code>ap2 ack roadmap_complete</code> to dismiss this "
+                "notice (ideation stays parked)"
+            )
     else:
         klass = "automation-status is-healthy"
         header = "Focus"

@@ -183,10 +183,11 @@ def test_cli_status_multi_focus_text_reflects_pointer_advance(
 def test_cli_status_roadmap_complete_text_shows_halt_line(
     cfg: Config, capsys,
 ):
-    """Pointer past the last focus AND a `roadmap_complete` event in
-    the tail with no subsequent ack → text-render shows the halt
-    line `focus: ROADMAP_COMPLETE — `ap2 ack roadmap_complete` to
-    resume`. Mirrors TB-227's auto-approve PAUSED line shape so the
+    """Pointer past the last focus, notice NOT yet dismissed →
+    text-render shows the `focus: ROADMAP_COMPLETE — ideation parked`
+    state line WITH the three-verb resume/dismiss nag (TB-340), which
+    names `ap2 ack roadmap_complete` (dismiss) alongside the resume
+    verbs. Mirrors TB-227's auto-approve PAUSED line shape so the
     operator's eye picks up the halt without a second pass."""
     from ap2.cli import cmd_status
 
@@ -196,36 +197,43 @@ def test_cli_status_roadmap_complete_text_shows_halt_line(
         "## Current focus: beta\n\nbeta body.\n\n",
     )
     # Push the pointer past the last focus (active_index >= len(foci))
-    # to simulate the halt state with no operator ack yet.
+    # to simulate the halt state. TB-340: `roadmap_exhausted` is a pure
+    # pointer predicate — `active_index >= total` alone trips it; no
+    # events-scan, no ack involvement.
     pointer = goal.load_pointer(cfg)
     pointer["active_index"] = 2  # past the last 0-indexed focus
     pointer["roadmap_complete_emitted"] = True
     goal.save_pointer(cfg, pointer)
-    # Emit a `roadmap_complete` event so the events-scan branch of
-    # `roadmap_exhausted` finds a halt marker; absence of a
-    # subsequent `operator_ack` event with the `roadmap_complete`
-    # token keeps the halt active.
-    events.append(cfg.events_file, "roadmap_complete", reason="exhausted")
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
     assert "ROADMAP_COMPLETE" in out, out
+    # Nag NOT dismissed → the resume/dismiss hint is present, naming
+    # both the resume verbs and the `ap2 ack roadmap_complete` dismiss.
     assert "`ap2 ack roadmap_complete`" in out, out
+    assert "rewind-focus" in out, out
     # Halt-state render replaces the position counter entirely — no
     # stale `(N of M)` should leak through.
     assert "(3 of 2)" not in out
 
 
-def test_cli_status_roadmap_complete_cleared_after_ack(
+def test_cli_status_roadmap_complete_nag_suppressed_after_dismiss(
     cfg: Config, capsys,
 ):
-    """After an `operator_ack` event carrying the `roadmap_complete`
-    token lands AFTER the most recent `roadmap_complete` event, the
-    halt clears and the text-render falls back to the regular
-    focus line (no `ROADMAP_COMPLETE` marker). Pins that the
-    render is wired to `goal.roadmap_exhausted`'s ack-aware
-    verdict, not just the raw `active_index >= total` check."""
+    """TB-340 surfacing-vs-state split: after the operator DISMISSES
+    the notice (the ack drain handler sets the pointer's
+    `roadmap_complete_ack_idx` to the foci count), the text-render
+    STILL shows the `ROADMAP_COMPLETE` state line (the daemon is still
+    parked — dismissal quiets the nag, not the state) but suppresses
+    the actionable resume/dismiss hint.
+
+    Pre-TB-340 this pin asserted the `ROADMAP_COMPLETE` marker
+    DISAPPEARED after an ack — the old wiring let the ack flip
+    `goal.roadmap_exhausted` to False, un-parking ideation. The
+    corrected gate is a pure pointer predicate; the ack only sets the
+    dismissal marker that `goal.roadmap_complete_notice_dismissed`
+    reads."""
     from ap2.cli import cmd_status
 
     _write_goal_md(
@@ -236,18 +244,21 @@ def test_cli_status_roadmap_complete_cleared_after_ack(
     pointer = goal.load_pointer(cfg)
     pointer["active_index"] = 2
     pointer["roadmap_complete_emitted"] = True
+    # Simulate the ack drain handler having dismissed THIS episode:
+    # the marker == the current foci count (2).
+    pointer["roadmap_complete_ack_idx"] = 2
     goal.save_pointer(cfg, pointer)
     events.append(cfg.events_file, "roadmap_complete", reason="exhausted")
-    # Operator-ack arrives later in the tail — clears the halt.
-    events.append(
-        cfg.events_file, "operator_ack",
-        note="roadmap_complete acknowledged; extending roadmap",
-    )
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
-    assert "ROADMAP_COMPLETE" not in out, out
+    # State line preserved: still parked.
+    assert "ROADMAP_COMPLETE" in out, out
+    assert "notice dismissed" in out, out
+    # Actionable nag suppressed: the resume verbs are NOT re-offered.
+    assert "rewind-focus" not in out, out
+    assert "extend the roadmap" not in out, out
 
 
 # ===========================================================================

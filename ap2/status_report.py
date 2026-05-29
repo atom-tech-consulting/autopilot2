@@ -413,7 +413,7 @@ def render_focus_rotation_activity_section(
         ## Focus rotation activity
 
         - focus_advanced: <from-title> → <to-title> (N of M)
-        - roadmap_complete: all foci exhausted — ideation parked; `ap2 update-goal` to resume or `ap2 ack roadmap_complete` to dismiss
+        - roadmap_complete: all foci exhausted — ideation parked; `ap2 update-goal` to extend the roadmap (resume on a new focus), `ap2 rewind-focus <title>` to resume on an exhausted focus, or `ap2 ack roadmap_complete` to dismiss this notice (ideation stays parked)
 
     Each line is rendered once per event in the window (so a window
     with 2 advances + 1 halt yields 3 lines). The lines preserve
@@ -463,18 +463,33 @@ def render_focus_rotation_activity_section(
         lines.append(
             f"- focus_advanced: {from_title} → {to_title}{position}"
         )
-    # `roadmap_complete` rendering: the resume + dismiss hints are
-    # verbatim so the operator can copy-paste them from the
-    # Mattermost post. TB-275: this is now an ideation-trigger
-    # park, not a dispatch halt — extend the roadmap to resume
-    # IDEATION, or ack to dismiss the notice. Task dispatch is NOT
-    # affected.
+    # `roadmap_complete` rendering: the "all foci exhausted — ideation
+    # parked" STATE line always renders (it's a digest of the episode
+    # that fired in the window). TB-275: this is an ideation-trigger
+    # park, not a dispatch halt. TB-340: the actionable resume/dismiss
+    # hint is suppressed once the operator dismissed THIS episode (so a
+    # window that both exhausted AND was acked doesn't re-nag); the
+    # hint names the three-verb model verbatim so the operator can
+    # copy-paste — `ap2 update-goal` (extend → resume on a new focus)
+    # and `ap2 rewind-focus <title>` (resume on an exhausted focus)
+    # RESUME, while `ap2 ack roadmap_complete` only DISMISSES the
+    # notice (ideation stays parked).
+    from . import goal as _goal  # local import to avoid module-load cycle
+    _notice_dismissed = _goal.roadmap_complete_notice_dismissed(cfg)
     for _ev in activity["roadmap_complete"]:
-        lines.append(
-            "- roadmap_complete: all foci exhausted — "
-            "ideation parked; `ap2 update-goal` to resume or "
-            "`ap2 ack roadmap_complete` to dismiss"
-        )
+        if _notice_dismissed:
+            lines.append(
+                "- roadmap_complete: all foci exhausted — "
+                "ideation parked (notice dismissed)"
+            )
+        else:
+            lines.append(
+                "- roadmap_complete: all foci exhausted — "
+                "ideation parked; `ap2 update-goal` to extend the roadmap "
+                "(resume on a new focus), `ap2 rewind-focus <title>` to "
+                "resume on an exhausted focus, or `ap2 ack roadmap_complete` "
+                "to dismiss this notice (ideation stays parked)"
+            )
     return "\n".join(lines)
 
 

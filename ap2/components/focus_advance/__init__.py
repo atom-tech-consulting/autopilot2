@@ -37,18 +37,22 @@ TB-285 renamed the per-focus sub-block from `Done when:` to
 bullets remain in goal.md as ideation-prompt context but no longer
 gate advancement.
 
-When all foci exhaust, emit `roadmap_complete` (once) and set the
-pointer's `roadmap_complete_emitted` flag so `ap2 status`'s focus
-line (`focus: ROADMAP_COMPLETE — ideation parked; `ap2 update-goal`
-to resume or `ap2 ack roadmap_complete` to dismiss`, derived from
-`focus_pointer.json` via `goal.roadmap_exhausted`) and the web home
-page surface the parked-ideation state. TB-275: this is an
+When all foci exhaust, emit `roadmap_complete` (once), set the
+pointer's `roadmap_complete_emitted` flag, AND clear the dismissal
+marker (`roadmap_complete_ack_idx = None`) so each fresh exhaustion
+episode re-arms the operator nag exactly once (TB-340). `ap2 status`'s
+focus line (`focus: ROADMAP_COMPLETE — ideation parked; ...`, derived
+from `focus_pointer.json` via `goal.roadmap_exhausted`) and the web
+home page surface the parked-ideation state. TB-275: this is an
 ideation-trigger gate only — `_maybe_ideate` skips with
-`reason=roadmap_complete` until the operator extends the roadmap
-(`ap2 update-goal`) or dismisses the notice (`ap2 ack
-roadmap_complete`). Task dispatch is NOT affected; already-queued
-Backlog tasks continue to drain. Use `ap2 pause` for an explicit
-full-stop.
+`reason=roadmap_complete` until ideation is RESUMED, which is a
+POINTER MOVE: `ap2 update-goal` (extend the roadmap → pointer resets
+onto the new focus) or `ap2 rewind-focus <title>` (re-point at an
+exhausted focus). `ap2 ack roadmap_complete` does NOT resume — it only
+DISMISSES the recurring nag (`goal.roadmap_complete_notice_dismissed`)
+while ideation stays parked (TB-340). Task dispatch is NOT affected;
+already-queued Backlog tasks continue to drain. Use `ap2 pause` for an
+explicit full-stop.
 
 TB-302: the daemon no longer appends a `Roadmap complete: ...`
 bullet to `.cc-autopilot/ideation_state.md` on first detection.
@@ -336,9 +340,8 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
             # (b) `focus_pointer.json` (`active_index past end`,
             # `exhausted_titles`, `roadmap_complete_emitted=true`,
             # empty `active_title`), (c) `ap2 status`'s focus line
-            # (`focus: ROADMAP_COMPLETE — ideation parked;
-            # `ap2 update-goal` to resume or `ap2 ack
-            # roadmap_complete` to dismiss`, derived from the
+            # (`focus: ROADMAP_COMPLETE — ideation parked; ...` with
+            # the three-verb resume/dismiss hint, derived from the
             # pointer), and (d) the TB-244 focus-rotation digest in
             # the cron status-report. The bullet was a fifth,
             # daemon-written surface that (1) bypassed the
@@ -358,6 +361,16 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
                 trigger="pointer_past_last",
             )
             pointer["roadmap_complete_emitted"] = True
+            # TB-340 (core stale-state fix): clear the dismissal marker
+            # so each fresh exhaustion episode re-arms the operator nag
+            # exactly once — even if a PRIOR episode at the same foci
+            # count was dismissed via `ap2 ack roadmap_complete`. The
+            # marker (`roadmap_complete_ack_idx`) is read only by
+            # `goal.roadmap_complete_notice_dismissed`; resetting it
+            # here makes that single field authoritative and removes the
+            # stale-ack ambiguity that let ideation auto-resume after an
+            # extend→re-exhaust cycle with no operator action.
+            pointer["roadmap_complete_ack_idx"] = None
             try:
                 goal.save_pointer(cfg, pointer)
             except OSError:

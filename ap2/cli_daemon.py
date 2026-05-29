@@ -349,10 +349,18 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         _focus_pointer = _goal.load_pointer(cfg)
         _focus_item = _goal.active_focus(cfg, _foci)
         _focus_roadmap_complete = _goal.roadmap_exhausted(cfg, _foci)
+        # TB-340: surfacing-vs-state split. `roadmap_complete` is the
+        # always-on parked-ideation STATE; `notice_dismissed` only
+        # quiets the actionable "extend the roadmap" nag once the
+        # operator has acked THIS exhaustion episode.
+        _focus_notice_dismissed = _goal.roadmap_complete_notice_dismissed(
+            cfg, _foci
+        )
     else:
         _focus_pointer = None
         _focus_item = None
         _focus_roadmap_complete = False
+        _focus_notice_dismissed = False
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
     # the URL so operators don't have to remember to run `ap2 web`
     # separately. Resolution mirrors the daemon's own — same env vars, same
@@ -549,11 +557,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # "what focus am I on, and how many remain?" without grepping
     # events.jsonl or reading `focus_pointer.json` by hand. Three
     # render shapes (mirrors the JSON branch):
-    #   - parked-ideation state (pointer past last focus, no operator
-    #     ack since the most recent `roadmap_complete` event) → the
-    #     `ROADMAP_COMPLETE — ideation parked` line with the
-    #     `ap2 update-goal` resume + `ap2 ack roadmap_complete`
-    #     dismiss nudges (TB-275 reword — dispatch is NOT halted).
+    #   - parked-ideation state (pointer past last focus) → the
+    #     `ROADMAP_COMPLETE — ideation parked` line. The state line is
+    #     ALWAYS shown while exhausted; the actionable three-verb
+    #     resume/dismiss nag is suppressed once the operator dismissed
+    #     THIS episode (TB-340; TB-275 reword — dispatch is NOT halted).
     #   - multi-focus → `focus: <title> (<idx+1> of <total>)`.
     #   - single-focus → `focus: <title>` (no `(1 of 1)` suffix —
     #     single-focus projects don't need a position counter).
@@ -562,15 +570,28 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # the default-off output stays byte-identical to pre-TB-242.
     if _foci:
         if _focus_roadmap_complete:
-            # TB-275: roadmap_complete parks the ideation trigger only
-            # — task dispatch continues. Wording reflects that: extend
-            # the roadmap to resume IDEATION, or ack to dismiss the
-            # notice. `ap2 pause` is the explicit full-stop verb.
-            print(
-                "focus:    ROADMAP_COMPLETE — ideation parked; "
-                "`ap2 update-goal` to resume or "
-                "`ap2 ack roadmap_complete` to dismiss"
-            )
+            # TB-275/TB-340: roadmap_complete parks the ideation trigger
+            # only — task dispatch continues. The ROADMAP_COMPLETE state
+            # line always renders so the operator knows the daemon is
+            # parked. Resume is a POINTER MOVE — `ap2 update-goal`
+            # (extend → resume on a new focus) or `ap2 rewind-focus
+            # <title>` (resume on an exhausted focus); `ap2 ack
+            # roadmap_complete` only DISMISSES this nag (ideation stays
+            # parked). Once dismissed, the nag is suppressed but the
+            # state line stays. `ap2 pause` is the explicit full-stop.
+            if _focus_notice_dismissed:
+                print(
+                    "focus:    ROADMAP_COMPLETE — ideation parked "
+                    "(notice dismissed)"
+                )
+            else:
+                print(
+                    "focus:    ROADMAP_COMPLETE — ideation parked; "
+                    "`ap2 update-goal` to extend the roadmap (resume on a "
+                    "new focus), `ap2 rewind-focus <title>` to resume on an "
+                    "exhausted focus, or `ap2 ack roadmap_complete` to "
+                    "dismiss this notice (ideation stays parked)"
+                )
         elif len(_foci) == 1:
             _title = _focus_item.title if _focus_item else ""
             print(f"focus:    {_title}")
