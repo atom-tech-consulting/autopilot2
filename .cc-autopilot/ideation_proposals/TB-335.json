@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-334",
   "briefing_path": ".cc-autopilot/tasks/migrate-core-ideation-knob-cluster-ap2-i.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "df35bc1",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-29T09:49:26Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-29T04:48:47Z",
   "tb_id": "TB-335",
   "why_now": "ideation is the cron entry point this very task runs\nunder \u2014 migrating its knob reads tightens the operator's\nconfig-discovery story end-to-end (set the knob in TOML once, see\nit on `ap2 config get core.ideation_cooldown_s` immediately\nwithout a daemon restart). Without it, even after TB-334 lands,\nthe most operator-visible cron path still reads env directly."
