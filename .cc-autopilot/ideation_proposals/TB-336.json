@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-326,TB-334",
   "briefing_path": ".cc-autopilot/tasks/migrate-remaining-8-cross-package-and-cr.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "3cf0173",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-29T10:47:07Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-29T07:22:50Z",
   "tb_id": "TB-336",
   "why_now": "TB-332 (f1a6176) + TB-334 (d4404ef) just landed the\nauto_approve cross-package + core agent-runtime clusters. The\nremaining ~8 reads are the last cleanly-migrable cross-package /\ncross-component strays \u2014 `_KNOBS_STAYING_ENV_ONLY` (config_compat.py\nL207-212) explicitly carves out the Mattermost-family + sandbox\nidentity knobs, and `config.py` / `env_reload.py` are the bootstrap\nthat CONSTRUCTS `cfg` (can't read from `cfg` to build `cfg`). Bundling\nthese 8 reads into one task closes the migration tail in a single\nsweep before the residual list fragments into low-leverage one-offs;\nthe TB-330 \"config_schema gained 2 keys to close a 1-vs-3 schema\nmismatch\" pattern (migration walk surfaces latent schema-doc gaps)\napplies here too \u2014 expect tiny `Manifest.config_schema` extensions\non `focus_advance` / `auto_approve` if any of the target keys aren't\nyet declared. Cheaper as one task than three since the shape repeats\nverbatim per the proven pilots."
