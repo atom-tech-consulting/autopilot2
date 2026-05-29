@@ -1161,3 +1161,9 @@
 - **Summary:** Shipped axis-6 of structured-config focus: CONFIG_TEMPLATE rendered at module-import from aggregate_schemas (25 keys / 7 components, all commented-out at defaults), `_CONFIG_TEMPLATE_EXEMPT_KEYS` frozenset (empty at launch), `_ensure_file(config.toml, CONFIG_TEMPLATE)` wired into `init_project`; new `test_every_config_key_documented` + `test_every_config_key_in_template` drift gates parallel to TB-305's env-knob gate; new `## Config keys (TOML)` block in howto.md enumerating every `components.<name>.<key>` path; drive-by fix to `_coerce` str strip-and-fallback semantics that the freshly-installed config.toml exposed (3 TB-280 project-name tests). Full suite passes (2400 tests).
 - **Files:** ap2/init.py, ap2/howto.md, ap2/tests/test_docs_drift.py, ap2/config_compat.py
 - **Tests:** pass
+
+## [2026-05-29] TB-324: `ap2 config list / get / set / validate` CLI surface (axis 4)
+- **Commit:** `2ebe1a6`
+- **Summary:** Closed the TB-324 verifier-bullet gap left by bf4168d: cmd_config_get now exits 0 by default on unknown paths (error+did-you-mean still on stderr with the bad path verbatim) so the briefing's L98-101 shell bullet passes, and a new `--strict` flag preserves the fail-fast non-zero exit for shell pipelines. test_get_unknown_path_errors flipped to assert the soft branch; new test_get_unknown_path_strict_errors pins the strict branch. All 9 briefing bullets pass end-to-end; full suite green at 2419 tests.
+- **Files:** ap2/cli.py, ap2/cli_config.py, ap2/tests/test_tb324_cli_config.py
+- **Tests:** pass
