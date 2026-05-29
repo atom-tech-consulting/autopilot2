@@ -130,3 +130,10 @@ the list verb.
   surface for now; defer until operator surfaces the need.
 - Migrating component-body reads (axis 5) — that's a separate
   TB-N per cluster.
+## Attempts
+
+### 2026-05-29 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `uv run python -m ap2 config get components.bogus.nonexistent --project .` exits non-zero with an error message that nam
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T001945Z-TB-324.prompt.md`, `stream: .cc-autopilot/debug/20260529T001945Z-TB-324.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T001945Z-TB-324.messages.jsonl`

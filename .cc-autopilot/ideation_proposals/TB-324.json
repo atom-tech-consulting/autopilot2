@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-321,TB-322,TB-323",
   "briefing_path": ".cc-autopilot/tasks/ap2-config-list-get-set-validate-cli-sur.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "bf4168d",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-29T00:37:54Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-29T00:14:56Z",
   "tb_id": "TB-324",
   "why_now": "the focus's delete-test at goal.md L349-351 (\"if not\nshipped, the new config surface is present but not\noperator-discoverable \u2014 every operator has to read the toml file\ndirectly\") is literally true today with axes 1+2+3 in HEAD but no\noperator-facing CLI. Axis 5 (per-cluster knob migration) gets\nsafer when `ap2 config get` is available to confirm a knob's\nread path during each migration, so axis 4 wants to land before\nthe long-tail axis-5 cluster TB-Ns dispatch."
