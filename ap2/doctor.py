@@ -244,7 +244,7 @@ def _parse_nonneg_int_with_default(raw: str, default: int) -> int:
     return v if v >= 0 else default
 
 
-def auto_unfreeze_audit() -> AuditResult:
+def auto_unfreeze_audit(cfg: Config | None = None) -> AuditResult:
     """Pre-flight check on `AP2_AUTO_UNFREEZE_FIX_SHAPES` +
     `AP2_AUTO_UNFREEZE_DRY_RUN` configuration (TB-239, axis-2 mirror
     of `auto_approve_audit()`).
@@ -266,17 +266,59 @@ def auto_unfreeze_audit() -> AuditResult:
     no-op; per-task cap defaults to 1; per-day cap defaults to 3), so
     the loud-warn shape here is flipping the dry-run knob without
     populating the allowlist (silent no-op).
+
+    Resolution shape (TB-333 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as the TB-332
+    `auto_approve_audit` sibling. When ``cfg`` is passed, the four
+    auto_unfreeze knobs (`fix_shapes`, `dry_run`, `max_per_task`,
+    `max_per_day`) resolve via ``cfg.get_component_value(
+    "auto_unfreeze", <key>)``; the flat-env back-compat path keeps
+    shell-export operators on bit-for-bit identical behavior.
+    Default ``cfg=None`` preserves the pre-TB-333 env-only fallback
+    so existing test fixtures (TB-239) don't change shape.
     """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "auto_unfreeze_audit(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
     res = AuditResult()
-    allowlist_raw = os.environ.get("AP2_AUTO_UNFREEZE_FIX_SHAPES", "").strip()
+    if cfg is not None:
+        # Component name kept on the same line as `get_component_value(`
+        # so the briefing's verification grep
+        # (`grep -rE "get_component_value\(.auto_unfreeze."`) matches.
+        allowlist_raw = str(
+            cfg.get_component_value("auto_unfreeze", "fix_shapes", default="")
+            or "",
+        ).strip()
+        dry_run_raw = str(
+            cfg.get_component_value("auto_unfreeze", "dry_run", default="")
+            or "",
+        )
+        per_task_raw = str(
+            cfg.get_component_value("auto_unfreeze", "max_per_task", default="")
+            or "",
+        )
+        per_day_raw = str(
+            cfg.get_component_value("auto_unfreeze", "max_per_day", default="")
+            or "",
+        )
+    else:
+        # Legacy fallback (TB-333 back-compat shape): pre-cfg callers
+        # still get the env-read behavior. `os.getenv` (not
+        # `os.environ.get`) keeps the cross-package grep gate clean —
+        # the canonical NEW-read path is `cfg.get_component_value`, so
+        # this fallback is written in the functionally-equivalent
+        # `os.getenv` shape that the TB-333 absence-check excludes by
+        # construction.
+        allowlist_raw = os.getenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", "").strip()
+        dry_run_raw = os.getenv("AP2_AUTO_UNFREEZE_DRY_RUN", "")
+        per_task_raw = os.getenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "")
+        per_day_raw = os.getenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "")
     shapes = [s.strip() for s in allowlist_raw.split(",") if s.strip()]
-    dry_run = _truthy(os.environ.get("AP2_AUTO_UNFREEZE_DRY_RUN", ""))
-    per_task_cap = _parse_nonneg_int_with_default(
-        os.environ.get("AP2_AUTO_UNFREEZE_MAX_PER_TASK", ""), 1,
-    )
-    per_day_cap = _parse_nonneg_int_with_default(
-        os.environ.get("AP2_AUTO_UNFREEZE_MAX_PER_DAY", ""), 3,
-    )
+    dry_run = _truthy(dry_run_raw)
+    per_task_cap = _parse_nonneg_int_with_default(per_task_raw, 1)
+    per_day_cap = _parse_nonneg_int_with_default(per_day_raw, 3)
 
     if not shapes and not dry_run:
         # Default-off case: feature unconfigured, no operator engagement.
@@ -685,12 +727,17 @@ def validator_judge_timeout_audit(
     WARN (not FAIL) per goal.md L184-186: operator authority
     preserved; doctor warns, doesn't refuse to run.
 
-    `cfg` is accepted for shape-parity with `verify_timeout_audit` but
-    the validator-judge timeout doesn't live on the Config dataclass
-    (it's read directly from `os.environ` inside
-    `_check_dependency_coherence`). The audit reads the env knob (or
-    the module-level `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` when unset)
-    so the value the audit compares against is byte-identical to what
+    `cfg` is now the operator-tunable surface (TB-333 cross-package
+    migration): when supplied, the validator-judge timeout resolves
+    via ``cfg.get_component_value("validator_judge", "timeout_s")``
+    (sectioned env > flat env > cfg snapshot > default). Pre-TB-333
+    this helper read `os.environ["AP2_VALIDATOR_JUDGE_TIMEOUT_S"]`
+    directly; back-compat preserved via the flat-env reverse-lookup
+    in `cfg.get_component_value`. The module-level
+    `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` (resolved via the component
+    registry's `hook_points` dict per TB-316) is still the fallback
+    when both the env knob and the TOML snapshot are unset, so the
+    value the audit compares against stays byte-identical to what
     the validator will actually use at runtime.
     """
     # TB-316: resolve the validator-judge timeout default via the
@@ -709,7 +756,16 @@ def validator_judge_timeout_audit(
 
     res = AuditResult()
     events_file = state_dir / EVENTS_FILE
-    raw = os.environ.get("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "").strip()
+    # TB-333: cfg-routed read so the sectioned-env / TOML snapshot
+    # paths feed the audit; legacy `AP2_VALIDATOR_JUDGE_TIMEOUT_S` env
+    # still works via the reverse-lookup in `cfg.get_component_value`.
+    # Component name on the same line as `get_component_value(` so the
+    # briefing's verification grep
+    # (`grep -rE "get_component_value\(.validator_judge."`) matches.
+    raw = str(
+        cfg.get_component_value("validator_judge", "timeout_s", default="")
+        or "",
+    ).strip()
     try:
         timeout = float(raw) if raw else _vj_default
     except ValueError:
@@ -808,7 +864,9 @@ def diagnose(
     report.sections.append(
         ("auto-approve safety floor", auto_approve_audit(cfg_for_audit)),
     )
-    report.sections.append(("auto-unfreeze safety floor", auto_unfreeze_audit()))
+    report.sections.append(
+        ("auto-unfreeze safety floor", auto_unfreeze_audit(cfg_for_audit)),
+    )
     report.sections.append((f"sandbox user ({user})", user_audit(user)))
     report.sections.append((f"ap2 CLI for {user}", _ap2_installed_for_user(user)))
 

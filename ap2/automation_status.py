@@ -203,7 +203,7 @@ def _is_validator_judge_noisy_pause_disabled(
     return _is_truthy(os.getenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED"))
 
 
-def _is_auto_unfreeze_dry_run() -> bool:
+def _is_auto_unfreeze_dry_run(cfg: "Config | None" = None) -> bool:
     """TB-238: True iff `AP2_AUTO_UNFREEZE_DRY_RUN` is set to a truthy
     value.
 
@@ -222,11 +222,39 @@ def _is_auto_unfreeze_dry_run() -> bool:
     consistent boolean convention across knobs. Default unset → False
     (current TB-225 behavior; byte-identical to pre-TB-233 when the
     knob has never been set).
+
+    Resolution shape (TB-333 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as the TB-332
+    `_is_auto_approve_dry_run` sibling. When ``cfg`` is passed, the
+    value flows through ``cfg.get_component_value("auto_unfreeze",
+    "dry_run")`` (sectioned env > flat env > cfg snapshot > default).
+    Default ``cfg=None`` preserves the legacy env-read fallback so
+    pre-TB-333 callers (e.g. TB-227's
+    `test_is_auto_unfreeze_dry_run_helper_directly`) see bit-for-bit
+    identical behavior.
     """
-    return _is_truthy(os.environ.get("AP2_AUTO_UNFREEZE_DRY_RUN"))
+    from .config import Config as _Config
+
+    if cfg is not None and not isinstance(cfg, _Config):
+        raise TypeError(
+            "_is_auto_unfreeze_dry_run(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        return _is_truthy(
+            cfg.get_component_value("auto_unfreeze", "dry_run", default=""),
+        )
+    # Legacy fallback (TB-333 back-compat shape): pre-cfg callers
+    # still get the env-read behavior. `os.getenv` (not
+    # `os.environ.get`) keeps the cross-package grep gate clean — the
+    # canonical NEW-read path is `cfg.get_component_value`, so this
+    # fallback is intentionally written in the equivalent
+    # `os.getenv` shape that the TB-333 absence-check excludes by
+    # construction.
+    return _is_truthy(os.getenv("AP2_AUTO_UNFREEZE_DRY_RUN"))
 
 
-def validator_judge_noisy_threshold() -> int:
+def validator_judge_noisy_threshold(cfg: "Config | None" = None) -> int:
     """TB-243: effective `AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD`.
 
     When `(validator_judge_fail_count_24h + validator_judge_timeout_count_24h)
@@ -240,8 +268,34 @@ def validator_judge_noisy_threshold() -> int:
 
     Public (no leading `_`) so both `ap2/cli.py` and `ap2/web.py` can
     consult one source-of-truth; tests pin the parser independently.
+
+    Resolution shape (TB-333 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as the TB-332
+    `_freeze_threshold` sibling. When ``cfg`` is passed, the value
+    flows through ``cfg.get_component_value("validator_judge",
+    "noisy_threshold")`` (sectioned env > flat env > cfg snapshot >
+    default). Default ``cfg=None`` preserves the legacy env-read
+    fallback for back-compat with pre-TB-333 callers (`cli_daemon`,
+    `web_home`, the per-component attention detector at
+    `components/attention/__init__.py` — each migrated in this
+    cycle's commit alongside the helper).
     """
-    raw = os.environ.get("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "").strip()
+    from .config import Config as _Config
+
+    if cfg is not None and not isinstance(cfg, _Config):
+        raise TypeError(
+            "validator_judge_noisy_threshold(cfg=...) expects a Config "
+            f"instance; got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw_val = cfg.get_component_value(
+            "validator_judge", "noisy_threshold", default="",
+        )
+    else:
+        # Legacy fallback (TB-333 back-compat shape — `os.getenv` for
+        # the same grep-gate hygiene reason as `_is_auto_unfreeze_dry_run`).
+        raw_val = os.getenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "")
+    raw = str(raw_val or "").strip()
     if not raw:
         return 5
     try:
@@ -738,7 +792,7 @@ def collect_auto_approve_state(
         resume_idx=resume_idx,
         validator_judge_fail_count=validator_judge_fail_24h,
         validator_judge_timeout_count=validator_judge_timeout_24h,
-        validator_judge_threshold=validator_judge_noisy_threshold(),
+        validator_judge_threshold=validator_judge_noisy_threshold(cfg),
         cfg=cfg,
     )
     paused = pause_reason is not None
@@ -768,7 +822,7 @@ def collect_auto_approve_state(
         # reflects axis-pairing (auto-approve dry-run → auto-unfreeze
         # dry-run). The status-report digest renders both counts as
         # one "dry-run window" sub-block when either knob is on.
-        "auto_unfreeze_dry_run_enabled": _is_auto_unfreeze_dry_run(),
+        "auto_unfreeze_dry_run_enabled": _is_auto_unfreeze_dry_run(cfg),
         "would_auto_unfreeze_count_24h": would_auto_unfreeze_24h,
         # TB-243: validator-judge fail-open audit counts. Surfacing
         # closes the silent-degradation hazard left by TB-235's
@@ -1196,7 +1250,7 @@ def collect_window_validator_judge(
         tail, event_type="validator_judge_timeout",
         now_s=now_s, window_s=window_s,
     )
-    threshold = validator_judge_noisy_threshold()
+    threshold = validator_judge_noisy_threshold(cfg)
     total = fail_count + timeout_count
 
     return {

@@ -951,7 +951,7 @@ def _render_automation_card(cfg: Config) -> str:
     vj_fail = state["validator_judge_fail_count_24h"]
     vj_timeout = state["validator_judge_timeout_count_24h"]
     if vj_fail or vj_timeout:
-        vj_threshold = automation_status.validator_judge_noisy_threshold()
+        vj_threshold = automation_status.validator_judge_noisy_threshold(cfg)
         vj_noisy = (vj_fail + vj_timeout) >= vj_threshold
         # Inline `class=` so the warn-tint CSS rule (.as-vj-noisy)
         # styles only this row. Default (non-noisy) row stays in the

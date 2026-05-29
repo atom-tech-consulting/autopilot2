@@ -64,6 +64,21 @@ from pathlib import Path
 # shield. Tests that need the judge to fire override via
 # `monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)`.
 #
+# TB-333 axis-5 migration exemption: the two `os.environ.get(
+# "AP2_VALIDATOR_JUDGE_DISABLED", ...)` / `os.environ.setdefault(
+# "AP2_VALIDATOR_JUDGE_DISABLED", ...)` calls below stay env-driven
+# (NOT migrated to `cfg.get_component_value("validator_judge",
+# "disabled")` like the cross-package consumers in
+# `automation_status.py` / `doctor.py`). The shield runs at conftest
+# import time — pytest hasn't constructed any project's `Config` yet,
+# so a cfg-routed read has no Config instance to consult and would
+# need to synthesize one against an unknown project root. The env
+# read here is the operator-facing source-of-truth surface anyway
+# (the operator opts out via `AP2_VALIDATOR_JUDGE_DISABLED=0 uv run
+# pytest`, not via a TOML edit), which makes env-only the right
+# resolution layer for this specific call site even after the axis-5
+# migration completes.
+#
 # Edge case: shells that `export AP2_VALIDATOR_JUDGE_DISABLED=` (no
 # value, empty string) make the key present in `os.environ` so
 # `setdefault` would leave the empty string alone and the shield

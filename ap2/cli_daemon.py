@@ -834,7 +834,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         _vj_fail = a["validator_judge_fail_count_24h"]
         _vj_timeout = a["validator_judge_timeout_count_24h"]
         if _vj_fail or _vj_timeout:
-            _vj_threshold = automation_status.validator_judge_noisy_threshold()
+            _vj_threshold = automation_status.validator_judge_noisy_threshold(cfg)
             _vj_noisy = (_vj_fail + _vj_timeout) >= _vj_threshold
             print(
                 f"validator-judge: {_vj_fail} fail | "

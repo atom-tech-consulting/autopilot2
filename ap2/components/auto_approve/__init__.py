@@ -553,7 +553,7 @@ def _validator_judge_noisy_paused(cfg: Config) -> tuple[int, int, int] | None:
         return None
     if not cfg.events_file.exists():
         return None
-    threshold = _astatus.validator_judge_noisy_threshold()
+    threshold = _astatus.validator_judge_noisy_threshold(cfg)
     if threshold <= 0:
         return None
     tail = events.tail(cfg.events_file, 2000)

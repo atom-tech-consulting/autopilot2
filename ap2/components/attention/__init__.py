@@ -482,7 +482,7 @@ def _detect_task_frozen(
 
 
 def _detect_validator_judge_noisy(
-    cfg: Config,  # noqa: ARG001 — accepted for parity with sibling detectors
+    cfg: Config,
     *,
     tail: list[dict],
     now: _dt.datetime,
@@ -525,7 +525,7 @@ def _detect_validator_judge_noisy(
     an orthogonal axis-3 safety floor). And independent of the
     TB-243 / TB-245 surfaces — this addition is purely additive.
     """
-    threshold = validator_judge_noisy_threshold()
+    threshold = validator_judge_noisy_threshold(cfg)
     if threshold <= 0:
         # Defensive: the resolver normalizes non-positive values
         # back to the default (5), so this branch is effectively
