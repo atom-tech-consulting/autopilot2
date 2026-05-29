@@ -1427,7 +1427,20 @@ Set in shell, in `<project>/.cc-autopilot/env`, or in
 `~claude-agent/.zshenv`. The full set the ap2 source consults
 (`grep -nE 'AP2_[A-Z_]+' ap2/*.py` is the source-of-truth — the
 `test_every_env_knob_documented` gate in `ap2/tests/test_docs_drift.py`
-fails CI if a new knob is added and not listed here):
+fails CI if a new knob is added and not listed here).
+
+**12-factor exempt set + CI gate (TB-338).** The subset of knobs that
+NEVER migrate to TOML — Mattermost auth / channel identity, integration
+secrets (`AP2_WEBHOOK_URL`), deployment-environment paths
+(`AP2_CHANNEL_FILE_PATH`), sandbox-identity placeholders (`AP2_DIR`,
+`AP2_REAL_SDK`) — is enumerated in
+`ap2/config_compat.py::_KNOBS_STAYING_ENV_ONLY`. The
+`test_tb338_env_only_cut_line` gate enforces this cut-line on every
+PR: any new `os.environ.get("AP2_…")` read added outside the exempt
+set + the `ap2/config.py` / `ap2/env_reload.py` bootstrap path fails
+CI until the author migrates via `cfg.get_*_value` or explicitly
+documents the new knob in `_KNOBS_STAYING_ENV_ONLY` with a one-line
+justification:
 
 **Hot-reload vs restart (TB-271).** Most tunable knobs (timeouts,
 max-turns, model/effort, auto-approve / auto-unfreeze thresholds,

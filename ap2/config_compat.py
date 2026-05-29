@@ -176,6 +176,17 @@ FLAT_TO_SECTIONED: dict[str, str] = {
 # test (`ap2/tests/test_tb323_config_compat.py::
 # test_template_exempt_partition_is_total`) to see why each one stays.
 #
+# TB-338 enforcement gate: `ap2/tests/test_tb338_env_only_cut_line.py`
+# closes goal.md progress signal 6 (L401-403, "clearly minimal") by
+# asserting (a) the disjointness of FLAT_TO_SECTIONED and this set, and
+# (b) that every direct `os.environ.get("AP2_…")` AST call node under
+# `ap2/` reads a knob that is EITHER in this set, in the
+# bootstrap allowlist (`ap2/config.py` / `ap2/env_reload.py`), or in the
+# test module's documented `_PENDING_MIGRATION_KNOBS` debt set. A future
+# PR that adds a new direct env read outside those carve-outs fails CI
+# until the author picks one of the four remediation paths the test's
+# failure message enumerates.
+#
 # Cut-line rationale (per knob):
 #   - Integration secrets / auth tokens: Mattermost bot identity and team
 #     identity are auth-bearing — they belong in shell-exported env (or a
