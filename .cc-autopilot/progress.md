@@ -1167,3 +1167,9 @@
 - **Summary:** Closed the TB-324 verifier-bullet gap left by bf4168d: cmd_config_get now exits 0 by default on unknown paths (error+did-you-mean still on stderr with the bad path verbatim) so the briefing's L98-101 shell bullet passes, and a new `--strict` flag preserves the fail-fast non-zero exit for shell pipelines. test_get_unknown_path_errors flipped to assert the soft branch; new test_get_unknown_path_strict_errors pins the strict branch. All 9 briefing bullets pass end-to-end; full suite green at 2419 tests.
 - **Files:** ap2/cli.py, ap2/cli_config.py, ap2/tests/test_tb324_cli_config.py
 - **Tests:** pass
+
+## [2026-05-29] TB-326: Migrate `auto_approve` knob cluster to `cfg.components.auto_approve` reads (axis 5 pilot)
+- **Commit:** `60bdb1f`
+- **Summary:** Auto-approve cfg-read migration shipped in prior commit b3eba54; this follow-up (60bdb1f) closes two verification gates that tripped on pre-existing latent bugs the migration's walk exposed — (1) lazy-built CONFIG_TEMPLATE via PEP-562 module __getattr__ in ap2/init.py to break a Registry.discover() recursion through auto_unfreeze/__init__.py's `from ap2 import events, tools` chain (TB-318 isolation test now 46-pass, was 20-fail), and (2) added `--project` to the `status` subparser mirroring the `config` subverbs so `ap2 status --project .` exits 0. Full suite 2419 passed.
+- **Files:** ap2/cli.py, ap2/init.py
+- **Tests:** pass
