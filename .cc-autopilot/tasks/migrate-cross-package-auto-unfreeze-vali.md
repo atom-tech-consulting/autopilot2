@@ -111,3 +111,10 @@ the per-component briefs structurally excluded them.
   constructed yet at conftest import time; documented as exempt
   in `_KNOBS_STAYING_ENV_ONLY` if not already.
 - Changes to TB-238 / TB-243 / TB-249 / TB-272 behavior contracts.
+## Attempts
+
+### 2026-05-29 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `uv run python -m ap2 doctor --project .` exits 0 in the defaultconfiguration (sanity that the cfg-read swap didn't brea
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T060757Z-TB-333.prompt.md`, `stream: .cc-autopilot/debug/20260529T060757Z-TB-333.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T060757Z-TB-333.messages.jsonl`
