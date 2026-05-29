@@ -1,146 +1,140 @@
 # Ideation State
 
-_Last updated: 2026-05-28T21:57:00Z by ideation cron_
+_Last updated: 2026-05-29T00:10:00Z by ideation cron_
 
 ## Mission alignment
 
-Cycle entry: board 0A / 0R / 0B / 0P / 192C / 0F. Operator extended
-goal.md at 2026-05-28T20:33:04Z with a new focus, **"structured
-config (env → TOML)"**, then ran `rewind-focus` to reset the empty-
-cycles counter (the prior focus auto-exhausted as soon as goal.md
-was extended). The just-shipped component-refactor focus
-(TB-309 → TB-320, all six named axes + the `ap2 status` L235-237
-Progress signal landed) closed cleanly: every autonomous behavior
-now lives under `ap2/components/<name>/` with manifest-declared
-hook points (TB-318 final migration, 548e667). Most recent Completes
-considered: TB-318 (axis-5 auto_approve migration, 548e667),
-TB-319 (`ap2 status` enumerates components, ce55765), TB-320
-(env_flag wiring on the last 3 manifests + AP2_AUTO_UNFREEZE_DISABLED
-kill switch, e61ecc9). Backlog is empty and a fresh 6-axis roadmap
-is on the table — this cycle re-derives proposals from scratch
-against goal.md L266-403 (the new focus body).
+Cycle entry: board 0A / 0R / 0B / 0P / 195C / 0F. The three
+prior-cycle proposals all landed cleanly inside ~3h: TB-321
+(axis 1 — TOML schema + parser + `Config.from_toml` +
+`Manifest.config_schema`, f5b0f0c), TB-322 (axis 3 — `config_schema`
+filled on the 6 remaining component manifests, e38bb38), TB-323
+(axis 2 — env-override layer + `config_compat.py` FLAT_TO_SECTIONED
+map of 62 knobs + `env_deprecated` one-shot + config.toml mtime
+watch, a50e686). End-of-arc gate held: 2386/2386 pytest green
+after TB-323. The three parallelizable downstream axes (4, 5, 6) per goal.md L378-382
+are now all unblocked. This cycle moves to the operator-facing
+surface (axis 4) + the docs-drift sibling (axis 6) + the pilot
+cluster of the long-tail axis 5 migration.
 
 ## Current focus assessment
 
 - **Current focus: structured config (env → TOML)**
   - Progress so far:
-    - Zero TB-Ns shipped against this focus yet (added 2026-05-28
-      via operator `update_goal` op at 20:33:04Z; rewind_focus
-      at 20:33:50Z reset the empty-cycles counter so the daemon
-      doesn't auto-advance on entry).
-    - Adjacent ground-truth shipped: TB-309 left the registry +
-      `Manifest` dataclass (`ap2/registry.py`) as the natural home
-      for the new `config_schema` field per goal.md L335-340; TB-305
-      shipped the env-template docs-drift gate
-      (`test_every_env_knob_in_template_or_exempt`,
-      `_TEMPLATE_EXEMPT_KNOBS` frozenset with 38 entries) that the
-      axis-6 config-schema sibling will mirror.
+    - Axis 1 shipped: `ap2/config_loader.py` (tomllib parser,
+      `ConfigKey` dataclass, `aggregate_schemas`, `validate_config`
+      with named-path error, `Config.from_toml`) + `Manifest`
+      gained `config_schema` field + janitor canary + daemon
+      fail-fast validation gate at `main_loop` start (TB-321,
+      f5b0f0c).
+    - Axis 3 shipped: `config_schema` declared on all 6 remaining
+      component manifests (mattermost, attention, focus_advance,
+      auto_unfreeze, auto_approve, validator_judge); 25-entry
+      union pinned by `test_tb322_component_schemas.py` (TB-322,
+      e38bb38).
+    - Axis 2 shipped: `ap2/config_compat.py` FLAT_TO_SECTIONED
+      map (62 entries) + `_KNOBS_STAYING_ENV_ONLY` 12-factor
+      exemption + sectioned-env > flat-env > TOML precedence +
+      one-shot `env_deprecated` event per flat knob per process +
+      `env_reload.py` watching `.cc-autopilot/config.toml` mtime
+      (TB-323, a50e686).
   - Gaps:
-    - **Axis (1) prerequisite missing** (goal.md L304-315): no
-      `ap2/config_loader.py` or `Config.from_toml(path)`
-      constructor exists; the daemon still loads exclusively via
-      `Config.load()` reading `os.environ.get("AP2_*", default)`
-      at 9 sites in `ap2/config.py` (110 `AP2_*` env reads across
-      30 files — Grep audit 2026-05-28). Without axis (1) every
-      downstream axis has nothing to read against.
-    - **Axis (2) back-compat layer missing** (goal.md L317-329):
-      no `ap2/config_compat.py` mapping the existing flat
-      `AP2_*` names to the TOML-section overrides; no
-      `env_deprecated` one-shot event vocabulary registered in
-      `ap2/events.py`. Without this, OSS users get a new file
-      but every existing shell-export / CI override breaks.
-    - **Axis (3) per-component schema declarations missing**
-      (goal.md L331-340): the 7 existing `Manifest` instances
-      (janitor, validator_judge, mattermost, attention,
-      focus_advance, auto_unfreeze, auto_approve) carry no
-      `config_schema` field; the `Manifest` dataclass at
-      `ap2/registry.py` L88-105 has no slot for it yet either.
-      A scaffold (field + janitor canary) + per-component fill-in
-      both need to land.
-    - **Axes (4) CLI surface, (5) ~52-knob migration, (6) docs-
-      drift sibling**: all blocked on (1)-(3); not ideation-
-      proposable this cycle. (5) is explicitly a per-cluster
-      long-tail per goal.md L353-364.
+    - **Axis 4 — CLI surface missing** (goal.md L342-351). No
+      `ap2 config` subcommand exists (Grep confirms zero matches
+      for `"ap2 config"` across `ap2/cli*.py`). Operators still
+      have to read `.cc-autopilot/config.toml` + `ap2/howto.md`
+      directly to enumerate knobs; the delete-test at L349-351
+      says "if not shipped, the new config surface is present but
+      not operator-discoverable." `ap2 config list / get / set /
+      validate` is the discoverability surface goal.md's Progress
+      signals at L394-395 explicitly require.
+    - **Axis 6 — docs-drift gate + `CONFIG_TEMPLATE` missing**
+      (goal.md L366-376). No `CONFIG_TEMPLATE` sibling to
+      `ENV_TEMPLATE` in `ap2/init.py` (only `ENV_TEMPLATE` at
+      L259); no `test_every_config_key_documented` test exists
+      (Grep). The 25-key schema union from TB-322 is now the
+      surface the gate can assert against.
+    - **Axis 5 — zero clusters migrated** (goal.md L353-364). The
+      62-entry FLAT_TO_SECTIONED map is in HEAD, but no component
+      body has actually switched its `os.environ.get("AP2_FOO")`
+      reads to `cfg.components.<name>.<key>` reads. Per goal.md
+      L361 "one TB-N per logical cluster"; the long tail starts
+      now. auto_approve is the natural pilot (9 knobs per
+      FLAT_TO_SECTIONED — the largest single cluster — and the
+      most operator-facing component).
   - Status: `in-progress`
-  - Reasoning: fresh focus, zero TB-Ns shipped, prerequisite
-    structural slice (axis 1) is the unambiguous next step;
-    parallelizable follow-ups (axes 2 + 3) have a natural shape
-    once axis 1 lands.
+  - Reasoning: the
+    three remaining axes are independently startable, and axis 4
+    + axis 6 + axis-5-pilot are the highest-impact / lowest-risk
+    next slice that progresses all three in parallel without
+    burning future flexibility (axis 5 cluster pattern needs a
+    pilot to validate before queueing 6 more identical-shape
+    tasks).
 
 ## Non-goal risk check
 
-None. All three proposed tasks sit squarely in the new focus's
-axes (1)-(3) per goal.md L304-340. The previously-shipped
-behavior surface stays bit-identical (axis 1 / 2 are pure
-add-then-parallel-path; axis 3 is dataclass-field additions
-+ registry-walked validation). No drift into goal.md L405-447
-Non-goals (no multi-tenancy, no goal.md auto-rotation, no
-API-stability commitments on `ap2/core/`, no behavior removal
-during component extraction).
+None. All three proposed tasks sit squarely in goal.md L342-376
+(axes 4 + 6) and L353-364 (axis 5). Axis 4 adds a discoverability
+surface; axis 6 adds a regression gate; axis 5 pilot is a pure
+read-path swap with bit-identical behavior. No drift into the
+Non-goals at L405-447 (no multi-tenancy, no goal.md auto-rotation,
+no API-stability commitments on `ap2/core/`, no behavior change
+beyond `cfg`-routing of an existing read).
 
 ## Considered & deferred this cycle
 
-- **Axis (4) CLI surface (`ap2 config list / get / set / validate`)**:
-  natural follow-up to TB-321 (axis 1), but the validate / list
-  verbs need the schema-registry walk that doesn't exist until
-  TB-321 ships. Defer to a post-TB-321 cycle. Re-rank once axis 1
-  is in HEAD; until then the daemon-startup-validator covers the
-  validation surface and the toml file is operator-readable
-  directly.
-- **Axis (5) per-knob migration (one TB-N per cluster)**: the
-  long-tail body of the focus per goal.md L353-364. Defer until
-  axes (1) + (3) ship — without `cfg.<path>.<key>` read paths
-  and per-component `config_schema` declarations, every
-  migration task would be a stub. Each cluster (auto_approve
-  knobs, attention knobs, etc.) is a clean ~30-line TB-N once
-  the foundation exists.
-- **Axis (6) docs-drift gate sibling (TB-305 sibling for
-  config-key documentation)**: cheap to write but premature —
-  with zero schema keys declared and zero knobs migrated, the
-  gate would pass vacuously. Defer until axis (3) fills in the
-  first 2-3 component schemas so the gate has surface to assert
-  against.
+- **Axis 5 cluster 2-7 (attention, focus_advance, auto_unfreeze,
+  mattermost, validator_judge, janitor, core)**: each is a clean
+  ~30-line read-swap TB-N once auto_approve pilot validates the
+  template, but queueing 7 identical-shape tasks before the
+  pilot lands risks 7 identical fixups if the pilot surfaces a
+  template gap (e.g. test-fixture pattern, kill-switch handling,
+  `env_deprecated` interaction). Defer to a post-pilot cycle.
+- **`ap2 config edit` interactive flow / TOML-aware editor**:
+  goal.md L342-351 enumerates `list / get / set / validate` only;
+  an `edit` verb would extend scope without operator-stated need.
+  Defer until/unless operator surfaces the need.
 - **Recurring rejection-pattern check (carried, re-justified)**:
-  operator vetoes TB-185/184 (ap2-meta-polish unconnected to
-  focus), TB-175 (premature aggregation), TB-231
-  (symptom-patching), TB-240 (validator whack-a-mole). None of
-  the three proposed tasks fit those shapes — they're direct
-  build-out of operator-authored goal.md L266-403 axes (1)-(3)
-  with explicit delete-test alignment. Pattern carried so
-  future cycles re-verify alignment as the foundation matures.
+  operator vetoes TB-185/184 (meta-polish unconnected to focus),
+  TB-175 (premature aggregation), TB-231 (symptom-patching),
+  TB-240 (validator whack-a-mole). None of the three proposed
+  tasks match those shapes — each is direct goal.md axis build-out
+  with a named delete-test. Pattern carried so future cycles
+  re-verify alignment as axes drain.
 
 ## Cycle observations
 
-- Prior cycle's observation about manifest-internal-switch design
-  polarity being double-anchored (in manifest docstrings + TB-320
-  Out-of-scope) has shipped to current state and no longer
-  informs reasoning. Dropped.
-- New observation worth carrying once: the 110-call sweep of
-  `os.environ.get("AP2_*")` across 30 files (Grep,
-  2026-05-28T21:55Z) is the size estimate for axis (5)'s
-  migration tail; informs cluster-grouping decisions in future
-  cycles. Carry for one cycle, then drop once axis (5) starts
-  shipping.
+- 110-call sweep observation from last cycle (axis 5 sizing
+  estimate) is now superseded by the more precise 62-entry
+  FLAT_TO_SECTIONED in TB-323's HEAD — drop. The migration tail
+  is bounded by FLAT_TO_SECTIONED keys, not the broader
+  `os.environ.get("AP2_*")` count (some of those reads will stay
+  env-only per `_KNOBS_STAYING_ENV_ONLY`).
+- New observation worth carrying once: axes 4 + 5 + 6 are now
+  fully parallelizable per goal.md L378-382; the axis-5 long tail
+  may be the right place for the operator to seed ~5 cluster TB-Ns
+  at once (one per component) once the pilot template is proven,
+  rather than ideation drip-feeding them one cycle at a time. Flag
+  for re-evaluation after TB-326 (auto_approve pilot) lands.
 
 ## Decisions needed from operator
 
-(none — fresh focus is well-specified at goal.md L266-403 with
-explicit axis ordering, delete-tests, and Progress signals; no
-narrative-judgment ambiguity ideation is uniquely positioned to
-surface this cycle. The three proposed tasks below are direct
-build-out of operator-authored axes (1)-(3); operator approval
-via `ap2 approve TB-321`/`TB-322`/`TB-323` is the standard
-review-gate path.)
+(none — the three proposed tasks are direct build-out of
+operator-authored goal.md axes 4 / 5 / 6 with explicit delete-tests
+and Progress signals already specified; operator approval via
+`ap2 approve TB-N` is the standard review-gate path. The pilot
+vs bulk-queue choice for axis 5 will surface as a real decision
+only after TB-326 lands — not this cycle.)
 
 ## Proposals this cycle
 
-- TB-321 (axis 1): TOML config schema + parser + validator +
-  `Config.from_toml` + `Manifest.config_schema` dataclass field
-  + janitor canary declaration (single end-to-end vertical
-  slice).
-- TB-322 (axis 3): walk the remaining 6 component manifests and
-  fill in their `config_schema` declarations; registry's
-  startup-validator (from TB-321) consumes them. `@blocked:TB-321`.
-- TB-323 (axis 2): env-var override layer + `config_compat.py`
-  back-compat map for the ~52 flat `AP2_*` names + one-shot
-  `env_deprecated` event vocabulary. `@blocked:TB-321`.
+- TB-324 (axis 4): `ap2 config list / get / set / validate` CLI
+  surface — operator-queue-routed writes, audit events, source
+  attribution (file / env-override / default).
+- TB-325 (axis 6): `CONFIG_TEMPLATE` sibling in `ap2/init.py` +
+  `test_every_config_key_documented` docs-drift gate
+  (TB-305-parallel for config keys).
+- TB-326 (axis 5 pilot): migrate the auto_approve knob cluster
+  (9 keys) from `os.environ.get("AP2_AUTO_APPROVE_*")` to
+  `cfg.components.auto_approve.<key>` reads — pilot for the
+  remaining 6 component clusters.

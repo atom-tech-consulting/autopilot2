@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-321,TB-322",
+  "briefing_path": ".cc-autopilot/tasks/config-template-test-every-config-key-do.md",
+  "focus_anchor": "current focus structured config env toml",
+  "proposed_at": "2026-05-29T00:16:13Z",
+  "tb_id": "TB-325",
+  "why_now": "TB-322 just placed 25 config keys across 7 component\nschemas, so the gate has real surface to assert against \u2014 last\ncycle this was deferred as premature (\"with zero schema keys\ndeclared, the gate would pass vacuously\"); that's no longer\ntrue. Every cluster migrated under axis 5 will add 1-6 more\nconfig keys; without the gate landing first, axis-5 migrations\nship key declarations whose howto.md entry can silently lag\nbehind \u2014 the exact class of drift TB-305 closed for env knobs."
+}
