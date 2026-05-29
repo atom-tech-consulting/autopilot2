@@ -134,7 +134,24 @@ FLAT_TO_SECTIONED: dict[str, str] = {
     "AP2_ATTENTION_DEBOUNCE_S": "components.attention.debounce_s",
     "AP2_ATTENTION_IMMEDIATE_PUSH": "components.attention.immediate_push",
     # --- focus_advance component --------------------------------------------
-    "AP2_FOCUS_AUTO_ADVANCE_DISABLED": "components.focus_advance.disabled",
+    # TB-329: the sectioned target on the left side of `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+    # was originally `components.focus_advance.disabled` (TB-323
+    # initial map) but TB-322's manifest schema named the key
+    # `auto_advance_disabled` (see
+    # `ap2/components/focus_advance/manifest.py` config_schema) and
+    # `ap2/howto.md` documents `components.focus_advance.auto_advance_disabled`
+    # to the operator. The bare `disabled` form was a latent bug — under
+    # it, a flat `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` would populate
+    # `cfg.components_config["focus_advance"]["disabled"]` (per the
+    # `apply_env_overrides` write path) but the TB-329 read-site
+    # migration calls `cfg.get_component_value("focus_advance",
+    # "auto_advance_disabled")`, whose reverse-`FLAT_TO_SECTIONED` lookup
+    # would miss the legacy flat env and the cfg-snapshot fallback would
+    # miss the wrongly-keyed write — net effect: the operator's flat env
+    # value would silently disappear once the read site swapped. Align
+    # the back-compat map with the schema + docs so the three surfaces
+    # (TB-322 schema, TB-323 back-compat map, TB-329 read site) agree.
+    "AP2_FOCUS_AUTO_ADVANCE_DISABLED": "components.focus_advance.auto_advance_disabled",
     "AP2_FOCUS_ADVANCE_EMPTY_CYCLES": "components.focus_advance.empty_cycles",
     # --- janitor component --------------------------------------------------
     "AP2_JANITOR_DISABLED": "components.janitor.disabled",

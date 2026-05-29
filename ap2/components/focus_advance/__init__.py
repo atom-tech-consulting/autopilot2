@@ -75,10 +75,20 @@ pointer file lives at `.cc-autopilot/focus_pointer.json`; it's both
 fenced from task agents (TASK_AGENT_FENCED_PATHS) and gitignored so
 rollbacks don't re-fire stale `focus_advanced` events.
 
-Kill-switch: `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits the
-advance attempt even when criteria are met. The daemon surfaces a
-`## Decisions needed from operator` bullet instead so the operator
-can advance manually via `ap2 update-goal`.
+Kill-switch: `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` (or
+`[components.focus_advance] auto_advance_disabled = true` post-TB-329
+TOML overlay) short-circuits the advance attempt even when criteria
+are met. The daemon surfaces a `## Decisions needed from operator`
+bullet instead so the operator can advance manually via
+`ap2 update-goal`. TB-329 axis-5: the read-site now routes through
+`cfg.get_component_value("focus_advance", "auto_advance_disabled")` /
+`cfg.get_component_value("focus_advance", "empty_cycles")` (via the
+intra-package `_focus_auto_advance_disabled(cfg)` /
+`_advance_empty_cycles_threshold(cfg)` helpers below) instead of the
+pre-migration `goal.auto_advance_disabled()` /
+`goal.advance_empty_cycles_threshold()` env-only path. See the
+manifest's TB-329 doc block for the chosen access-shape rationale
+and the FLAT_TO_SECTIONED latent-bug fix that landed alongside.
 """
 from __future__ import annotations
 
@@ -88,6 +98,88 @@ from ap2.config import Config
 
 
 _FOCUS_RECENT_TAIL_N = 200
+
+# Mirror of the `ap2.goal` parser constants (kept here so the
+# `_advance_empty_cycles_threshold(cfg)` helper below can clamp without
+# the call chain re-routing through `goal.py`'s env-only helper, which
+# is what TB-329 is migrating away from). `goal.ADVANCE_EMPTY_CYCLES_*`
+# remain the single source of truth — they're imported lazily inside
+# the helper to keep the module-level alias surface stable for the
+# `daemon._maybe_advance_focus` re-export contract (TB-313).
+
+
+def _focus_auto_advance_disabled(cfg: Config) -> bool:
+    """TB-329 axis-5: True iff the focus auto-advance kill switch is
+    set to a truthy value.
+
+    Resolution shape (mirrors the TB-326 pilot template + TB-327 /
+    TB-328 cluster siblings): routes through
+    `cfg.get_component_value("focus_advance", "auto_advance_disabled")`,
+    which evaluates sectioned env (the
+    `f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"` shape built
+    inside the helper) > flat env (`AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+    via the `FLAT_TO_SECTIONED` reverse-lookup) > `cfg.components_config`
+    snapshot > default at call time. Call-time env-first precedence
+    preserves the pre-TB-329 `goal.auto_advance_disabled()` lazy-read
+    pattern — `monkeypatch.setenv(...)` plus a subsequent helper call
+    picks up the new value without rebuilding cfg.
+
+    Same truthy enumeration as `goal.auto_advance_disabled()`
+    (`"1"` / `"true"` / `"yes"` / `"on"`, case-insensitive) so the
+    pre-migration `_maybe_advance_focus` kill-switch test pin
+    (`test_auto_advance_disabled_short_circuits` in
+    `test_tb226_focus_rotation.py`) passes without modification. The
+    TOML layer's typed `True` / `False` is also honored so an operator
+    who opts into `[components.focus_advance] auto_advance_disabled =
+    true` gets the same behavior the shell-export operator does.
+
+    Default unset → False (auto-advance enabled), bit-for-bit
+    identical to the pre-TB-329 env-only behavior.
+    """
+    raw = cfg.get_component_value("focus_advance", "auto_advance_disabled")
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _advance_empty_cycles_threshold(cfg: Config) -> int:
+    """TB-329 axis-5: effective threshold for the empty-cycles
+    heuristic advance signal (TB-283 / TB-292).
+
+    Resolution shape (mirrors the TB-326 pilot template + TB-327 /
+    TB-328 cluster siblings): routes through
+    `cfg.get_component_value("focus_advance", "empty_cycles")`, which
+    evaluates sectioned env (the
+    `f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"` shape built
+    inside the helper) > flat env (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+    via the `FLAT_TO_SECTIONED` reverse-lookup) > `cfg.components_config`
+    snapshot > default at call time. The flat env name keeps today's
+    behavior bit-for-bit for the shell-export operator who never
+    migrated their `.cc-autopilot/env`.
+
+    Permissive parse (`goal.advance_empty_cycles_threshold()` parity):
+    empty / non-int / whitespace-only values fall back to the default
+    (`goal.ADVANCE_EMPTY_CYCLES_DEFAULT` = 3); out-of-range values clamp
+    to [`goal.ADVANCE_EMPTY_CYCLES_MIN`, `goal.ADVANCE_EMPTY_CYCLES_MAX`]
+    (= [1, 20]) so an operator typo (e.g. `0` or `999999`) doesn't
+    disable the advance path or wedge it permanently. The clamp
+    constants live in `ap2/goal.py` and are referenced here via late
+    import so the parser bounds stay single-source-of-truth.
+    """
+    raw = cfg.get_component_value("focus_advance", "empty_cycles")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return goal.ADVANCE_EMPTY_CYCLES_DEFAULT
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return goal.ADVANCE_EMPTY_CYCLES_DEFAULT
+    if v < goal.ADVANCE_EMPTY_CYCLES_MIN:
+        return goal.ADVANCE_EMPTY_CYCLES_MIN
+    if v > goal.ADVANCE_EMPTY_CYCLES_MAX:
+        return goal.ADVANCE_EMPTY_CYCLES_MAX
+    return v
 
 
 def _ideation_empty_against_focus(tail: list[dict], focus_title: str) -> int:
@@ -288,7 +380,19 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
     # manually. Idempotent via the bullet's prefix (we don't dedup;
     # the operator-decisions reader handles repeated bullets fine —
     # same shape TB-225 uses for per_day_cap halts).
-    advance_disabled = goal.auto_advance_disabled()
+    # TB-329 axis-5: cfg-routed reads. The pre-TB-329 path called
+    # `goal.auto_advance_disabled()` / `goal.advance_empty_cycles_threshold()`
+    # which read `os.environ` directly. The new helpers route through
+    # `cfg.get_component_value("focus_advance", <key>)` (see TB-326
+    # pilot manifest docstring) so a TOML-opted operator's
+    # `[components.focus_advance]` values flow transparently while
+    # the shell-export operator keeps the legacy flat env names
+    # via the `FLAT_TO_SECTIONED` reverse-lookup back-compat path.
+    # The env-only `goal.*` helpers are retained for the
+    # `test_tb226_focus_rotation.py` unit pins (per the briefing's
+    # "tests pass without modification" contract); only this call
+    # site swaps.
+    advance_disabled = _focus_auto_advance_disabled(cfg)
 
     advance_trigger: str | None = None
 
@@ -297,7 +401,7 @@ async def _maybe_advance_focus(cfg: Config, sdk) -> None:
     # sub-block (TB-285 rename of the prior `Done when:` block).
     # Count consecutive ideation cycles that produced 0 proposals
     # against the active focus.
-    threshold = goal.advance_empty_cycles_threshold()
+    threshold = _advance_empty_cycles_threshold(cfg)
     tail = events.tail(cfg.events_file, _FOCUS_RECENT_TAIL_N)
     empty_cycles = _ideation_empty_against_focus(tail, active.title)
     # Keep the pointer's empty_cycles field in sync (forensic /

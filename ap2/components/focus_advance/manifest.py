@@ -1,4 +1,4 @@
-"""focus_advance component manifest (TB-313 axis 5).
+"""focus_advance component manifest (TB-313 axis 5 + TB-329 read-site migration).
 
 Registers the focus-list pointer advance pass as the `PRE_DISPATCH`
 tick hook so `daemon._tick` walks
@@ -7,6 +7,59 @@ flat module directly. The implementation lives intra-package at
 `ap2/components/focus_advance/__init__.py` (relocated from
 `ap2/focus_advance.py` by TB-313); the manifest references the
 runtime symbols via `from . import …`.
+
+TB-329 axis-5 read-site migration — chosen resolved-config access shape
+=========================================================================
+The two operator-tunable knobs the component logically owns
+(`auto_advance_disabled`, `empty_cycles`) are now read via the
+**`cfg.get_component_value(component, key)`** helper on `Config`
+(option 2 of the TB-326 pilot's three candidate shapes — see
+`ap2/components/auto_approve/manifest.py` and `ap2/config.py`'s
+docstring for the helper). The two legacy flat env names
+(`AP2_FOCUS_AUTO_ADVANCE_DISABLED`, `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`)
+are no longer read directly inside the component body — the
+`_maybe_advance_focus` call sites previously routed through
+`goal.auto_advance_disabled()` / `goal.advance_empty_cycles_threshold()`
+(env-only helpers in `ap2/goal.py`); they now route through the new
+intra-package `_focus_auto_advance_disabled(cfg)` /
+`_advance_empty_cycles_threshold(cfg)` helpers, which themselves call
+`Config.get_component_value("focus_advance", <key>)`. The env-only
+`goal.*` helpers are retained as-is so the `test_tb226_focus_rotation.py`
+unit pins (env-knob parser shape) pass without modification per the
+briefing's behavior-preservation contract — only the read-site
+consumer swapped.
+
+Why option 2 (helper) and not 1 (raw dict) or 3 (per-component
+dataclass): TB-326's pilot (b3eba54) ratified the helper as the
+lightest-touch incremental shape every remaining cluster reuses
+verbatim. Option 1 (`cfg.components_config["focus_advance"][<key>]`)
+loses env-only-mode back-compat without an additional wrapper — the
+env-only resolution branch (`_load_env_path`) doesn't invoke
+`apply_env_overrides`, so `components_config` stays empty and a raw
+dict read would skip the operator's shell-exported value. Option 3
+(per-component dataclass synthesis) requires a code-gen pass on
+every `Manifest.config_schema`. The TB-329 regression-pin at
+`ap2/tests/test_tb329_focus_advance_cfg_reads.py` mirrors the
+TB-326 / TB-327 / TB-328 five cleavages (grep-absence, TOML-first
+read precedence, flat-env back-compat parity, parser default-on-bad-
+value semantics preservation including the [1, 20] clamp on
+`empty_cycles`, and the manifest's documented access shape).
+
+TB-329 latent-bug fix in `ap2/config_compat.py`: the original
+`FLAT_TO_SECTIONED` map (TB-323 a50e686) wrote
+`AP2_FOCUS_AUTO_ADVANCE_DISABLED` to
+`components.focus_advance.disabled`, but the TB-322 schema (e38bb38)
+named the key `auto_advance_disabled` — and `ap2/howto.md` documents
+`components.focus_advance.auto_advance_disabled` to the operator. The
+bare `disabled` form was a latent bug: under it the flat env value
+would silently disappear once the read site swapped (the reverse-
+`FLAT_TO_SECTIONED` lookup inside `Config.get_component_value` walks
+for `components.focus_advance.auto_advance_disabled` and would miss
+the `disabled`-keyed map entry; the cfg-snapshot fallback would
+likewise miss the wrongly-keyed write). The TB-329 migration aligns
+the back-compat map's sectioned target with the schema + docs so the
+three surfaces (TB-322 schema, TB-323 back-compat map, TB-329 read
+site) agree end-to-end.
 
 Observable-behavior preservation: the wrapping `_tick_hook` function
 self-handles the original stderr-print error surface that
@@ -64,11 +117,13 @@ MANIFEST = Manifest(
     # TB-320: surface TB-226's existing kill switch
     # `AP2_FOCUS_AUTO_ADVANCE_DISABLED` on the manifest so the
     # registry / `ap2 status` render the on/off state correctly and
-    # the registry-level enabled filter picks it up. The subpackage's
-    # internal `_maybe_advance_focus` self-gate (reading `os.environ`
-    # via `goal.auto_advance_disabled()`) stays in place — manifest
-    # wiring is informational at the registry layer, not a
-    # replacement. `default_enabled=True` → suppress-polarity per
+    # the registry-level enabled filter picks it up. Post-TB-329 the
+    # subpackage's internal `_maybe_advance_focus` self-gate routes
+    # through `cfg.get_component_value("focus_advance",
+    # "auto_advance_disabled")` instead of `goal.auto_advance_disabled()`
+    # — the env_flag wiring here remains the registry-facing surface;
+    # the cfg-routed call inside the hook body is the runtime surface.
+    # `default_enabled=True` → suppress-polarity per
     # `registry.Manifest.is_enabled`'s "env_flag set + default_enabled
     # True → truthy disables" branch (`ap2/registry.py:189-194`).
     env_flag="AP2_FOCUS_AUTO_ADVANCE_DISABLED",
@@ -88,17 +143,18 @@ MANIFEST = Manifest(
     tick_hooks=[(Phase.PRE_DISPATCH, _tick_hook)],
     dependencies=[],
     # TB-322 (axis 3): per-component `config_schema` declarations for
-    # the knobs the focus_advance component logically owns. The
-    # subpackage itself does not call `os.environ.get("AP2_*")`
-    # directly — both knobs are read via `ap2/goal.py` helpers
-    # (`goal.auto_advance_disabled()` and
-    # `goal.advance_empty_cycles_threshold()`) that the
-    # `_maybe_advance_focus` body consults. The schema entries cover
-    # them anyway because the briefing's per-component-ownership
-    # contract puts AP2_FOCUS_AUTO_ADVANCE_DISABLED / AP2_FOCUS_ADVANCE_EMPTY_CYCLES
-    # on this manifest (axis-5 read-site migrations will move the
-    # `os.environ.get` calls themselves intra-package). Both knobs
-    # are in `env_reload.HOT_RELOADABLE_KNOBS`, so `hot_reloadable=True`.
+    # the knobs the focus_advance component logically owns. Post-TB-329
+    # the subpackage reads both knobs via
+    # `cfg.get_component_value("focus_advance", <key>)` from
+    # `_maybe_advance_focus` (the new intra-package
+    # `_focus_auto_advance_disabled(cfg)` /
+    # `_advance_empty_cycles_threshold(cfg)` helpers route through
+    # `Config.get_component_value`). The env-only `ap2/goal.py`
+    # helpers (`goal.auto_advance_disabled()` /
+    # `goal.advance_empty_cycles_threshold()`) are retained for the
+    # existing env-only unit pins in `test_tb226_focus_rotation.py`
+    # but no longer drive `_maybe_advance_focus`. Both knobs are in
+    # `env_reload.HOT_RELOADABLE_KNOBS`, so `hot_reloadable=True`.
     config_schema={
         "auto_advance_disabled": ConfigKey(
             name="auto_advance_disabled",
