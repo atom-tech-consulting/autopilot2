@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/enforce-knobs-staying-env-only-12-factor.md",
+  "focus_anchor": "current focus structured config env toml",
+  "proposed_at": "2026-05-29T07:26:35Z",
+  "tb_id": "TB-338",
+  "why_now": "TB-326..TB-335 + TB-336 (in-flight) exercised the migration\nwalk across 6 components + 3 core clusters; the residual direct env\nreads are now substantially just the documented exempts + the\nbootstrap path. The cut-line is mature enough to pin \u2014 pinning it\nlater, once unmigrated AP2 reads have accumulated, requires either a\nratchet-up of the exempt list (defeats \"clearly minimal\") or a\nmigration-debt cleanup before the gate can land. Cheap now, expensive\nlater. Same delete-test as TB-305 / TB-325: without the gate, the\nguarantee in the progress signal is aspirational, not enforced."
+}

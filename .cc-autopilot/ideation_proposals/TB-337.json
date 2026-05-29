@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-322,TB-334",
+  "briefing_path": ".cc-autopilot/tasks/declare-core-section-configkey-schema-cl.md",
+  "focus_anchor": "current focus structured config env toml",
+  "proposed_at": "2026-05-29T07:24:45Z",
+  "tb_id": "TB-337",
+  "why_now": "TB-334 just made `core_config` consumable via a helper, so\nmore readers will migrate into it (TB-336 will add at least 5 more\ncore readers). Declaring the schema before the consumer count grows\navoids a retroactive validation rollout. The shape is well-pinned \u2014\n21 known core keys with sectioned homes already in\n`FLAT_TO_SECTIONED` (config_compat.py L89-115): `tick_s`, `mm_tick_s`,\n`task_timeout_s`, `control_timeout_s`, `max_retries`, `verify_cmd`,\n`verify_timeout_s`, `event_context`, `agent_model`, `agent_effort`,\n`task_max_turns`, `control_max_turns`, `verify_judge_max_turns`,\n`ideation_disabled`, `ideation_trigger_task_count`,\n`ideation_cooldown_s`, `ideation_max_turns`, `ideation_scrub_model`,\n`project_name`, `web_port`, `web_disabled`. Same delete-test as TB-322:\nwithout it, every typo in a core TOML key is silent."
+}
