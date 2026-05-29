@@ -45,6 +45,10 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .config import Config
 
 
 # TB-284: default scrub model. Haiku-4.5 is the cost-target floor —
@@ -153,22 +157,49 @@ _SCRUB_SYSTEM_PROMPT = (
 )
 
 
-def _resolved_model() -> str:
+def _resolved_model(cfg: "Config | None" = None) -> str:
     """Return the scrub model, honoring ``AP2_IDEATION_SCRUB_MODEL``.
 
-    Read fresh from ``os.environ`` at call-time so a hot-reload via
+    TB-335 (axis-5 core-cluster migration): resolves through
+    ``cfg.get_core_value("ideation_scrub_model", default=None)`` —
+    the sectioned-env > flat-env > TOML-snapshot > default precedence
+    chain ``Config.get_core_value`` defines (TB-334). The helper
+    reads env at call time so a hot-reload via
     ``env_reload.maybe_reload_env`` propagates without rebinding any
-    cached state. Empty / whitespace-only overrides fall back to the
-    module default (the safer choice — a typo'd empty value shouldn't
-    silently route the SDK call to "" and trip an opaque SDK error).
+    cached state (parity with the pre-TB-335 direct env read).
+
+    Empty / whitespace-only overrides fall back to the module default
+    (the safer choice — a typo'd empty value shouldn't silently route
+    the SDK call to "" and trip an opaque SDK error).
+
+    Default ``cfg=None`` preserves the legacy env-read fallback for
+    test paths that ``monkeypatch.setenv("AP2_IDEATION_SCRUB_MODEL",
+    ...)`` without threading a Config. Cfg-kwarg-+-TypeError-guard
+    shape per TB-327.
     """
-    return (
-        os.environ.get("AP2_IDEATION_SCRUB_MODEL", "").strip()
-        or DEFAULT_SCRUB_MODEL
-    )
+    # Late import keeps the boundary between `ideation_scrub` and the
+    # heavyweight `config` module narrow — `Config` is referenced
+    # only at call time, mirroring `_run_scrub`'s lazy SDK pattern.
+    from .config import Config
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_resolved_model(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = cfg.get_core_value("ideation_scrub_model", default="")
+        value = str(raw or "").strip()
+    else:
+        # Legacy fallback (TB-335 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; the canonical NEW-read path
+        # is `cfg.get_core_value`).
+        value = (os.getenv("AP2_IDEATION_SCRUB_MODEL", "") or "").strip()
+    return value or DEFAULT_SCRUB_MODEL
 
 
-def scrub_exhaustion_language(text: str, *, sdk) -> str:
+def scrub_exhaustion_language(
+    text: str, *, sdk, cfg: "Config | None" = None,
+) -> str:
     """Return ``text`` with exhaustion-asserting sentences removed.
 
     ``sdk`` is a module-like object exposing ``query`` and
@@ -215,7 +246,7 @@ def scrub_exhaustion_language(text: str, *, sdk) -> str:
     """
     if not text or not text.strip():
         return text
-    model = _resolved_model()
+    model = _resolved_model(cfg)
     prompt = _build_scrub_prompt(text)
     try:
         scrubbed = _run_scrub(sdk=sdk, prompt=prompt, model=model)

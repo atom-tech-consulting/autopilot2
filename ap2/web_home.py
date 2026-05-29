@@ -30,7 +30,6 @@ from __future__ import annotations
 import datetime as _dt
 import html
 import json
-import os
 import re
 from pathlib import Path
 
@@ -354,11 +353,9 @@ def _ideation_gate_state(cfg: Config) -> dict:
     from . import ideation as ideation_mod
     from .cron import load_state
 
-    disabled = os.environ.get(
-        "AP2_IDEATION_DISABLED", ""
-    ).strip().lower() in ("1", "true", "yes")
-    threshold = ideation_mod._trigger_task_count()
-    cooldown_s = ideation_mod._cooldown_s()
+    disabled = ideation_mod._ideation_disabled(cfg)
+    threshold = ideation_mod._trigger_task_count(cfg)
+    cooldown_s = ideation_mod._cooldown_s(cfg)
 
     board = Board.load(cfg.tasks_file)
     active_count = sum(1 for _ in board.iter_tasks(section="Active"))

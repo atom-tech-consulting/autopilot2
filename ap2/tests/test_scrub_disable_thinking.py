@@ -247,7 +247,7 @@ def _stub_scrub_raises(monkeypatch, exc: Exception) -> None:
     monkeypatch must be on the ``ideation_scrub`` module attribute so
     the lazy import resolves to the stubbed callable.
     """
-    def _raises(text, *, sdk):
+    def _raises(text, *, sdk, cfg=None):
         raise exc
     monkeypatch.setattr(ideation_scrub, "scrub_exhaustion_language", _raises)
 

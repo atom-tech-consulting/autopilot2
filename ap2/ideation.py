@@ -508,7 +508,9 @@ def _maybe_scrub_ideation_state(cfg: Config, sdk) -> None:
     from . import ideation_scrub
     started = time.monotonic()
     try:
-        scrubbed = ideation_scrub.scrub_exhaustion_language(original, sdk=sdk)
+        scrubbed = ideation_scrub.scrub_exhaustion_language(
+            original, sdk=sdk, cfg=cfg,
+        )
     except ideation_scrub.ScrubTimeoutError as exc:
         events.append(
             cfg.events_file,
@@ -561,35 +563,114 @@ def _maybe_scrub_ideation_state(cfg: Config, sdk) -> None:
     )
 
 
-def _cooldown_s() -> int:
-    """Effective cooldown (seconds), env-overridable."""
-    v = os.environ.get("AP2_IDEATION_COOLDOWN_S")
-    if v:
-        try:
-            return int(v)
-        except ValueError:
-            pass
-    return IDEATION_COOLDOWN_DEFAULT_S
+def _cooldown_s(cfg: "Config | None" = None) -> int:
+    """Effective cooldown (seconds), env-overridable.
+
+    TB-335 (axis-5 core-cluster migration): resolves through
+    ``cfg.get_core_value("ideation_cooldown_s", default=None)`` —
+    the sectioned-env > flat-env > TOML-snapshot > default precedence
+    chain `Config.get_core_value` defines (TB-334). Default ``cfg=None``
+    preserves the legacy env-read fallback so test callers that
+    `monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", ...)` without
+    threading a Config keep working bit-for-bit.
+
+    Cfg-kwarg-+-TypeError-guard shape per TB-327 (the sibling cross-
+    package migrations TB-332 / TB-333 adopted the same template) —
+    a positional non-Config (e.g. ``cfg="42"``) trips the guard so a
+    miswired call surfaces at the boundary instead of getting silently
+    coerced.
+    """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_cooldown_s(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        v = cfg.get_core_value("ideation_cooldown_s", default=None)
+    else:
+        # Legacy fallback (TB-335 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; the canonical NEW-read path
+        # is `cfg.get_core_value`).
+        v = os.getenv("AP2_IDEATION_COOLDOWN_S")
+    if v is None or v == "":
+        return IDEATION_COOLDOWN_DEFAULT_S
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return IDEATION_COOLDOWN_DEFAULT_S
 
 
-def _trigger_task_count() -> int:
+def _trigger_task_count(cfg: "Config | None" = None) -> int:
     """Effective Ready+Backlog trigger threshold, env-overridable.
 
-    Reads `AP2_IDEATION_TRIGGER_TASK_COUNT`. Same permissive parsing style
-    as `_cooldown_s`: invalid (non-int, non-positive, empty) values fall
-    back to the module default silently. A value <= 0 would make the gate
-    impossible to clear (every count >= 0 satisfies `count >= 0`), so we
-    treat that as invalid too.
+    Reads ``AP2_IDEATION_TRIGGER_TASK_COUNT`` (flat) /
+    ``[core.ideation_trigger_task_count]`` (TOML) /
+    the sectioned-env equivalent (``AP2_CORE_`` prefix per the TB-323
+    regime) via
+    ``cfg.get_core_value("ideation_trigger_task_count", default=None)``
+    (TB-335 axis-5 core-cluster migration). Same permissive parsing
+    style as ``_cooldown_s``: invalid (non-int, non-positive, empty)
+    values fall back to the module default silently. A value <= 0
+    would make the gate impossible to clear (every count >= 0
+    satisfies ``count >= 0``), so we treat that as invalid too.
+
+    Default ``cfg=None`` preserves the legacy env-read fallback so
+    test callers (`test_ideation_trigger.py`) that
+    ``monkeypatch.setenv(...)`` without threading a Config keep
+    working bit-for-bit. Cfg-kwarg-+-TypeError-guard shape per TB-327.
     """
-    v = os.environ.get("AP2_IDEATION_TRIGGER_TASK_COUNT")
-    if v:
-        try:
-            parsed = int(v)
-        except ValueError:
-            return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
-        if parsed > 0:
-            return parsed
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_trigger_task_count(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        v = cfg.get_core_value("ideation_trigger_task_count", default=None)
+    else:
+        # Legacy fallback (TB-335 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; see `_cooldown_s`).
+        v = os.getenv("AP2_IDEATION_TRIGGER_TASK_COUNT")
+    if v is None or v == "":
+        return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
+    try:
+        parsed = int(v)
+    except (TypeError, ValueError):
+        return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
+    if parsed > 0:
+        return parsed
     return IDEATION_TRIGGER_TASK_COUNT_DEFAULT
+
+
+def _ideation_disabled(cfg: "Config | None" = None) -> bool:
+    """True iff `AP2_IDEATION_DISABLED` resolves to a truthy value.
+
+    TB-335 (axis-5 core-cluster migration): resolves through
+    ``cfg.get_core_value("ideation_disabled", default=None)`` — the
+    sectioned-env > flat-env > TOML-snapshot > default precedence
+    chain. Truthy parse preserves the historical shape
+    ``.strip() in ("1", "true", "yes")`` (case-sensitive — matches
+    `_is_auto_approve_enabled` and the pre-TB-335 inline read at the
+    `_maybe_ideate` entry point).
+
+    Default ``cfg=None`` preserves the legacy env-read fallback so
+    test callers that ``monkeypatch.setenv("AP2_IDEATION_DISABLED",
+    "1")`` without threading a Config keep working bit-for-bit.
+    Cfg-kwarg-+-TypeError-guard shape per TB-327.
+    """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_ideation_disabled(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(
+            cfg.get_core_value("ideation_disabled", default="") or "",
+        )
+    else:
+        # Legacy fallback (TB-335 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; see `_cooldown_s`).
+        raw = os.getenv("AP2_IDEATION_DISABLED", "") or ""
+    return raw.strip() in ("1", "true", "yes")
 
 
 # TB-223: opt-in `AP2_AUTO_APPROVE` mode lets the daemon dispatch
@@ -796,7 +877,7 @@ async def _run_ideation(cfg: Config, sdk, mcp_server, *, slots: int) -> None:
     """
     state = load_state(cfg.cron_state_file)
     last = state.get(IDEATION_NAME, 0.0)
-    cooldown = _cooldown_s()
+    cooldown = _cooldown_s(cfg)
     now = time.time()
     events.append(
         cfg.events_file,
@@ -930,7 +1011,7 @@ def _compute_slots(cfg: Config) -> tuple[int, int, int]:
         sum(1 for _ in board.iter_tasks(section=s))
         for s in ("Ready", "Backlog")
     )
-    threshold = _trigger_task_count()
+    threshold = _trigger_task_count(cfg)
     slots = max(0, threshold - queued)
     return slots, queued, threshold
 
@@ -982,7 +1063,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     by default; it's also useful for projects that want to drive ideation
     manually rather than on the natural gate).
     """
-    if os.environ.get("AP2_IDEATION_DISABLED", "").strip() in ("1", "true", "yes"):
+    if _ideation_disabled(cfg):
         return
     board = Board.load(cfg.tasks_file)
     # Active is a HARD gate independent of the threshold: a task agent and
@@ -993,7 +1074,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
         return
     state = load_state(cfg.cron_state_file)
     last = state.get(IDEATION_NAME, 0.0)
-    cooldown = _cooldown_s()
+    cooldown = _cooldown_s(cfg)
     now = time.time()
     if now - last < cooldown:
         return
