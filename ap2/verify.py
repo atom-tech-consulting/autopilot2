@@ -40,8 +40,12 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .json_extract import extract_rightmost_json_object
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .config import Config
 
 
 # Mistune AST parser — used for `## Verification` section detection and bullet
@@ -472,6 +476,7 @@ async def _judge_prose_bullet(
     events_file: Path | None = None,
     task_id: str | None = None,
     bullet_idx: int | None = None,
+    cfg: "Config | None" = None,
 ) -> CriterionResult:
     """Ask the SDK whether `bullet.text` is satisfied by `diff_text` plus the
     working tree at HEAD.
@@ -550,6 +555,19 @@ async def _judge_prose_bullet(
         # a different cap can edit the source.
         f"Cumulative diff:\n```\n{diff_text[:30_000]}\n```\n"
     )
+    # TB-334 (axis 5 core cluster): `cfg` lets us resolve the
+    # agent-runtime core knobs (`agent_model`, `agent_effort`,
+    # `verify_judge_max_turns`) through `Config.get_core_value`'s
+    # sectioned-env > flat-env > TOML > default precedence chain
+    # rather than direct `os.environ.get`. Callers that don't thread
+    # `cfg` (pre-TB-334 tests, harness paths without a project root)
+    # synthesize one via `Config.load(project_root)` — the same
+    # back-compat shape pre-migration env-reads gave them. The
+    # synthesized cfg's env-first precedence preserves the
+    # `monkeypatch.setenv(...)` idiom every existing test uses.
+    if cfg is None:
+        from .config import Config as _Config
+        cfg = _Config.load(project_root)
     try:
         # TB-156: per-call-site effort knob. The judge's job — read a diff,
         # optionally Grep/Read for confirmation, emit a one-line JSON
@@ -559,9 +577,17 @@ async def _judge_prose_bullet(
         # `xhigh`); operators can still pin a specific value via
         # `AP2_VERIFY_JUDGE_EFFORT`, or globally via `AP2_AGENT_EFFORT`.
         # Precedence: per-site env > global env > per-site default.
+        # TB-334: the global-AGENT_EFFORT layer is now resolved via
+        # `cfg.get_core_value("agent_effort", default="high")` — same
+        # sectioned-env > flat-env > TOML > default chain. The
+        # per-site `AP2_VERIFY_JUDGE_EFFORT` knob stays on the direct
+        # env read here (own-cluster Out-of-scope per the briefing's
+        # core-cluster split — `verify_judge_effort` is a follow-up
+        # alongside `verify_judge_max_turns`'s sibling once the helper
+        # stabilizes).
         effort = os.environ.get(
             "AP2_VERIFY_JUDGE_EFFORT",
-            os.environ.get("AP2_AGENT_EFFORT", "high"),
+            cfg.get_core_value("agent_effort", default="high"),
         )
         # The judge can take a few tool roundtrips (Grep → Read) before
         # emitting its final verdict, so allow a handful of turns. The
@@ -570,9 +596,9 @@ async def _judge_prose_bullet(
             cwd=str(project_root),
             allowed_tools=list(JUDGE_REPO_READ_TOOLS),
             permission_mode="bypassPermissions",
-            max_turns=int(os.environ.get("AP2_VERIFY_JUDGE_MAX_TURNS", 20)),
+            max_turns=int(cfg.get_core_value("verify_judge_max_turns", default=20)),
             setting_sources=["project"],
-            model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+            model=cfg.get_core_value("agent_model", default="claude-opus-4-7"),
             extra_args={"effort": effort},
         )
         text = ""
@@ -1020,6 +1046,7 @@ async def verify_task(
     sdk=None,
     task_id: str | None = None,
     events_file: Path | None = None,
+    cfg: "Config | None" = None,
 ) -> VerifyVerdict | None:
     """Run the per-task verifier. Returns None when there's nothing to check.
 
@@ -1079,6 +1106,7 @@ async def verify_task(
             results.append(await _judge_prose_bullet(
                 b, project_root=project_root, sdk=sdk, diff_text=diff_text,
                 events_file=events_file, task_id=task_id, bullet_idx=idx,
+                cfg=cfg,
             ))
 
     return VerifyVerdict(

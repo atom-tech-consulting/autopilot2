@@ -2019,9 +2019,15 @@ async def run_status_report(
     # specific value via `AP2_STATUS_REPORT_EFFORT`, or globally via
     # `AP2_AGENT_EFFORT`. Precedence: per-site env > global env > per-site
     # default.
+    # TB-334 (axis 5 core cluster): the global-`AGENT_EFFORT` layer is
+    # now resolved via `cfg.get_core_value("agent_effort", default="medium")`
+    # — same sectioned-env > flat-env > TOML > default chain. The
+    # per-site `AP2_STATUS_REPORT_EFFORT` outer read stays as a direct
+    # env read (a `core.status_report_effort` follow-up migration is
+    # out-of-scope for this TB).
     effort = os.environ.get(
         "AP2_STATUS_REPORT_EFFORT",
-        os.environ.get("AP2_AGENT_EFFORT", "medium"),
+        cfg.get_core_value("agent_effort", default="medium"),
     )
     timed_out, error, stderr_tail, prompt_dump = await _daemon._run_control_agent(
         cfg,

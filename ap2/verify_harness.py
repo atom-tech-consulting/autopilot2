@@ -131,4 +131,10 @@ async def _maybe_per_task_verify(cfg: Config, sdk, task) -> "verify.VerifyVerdic
         # path bypasses the daemon's `_log_message` (its own SDK loop),
         # so this is the only capture point for prose-judge cost.
         events_file=cfg.events_file,
+        # TB-334 (axis 5 core cluster): thread cfg so the prose-judge
+        # path resolves agent-runtime knobs (`agent_model`,
+        # `agent_effort`, `verify_judge_max_turns`) through
+        # `Config.get_core_value` rather than the pre-migration direct
+        # `os.environ.get` reads. Same precedence at call time.
+        cfg=cfg,
     )

@@ -390,7 +390,17 @@ def _get_path(cfg: "Config", path: list[str]) -> Any:
     against" — coercion falls back to the heuristic branch.
     """
     if len(path) == 2 and path[0] == "core":
-        return getattr(cfg, path[1], None)
+        # TB-334: non-dataclass core knobs (`agent_model`,
+        # `task_max_turns`, &c.) live in `cfg.core_config` rather
+        # than as named dataclass attributes. Probe both — dataclass
+        # attr first (existing tunables that ARE Config fields), then
+        # `core_config` dict (the axis-5 core-cluster overlay).
+        if hasattr(cfg, path[1]):
+            return getattr(cfg, path[1], None)
+        core_cfg = getattr(cfg, "core_config", None)
+        if isinstance(core_cfg, dict):
+            return core_cfg.get(path[1])
+        return None
     if len(path) == 3 and path[0] == "components":
         comp = (cfg.components_config or {}).get(path[1])
         if isinstance(comp, dict):
@@ -413,7 +423,17 @@ def _set_path(cfg: "Config", path: list[str], value: Any) -> bool:
         if hasattr(cfg, path[1]):
             setattr(cfg, path[1], value)
             return True
-        return False
+        # TB-334: non-dataclass core knobs (the axis-5 agent-runtime
+        # cluster: `agent_model`, `task_max_turns`, &c.) land in
+        # `cfg.core_config` so flat-env / sectioned-env overrides
+        # still apply for keys the dataclass doesn't carry as named
+        # attributes. Mirrors the `components.<name>.<key>` write path
+        # below — the back-compat shim populates the structured
+        # config even when the dataclass has no slot for the key.
+        if getattr(cfg, "core_config", None) is None:
+            cfg.core_config = {}
+        cfg.core_config[path[1]] = value
+        return True
     if len(path) == 3 and path[0] == "components":
         if cfg.components_config is None:
             cfg.components_config = {}

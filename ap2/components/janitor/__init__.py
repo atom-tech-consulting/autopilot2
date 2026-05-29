@@ -199,10 +199,12 @@ def _judge_effort(cfg: Config) -> str:
     Same cfg-routed shape as `_max_findings_llm` for the janitor-
     specific value (`AP2_JANITOR_JUDGE_EFFORT` → sectioned
     `components.janitor.judge_effort`). Falls back to `AP2_AGENT_EFFORT`
-    (a core-namespace knob outside this cluster's migration scope, read
-    directly at the helper boundary) and finally to `"high"` — same
-    precedence chain the pre-TB-330 nested env-get fallback expression
-    evaluated.
+    (a core-namespace knob — TB-334 routed it through
+    `cfg.get_core_value("agent_effort", default="high")` so the
+    sectioned-env > flat-env > TOML > default precedence applies
+    uniformly across the agent-runtime cluster) and finally to
+    `"high"` — same precedence chain the pre-TB-330 nested env-get
+    fallback expression evaluated.
     """
     raw = cfg.get_component_value("janitor", "judge_effort")
     if isinstance(raw, str) and raw.strip():
@@ -211,7 +213,7 @@ def _judge_effort(cfg: Config) -> str:
         # TOML-typed non-str (unlikely for a free-form effort label but
         # defensive): coerce to its string form.
         return str(raw)
-    return os.environ.get("AP2_AGENT_EFFORT", "high")
+    return cfg.get_core_value("agent_effort", default="high")
 
 
 def _judge_max_turns(cfg: Config) -> int:
@@ -786,7 +788,7 @@ async def _judge_finding(
             permission_mode="bypassPermissions",
             max_turns=_judge_max_turns(cfg),
             setting_sources=["project"],
-            model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+            model=cfg.get_core_value("agent_model", default="claude-opus-4-7"),
             extra_args={"effort": effort},
         )
         async for msg in sdk.query(prompt=prompt, options=options):

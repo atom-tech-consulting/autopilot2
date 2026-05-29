@@ -215,58 +215,86 @@ def _drive_judge_finding(tmp_path: Path, sdk: _ScriptedJudgeSDK) -> tuple[str, s
 # ===========================================================================
 
 
-# TB-278: source-grep now anchors on the `DEFAULT_TASK_MAX_TURNS`
-# named constant rather than the inline literal so a future bump to
-# the constant in `config.py` propagates without touching this test.
-# The literal `200` is asserted only via the bare in-env-scoped
-# expression below (which pulls from `config.DEFAULT_TASK_MAX_TURNS`
-# itself for the round-trip).
+# TB-278: source-grep originally anchored on the
+# `DEFAULT_TASK_MAX_TURNS` named constant rather than the inline
+# literal so a future bump to the constant in `config.py` propagates
+# without touching this test.
+#
+# TB-334 (axis 5 core cluster): the call-site shape migrated from
+# `int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS))`
+# to `int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS))`
+# so the source-grep expression below tracks the new helper-based shape.
+# The behavioral asserts re-evaluate the equivalent expression via the
+# helper (`Config.load(tmp_path).get_core_value(...)`) which carries
+# the same env-first precedence at call time — the test still exercises
+# the EXACT precedence chain `run_task` runs.
 _TASK_MAX_TURNS_EXPR = (
-    'int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS))'
+    'int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS))'
 )
 
 
-def test_task_max_turns_default_is_two_hundred_when_env_unset(monkeypatch):
+def _eval_task_max_turns_via_helper(tmp_path):
+    """Re-evaluate `run_task`'s call-site expression against the
+    current env. Builds a fresh `Config` rooted at `tmp_path` so the
+    project's own `.cc-autopilot/env` doesn't leak, then runs the
+    same `cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS)`
+    chain `run_task` runs.
+    """
+    from ap2.config import Config
+
+    cfg = Config.load(tmp_path)
+    return int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS))
+
+
+def test_task_max_turns_default_is_two_hundred_when_env_unset(tmp_path, monkeypatch):
     """Happy path: `daemon.run_task` reads AP2_TASK_MAX_TURNS via
-    `int(os.environ.get(..., DEFAULT_TASK_MAX_TURNS))`. With env unset,
-    the call-site expression evaluates to 200 — the
-    `config.DEFAULT_TASK_MAX_TURNS` constant (raised from 50 in
-    TB-278). A bump of the constant trips this test (source-grep
-    flags the expression drift, behavior assert flags the parsed
-    value drift)."""
+    `int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS))`
+    (TB-334 migrated shape). With env unset, the call-site expression
+    evaluates to 200 — the `config.DEFAULT_TASK_MAX_TURNS` constant
+    (raised from 50 in TB-278). A bump of the constant trips this test
+    (source-grep flags the expression drift, behavior assert flags the
+    parsed value drift)."""
     src = inspect.getsource(daemon.run_task)
     assert _TASK_MAX_TURNS_EXPR in src, (
         f"regression: `daemon.run_task` no longer reads AP2_TASK_MAX_TURNS "
-        f"with the bare `{_TASK_MAX_TURNS_EXPR}` parse — either the env "
-        "key was renamed or the named-constant default drifted"
+        f"with the cfg-routed `{_TASK_MAX_TURNS_EXPR}` parse — either the "
+        "helper was renamed, the env mapping was dropped from "
+        "FLAT_TO_SECTIONED, or the named-constant default drifted"
     )
 
     monkeypatch.delenv("AP2_TASK_MAX_TURNS", raising=False)
+    monkeypatch.delenv("AP2_CORE_TASK_MAX_TURNS", raising=False)
     # Re-evaluate the call-site expression against the scoped env. This
-    # is the EXACT code path `run_task`'s `_consume()` runs every call.
-    assert int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS)) == 200
+    # is the EXACT code path `run_task`'s `_consume()` runs every call
+    # post-TB-334.
+    assert _eval_task_max_turns_via_helper(tmp_path) == 200
     assert DEFAULT_TASK_MAX_TURNS == 200, (
         "TB-278: DEFAULT_TASK_MAX_TURNS must be 200; bump this assertion "
         "(and the env template) deliberately if you raise it further"
     )
 
 
-def test_task_max_turns_env_override_flows_through_to_run_task(monkeypatch):
+def test_task_max_turns_env_override_flows_through_to_run_task(tmp_path, monkeypatch):
     """Happy path: `AP2_TASK_MAX_TURNS="30"` → `daemon.run_task`'s
-    `int(os.environ.get(...))` parses to 30 and that value is what
-    `ClaudeAgentOptions.max_turns` receives. Pins the env read in
-    `run_task`'s `_consume()` so a refactor that drops it surfaces."""
+    `int(cfg.get_core_value(...))` (TB-334) parses to 30 and that value
+    is what `ClaudeAgentOptions.max_turns` receives. Pins the cfg-routed
+    read in `run_task`'s `_consume()` so a refactor that drops it
+    surfaces."""
     src = inspect.getsource(daemon.run_task)
     assert _TASK_MAX_TURNS_EXPR in src
 
     monkeypatch.setenv("AP2_TASK_MAX_TURNS", "30")
-    assert int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS)) == 30
+    assert _eval_task_max_turns_via_helper(tmp_path) == 30
 
 
-def test_task_max_turns_invalid_value_raises(monkeypatch):
-    """Error path: `daemon.run_task`'s bare `int(os.environ.get(...))`
-    raises ValueError on a non-int env value. Pins CURRENT behavior — a
-    future refactor to a permissive `_int_env`-style helper with
+def test_task_max_turns_invalid_value_raises(tmp_path, monkeypatch):
+    """Error path: `daemon.run_task`'s
+    `int(cfg.get_core_value(...))` (TB-334) raises ValueError on a
+    non-int env value — `Config.get_core_value` returns the raw env
+    string (no type coercion at the helper boundary), and the outer
+    `int(...)` parse raises just like the pre-TB-334 bare
+    `int(os.environ.get(...))` did. Pins CURRENT behavior — a future
+    refactor to a permissive `_int_env`-style helper with
     default-fallback would flip the source-grep AND remove the raise
     here, both deliberate visible changes.
 
@@ -282,7 +310,7 @@ def test_task_max_turns_invalid_value_raises(monkeypatch):
 
     monkeypatch.setenv("AP2_TASK_MAX_TURNS", "abc")
     with pytest.raises(ValueError):
-        int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS))
+        _eval_task_max_turns_via_helper(tmp_path)
 
 
 # ===========================================================================

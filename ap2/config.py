@@ -220,6 +220,22 @@ class Config:
     # env-path branch passes positional args, so this MUST be a
     # default-bearing field at the end of the list.
     components_config: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # TB-334 (axis 5 core cluster): `[core.<key>]` entries from
+    # `.cc-autopilot/config.toml` that are NOT existing Config
+    # dataclass fields (`tick_interval_s`, `task_timeout_s`, &c. flow
+    # through their named attributes as before — see
+    # `config_loader.from_toml`'s `[core.X]` overlay). The new
+    # `core_config` dict is the snapshot the `Config.get_core_value`
+    # helper consults for non-dataclass core knobs (`agent_model`,
+    # `agent_effort`, `task_max_turns`, `control_max_turns`,
+    # `verify_judge_max_turns`, etc.) — the agent-runtime tunables
+    # whose pre-migration call sites read `os.environ.get("AP2_*",
+    # ...)` directly. Empty dict for the env-path branch (today's
+    # default) so the helper always finds a safe `{}` to fall back
+    # through to its env / default precedence. Default-bearing field
+    # at the end of the list for the same dataclass-constructor reason
+    # `components_config` is.
+    core_config: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
@@ -442,6 +458,83 @@ class Config:
         comp = (self.components_config or {}).get(component)
         if isinstance(comp, dict) and key in comp:
             return comp[key]
+        # 4) Default.
+        return default
+
+    def get_core_value(
+        self,
+        key: str,
+        *,
+        default: Any = None,
+    ) -> Any:
+        """Resolved value for a non-component (core-cluster) config key.
+
+        TB-334 axis-5 sibling to ``get_component_value`` for the
+        ``[core.*]`` section the structured-config focus (goal.md L308)
+        carves out for non-component tunables. Same precedence shape,
+        same call-time-evaluated env-first contract:
+
+          1. Sectioned env (``AP2_CORE_<KEY>``) — the canonical naming
+             under the sectioned regime. Wins over every other layer so
+             an operator exporting the sectioned env mid-process sees
+             the next-tick propagation (parallel to
+             ``_apply_sectioned_env_overrides``'s head-of-list position
+             at load time).
+          2. Flat env (``AP2_<knob>``) via reverse-``FLAT_TO_SECTIONED``
+             lookup — catches the pre-migration flat names
+             (``AP2_AGENT_MODEL`` → ``core.agent_model``,
+             ``AP2_TASK_MAX_TURNS`` → ``core.task_max_turns``, &c.)
+             without forcing the operator to rename their env file.
+          3. ``self.core_config.get(key)`` — the cfg snapshot populated
+             by ``config_loader.from_toml``'s ``[core.<key>]`` overlay.
+             Values here are the TOML-parsed types (int / bool / str)
+             ready for the caller to use directly.
+          4. ``default`` — when none of the above carry a value.
+
+        Why call-time env-first (matching ``get_component_value``): the
+        pre-migration ``os.environ.get('AP2_AGENT_MODEL')`` /
+        ``os.environ.get('AP2_TASK_MAX_TURNS')`` helpers naturally
+        hot-reloaded by reading env on every call. Tests +
+        operators who monkeypatch / shell-export mid-process don't
+        trip ``env_reload.maybe_reload_env``'s mtime check. Reading
+        env-first at call time preserves the pre-migration call-site
+        contract bit-for-bit; the cfg snapshot is the lower-precedence
+        default that fires only when no env override is live.
+
+        Note that ``[core.<key>]`` entries that ALSO name an existing
+        Config dataclass field (``tick_interval_s``, ``task_timeout_s``,
+        &c.) are overlaid onto the dataclass attribute by
+        ``config_loader.from_toml`` for pre-TB-334 readers that access
+        ``cfg.tick_interval_s`` directly; the same value is stashed in
+        ``core_config`` so this helper finds it too. Non-dataclass
+        keys (``agent_model``, ``task_max_turns``, etc. — the
+        agent-runtime knobs this TB migrates) flow solely through
+        ``core_config``.
+
+        Pure / read-only — no caching, no side effects. The env lookup
+        is bounded by ``FLAT_TO_SECTIONED``'s ~40 entries; an O(N)
+        walk is faster than a reverse-map cache for the rare per-tick
+        call rate of these knobs.
+        """
+        # 1) Sectioned env (highest precedence).
+        sectioned_env_name = f"AP2_CORE_{key.upper()}"
+        raw = os.environ.get(sectioned_env_name)
+        if raw is not None:
+            return raw
+        # 2) Flat env via reverse-FLAT_TO_SECTIONED lookup. Late import
+        #    keeps the config.py ↔ config_compat.py boundary tidy.
+        from .config_compat import FLAT_TO_SECTIONED
+        sectioned_target = f"core.{key}"
+        for flat, sectioned in FLAT_TO_SECTIONED.items():
+            if sectioned != sectioned_target:
+                continue
+            raw = os.environ.get(flat)
+            if raw is not None:
+                return raw
+            break
+        # 3) cfg snapshot (TOML overlay).
+        if isinstance(self.core_config, dict) and key in self.core_config:
+            return self.core_config[key]
         # 4) Default.
         return default
 

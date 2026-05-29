@@ -220,11 +220,11 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 allowed_tools=TASK_AGENT_TOOLS,
                 disallowed_tools=_TASK_DISALLOWED_TOOLS,
                 permission_mode="bypassPermissions",
-                max_turns=int(os.environ.get("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS)),
+                max_turns=int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS)),
                 setting_sources=["project"],
                 stderr=_stderr_sink,
-                model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
-                extra_args={"effort": os.environ.get("AP2_AGENT_EFFORT", "xhigh")},
+                model=cfg.get_core_value("agent_model", default="claude-opus-4-7"),
+                extra_args={"effort": cfg.get_core_value("agent_effort", default="xhigh")},
             ),
         ):
             _log_message(msg)
@@ -772,7 +772,7 @@ async def handle_message(cfg: Config, sdk, mcp_server, msg: dict) -> None:
         label=f"MM-{post_id}",
         prompt=prompt,
         allowed_tools=MM_HANDLER_TOOLS,
-        max_turns=int(os.environ.get("AP2_CONTROL_MAX_TURNS", 15)),
+        max_turns=int(cfg.get_core_value("control_max_turns", default=15)),
     )
     if timed_out:
         events.append(
@@ -865,7 +865,7 @@ async def _run_control_agent(
 
     resolved_effort = (
         effort if effort is not None
-        else os.environ.get("AP2_AGENT_EFFORT", "xhigh")
+        else cfg.get_core_value("agent_effort", default="xhigh")
     )
 
     # TB-166: same two-layer message log as `run_task`. `.stream.jsonl`
@@ -900,7 +900,7 @@ async def _run_control_agent(
                 max_turns=max_turns,
                 setting_sources=["project"],
                 stderr=stderr_sink,
-                model=os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7"),
+                model=cfg.get_core_value("agent_model", default="claude-opus-4-7"),
                 extra_args={"effort": resolved_effort},
             ),
         ):

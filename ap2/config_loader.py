@@ -281,6 +281,17 @@ def from_toml(toml_path: Path) -> "Config":
         # docstring's note on [core.*]).
         if hasattr(cfg, key):
             setattr(cfg, key, value)
+    # TB-334 (axis 5 core cluster): also stash every [core.<key>] entry
+    # verbatim on `cfg.core_config` so `Config.get_core_value` can read
+    # the TOML snapshot for non-dataclass core knobs (`agent_model`,
+    # `agent_effort`, `task_max_turns`, &c. — the agent-runtime
+    # tunables whose pre-migration call sites read `os.environ.get`).
+    # The setattr overlay above remains the back-compat path for
+    # readers that access `cfg.<field>` directly (e.g.
+    # `cfg.tick_interval_s`); the dict snapshot here is the helper's
+    # input. Deep-copy not needed — values are scalars (int/bool/str)
+    # not nested tables.
+    cfg.core_config = dict(core_section)
     components_section = raw.get("components") or {}
     if not isinstance(components_section, dict):
         raise ConfigSchemaError(
