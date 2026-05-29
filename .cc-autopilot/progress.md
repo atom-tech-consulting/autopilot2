@@ -1233,3 +1233,9 @@
 - **Summary:** Migrated the 8 remaining cross-package + cross-component AP2 env reads to cfg.get_core_value / cfg.get_component_value (web.is_web_disabled / daemon_web_port; goal.advance_empty_cycles_threshold / auto_advance_disabled; doctor._verify_gate_state; ideation._run_ideation max_turns; attention._cost_approach_pct), added `cost_approach_pct` to auto_approve Manifest.config_schema + howto.md (TB-330 precedent), threaded cfg through daemon.py / cli_daemon.py callers, and pinned the migration with new ap2/tests/test_tb336_axis5_tail_cfg_reads.py (59 cases — per-knob flat/sectioned/precedence/default parity + per-call-site shape pins + manifest+howto docs); full suite passes 2777/0.
 - **Files:** ap2/web.py, ap2/goal.py, ap2/doctor.py, ap2/ideation.py, ap2/components/attention/__init__.py, ap2/components/auto_approve/manifest.py, ap2/howto.md, ap2/daemon.py, ap2/cli_daemon.py, ap2/tests/test_tb336_axis5_tail_cfg_reads.py, ap2/tests/test_tb290_attention_cost_cap_approach.py, ap2/tests/test_tb322_component_schemas.py
 - **Tests:** pass
+
+## [2026-05-29] TB-337: Declare core-section ConfigKey schema; close axis-1 deferred validation gap
+- **Commit:** `deecdca`
+- **Summary:** Declared CORE_CONFIG_SCHEMA (21 typed core keys) in new ap2/core_config_schema.py, wired it into aggregate_schemas/validate_config (rejects unknown [core.*] keys with did-you-mean hint + bad types), extended Config.get_core_value to fall back to schema default, added [core] block to ap2 init's CONFIG_TEMPLATE + howto.md ### [core] subsection, extended docs-drift gate to walk both surfaces, plus 40 regression tests in test_tb337_core_schema.py. Full suite (2817) passes.
+- **Files:** ap2/core_config_schema.py, ap2/config.py, ap2/config_loader.py, ap2/init.py, ap2/howto.md, ap2/tests/test_docs_drift.py, ap2/tests/test_tb337_core_schema.py
+- **Tests:** pass
