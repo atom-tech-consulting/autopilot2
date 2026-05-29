@@ -1,4 +1,4 @@
-"""auto_unfreeze component manifest (TB-314 axis 5).
+"""auto_unfreeze component manifest (TB-314 axis 5 + TB-327 read-site migration).
 
 Registers the auto-unfreeze briefing-shape fix sweep as the
 `PRE_DISPATCH` tick hook so `daemon._tick` walks
@@ -7,6 +7,44 @@ flat module directly. The implementation lives intra-package at
 `ap2/components/auto_unfreeze/__init__.py` (relocated from
 `ap2/auto_unfreeze.py` by TB-314); the manifest references the
 runtime symbols via `from . import …`.
+
+TB-327 axis-5 read-site migration — chosen resolved-config access shape
+=========================================================================
+The five operator-tunable knobs the component logically owns
+(`disabled`, `fix_shapes`, `dry_run`, `max_per_task`, `max_per_day`)
+are now read via the **`cfg.get_component_value(component, key)`**
+helper on `Config` (option 2 of the TB-326 pilot's three candidate
+shapes — see `ap2/components/auto_approve/manifest.py` and
+`ap2/config.py`'s docstring for the helper). The five legacy flat
+env names (`AP2_AUTO_UNFREEZE_DISABLED`,
+`AP2_AUTO_UNFREEZE_FIX_SHAPES`, `AP2_AUTO_UNFREEZE_DRY_RUN`,
+`AP2_AUTO_UNFREEZE_MAX_PER_TASK`, `AP2_AUTO_UNFREEZE_MAX_PER_DAY`)
+are no longer read directly via the `os.environ` mapping inside the
+component body; the back-compat path flows through
+`Config.get_component_value`'s reverse-`FLAT_TO_SECTIONED` lookup so
+a shell-export operator who never migrated their `.cc-autopilot/env`
+keeps today's behavior bit-for-bit, while a TOML-opted operator's
+`[components.auto_unfreeze]` values win transparently once env-side
+overrides are unset.
+
+Why option 2 (helper) and not 1 (raw dict) or 3 (per-component
+dataclass): TB-326's pilot (b3eba54) ratified the helper as the
+lightest-touch incremental shape every remaining cluster reuses
+verbatim — option 1 loses env-only-mode back-compat without an extra
+wrapper (the env-only resolution branch doesn't invoke
+`apply_env_overrides`), and option 3 requires a code-gen pass on
+every `Manifest.config_schema`. The TB-327 regression-pin at
+`ap2/tests/test_tb327_auto_unfreeze_cfg_reads.py` mirrors the
+TB-326 pilot's five cleavages (grep-absence, TOML-first read
+precedence, flat-env back-compat parity, parser default-on-bad-value
+semantics preservation, and the manifest's documented access shape).
+
+Hook-points contract under TB-327: the helpers exposed in
+`hook_points` (`auto_unfreeze_allowlist`, `auto_unfreeze_dry_run`,
+`auto_unfreeze_max_per_task`, `auto_unfreeze_max_per_day`) all
+acquired a `cfg: Config` argument as part of the migration. The
+daemon's module-level alias block at L1897-1908 still resolves the
+same callable identities — only the signature changed.
 
 Observable-behavior preservation: the wrapping `_tick_hook` function
 self-handles the same `auto_unfreeze_skipped reason=sweep_error`

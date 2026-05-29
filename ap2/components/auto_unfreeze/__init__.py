@@ -46,7 +46,6 @@ operator can see why a Frozen task stayed Frozen).
 """
 from __future__ import annotations
 
-import os
 import time
 
 from ap2 import events, tools
@@ -78,21 +77,32 @@ _AUTO_UNFREEZE_WINDOW_S = 24 * 3600  # rolling 24h, mirrors TB-224's window
 _DISABLED_EVENT_EMITTED: bool = False
 
 
-def _is_auto_unfreeze_disabled() -> bool:
-    """TB-320: True iff `AP2_AUTO_UNFREEZE_DISABLED` is set to a truthy
-    value (`"1"` / `"true"` / `"yes"` / `"on"`, case-insensitive).
+def _is_auto_unfreeze_disabled(cfg: Config) -> bool:
+    """TB-320: True iff the auto-unfreeze kill switch is set to a
+    truthy value (`"1"` / `"true"` / `"yes"` / `"on"`, case-insensitive
+    string forms; the TOML layer's typed `True` is also honored).
 
-    Lazy-read pattern: reads `os.environ` directly each call so a
-    hot-reloaded env file (TB-271) takes effect on the next tick.
-    Mirrors `goal.auto_advance_disabled()`'s
-    `AP2_FOCUS_AUTO_ADVANCE_DISABLED` parse — same truthy set, same
-    "default-unset → False" polarity. The truthy set is also
-    consistent with `Manifest.is_enabled`'s falsy enumeration
+    TB-327 (axis-5): the helper no longer reads
+    `AP2_AUTO_UNFREEZE_DISABLED` from `os.environ` directly — it routes
+    through `Config.get_component_value("auto_unfreeze", "disabled")`,
+    which evaluates sectioned-env > flat-env > TOML > default at call
+    time. The flat env name `AP2_AUTO_UNFREEZE_DISABLED` still wins via
+    the `FLAT_TO_SECTIONED` reverse-lookup so the hot-reload contract
+    (TB-271) and the `monkeypatch.setenv(...); helper(cfg)` test idiom
+    both stay bit-for-bit compatible — call-time env-first precedence
+    inside `get_component_value` preserves the pre-migration lazy-read
+    pattern. Same truthy set as `goal.auto_advance_disabled()`'s
+    `AP2_FOCUS_AUTO_ADVANCE_DISABLED` parse and consistent with
+    `Manifest.is_enabled`'s falsy enumeration
     (`"", "0", "false", "no", "off"`) so the registry-level and
     self-gate paths agree on what counts as "set".
     """
-    raw = os.environ.get("AP2_AUTO_UNFREEZE_DISABLED", "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    raw = cfg.get_component_value("auto_unfreeze", "disabled")
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _reset_disabled_event_emitted_for_tests() -> None:
@@ -108,27 +118,42 @@ def _reset_disabled_event_emitted_for_tests() -> None:
     _DISABLED_EVENT_EMITTED = False
 
 
-def _auto_unfreeze_allowlist() -> frozenset[str]:
-    """Effective allowlist parsed from `AP2_AUTO_UNFREEZE_FIX_SHAPES`.
+def _auto_unfreeze_allowlist(cfg: Config) -> frozenset[str]:
+    """Effective allowlist parsed from the `fix_shapes` knob (TB-327
+    axis-5: read via `cfg.get_component_value("auto_unfreeze",
+    "fix_shapes")`).
 
     Comma-separated shape tokens. Default unset → empty set, which the
     `_maybe_auto_unfreeze` caller treats as "feature disabled" (no
     auto-unfreeze attempts, no skip events). Operators opt in by listing
-    shape tokens; the env-knob string IS the trust contract.
+    shape tokens; the knob string IS the trust contract.
 
     Whitespace around tokens is trimmed; empty tokens (e.g. trailing
     comma) are dropped. The frozenset return makes the value safe to
     pass around or compare against without defensive copies.
+
+    Resolution shape (TB-327): the legacy flat env name
+    `AP2_AUTO_UNFREEZE_FIX_SHAPES` still wins via the
+    `FLAT_TO_SECTIONED` reverse-lookup `Config.get_component_value`
+    performs internally, so the shell-export operator who never
+    migrated their `.cc-autopilot/env` keeps today's behavior
+    bit-for-bit. A `[components.auto_unfreeze] fix_shapes = "…"`
+    TOML value flows through the same call when no env override is
+    live.
     """
-    raw = os.environ.get("AP2_AUTO_UNFREEZE_FIX_SHAPES", "").strip()
-    if not raw:
+    raw = cfg.get_component_value("auto_unfreeze", "fix_shapes")
+    if raw is None:
         return frozenset()
-    return frozenset(s.strip() for s in raw.split(",") if s.strip())
+    text = str(raw).strip()
+    if not text:
+        return frozenset()
+    return frozenset(s.strip() for s in text.split(",") if s.strip())
 
 
-def _auto_unfreeze_dry_run() -> bool:
-    """TB-233: True iff `AP2_AUTO_UNFREEZE_DRY_RUN` is set to a truthy
-    value (`"1"` / `"true"` / `"yes"`, case-insensitive).
+def _auto_unfreeze_dry_run(cfg: Config) -> bool:
+    """TB-233: True iff the `dry_run` knob is set to a truthy value
+    (`"1"` / `"true"` / `"yes"`, case-insensitive string forms; the
+    TOML layer's typed `True` is also honored).
 
     Monitor-only on-ramp for the auto-unfreeze loop (TB-225), sibling
     of `automation_status._is_auto_approve_dry_run` (TB-232) on the
@@ -151,13 +176,24 @@ def _auto_unfreeze_dry_run() -> bool:
     mirrors the boolean shape used by `_is_truthy` in
     `automation_status.py` so operators tuning the autopilot env file
     see one consistent convention across knobs.
+
+    Resolution shape (TB-327): routes through
+    `cfg.get_component_value("auto_unfreeze", "dry_run")` so the flat
+    env name `AP2_AUTO_UNFREEZE_DRY_RUN` still wins via the
+    `FLAT_TO_SECTIONED` reverse-lookup back-compat path while a
+    `[components.auto_unfreeze] dry_run = true` TOML value flows
+    through the same call when no env override is live.
     """
-    raw = os.environ.get("AP2_AUTO_UNFREEZE_DRY_RUN", "").strip().lower()
-    return raw in ("1", "true", "yes")
+    raw = cfg.get_component_value("auto_unfreeze", "dry_run")
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes")
 
 
-def _auto_unfreeze_max_per_task() -> int:
-    """Per-task cap from `AP2_AUTO_UNFREEZE_MAX_PER_TASK` (default 1).
+def _auto_unfreeze_max_per_task(cfg: Config) -> int:
+    """Per-task cap on auto-unfreeze applications (default 1).
 
     Bounds oscillation when an auto-applied patch still fails: a task
     that's been auto-unfrozen once and re-frozen falls back to manual
@@ -169,38 +205,51 @@ def _auto_unfreeze_max_per_task() -> int:
     default. Zero is honored (caps disabled = unbounded retries) but
     is intentionally NOT the default — disabling the per-task cap
     should be an explicit operator decision.
+
+    Resolution shape (TB-327 axis-5): routed through
+    `cfg.get_component_value("auto_unfreeze", "max_per_task")`. The
+    flat env name `AP2_AUTO_UNFREEZE_MAX_PER_TASK` still wins via the
+    `FLAT_TO_SECTIONED` reverse-lookup back-compat path; a
+    `[components.auto_unfreeze] max_per_task = N` TOML value flows
+    through the same call when no env override is live.
     """
-    raw = os.environ.get("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "").strip()
-    if not raw:
+    raw = cfg.get_component_value("auto_unfreeze", "max_per_task")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return _AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT
     try:
         v = int(raw)
-    except ValueError:
+    except (TypeError, ValueError):
         return _AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT
     return v if v >= 0 else _AUTO_UNFREEZE_MAX_PER_TASK_DEFAULT
 
 
-def _auto_unfreeze_max_per_day() -> int:
-    """Per-day cap from `AP2_AUTO_UNFREEZE_MAX_PER_DAY` (default 3).
+def _auto_unfreeze_max_per_day(cfg: Config) -> int:
+    """Per-day cap on total auto-unfreeze applications (default 3).
 
-    Rolling 24h cap on total auto-unfreeze applications across all
-    tasks. Bounds the "systemic regression cascades through 10 tasks
-    before operator notices" failure mode. When exceeded, the daemon
-    halts and surfaces a `## Decisions needed from operator` bullet so
-    the operator sees a systemic-regression signal rather than a silent
-    burn.
+    Rolling 24h cap across all tasks. Bounds the "systemic regression
+    cascades through 10 tasks before operator notices" failure mode.
+    When exceeded, the daemon halts and surfaces a `## Decisions
+    needed from operator` bullet so the operator sees a systemic-
+    regression signal rather than a silent burn.
 
     Default 3 calibrated for the observed steady-state recurrence rate
     on this codebase (TB-204 + TB-207 = 2 instances in one week);
     higher values invite the silent-burn failure mode, lower values
     invite operator-toil from over-frequent caps.
+
+    Resolution shape (TB-327 axis-5): routed through
+    `cfg.get_component_value("auto_unfreeze", "max_per_day")`. The
+    flat env name `AP2_AUTO_UNFREEZE_MAX_PER_DAY` still wins via the
+    `FLAT_TO_SECTIONED` reverse-lookup back-compat path; a
+    `[components.auto_unfreeze] max_per_day = N` TOML value flows
+    through the same call when no env override is live.
     """
-    raw = os.environ.get("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "").strip()
-    if not raw:
+    raw = cfg.get_component_value("auto_unfreeze", "max_per_day")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return _AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT
     try:
         v = int(raw)
-    except ValueError:
+    except (TypeError, ValueError):
         return _AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT
     return v if v >= 0 else _AUTO_UNFREEZE_MAX_PER_DAY_DEFAULT
 
@@ -400,7 +449,7 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
     consistent with the briefing's "cheap deduplication acceptable"
     guidance.
     """
-    if _is_auto_unfreeze_disabled():
+    if _is_auto_unfreeze_disabled(cfg):
         global _DISABLED_EVENT_EMITTED
         if not _DISABLED_EVENT_EMITTED:
             try:
@@ -417,7 +466,7 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
                 pass
             _DISABLED_EVENT_EMITTED = True
         return
-    allowlist = _auto_unfreeze_allowlist()
+    allowlist = _auto_unfreeze_allowlist(cfg)
     if not allowlist:
         return
     if not cfg.tasks_file.exists():
@@ -430,8 +479,8 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
     if not frozen_tasks:
         return
     tail = events.tail(cfg.events_file, 2000)
-    per_task_cap = _auto_unfreeze_max_per_task()
-    per_day_cap = _auto_unfreeze_max_per_day()
+    per_task_cap = _auto_unfreeze_max_per_task(cfg)
+    per_day_cap = _auto_unfreeze_max_per_day(cfg)
     day_count = _count_auto_unfreeze_applied_in_window(tail)
 
     for task in frozen_tasks:
@@ -495,7 +544,7 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
             # (over the dry-run window) the would_auto_unfreeze stream
             # and infers the systemic-regression signal directly from
             # the auto_unfreeze_skipped count.
-            if _auto_unfreeze_dry_run():
+            if _auto_unfreeze_dry_run(cfg):
                 return
             try:
                 _append_decisions_needed_bullet(
@@ -532,7 +581,7 @@ def _maybe_auto_unfreeze(cfg: Config) -> None:
         # right shape (the operator wants to see the full Frozen-set
         # decision before flipping the switch). When dry-run is off,
         # behavior is byte-identical to pre-TB-233.
-        if _auto_unfreeze_dry_run():
+        if _auto_unfreeze_dry_run(cfg):
             events.append(
                 cfg.events_file,
                 "would_auto_unfreeze",

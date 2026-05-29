@@ -92,8 +92,17 @@ _BRIEFING = (
 
 
 @pytest.fixture
-def cfg(tmp_path: Path) -> Config:
-    """Project root with the standard ap2 init layout + a real goal.md."""
+def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
+    """Project root with the standard ap2 init layout + a real goal.md.
+
+    TB-327: strip every `AP2_*` env knob BEFORE `Config.load` so the
+    cfg snapshot doesn't carry a stale `AP2_AUTO_UNFREEZE_*` value
+    from the parent process (mirror of the TB-326 `clean_env` shape).
+    """
+    import os
+    for name in list(os.environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
     init_project(tmp_path)
     (tmp_path / "goal.md").write_text(_GOAL_MD)
     cfg = Config.load(tmp_path)
@@ -186,27 +195,34 @@ def _read_queue(cfg: Config) -> list[dict]:
 # ===========================================================================
 
 
-def test_dry_run_helper_default_off_and_truthy_parse(monkeypatch):
+def test_dry_run_helper_default_off_and_truthy_parse(
+    cfg: Config, monkeypatch,
+):
     """`AP2_AUTO_UNFREEZE_DRY_RUN` defaults to False (feature off);
     `1` / `true` / `yes` (any case) parse truthy. Anything else parses
     False so a typo doesn't silently enable a feature that's supposed
     to flip the WRITE step. Pins the briefing's Scope (1) parse shape.
+
+    TB-327: helper now takes a `cfg` argument and resolves the env
+    name via `Config.get_component_value`'s reverse-`FLAT_TO_SECTIONED`
+    back-compat path, so the flat env name still wins end-to-end and
+    the parse-shape pin holds.
     """
     monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
-    assert daemon._auto_unfreeze_dry_run() is False
+    assert daemon._auto_unfreeze_dry_run(cfg) is False
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "")
-    assert daemon._auto_unfreeze_dry_run() is False
+    assert daemon._auto_unfreeze_dry_run(cfg) is False
 
     for truthy in ("1", "true", "yes", "TRUE", "Yes", "TrUe"):
         monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", truthy)
-        assert daemon._auto_unfreeze_dry_run() is True, (
+        assert daemon._auto_unfreeze_dry_run(cfg) is True, (
             f"{truthy!r} must parse truthy"
         )
 
     for falsy in ("0", "false", "no", "off", "garbage", "  "):
         monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", falsy)
-        assert daemon._auto_unfreeze_dry_run() is False, (
+        assert daemon._auto_unfreeze_dry_run(cfg) is False, (
             f"{falsy!r} must parse falsy"
         )
 

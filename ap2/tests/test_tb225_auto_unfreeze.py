@@ -92,8 +92,24 @@ _BRIEFING = (
 
 
 @pytest.fixture
-def cfg(tmp_path: Path) -> Config:
-    """Project root with the standard ap2 init layout + a real goal.md."""
+def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
+    """Project root with the standard ap2 init layout + a real goal.md.
+
+    TB-327: strip every `AP2_*` env knob BEFORE `Config.load` so the
+    cfg snapshot doesn't carry a stale `AP2_AUTO_UNFREEZE_*` value
+    from a parent process whose `.cc-autopilot/env` happens to export
+    a knob. The migrated helpers route through
+    `Config.get_component_value`, whose env-first precedence reads
+    `os.environ` at call time — but the snapshot layer (TOML overlay
+    + load-time env-coerced value) populated at `apply_env_overrides`
+    time would otherwise leak parent-process knob values into the
+    "unset / empty / non-int → default" parser pins. Mirrors the
+    TB-326 pilot's `clean_env` fixture shape.
+    """
+    import os
+    for name in list(os.environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
     init_project(tmp_path)
     (tmp_path / "goal.md").write_text(_GOAL_MD)
     cfg = Config.load(tmp_path)
@@ -237,29 +253,38 @@ def test_parser_handles_non_string_input():
 # ===========================================================================
 
 
-def test_allowlist_unset_returns_empty(monkeypatch):
+def test_allowlist_unset_returns_empty(cfg: Config, monkeypatch):
     """`AP2_AUTO_UNFREEZE_FIX_SHAPES` unset / empty → empty set. The
     daemon treats this as "feature disabled," not as a typo / parse
-    failure. Pins the opt-in default."""
+    failure. Pins the opt-in default.
+
+    TB-327: helper now takes a `cfg` argument and resolves via
+    `Config.get_component_value`; the flat env name still wins via
+    the back-compat reverse-lookup, so the parse-shape pin holds
+    end-to-end.
+    """
     monkeypatch.delenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", raising=False)
-    assert daemon._auto_unfreeze_allowlist() == frozenset()
+    assert daemon._auto_unfreeze_allowlist(cfg) == frozenset()
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", "")
-    assert daemon._auto_unfreeze_allowlist() == frozenset()
+    assert daemon._auto_unfreeze_allowlist(cfg) == frozenset()
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", "  ")
-    assert daemon._auto_unfreeze_allowlist() == frozenset()
+    assert daemon._auto_unfreeze_allowlist(cfg) == frozenset()
 
 
-def test_allowlist_parses_csv(monkeypatch):
+def test_allowlist_parses_csv(cfg: Config, monkeypatch):
     """Comma-separated tokens with whitespace are trimmed; empty tokens
     are dropped. Frozenset return so callers can pass it around without
-    defensive copies."""
+    defensive copies.
+
+    TB-327: same `cfg`-argument migration as the unset-pin sibling.
+    """
     monkeypatch.setenv(
         "AP2_AUTO_UNFREEZE_FIX_SHAPES",
         "grep_missing_r_on_dir, literal_backtick_in_shell_bullet ,, bare_path_to_test_f",
     )
-    got = daemon._auto_unfreeze_allowlist()
+    got = daemon._auto_unfreeze_allowlist(cfg)
     assert isinstance(got, frozenset)
     assert got == frozenset({
         "grep_missing_r_on_dir",
@@ -268,27 +293,34 @@ def test_allowlist_parses_csv(monkeypatch):
     })
 
 
-def test_per_task_cap_default_is_one(monkeypatch):
+def test_per_task_cap_default_is_one(cfg: Config, monkeypatch):
     """`AP2_AUTO_UNFREEZE_MAX_PER_TASK` defaults to 1 (single attempt
     before fallback to manual unfreeze). Pins the briefing's stated
-    default."""
+    default.
+
+    TB-327: helper now takes a `cfg` argument; the flat env name still
+    wins via the `Config.get_component_value` back-compat reverse-
+    lookup, so the parse-shape pin still exercises the env parser
+    shape end-to-end (default-on-empty/garbage/negative, zero-honored,
+    positive-int passthrough).
+    """
     monkeypatch.delenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", raising=False)
-    assert daemon._auto_unfreeze_max_per_task() == 1
+    assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "")
-    assert daemon._auto_unfreeze_max_per_task() == 1
+    assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "garbage")
-    assert daemon._auto_unfreeze_max_per_task() == 1
+    assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "-5")
-    assert daemon._auto_unfreeze_max_per_task() == 1
+    assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "0")
-    assert daemon._auto_unfreeze_max_per_task() == 0  # explicit disable honored
+    assert daemon._auto_unfreeze_max_per_task(cfg) == 0  # explicit disable honored
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "5")
-    assert daemon._auto_unfreeze_max_per_task() == 5
+    assert daemon._auto_unfreeze_max_per_task(cfg) == 5
 
 
 # ===========================================================================
@@ -436,49 +468,58 @@ def test_tb320_kill_switch_unset_runs_sweep_normally(
     assert len(applied) == 1, applied
 
 
-def test_tb320_is_auto_unfreeze_disabled_truthy_parse(monkeypatch):
-    """`_is_auto_unfreeze_disabled` reads `AP2_AUTO_UNFREEZE_DISABLED`
-    fresh from `os.environ` each call and accepts the same truthy set
-    as the sibling kill-switch parsers (`AP2_FOCUS_AUTO_ADVANCE_DISABLED`,
-    `AP2_VALIDATOR_JUDGE_DISABLED`): `1` / `true` / `yes` / `on`
-    (case-insensitive). Default-unset → False.
+def test_tb320_is_auto_unfreeze_disabled_truthy_parse(
+    cfg: Config, monkeypatch,
+):
+    """`_is_auto_unfreeze_disabled` resolves the disabled knob via
+    `Config.get_component_value` (TB-327 axis-5) and accepts the same
+    truthy set as the sibling kill-switch parsers
+    (`AP2_FOCUS_AUTO_ADVANCE_DISABLED`, `AP2_VALIDATOR_JUDGE_DISABLED`):
+    `1` / `true` / `yes` / `on` (case-insensitive). Default-unset →
+    False. The flat env name still wins via the back-compat reverse-
+    lookup so the truthy-parse pin still exercises the env-side parser
+    shape end-to-end.
     """
     from ap2.components.auto_unfreeze import _is_auto_unfreeze_disabled
 
     monkeypatch.delenv("AP2_AUTO_UNFREEZE_DISABLED", raising=False)
-    assert _is_auto_unfreeze_disabled() is False
+    assert _is_auto_unfreeze_disabled(cfg) is False
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "")
-    assert _is_auto_unfreeze_disabled() is False
+    assert _is_auto_unfreeze_disabled(cfg) is False
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "0")
-    assert _is_auto_unfreeze_disabled() is False
+    assert _is_auto_unfreeze_disabled(cfg) is False
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "false")
-    assert _is_auto_unfreeze_disabled() is False
+    assert _is_auto_unfreeze_disabled(cfg) is False
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "1")
-    assert _is_auto_unfreeze_disabled() is True
+    assert _is_auto_unfreeze_disabled(cfg) is True
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "TRUE")
-    assert _is_auto_unfreeze_disabled() is True
+    assert _is_auto_unfreeze_disabled(cfg) is True
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "yes")
-    assert _is_auto_unfreeze_disabled() is True
+    assert _is_auto_unfreeze_disabled(cfg) is True
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "on")
-    assert _is_auto_unfreeze_disabled() is True
+    assert _is_auto_unfreeze_disabled(cfg) is True
 
 
-def test_per_day_cap_default_is_three(monkeypatch):
-    """`AP2_AUTO_UNFREEZE_MAX_PER_DAY` defaults to 3 (rolling 24h)."""
+def test_per_day_cap_default_is_three(cfg: Config, monkeypatch):
+    """`AP2_AUTO_UNFREEZE_MAX_PER_DAY` defaults to 3 (rolling 24h).
+
+    TB-327: helper now takes a `cfg` argument; the flat env name still
+    wins via the back-compat reverse-lookup.
+    """
     monkeypatch.delenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", raising=False)
-    assert daemon._auto_unfreeze_max_per_day() == 3
+    assert daemon._auto_unfreeze_max_per_day(cfg) == 3
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "")
-    assert daemon._auto_unfreeze_max_per_day() == 3
+    assert daemon._auto_unfreeze_max_per_day(cfg) == 3
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "not-a-number")
-    assert daemon._auto_unfreeze_max_per_day() == 3
+    assert daemon._auto_unfreeze_max_per_day(cfg) == 3
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "0")
-    assert daemon._auto_unfreeze_max_per_day() == 0
+    assert daemon._auto_unfreeze_max_per_day(cfg) == 0
 
     monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "10")
-    assert daemon._auto_unfreeze_max_per_day() == 10
+    assert daemon._auto_unfreeze_max_per_day(cfg) == 10
 
 
 # ===========================================================================
