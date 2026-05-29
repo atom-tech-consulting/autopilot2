@@ -1245,3 +1245,9 @@
 - **Summary:** Added test_tb338_env_only_cut_line.py with AST-based env-read walker enforcing disjointness (FLAT_TO_SECTIONED ∩ _KNOBS_STAYING_ENV_ONLY = ∅) and source-level cut-line (every os.environ.get("AP2_…") must be in the exempt set, in the ap2/config.py/env_reload.py bootstrap allowlist, or in a small documented _PENDING_MIGRATION_KNOBS debt set holding TB-334-deferred AP2_VERIFY_JUDGE_EFFORT + AP2_STATUS_REPORT_EFFORT residuals); cross-referenced from the _KNOBS_STAYING_ENV_ONLY comment block in config_compat.py and from the ## Configuration knobs section of howto.md. Full suite: 2822 passed.
 - **Files:** ap2/tests/test_tb338_env_only_cut_line.py, ap2/config_compat.py, ap2/howto.md
 - **Tests:** pass
+
+## [2026-05-29] TB-339: Drain `_PENDING_MIGRATION_KNOBS` to empty: migrate AP2_VERIFY_JUDGE_EFFORT + AP2_STATUS_REPORT_EFFORT via cfg.get_core_value (axis-5 cleanup)
+- **Commit:** `560bebd`
+- **Summary:** Drained _PENDING_MIGRATION_KNOBS to frozenset(): declared verify_judge_effort + status_report_effort in CORE_CONFIG_SCHEMA, swapped the two direct AP2_* env reads (verify.py L588, status_report.py L2028) to chained-`or` cfg.get_core_value(...) preserving precedence; added regression-pin test, howto.md core entries, CONFIG_TEMPLATE auto-renders via dynamic schema walk. Full suite 2839 passed; grep-absence + schema/howto/test-exists checks green.</summary>
+<parameter name="files_changed">ap2/core_config_schema.py, ap2/verify.py, ap2/status_report.py, ap2/tests/test_tb338_env_only_cut_line.py, ap2/tests/test_tb339_pending_migration_drained.py, ap2/howto.md
+- **Tests:** pass

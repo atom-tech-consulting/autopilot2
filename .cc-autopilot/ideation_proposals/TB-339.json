@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-338",
   "briefing_path": ".cc-autopilot/tasks/drain-pending-migration-knobs-to-empty-m.md",
   "focus_anchor": "current focus structured config env toml",
+  "outcome": {
+    "commit": "560bebd",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-29T14:22:36Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-29T11:58:48Z",
   "tb_id": "TB-339",
   "why_now": "the cut-line CI gate landed one cycle ago carrying the\n2-entry debt set as a documented exception. Draining the debt set\nNOW keeps the \"clearly minimal\" framing per goal.md L401-403 honest\n\u2014 the set is intended to trend to empty, and pinning the last 2\nresiduals immediately after the gate lands is the cheapest possible\ndebt payoff. Deferring lets the carve-out normalize as \"permanent\"\nrather than transitional. The migration shape is mechanical\n(TB-326/336 template applies verbatim now that FLAT_TO_SECTIONED is\nin place); this is the smallest possible task that takes the\nstructured-config focus from \"in-progress\" to\n\"exhausted-needs-operator\"."
