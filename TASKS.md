@@ -9,6 +9,7 @@
 ## Backlog
 
 - [ ] **TB-340** **Fix `ack roadmap_complete` semantics: dismiss-the-notice, never resume-ideation** `#autopilot` `#bug` `#roadmap-complete` `#focus-advance` `#ideation` `#operator-ux` [→ brief](.cc-autopilot/tasks/fix-ack-roadmap-complete-semantics-dismi.md)
+- [ ] **TB-341** **Upgrade claude-agent-sdk 0.1.71 → 0.2.x (unblock Opus 4.8 thinking-block round-trip)** `#autopilot` `#sdk` `#dependency` `#infrastructure` `#opus-4-8` `#thinking-blocks` [→ brief](.cc-autopilot/tasks/upgrade-claude-agent-sdk-0-1-71-0-2-x-un.md)
 
 ## Pipeline Pending
 

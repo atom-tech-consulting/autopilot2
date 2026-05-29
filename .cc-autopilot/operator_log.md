@@ -284,3 +284,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-29T14:04:05Z — auto_approve_window_resume — TB-339 task_error was a transient Anthropic API 500 mid-run (seq 163 in agent trace), not a code/briefing fault; daemon restarted onto Opus 4.8
 - 2026-05-29T14:03:56Z — applied operator-queued ack
 - 2026-05-29T21:13:27Z — applied operator-queued add_backlog → TB-340 (goal-alignment check skipped)
+- 2026-05-29T21:24:37Z — applied operator-queued add_backlog → TB-341 (goal-alignment check skipped)
+- 2026-05-29T21:54:35Z — applied operator-queued update → TB-340 (goal-alignment check skipped)

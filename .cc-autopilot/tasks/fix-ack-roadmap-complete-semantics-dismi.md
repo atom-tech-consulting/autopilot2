@@ -141,7 +141,10 @@ is a correctness + UX + cost bug in one. Operator-directed fix
 
 ## Verification
 
-- `uv run pytest -q` — full suite passes.
+- `uv run pytest -q ap2/tests/` — full suite passes (scoped to
+  `ap2/tests/`, matching the project's canonical `AP2_VERIFY_CMD`;
+  an unscoped `pytest -q` collects failing/erroring files outside
+  `ap2/tests/` and is not the project's gate).
 - `uv run pytest -q ap2/tests/test_tb226_focus_rotation.py` — the
   existing focus-rotation pins pass (adjust expectations for the
   corrected semantics where a pin asserted ack-clears-the-gate;
@@ -195,16 +198,3 @@ is a correctness + UX + cost bug in one. Operator-directed fix
 - The structured-config TOML migration of any
   roadmap/focus knobs (separate focus, already shipped where
   applicable).
-## Attempts
-
-### 2026-05-29 — error
-(no summary)
-- **error:** Exception: Command failed with exit code 1 (exit code: 1)
-Error output: Check stderr output for details
-- **stderr_tail:** 
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T211358Z-TB-340.prompt.md`, `stream: .cc-autopilot/debug/20260529T211358Z-TB-340.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T211358Z-TB-340.messages.jsonl`
-### 2026-05-29 — verification_failed
-(no summary)
-- **kind:** per_task
-- **failed_criteria:** [fail] `uv run pytest -q` — full suite passes.
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T211645Z-TB-340.prompt.md`, `stream: .cc-autopilot/debug/20260529T211645Z-TB-340.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T211645Z-TB-340.messages.jsonl`
