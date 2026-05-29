@@ -281,3 +281,5 @@ ideation won't re-propose decisions logged here._
 - 2026-05-28T20:33:50Z — applied operator-queued rewind_focus
 - 2026-05-28T20:33:50Z — operator rewound focus pointer ((unknown) → structured config (env → TOML)): fix immediate auto-exhaust on goal extension: empty_cycles was at advance threshold from prior shipped focus; rewind sets pointer back to the new focus and resets counter
 - 2026-05-29T06:40:41Z — applied operator-queued update → TB-333
+- 2026-05-29T14:04:05Z — auto_approve_window_resume — TB-339 task_error was a transient Anthropic API 500 mid-run (seq 163 in agent trace), not a code/briefing fault; daemon restarted onto Opus 4.8
+- 2026-05-29T14:03:56Z — applied operator-queued ack

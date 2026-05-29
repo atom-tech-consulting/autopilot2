@@ -176,3 +176,11 @@ structured-config focus from "in-progress" to
 - Behavior change. Both call sites' EFFECTIVE effort value must
   stay identical to today's behavior at every state of the env /
   TOML / global-cfg precedence chain. Test bullets 4 + 5 pin this.
+## Attempts
+
+### 2026-05-29 — error
+(no summary)
+- **error:** Exception: Command failed with exit code 1 (exit code: 1)
+Error output: Check stderr output for details
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260529T115944Z-TB-339.prompt.md`, `stream: .cc-autopilot/debug/20260529T115944Z-TB-339.stream.jsonl`, `messages: .cc-autopilot/debug/20260529T115944Z-TB-339.messages.jsonl`
