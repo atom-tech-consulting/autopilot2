@@ -48,7 +48,17 @@ from ap2.init import init_project
 
 
 @pytest.fixture
-def cfg(tmp_path: Path) -> Config:
+def cfg(tmp_path: Path, monkeypatch) -> Config:
+    """Per-test cfg with AP2_* env stripped BEFORE `Config.load` (TB-332
+    cross-package migration). Mirrors the TB-227 / TB-326 fixture
+    shape so the cfg snapshot doesn't inherit a parent-shell
+    `AP2_AUTO_APPROVE=1` painted at `apply_env_overrides` time.
+    """
+    import os
+
+    for name in list(os.environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()

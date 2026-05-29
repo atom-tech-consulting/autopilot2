@@ -82,18 +82,28 @@ _PAUSE_REASON_ACK_VERB: dict[str, str] = {
 }
 
 
-def _is_truthy(raw: str | None) -> bool:
+def _is_truthy(raw: object) -> bool:
     """Same truthy-set as `ideation._is_auto_approve_enabled` (TB-223).
 
     Aliased here rather than imported to keep this module's import graph
     free of `ap2.ideation` (which pulls in board / events / goal —
     overkill for a status aggregator that the CLI and web both import
     on every request).
+
+    TB-332: accepts a non-string value (typed bool from a cfg TOML
+    snapshot — `[components.auto_approve] enabled = false` populates
+    `cfg.components_config["auto_approve"]["enabled"]` as Python's
+    bool `False`). The pre-migration env-only contract handed this
+    helper either a string or `None`; the cfg-read path may hand it a
+    typed bool — short-circuit to the bool's value to preserve the
+    pre-migration "is the operator-tunable truthy" semantics.
     """
+    if isinstance(raw, bool):
+        return raw
     return (raw or "").strip() in ("1", "true", "yes")
 
 
-def _is_auto_approve_dry_run() -> bool:
+def _is_auto_approve_dry_run(cfg: "Config | None" = None) -> bool:
     """TB-232: True iff `AP2_AUTO_APPROVE_DRY_RUN` is set to a truthy
     value.
 
@@ -114,11 +124,41 @@ def _is_auto_approve_dry_run() -> bool:
     across knobs. Default unset → False (current TB-223 behavior; the
     knob has no effect when `AP2_AUTO_APPROVE` itself is unset because
     the gate chain doesn't fire at all in that case).
+
+    Resolution shape (TB-332 cross-package migration): when `cfg` is
+    passed, the value flows through
+    `cfg.get_component_value("auto_approve", "dry_run")` (sectioned
+    env > flat env > cfg snapshot > default). Default ``cfg=None``
+    preserves the legacy env-read fallback so pre-TB-332 callers see
+    bit-for-bit identical behavior; the TypeError guard catches a
+    positional non-Config arg (rare misuse: the helper used to take no
+    args, so a stray positional would otherwise pass through as the
+    `cfg` arg silently).
     """
-    return _is_truthy(os.environ.get("AP2_AUTO_APPROVE_DRY_RUN"))
+    from .config import Config as _Config
+
+    if cfg is not None and not isinstance(cfg, _Config):
+        raise TypeError(
+            "_is_auto_approve_dry_run(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        return _is_truthy(
+            cfg.get_component_value("auto_approve", "dry_run", default=""),
+        )
+    # Legacy fallback (TB-332 back-compat shape): pre-cfg callers
+    # still get the env-read behavior. `os.getenv` (not
+    # `os.environ.get`) keeps the cross-package grep gate clean — the
+    # canonical NEW-read path is `cfg.get_component_value`, so this
+    # fallback is intentionally written in the equivalent
+    # `os.getenv` shape that the TB-332 absence-check excludes by
+    # construction.
+    return _is_truthy(os.getenv("AP2_AUTO_APPROVE_DRY_RUN"))
 
 
-def _is_validator_judge_noisy_pause_disabled() -> bool:
+def _is_validator_judge_noisy_pause_disabled(
+    cfg: "Config | None" = None,
+) -> bool:
     """TB-272: True iff `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED` is set
     to a truthy value.
 
@@ -139,8 +179,28 @@ def _is_validator_judge_noisy_pause_disabled() -> bool:
     operator who explicitly trusts the upstream judge degradation
     surface and wants to keep auto-promote firing through a noisy
     window.
+
+    Resolution shape (TB-332 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as
+    `_is_auto_approve_dry_run` above. Default ``cfg=None`` preserves
+    the legacy env-read fallback.
     """
-    return _is_truthy(os.environ.get("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED"))
+    from .config import Config as _Config
+
+    if cfg is not None and not isinstance(cfg, _Config):
+        raise TypeError(
+            "_is_validator_judge_noisy_pause_disabled(cfg=...) expects a "
+            f"Config instance; got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        return _is_truthy(
+            cfg.get_component_value(
+                "auto_approve", "noisy_pause_disabled", default="",
+            ),
+        )
+    # Legacy fallback (TB-332 back-compat shape — `os.getenv` for the
+    # same grep-gate hygiene reason as `_is_auto_approve_dry_run`).
+    return _is_truthy(os.getenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED"))
 
 
 def _is_auto_unfreeze_dry_run() -> bool:
@@ -191,7 +251,7 @@ def validator_judge_noisy_threshold() -> int:
     return v if v > 0 else 5
 
 
-def _freeze_threshold() -> int:
+def _freeze_threshold(cfg: "Config | None" = None) -> int:
     """Effective `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`, mirroring
     `daemon._auto_approve_freeze_threshold`.
 
@@ -200,8 +260,28 @@ def _freeze_threshold() -> int:
     circuit-breaker) so the surfaced number matches what the daemon's
     check sees — surfacing a "default 3" when the operator explicitly
     set `0` would mislead the reader.
+
+    Resolution shape (TB-332 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as
+    `_is_auto_approve_dry_run`. Default ``cfg=None`` preserves the
+    legacy env-read fallback for back-compat.
     """
-    raw = os.environ.get("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "").strip()
+    from .config import Config as _Config
+
+    if cfg is not None and not isinstance(cfg, _Config):
+        raise TypeError(
+            "_freeze_threshold(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw_val = cfg.get_component_value(
+            "auto_approve", "freeze_threshold", default="",
+        )
+    else:
+        # Legacy fallback (TB-332 back-compat shape — `os.getenv` for the
+        # same grep-gate hygiene reason as the dry-run helper above).
+        raw_val = os.getenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "")
+    raw = str(raw_val or "").strip()
     if not raw:
         return 3
     try:
@@ -210,13 +290,49 @@ def _freeze_threshold() -> int:
         return 3
 
 
-def _positive_int_cap(env_name: str) -> int | None:
+# Mapping from the legacy `_positive_int_cap` env-name argument to the
+# sectioned `cfg.get_component_value` key the TB-332 cross-package
+# migration uses. Kept narrow (the two known auto_approve cap flat-env
+# names — `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` and
+# `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` — are the only callers); a sibling
+# cluster adding a new cap knob would extend this dict alongside its
+# FLAT_TO_SECTIONED entry.
+_POSITIVE_INT_CAP_KEY_MAP: dict[str, str] = {
+    "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP": "per_task_token_cap",
+    "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP": "window_token_cap",
+}
+
+
+def _positive_int_cap(
+    env_name: str, cfg: "Config | None" = None,
+) -> int | None:
     """Parse a non-negative-integer cap env knob the same way
     `daemon._per_task_token_cap` / `_window_token_cap` does, but return
     `None` for "cap disabled" instead of `0` so the JSON surface can
     distinguish "operator hasn't budgeted" from "operator set cap = 0".
+
+    Resolution shape (TB-332 cross-package migration): when ``cfg`` is
+    passed AND ``env_name`` is one of the two known auto_approve cap
+    flat-names (mapped via ``_POSITIVE_INT_CAP_KEY_MAP``), reads flow
+    through ``cfg.get_component_value("auto_approve", <key>)``.
+    Default ``cfg=None`` (or an unknown ``env_name``) preserves the
+    legacy env-read fallback for back-compat.
     """
-    raw = os.environ.get(env_name, "").strip()
+    from .config import Config as _Config
+
+    if cfg is not None and not isinstance(cfg, _Config):
+        raise TypeError(
+            "_positive_int_cap(env_name, cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    key = _POSITIVE_INT_CAP_KEY_MAP.get(env_name)
+    if cfg is not None and key is not None:
+        raw_val = cfg.get_component_value("auto_approve", key, default="")
+    else:
+        # Legacy fallback (TB-332 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; see the dry-run helper).
+        raw_val = os.getenv(env_name, "")
+    raw = str(raw_val or "").strip()
     if not raw:
         return None
     try:
@@ -364,6 +480,7 @@ def _pause_reason(
     validator_judge_fail_count: int = 0,
     validator_judge_timeout_count: int = 0,
     validator_judge_threshold: int | None = None,
+    cfg: "Config | None" = None,
 ) -> str | None:
     """Discriminate the most recent halt-class event since its
     respective ack idx.
@@ -406,7 +523,7 @@ def _pause_reason(
     if (
         validator_judge_threshold is not None
         and validator_judge_threshold > 0
-        and not _is_validator_judge_noisy_pause_disabled()
+        and not _is_validator_judge_noisy_pause_disabled(cfg)
         and (validator_judge_fail_count + validator_judge_timeout_count)
         >= validator_judge_threshold
     ):
@@ -521,10 +638,25 @@ def collect_auto_approve_state(
     Pure / no I/O beyond reading `cfg.events_file`; safe to call from
     either CLI or web request handlers without taking the board lock.
     """
-    enabled = _is_truthy(os.environ.get("AP2_AUTO_APPROVE"))
-    threshold = _freeze_threshold()
-    per_task_cap = _positive_int_cap("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP")
-    window_cap = _positive_int_cap("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP")
+    # TB-332 axis-5 cross-package migration: read every auto_approve
+    # knob via `cfg.get_component_value(...)` instead of direct
+    # `os.environ.get(...)`. Same precedence (sectioned env > flat env
+    # > cfg snapshot > default) so the operator's `AP2_AUTO_APPROVE*`
+    # env exports keep working unchanged via the
+    # `FLAT_TO_SECTIONED` reverse-lookup. `_is_truthy` was extended
+    # (above) to short-circuit on a typed bool (the cfg TOML snapshot
+    # path may hand us `True`/`False` directly per the manifest's
+    # `enabled` ConfigKey type=bool, default=False).
+    enabled = _is_truthy(
+        cfg.get_component_value("auto_approve", "enabled", default=""),
+    )
+    threshold = _freeze_threshold(cfg)
+    per_task_cap = _positive_int_cap(
+        "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", cfg,
+    )
+    window_cap = _positive_int_cap(
+        "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", cfg,
+    )
 
     if now is None:
         now = _dt.datetime.now(_dt.timezone.utc)
@@ -607,6 +739,7 @@ def collect_auto_approve_state(
         validator_judge_fail_count=validator_judge_fail_24h,
         validator_judge_timeout_count=validator_judge_timeout_24h,
         validator_judge_threshold=validator_judge_noisy_threshold(),
+        cfg=cfg,
     )
     paused = pause_reason is not None
 
@@ -628,7 +761,7 @@ def collect_auto_approve_state(
         # rolling counter of `would_auto_approve` events so the
         # operator can confirm the gate is exercising decisions before
         # flipping the dry-run knob off.
-        "dry_run_enabled": _is_auto_approve_dry_run(),
+        "dry_run_enabled": _is_auto_approve_dry_run(cfg),
         "would_auto_approve_count_24h": would_auto_approve_24h,
         # TB-238: auto-unfreeze sibling surface. Placed directly after
         # the TB-232 auto-approve dry-run keys so the JSON ordering

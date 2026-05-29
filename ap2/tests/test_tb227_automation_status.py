@@ -39,7 +39,29 @@ from ap2.init import init_project
 
 
 @pytest.fixture
-def cfg(tmp_path: Path) -> Config:
+def cfg(tmp_path: Path, monkeypatch) -> Config:
+    """Per-test cfg over a fresh project root with AP2_* env stripped
+    BEFORE `Config.load`.
+
+    TB-332: post-cross-package migration, `automation_status` helpers
+    read auto_approve knobs via `cfg.get_component_value(...)`, which
+    snapshots `cfg.components_config` at load time from the env-
+    override layer (`apply_env_overrides`). The dev shell may export
+    `AP2_AUTO_APPROVE=1` (the parent process the test inherits from),
+    which would otherwise paint `enabled=True` onto the cfg snapshot
+    before a test body's `monkeypatch.delenv("AP2_AUTO_APPROVE")` runs.
+    Stripping AP2_* env in the fixture (BEFORE `Config.load`) pins
+    each test's cfg to a clean baseline; test bodies that want a knob
+    truthy use `monkeypatch.setenv(...)` AFTER the fixture lands and
+    the cfg-read path picks up the env via the call-time precedence
+    in `Config.get_component_value`. Mirrors the TB-326 / TB-327 /
+    TB-328 / TB-330 cluster-pilot fixture shape.
+    """
+    import os
+
+    for name in list(os.environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()

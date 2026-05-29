@@ -52,7 +52,19 @@ from ap2.init import init_project
 
 
 @pytest.fixture
-def cfg(tmp_path: Path) -> Config:
+def cfg(tmp_path: Path, monkeypatch) -> Config:
+    """Per-test cfg with AP2_* env stripped BEFORE `Config.load` (TB-332
+    cross-package migration). The cfg-read path
+    (`Config.get_component_value`) snapshots the env layer onto
+    `cfg.components_config` at load time; pre-stripping prevents a
+    parent-shell `AP2_AUTO_APPROVE=1` from painting the cfg snapshot
+    before a test body's `_clear_auto_env(monkeypatch)` runs.
+    """
+    import os
+
+    for name in list(os.environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()

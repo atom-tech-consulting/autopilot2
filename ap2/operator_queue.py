@@ -1453,8 +1453,6 @@ def drain_operator_queue(cfg: Config) -> dict:
 
 
 def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
-    import os
-
     op = rec.get("op", "")
     args = rec.get("args") or {}
     add_map = {
@@ -1514,12 +1512,19 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
                     # rewrite logic stays single-source-of-truth with
                     # the direct path. Then emit `auto_approved` with
                     # the same payload shape `do_board_edit` uses.
+                    # TB-332 axis-5 cross-package migration: read the
+                    # `AP2_AUTO_APPROVE` knob via
+                    # `cfg.get_component_value("auto_approve", "enabled")`
+                    # so the event-payload string shape preserves the
+                    # downstream-parser contract (TB-223 / TB-232
+                    # audit consumers expect the raw env-style value).
                     _approve_review_token(board, task_id)
+                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
                     events.append(
                         cfg.events_file,
                         "auto_approved",
                         task=task_id,
-                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                        knob=str(_knob or ""),
                     )
                 elif decision == "dry_run":
                     # TB-232 monitor-only on-ramp: all four gates passed
@@ -1527,12 +1532,15 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
                     # WRITE step. The `@blocked:review` codespan
                     # survives so the task still requires operator
                     # `ap2 approve`. Mirrors the direct-path payload
-                    # (`dry_run=True` discriminator).
+                    # (`dry_run=True` discriminator). TB-332: same
+                    # `cfg.get_component_value("auto_approve",
+                    # "enabled")` read path as the strip branch above.
+                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
                     events.append(
                         cfg.events_file,
                         "would_auto_approve",
                         task=task_id,
-                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                        knob=str(_knob or ""),
                         dry_run=True,
                     )
                 # decision == "noop": at least one gate failed

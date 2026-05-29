@@ -549,7 +549,7 @@ def _validator_judge_noisy_paused(cfg: Config) -> tuple[int, int, int] | None:
     """
     from ap2 import automation_status as _astatus
 
-    if _astatus._is_validator_judge_noisy_pause_disabled():
+    if _astatus._is_validator_judge_noisy_pause_disabled(cfg):
         return None
     if not cfg.events_file.exists():
         return None
@@ -683,7 +683,7 @@ def evaluate_auto_approve_decision(
     # Short-circuits both real and dry-run modes — a tag opt-out
     # means "operator must manually approve", which the
     # `@blocked:review` codespan already enforces.
-    if not ideation.should_auto_approve(tags):
+    if not ideation.should_auto_approve(tags, cfg):
         return "noop"
     # Gate 2: freeze-threshold (TB-223 circuit-breaker). Evaluated
     # here so the dry-run terminal branch below can honor it; real
@@ -703,7 +703,7 @@ def evaluate_auto_approve_decision(
     # enforcement to the dispatch-time gate site in `_tick` so the
     # canonical `auto_approve_paused` / `auto_approve_halted` event
     # stream stays single-source-of-truth.
-    if _astatus._is_auto_approve_dry_run():
+    if _astatus._is_auto_approve_dry_run(cfg):
         if freeze_paused or token_violation is not None:
             return "noop"
         return "dry_run"

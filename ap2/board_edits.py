@@ -26,8 +26,6 @@ from them rather than re-defining.
 """
 from __future__ import annotations
 
-import os
-
 from . import events
 from .board import locked_board
 from .briefing_validators import (
@@ -242,11 +240,21 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     briefing=briefing_rel,
                 )
                 if auto_approved_stripped:
+                    # TB-332 axis-5 cross-package migration: read the
+                    # `AP2_AUTO_APPROVE` knob value via
+                    # `cfg.get_component_value("auto_approve", "enabled")`
+                    # so the event payload preserves the same string
+                    # shape downstream parsers already expect (TB-223 /
+                    # TB-232 audit consumers read `knob` as the raw
+                    # env-style value). The default="" mirrors the
+                    # legacy `os.environ.get(..., "")` shape — never
+                    # emit a `None` here.
+                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
                     events.append(
                         cfg.events_file,
                         "auto_approved",
                         task=new_id,
-                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                        knob=str(_knob or ""),
                     )
                 elif would_auto_approved_simulated:
                     # TB-232: payload mirrors `auto_approved` shape so
@@ -254,12 +262,15 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     # tooling can parse both event streams uniformly.
                     # `dry_run=True` discriminator field lets
                     # downstream consumers distinguish the simulated
-                    # decision from the real one.
+                    # decision from the real one. TB-332: same
+                    # `cfg.get_component_value("auto_approve",
+                    # "enabled")` read path as the strip branch above.
+                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
                     events.append(
                         cfg.events_file,
                         "would_auto_approve",
                         task=new_id,
-                        knob=os.environ.get("AP2_AUTO_APPROVE", ""),
+                        knob=str(_knob or ""),
                         dry_run=True,
                     )
                 # TB-141: persist the new high-water mark to CLAUDE.md

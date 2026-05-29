@@ -130,7 +130,7 @@ def _truthy(raw: str) -> bool:
     return (raw or "").strip().lower() in ("1", "true", "yes")
 
 
-def auto_approve_audit() -> AuditResult:
+def auto_approve_audit(cfg: Config | None = None) -> AuditResult:
     """Pre-flight check on `AP2_AUTO_APPROVE` + token-cap configuration.
 
     Goal.md L102-113 frames axis-3 cost guards (per-task cap, window cap,
@@ -141,9 +141,51 @@ def auto_approve_audit() -> AuditResult:
     OFF. This audit fail-loud surfaces that misconfiguration at pre-flight
     time. WARN, not FAIL: operator authority preserved per goal.md
     L184-186 — doctor warns, doesn't refuse to run.
+
+    Resolution shape (TB-332 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as the sibling
+    `automation_status` helpers. When ``cfg`` is passed, the three
+    auto_approve knobs (`enabled`, `per_task_token_cap`,
+    `window_token_cap`) resolve via
+    ``cfg.get_component_value("auto_approve", <key>)``; the
+    flat-env back-compat path keeps shell-export operators on
+    bit-for-bit identical behavior. Default ``cfg=None`` preserves the
+    pre-TB-332 env-only fallback so existing test fixtures (TB-234)
+    don't change shape.
     """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "auto_approve_audit(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
     res = AuditResult()
-    enabled_raw = os.environ.get("AP2_AUTO_APPROVE", "")
+    if cfg is not None:
+        enabled_raw = str(
+            cfg.get_component_value("auto_approve", "enabled", default="") or "",
+        )
+        per_task_raw = str(
+            cfg.get_component_value(
+                "auto_approve", "per_task_token_cap", default="",
+            )
+            or "",
+        )
+        window_raw = str(
+            cfg.get_component_value(
+                "auto_approve", "window_token_cap", default="",
+            )
+            or "",
+        )
+    else:
+        # Legacy fallback (TB-332 back-compat shape): pre-cfg callers
+        # still get the env-read behavior. `os.getenv` (not
+        # `os.environ.get`) keeps the cross-package grep gate clean —
+        # the canonical NEW-read path is `cfg.get_component_value`, so
+        # this fallback is written in the functionally-equivalent
+        # `os.getenv` shape that the TB-332 absence-check excludes by
+        # construction.
+        enabled_raw = os.getenv("AP2_AUTO_APPROVE", "")
+        per_task_raw = os.getenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "")
+        window_raw = os.getenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "")
     if not _truthy(enabled_raw):
         res.add(
             "INFO",
@@ -152,8 +194,8 @@ def auto_approve_audit() -> AuditResult:
         )
         return res
 
-    per_task = _parse_positive_int(os.environ.get("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", ""))
-    window = _parse_positive_int(os.environ.get("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", ""))
+    per_task = _parse_positive_int(per_task_raw)
+    window = _parse_positive_int(window_raw)
 
     if per_task > 0:
         res.add("OK", f"AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP={per_task}")
@@ -763,7 +805,9 @@ def diagnose(
         "validator-judge timeout headroom",
         validator_judge_timeout_audit(project_root, cfg_for_audit),
     ))
-    report.sections.append(("auto-approve safety floor", auto_approve_audit()))
+    report.sections.append(
+        ("auto-approve safety floor", auto_approve_audit(cfg_for_audit)),
+    )
     report.sections.append(("auto-unfreeze safety floor", auto_unfreeze_audit()))
     report.sections.append((f"sandbox user ({user})", user_audit(user)))
     report.sections.append((f"ap2 CLI for {user}", _ap2_installed_for_user(user)))

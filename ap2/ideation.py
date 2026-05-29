@@ -624,7 +624,7 @@ AUTO_APPROVE_DEFAULT_GATE_TAGS: tuple[str, ...] = (
 )
 
 
-def _is_auto_approve_enabled() -> bool:
+def _is_auto_approve_enabled(cfg: "Config | None" = None) -> bool:
     """True iff `AP2_AUTO_APPROVE` is set to a truthy value.
 
     Truthy values: `"1"`, `"true"`, `"yes"` (case-sensitive, leading/trailing
@@ -635,11 +635,32 @@ def _is_auto_approve_enabled() -> bool:
     Matches the parsing shape of `AP2_IDEATION_DISABLED` in
     `_maybe_ideate` (L641) so operators tuning the autopilot env file see
     one consistent boolean convention across knobs.
+
+    Resolution shape (TB-332 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as the sibling
+    `automation_status._is_auto_approve_dry_run` helper. Default
+    ``cfg=None`` preserves the legacy env-read fallback so
+    pre-TB-332 callers (TB-223 unit tests) see bit-for-bit identical
+    behavior.
     """
-    return os.environ.get("AP2_AUTO_APPROVE", "").strip() in ("1", "true", "yes")
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_is_auto_approve_enabled(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(
+            cfg.get_component_value("auto_approve", "enabled", default="") or "",
+        )
+    else:
+        # Legacy fallback (TB-332 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; the canonical NEW-read path
+        # is `cfg.get_component_value`).
+        raw = os.getenv("AP2_AUTO_APPROVE", "")
+    return raw.strip() in ("1", "true", "yes")
 
 
-def _auto_approve_gate_tags() -> frozenset[str]:
+def _auto_approve_gate_tags(cfg: "Config | None" = None) -> frozenset[str]:
     """Parsed `AP2_AUTO_APPROVE_GATE_TAGS` as a frozenset of normalized
     tag strings.
 
@@ -654,8 +675,28 @@ def _auto_approve_gate_tags() -> frozenset[str]:
     falls back to the default set (the explicit way to opt out of every
     gate-tag is `AP2_AUTO_APPROVE_GATE_TAGS="#__never__"` or similar
     sentinel that no real task carries).
+
+    Resolution shape (TB-332 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as
+    `_is_auto_approve_enabled`. Default ``cfg=None`` preserves the
+    legacy env-read fallback for back-compat.
     """
-    raw = os.environ.get("AP2_AUTO_APPROVE_GATE_TAGS", "").strip()
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_auto_approve_gate_tags(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(
+            cfg.get_component_value(
+                "auto_approve", "gate_tags", default="",
+            )
+            or "",
+        ).strip()
+    else:
+        # Legacy fallback (TB-332 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; see `_is_auto_approve_enabled`).
+        raw = os.getenv("AP2_AUTO_APPROVE_GATE_TAGS", "").strip()
     if not raw:
         return frozenset(AUTO_APPROVE_DEFAULT_GATE_TAGS)
     out: set[str] = set()
@@ -669,7 +710,10 @@ def _auto_approve_gate_tags() -> frozenset[str]:
     return frozenset(out) if out else frozenset(AUTO_APPROVE_DEFAULT_GATE_TAGS)
 
 
-def should_auto_approve(tags: list[str] | tuple[str, ...] | None) -> bool:
+def should_auto_approve(
+    tags: list[str] | tuple[str, ...] | None,
+    cfg: "Config | None" = None,
+) -> bool:
     """Should this ideation-proposed task have its `@blocked:review`
     codespan dropped at `add_backlog` time?
 
@@ -682,12 +726,24 @@ def should_auto_approve(tags: list[str] | tuple[str, ...] | None) -> bool:
     proposed task's tag list to decide whether to strip
     `blocked_on="review"` before the row hits TASKS.md. Pure / no I/O —
     relies only on the env layer + the in-memory tag list.
+
+    Resolution shape (TB-332 cross-package migration): same
+    cfg-kwarg-with-TypeError-guard pattern as the sibling helpers
+    above. Default ``cfg=None`` preserves the legacy env-read
+    fallback so the TB-223 unit tests
+    (`test_should_auto_approve_helper_directly`) work without
+    modification.
     """
-    if not _is_auto_approve_enabled():
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "should_auto_approve(tags, cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if not _is_auto_approve_enabled(cfg):
         return False
     if not tags:
         return True
-    gate_tags = _auto_approve_gate_tags()
+    gate_tags = _auto_approve_gate_tags(cfg)
     if not gate_tags:
         return True
     for t in tags:
