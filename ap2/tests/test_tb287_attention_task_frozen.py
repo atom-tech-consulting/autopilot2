@@ -318,12 +318,16 @@ def test_detector_handles_multiple_frozen_tasks(cfg: Config):
 # ===========================================================================
 
 
-def test_task_frozen_recency_default(monkeypatch):
+def test_task_frozen_recency_default(cfg: Config, monkeypatch):
     """No env knob set → `_task_frozen_recency_s` returns
     `DEFAULT_TASK_FROZEN_RECENCY_S` (86400 / 24h). Pin the default
-    so a refactor that silently shifts the floor blows here."""
+    so a refactor that silently shifts the floor blows here.
+
+    TB-328: the helper now takes a `cfg` argument; the resolved-config
+    layer reads sectioned-env > flat-env > TOML > default at call time.
+    """
     monkeypatch.delenv("AP2_TASK_FROZEN_RECENCY_S", raising=False)
-    assert _task_frozen_recency_s() == DEFAULT_TASK_FROZEN_RECENCY_S
+    assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
     assert DEFAULT_TASK_FROZEN_RECENCY_S == 86400
 
 
@@ -334,7 +338,7 @@ def test_task_frozen_recency_env_override(cfg: Config, monkeypatch):
     detector behavior under the override.
     """
     monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "3600")
-    assert _task_frozen_recency_s() == 3600
+    assert _task_frozen_recency_s(cfg) == 3600
 
     _seed_frozen_task(cfg, "TB-340", "Two-hour-stale freeze")
     now = _dt.datetime(2026, 5, 23, 12, 0, 0, tzinfo=_dt.timezone.utc)
@@ -348,18 +352,18 @@ def test_task_frozen_recency_env_override(cfg: Config, monkeypatch):
     )
 
 
-def test_task_frozen_recency_invalid_falls_back(monkeypatch):
+def test_task_frozen_recency_invalid_falls_back(cfg: Config, monkeypatch):
     """Garbage value → falls back to the default. Pin the safe-
     default rule so an operator typo doesn't disable the detector
     silently (parallel to TB-282's
     `test_task_stuck_threshold_invalid_falls_back`).
     """
     monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "not-a-number")
-    assert _task_frozen_recency_s() == DEFAULT_TASK_FROZEN_RECENCY_S
+    assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
     monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "0")
-    assert _task_frozen_recency_s() == DEFAULT_TASK_FROZEN_RECENCY_S
+    assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
     monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "-1")
-    assert _task_frozen_recency_s() == DEFAULT_TASK_FROZEN_RECENCY_S
+    assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
 
 
 def test_task_frozen_env_knob_is_hot_reloadable():

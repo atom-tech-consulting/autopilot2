@@ -1,4 +1,4 @@
-"""attention component manifest (TB-315 axis 5).
+"""attention component manifest (TB-315 axis 5 + TB-328 read-site migration).
 
 Registers the proactive attention-detector → `attention_raised` event
 wire-up as the `ATTENTION_EMISSION` tick hook so `daemon._tick` walks
@@ -8,6 +8,46 @@ the flat module directly. The implementation lives intra-package at
 `ap2/attention.py` by TB-315); the manifest references the runtime
 symbols via `from . import …` rather than the pre-TB-315
 late-binding `from ap2 import daemon as _daemon_mod` shape.
+
+TB-328 axis-5 read-site migration — chosen resolved-config access shape
+=========================================================================
+The four operator-tunable knobs the component logically owns
+(`task_stuck_threshold_s`, `task_frozen_recency_s`, `debounce_s`,
+`immediate_push`) are now read via the **`cfg.get_component_value(component,
+key)`** helper on `Config` (option 2 of the TB-326 pilot's three
+candidate shapes — see `ap2/components/auto_approve/manifest.py` and
+`ap2/config.py`'s docstring for the helper). The four legacy flat env
+names (`AP2_TASK_STUCK_THRESHOLD_S`, `AP2_TASK_FROZEN_RECENCY_S`,
+`AP2_ATTENTION_DEBOUNCE_S`, `AP2_ATTENTION_IMMEDIATE_PUSH`) are no
+longer read directly via the `os.environ` mapping inside the component
+body; the back-compat path flows through `Config.get_component_value`'s
+reverse-`FLAT_TO_SECTIONED` lookup so a shell-export operator who never
+migrated their `.cc-autopilot/env` keeps today's behavior bit-for-bit,
+while a TOML-opted operator's `[components.attention]` values win
+transparently once env-side overrides are unset.
+
+Why option 2 (helper) and not 1 (raw dict) or 3 (per-component
+dataclass): TB-326's pilot (b3eba54) and TB-327's sibling (48ab4a8)
+ratified the helper as the lightest-touch incremental shape every
+remaining cluster reuses verbatim — option 1 loses env-only-mode
+back-compat without an extra wrapper (the env-only resolution branch
+doesn't invoke `apply_env_overrides`), and option 3 requires a
+code-gen pass on every `Manifest.config_schema`. The TB-328
+regression-pin at `ap2/tests/test_tb328_attention_cfg_reads.py`
+mirrors the TB-326/TB-327 cleavages (grep-absence, TOML-first read
+precedence, flat-env back-compat parity, parser default-on-bad-value
+semantics preservation, and the manifest's documented access shape).
+
+Hook-points contract under TB-328: the helpers exposed in
+`hook_points` (`task_stuck_threshold_s`, `task_frozen_recency_s`,
+`attention_debounce_s`, `is_attention_immediate_push_enabled`) all
+acquired a `cfg: Config` argument as part of the migration. The
+daemon's module-level alias block at L1959-2003 still resolves the
+same callable identities — only the signature changed. The
+`AP2_AUTO_APPROVE_COST_APPROACH_PCT` knob lives logically in the
+auto_approve cluster (per `FLAT_TO_SECTIONED`) and stays on the
+direct env-read path inside `_cost_approach_pct`; its migration is
+covered by a separate auto_approve-cluster sweep, not TB-328.
 
 Observable-behavior preservation: the wrapping `_tick_hook` function
 preserves the same `[ap2] _maybe_emit_attention_events error: ...`

@@ -280,7 +280,7 @@ def test_debounce_suppresses_refire_within_window(cfg: Config):
         summary="fresh", ts=prior_ts, extras={"task": "TB-400"},
     )
     tail = events.tail(cfg.events_file, 100)
-    assert should_suppress(cond, tail=tail, now=now) is True
+    assert should_suppress(cond, tail=tail, now=now, cfg=cfg) is True
 
 
 def test_debounce_allows_refire_past_window(cfg: Config):
@@ -303,7 +303,7 @@ def test_debounce_allows_refire_past_window(cfg: Config):
         summary="fresh", ts=prior_ts, extras={"task": "TB-401"},
     )
     tail = events.tail(cfg.events_file, 100)
-    assert should_suppress(cond, tail=tail, now=now) is False
+    assert should_suppress(cond, tail=tail, now=now, cfg=cfg) is False
 
 
 def test_debounce_per_key_not_per_type(cfg: Config):
@@ -326,7 +326,7 @@ def test_debounce_per_key_not_per_type(cfg: Config):
         summary="fresh", ts=prior_ts, extras={"task": "TB-501"},
     )
     tail = events.tail(cfg.events_file, 100)
-    assert should_suppress(cond, tail=tail, now=now) is False, (
+    assert should_suppress(cond, tail=tail, now=now, cfg=cfg) is False, (
         "different keys must NOT cross-suppress"
     )
 
@@ -568,56 +568,62 @@ def test_status_report_prompt_references_attention_section():
 # ===========================================================================
 
 
-def test_task_stuck_threshold_default(monkeypatch):
+def test_task_stuck_threshold_default(cfg: Config, monkeypatch):
     """No env knob set → `_task_stuck_threshold_s` returns
     `DEFAULT_TASK_STUCK_THRESHOLD_S` (14400 / 4h). Pin the default
-    so a refactor that silently shifts the floor blows here."""
+    so a refactor that silently shifts the floor blows here.
+
+    TB-328: the helper now takes a `cfg` argument; the resolved-config
+    layer reads sectioned-env > flat-env > TOML > default at call time.
+    """
     monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
-    assert _task_stuck_threshold_s() == DEFAULT_TASK_STUCK_THRESHOLD_S
+    assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
     assert DEFAULT_TASK_STUCK_THRESHOLD_S == 14400
 
 
-def test_task_stuck_threshold_env_override(monkeypatch):
+def test_task_stuck_threshold_env_override(cfg: Config, monkeypatch):
     """`AP2_TASK_STUCK_THRESHOLD_S=7200` → `_task_stuck_threshold_s`
-    returns 7200 (operator tightens the floor to 2h). The detector
-    reads fresh from `os.environ` so an env-reload propagates."""
+    returns 7200 (operator tightens the floor to 2h). TB-328: the
+    resolved-config layer's call-time env-first precedence preserves
+    the pre-migration lazy-read pattern so an env-reload propagates
+    without re-threading state."""
     monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "7200")
-    assert _task_stuck_threshold_s() == 7200
+    assert _task_stuck_threshold_s(cfg) == 7200
 
 
-def test_task_stuck_threshold_invalid_falls_back(monkeypatch):
+def test_task_stuck_threshold_invalid_falls_back(cfg: Config, monkeypatch):
     """Garbage value (`AP2_TASK_STUCK_THRESHOLD_S=not-a-number`) →
     falls back to the default. Pin the safe-default rule so an
     operator typo doesn't disable the detector silently."""
     monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "not-a-number")
-    assert _task_stuck_threshold_s() == DEFAULT_TASK_STUCK_THRESHOLD_S
+    assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
     monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "0")
-    assert _task_stuck_threshold_s() == DEFAULT_TASK_STUCK_THRESHOLD_S
+    assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
     monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "-1")
-    assert _task_stuck_threshold_s() == DEFAULT_TASK_STUCK_THRESHOLD_S
+    assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
 
 
-def test_attention_debounce_default(monkeypatch):
+def test_attention_debounce_default(cfg: Config, monkeypatch):
     """No env knob set → `_attention_debounce_s` returns
     `DEFAULT_ATTENTION_DEBOUNCE_S` (21600 / 6h). Pin the default."""
     monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
-    assert _attention_debounce_s() == DEFAULT_ATTENTION_DEBOUNCE_S
+    assert _attention_debounce_s(cfg) == DEFAULT_ATTENTION_DEBOUNCE_S
     assert DEFAULT_ATTENTION_DEBOUNCE_S == 21600
 
 
-def test_attention_debounce_env_override(monkeypatch):
+def test_attention_debounce_env_override(cfg: Config, monkeypatch):
     """`AP2_ATTENTION_DEBOUNCE_S=3600` → `_attention_debounce_s`
     returns 3600 (operator tightens to 1h)."""
     monkeypatch.setenv("AP2_ATTENTION_DEBOUNCE_S", "3600")
-    assert _attention_debounce_s() == 3600
+    assert _attention_debounce_s(cfg) == 3600
 
 
-def test_attention_debounce_invalid_falls_back(monkeypatch):
+def test_attention_debounce_invalid_falls_back(cfg: Config, monkeypatch):
     """Garbage value → falls back to the default."""
     monkeypatch.setenv("AP2_ATTENTION_DEBOUNCE_S", "garbage")
-    assert _attention_debounce_s() == DEFAULT_ATTENTION_DEBOUNCE_S
+    assert _attention_debounce_s(cfg) == DEFAULT_ATTENTION_DEBOUNCE_S
     monkeypatch.setenv("AP2_ATTENTION_DEBOUNCE_S", "0")
-    assert _attention_debounce_s() == DEFAULT_ATTENTION_DEBOUNCE_S
+    assert _attention_debounce_s(cfg) == DEFAULT_ATTENTION_DEBOUNCE_S
 
 
 def test_attention_env_knobs_are_hot_reloadable():

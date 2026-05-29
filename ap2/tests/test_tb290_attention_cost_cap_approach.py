@@ -351,7 +351,7 @@ def test_detector_debounce_suppresses_within_window(
     assert len(approach_conds) == 1
     # ...but the daemon's debounce check suppresses re-emission.
     tail = events.tail(cfg.events_file, 200)
-    assert should_suppress(approach_conds[0], tail=tail, now=now) is True
+    assert should_suppress(approach_conds[0], tail=tail, now=now, cfg=cfg) is True
 
 
 def test_detector_debounce_releases_after_window(
@@ -381,7 +381,7 @@ def test_detector_debounce_releases_after_window(
     approach_conds = [c for c in conditions if c.type == "cost_cap_approach"]
     assert len(approach_conds) == 1
     tail = events.tail(cfg.events_file, 200)
-    assert should_suppress(approach_conds[0], tail=tail, now=now) is False
+    assert should_suppress(approach_conds[0], tail=tail, now=now, cfg=cfg) is False
 
 
 # ===========================================================================
@@ -508,7 +508,7 @@ def test_debounce_independent_from_other_detectors(
     assert len(approach_conds) == 1
     tail = events.tail(cfg.events_file, 200)
     # The approach condition itself has no prior matching fire.
-    assert should_suppress(approach_conds[0], tail=tail, now=now) is False
+    assert should_suppress(approach_conds[0], tail=tail, now=now, cfg=cfg) is False
     # Cross-check the find helper agrees.
     assert find_last_attention_fire(
         tail,

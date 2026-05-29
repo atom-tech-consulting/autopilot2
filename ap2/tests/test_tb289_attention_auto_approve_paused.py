@@ -331,7 +331,7 @@ def test_detector_dedup_key_is_per_reason(cfg: Config, monkeypatch):
     # The debounce check on the noisy condition must NOT find the
     # prior consecutive_freezes fire (different key family).
     tail = events.tail(cfg.events_file, 200)
-    assert should_suppress(pause_conds[0], tail=tail, now=now) is False
+    assert should_suppress(pause_conds[0], tail=tail, now=now, cfg=cfg) is False
     # Cross-check the find helper.
     assert find_last_attention_fire(
         tail,
@@ -380,7 +380,7 @@ def test_detector_debounce_suppresses_within_window(cfg: Config):
     assert len(pause_conds) == 1
     # ...but the daemon's debounce check suppresses re-emission.
     tail = events.tail(cfg.events_file, 200)
-    assert should_suppress(pause_conds[0], tail=tail, now=now) is True
+    assert should_suppress(pause_conds[0], tail=tail, now=now, cfg=cfg) is True
 
 
 def test_detector_debounce_releases_after_window(cfg: Config):
@@ -407,7 +407,7 @@ def test_detector_debounce_releases_after_window(cfg: Config):
     pause_conds = [c for c in conditions if c.type == "auto_approve_paused"]
     assert len(pause_conds) == 1
     tail = events.tail(cfg.events_file, 200)
-    assert should_suppress(pause_conds[0], tail=tail, now=now) is False
+    assert should_suppress(pause_conds[0], tail=tail, now=now, cfg=cfg) is False
 
 
 # ===========================================================================

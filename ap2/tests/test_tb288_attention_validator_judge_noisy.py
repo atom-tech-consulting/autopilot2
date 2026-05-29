@@ -270,7 +270,7 @@ def test_detector_debounce_suppresses_within_window(cfg: Config):
     assert len(noisy_conds) == 1
     # ...but the daemon's debounce check suppresses re-emission.
     tail = events.tail(cfg.events_file, 100)
-    assert should_suppress(noisy_conds[0], tail=tail, now=now) is True
+    assert should_suppress(noisy_conds[0], tail=tail, now=now, cfg=cfg) is True
 
 
 def test_detector_debounce_releases_after_window(cfg: Config):
@@ -296,7 +296,7 @@ def test_detector_debounce_releases_after_window(cfg: Config):
     noisy_conds = [c for c in conditions if c.type == "validator_judge_noisy"]
     assert len(noisy_conds) == 1
     tail = events.tail(cfg.events_file, 100)
-    assert should_suppress(noisy_conds[0], tail=tail, now=now) is False
+    assert should_suppress(noisy_conds[0], tail=tail, now=now, cfg=cfg) is False
 
 
 def test_debounce_independent_from_other_detectors(cfg: Config):
@@ -322,7 +322,7 @@ def test_debounce_independent_from_other_detectors(cfg: Config):
     assert len(noisy_conds) == 1
     tail = events.tail(cfg.events_file, 100)
     # The noisy condition itself has no prior matching fire.
-    assert should_suppress(noisy_conds[0], tail=tail, now=now) is False
+    assert should_suppress(noisy_conds[0], tail=tail, now=now, cfg=cfg) is False
     # Cross-check the find helper agrees.
     assert find_last_attention_fire(
         tail, type_="validator_judge_noisy", key="validator_judge_noisy",

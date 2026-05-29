@@ -161,14 +161,23 @@ class AttentionCondition:
     extras: dict[str, Any] = field(default_factory=dict)
 
 
-def _task_stuck_threshold_s() -> int:
-    """Resolve `AP2_TASK_STUCK_THRESHOLD_S` with the documented default
-    + invalid-value fallback. Read fresh from `os.environ` per call so
-    the env-reload helper's mid-run knob refresh takes effect on the
-    next detector tick without re-threading state.
+def _task_stuck_threshold_s(cfg: Config) -> int:
+    """Resolve the `task_stuck_threshold_s` knob with the documented
+    default + invalid-value fallback.
+
+    Resolution shape (TB-328 axis-5): routes through
+    `cfg.get_component_value("attention", "task_stuck_threshold_s")` so
+    the legacy flat env name `AP2_TASK_STUCK_THRESHOLD_S` still wins via
+    the `FLAT_TO_SECTIONED` reverse-lookup back-compat path while a
+    `[components.attention] task_stuck_threshold_s = N` TOML value flows
+    through the same call when no env override is live. Call-time env-
+    first precedence inside `get_component_value` preserves the
+    pre-migration lazy-read pattern so the env-reload helper's mid-run
+    knob refresh still takes effect on the next detector tick without
+    re-threading state.
     """
-    raw = os.environ.get("AP2_TASK_STUCK_THRESHOLD_S", "")
-    if not raw:
+    raw = cfg.get_component_value("attention", "task_stuck_threshold_s")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return DEFAULT_TASK_STUCK_THRESHOLD_S
     try:
         val = int(raw)
@@ -179,14 +188,21 @@ def _task_stuck_threshold_s() -> int:
     return val
 
 
-def _task_frozen_recency_s() -> int:
-    """Resolve `AP2_TASK_FROZEN_RECENCY_S` with the documented default
-    + invalid-value fallback (TB-287). Mirrors `_task_stuck_threshold_s`
-    — fresh-read-each-call so env-reload propagates without re-
-    threading state.
+def _task_frozen_recency_s(cfg: Config) -> int:
+    """Resolve the `task_frozen_recency_s` knob with the documented
+    default + invalid-value fallback (TB-287). Mirrors
+    `_task_stuck_threshold_s` — same call-time env-first precedence so
+    env-reload propagates without re-threading state.
+
+    Resolution shape (TB-328 axis-5): routes through
+    `cfg.get_component_value("attention", "task_frozen_recency_s")`; the
+    flat env name `AP2_TASK_FROZEN_RECENCY_S` still wins via the
+    `FLAT_TO_SECTIONED` reverse-lookup back-compat path while a
+    `[components.attention] task_frozen_recency_s = N` TOML value flows
+    through the same call when no env override is live.
     """
-    raw = os.environ.get("AP2_TASK_FROZEN_RECENCY_S", "")
-    if not raw:
+    raw = cfg.get_component_value("attention", "task_frozen_recency_s")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return DEFAULT_TASK_FROZEN_RECENCY_S
     try:
         val = int(raw)
@@ -229,13 +245,20 @@ def _cost_approach_pct() -> int:
     return val
 
 
-def _attention_debounce_s() -> int:
-    """Resolve `AP2_ATTENTION_DEBOUNCE_S` with the documented default
-    + invalid-value fallback. Mirrors `_task_stuck_threshold_s` —
-    same fresh-read-each-call semantics so env-reload propagates.
+def _attention_debounce_s(cfg: Config) -> int:
+    """Resolve the per-(type, key) debounce knob with the documented
+    default + invalid-value fallback. Mirrors `_task_stuck_threshold_s`
+    — same call-time env-first precedence so env-reload propagates.
+
+    Resolution shape (TB-328 axis-5): routes through
+    `cfg.get_component_value("attention", "debounce_s")`; the legacy
+    flat env name `AP2_ATTENTION_DEBOUNCE_S` still wins via the
+    `FLAT_TO_SECTIONED` reverse-lookup back-compat path while a
+    `[components.attention] debounce_s = N` TOML value flows through the
+    same call when no env override is live.
     """
-    raw = os.environ.get("AP2_ATTENTION_DEBOUNCE_S", "")
-    if not raw:
+    raw = cfg.get_component_value("attention", "debounce_s")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
         return DEFAULT_ATTENTION_DEBOUNCE_S
     try:
         val = int(raw)
@@ -295,7 +318,7 @@ def _detect_task_stuck(
     if not active_ids:
         return []
 
-    threshold_s = _task_stuck_threshold_s()
+    threshold_s = _task_stuck_threshold_s(cfg)
     out: list[AttentionCondition] = []
     for task_id in active_ids:
         # Walk the tail in reverse looking for either a terminal event
@@ -389,7 +412,7 @@ def _detect_task_frozen(
     if not frozen_ids:
         return []
 
-    recency_s = _task_frozen_recency_s()
+    recency_s = _task_frozen_recency_s(cfg)
     out: list[AttentionCondition] = []
     for task_id in frozen_ids:
         # Walk the tail in reverse looking for either an operator-
@@ -868,17 +891,35 @@ def should_suppress(
     tail: list[dict],
     now: _dt.datetime,
     debounce_s: int | None = None,
+    cfg: Config | None = None,
 ) -> bool:
     """Return True iff the most recent matching `attention_raised`
-    event in `tail` is within `AP2_ATTENTION_DEBOUNCE_S` of `now`.
+    event in `tail` is within the resolved attention debounce window
+    of `now`.
 
     Per-(type, key) debounce, mirrors the briefing's contract. The
     daemon wire-up calls this before emitting `attention_raised` so a
     still-stuck task that was already surfaced 10 minutes ago doesn't
     re-fire every tick.
+
+    TB-328 axis-5: when `debounce_s` is left unset, the value is
+    resolved through `_attention_debounce_s(cfg)` which routes the read
+    via `Config.get_component_value("attention", "debounce_s")`. The
+    `cfg` kwarg is required only on that fallback branch — callers that
+    pre-resolve the debounce (tests pinning explicit values) may keep
+    passing `debounce_s` without cfg. Raises `TypeError` when both are
+    None so a refactor that drops cfg from `_maybe_emit_attention_events`
+    surfaces here instead of silently re-introducing an `os.environ`
+    read.
     """
     if debounce_s is None:
-        debounce_s = _attention_debounce_s()
+        if cfg is None:
+            raise TypeError(
+                "should_suppress requires either `debounce_s` or `cfg` "
+                "to be passed; the TB-328 cfg-side read path needs cfg "
+                "to resolve `attention.debounce_s`."
+            )
+        debounce_s = _attention_debounce_s(cfg)
     prior = find_last_attention_fire(tail, type_=cond.type, key=cond.key)
     if prior is None:
         return False
@@ -941,7 +982,7 @@ def _maybe_emit_attention_events(cfg: Config) -> None:
         if cfg.events_file.exists() else []
     )
     for cond in candidates:
-        if should_suppress(cond, tail=tail, now=now):
+        if should_suppress(cond, tail=tail, now=now, cfg=cfg):
             continue
         try:
             events.append(
@@ -1011,18 +1052,34 @@ def _save_attention_push_state(cfg: Config, state: dict) -> None:
     path.write_text(json.dumps(state, indent=2, sort_keys=True))
 
 
-def _is_attention_immediate_push_enabled() -> bool:
-    """Parse `AP2_ATTENTION_IMMEDIATE_PUSH` fresh from `os.environ`.
+def _is_attention_immediate_push_enabled(cfg: Config) -> bool:
+    """Parse the `immediate_push` knob at push-decision time.
 
-    Read at push-decision time (NOT cached on `Config`) so a hot-reload
-    of the env file flips the knob on the very next tick. Truthy set
-    mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED` style:
-    `1` / `true` / `yes` / `on` (case-insensitive). Anything else,
-    including the unset case, is false (conservative default per
-    goal.md Non-goals L253-256).
+    Read fresh from the resolved-config layer (NOT cached on `Config`)
+    so a hot-reload of the env file flips the knob on the very next
+    tick. Truthy set mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+    style: `1` / `true` / `yes` / `on` (case-insensitive). Anything
+    else, including the unset case, is false (conservative default per
+    goal.md Non-goals L253-256). The TOML layer's typed `True` / `False`
+    is also honored when an operator opts into the structured-config
+    path.
+
+    Resolution shape (TB-328 axis-5): routes through
+    `cfg.get_component_value("attention", "immediate_push")`; the legacy
+    flat env name `AP2_ATTENTION_IMMEDIATE_PUSH` still wins via the
+    `FLAT_TO_SECTIONED` reverse-lookup back-compat path while a
+    `[components.attention] immediate_push = true` TOML value flows
+    through the same call when no env override is live. Call-time env-
+    first precedence inside `get_component_value` preserves the
+    pre-migration lazy-read pattern so an operator toggling the knob
+    on/off takes effect on the next tick without a daemon restart.
     """
-    raw = os.environ.get("AP2_ATTENTION_IMMEDIATE_PUSH", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    raw = cfg.get_component_value("attention", "immediate_push")
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _maybe_push_attention(cfg: Config, cond) -> None:
@@ -1066,7 +1123,7 @@ def _maybe_push_attention(cfg: Config, cond) -> None:
     from ap2.registry import default_registry
     from ap2.watchdog import _first_mm_channel
 
-    if not _is_attention_immediate_push_enabled():
+    if not _is_attention_immediate_push_enabled(cfg):
         return
 
     # TB-312: route through `_deliver(cfg, text, **meta)` so the
