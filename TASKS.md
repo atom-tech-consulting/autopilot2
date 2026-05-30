@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-346** **Config-correctness cleanup: component-value resolution + inline-default consistency + auto_diagnose schema coverage** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/config-correctness-cleanup-component-val.md)
 - [ ] **TB-350** **Add a 6-hourly real-SDK smoke cron job dispatched through a dedicated routine** `#autopilot` `#cron` `#real-sdk` `#smoke` `#verification` `#monitoring` [→ brief](.cc-autopilot/tasks/add-a-6-hourly-real-sdk-smoke-cron-job-d.md)
 - [ ] **TB-351** **Harden real-SDK smokes to skip on transient SDK errors instead of false-failing** `#autopilot` `#smoke` `#real-sdk` `#test-reliability` `#monitoring` [→ brief](.cc-autopilot/tasks/harden-real-sdk-smokes-to-skip-on-transi.md)
 
@@ -236,5 +235,6 @@
 - [x] **TB-345** **Merge focus_advance into core as ideation-halt; rename the AP2_FOCUS_ADVANCE knobs to the AP2_IDEATION_HALT namespace** `#autopilot` `#components` `#core` `#refactor` `#ideation-halt` `#rename` `@blocked:TB-342,TB-344` [→ brief](.cc-autopilot/tasks/merge-focus-advance-into-core-as-ideatio.md)
 - [x] **TB-348** **Purge stale hardcoded-3 proposal caps and rotation-era references from the ideation prompt** `#autopilot` `#ideation` `#prompt` `#refactor` `#docs-drift` `#cleanup` `#autopilot` `#ideation` `#prompt` `#refactor` `#docs-drift` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/purge-stale-hardcoded-3-proposal-caps-an.md)
 - [x] **TB-349** **Fix stale focus_advance module and symbol references in source comments after the ideation-halt rename** `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/fix-stale-focus-advance-module-and-symbo.md)
+- [x] **TB-346** **Config-correctness cleanup: component-value resolution + inline-default consistency + auto_diagnose schema coverage** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/config-correctness-cleanup-component-val.md)
 
 ## Frozen
