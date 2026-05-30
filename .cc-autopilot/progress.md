@@ -1275,3 +1275,9 @@
 - **Summary:** config_introspect.collect_rows now resolves core values via cfg.get_core_value (env→TOML→schema default) instead of getattr, so agent_model/agent_effort display their resolved value not (unset); agent_model schema default set to canonical claude-opus-4-7 and inline default= dropped at the 4 dispatch sites; agent_effort "" left intentional; regression tests added; full suite 2834 passed.
 - **Files:** ap2/config_introspect.py, ap2/core_config_schema.py, ap2/daemon.py, ap2/verify.py, ap2/components/janitor/impl.py, ap2/tests/test_env_knobs.py, ap2/tests/test_tb324_cli_config.py
 - **Tests:** pass
+
+## [2026-05-30] TB-347: Raise core task defaults (DEFAULT_TASK_TIMEOUT_S 1200 to 3600, DEFAULT_TASK_MAX_TURNS 200 to 500)
+- **Commit:** `2b651eb`
+- **Summary:** Raised DEFAULT_TASK_TIMEOUT_S 1200→3600 and DEFAULT_TASK_MAX_TURNS 200→500 in config.py (schema/call-sites/ENV_TEMPLATE reference the constants so they propagate automatically), refreshed init.py + howto.md prose to the new shipped defaults while preserving the TB-122 rationale, and bumped the two tests pinning the old 200 default; full suite 2792 passed.
+- **Files:** ap2/config.py, ap2/init.py, ap2/howto.md, ap2/tests/test_tb210_env_knobs.py, ap2/tests/test_tb334_core_cfg_reads.py
+- **Tests:** pass
