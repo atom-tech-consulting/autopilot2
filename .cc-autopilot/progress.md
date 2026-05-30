@@ -1281,3 +1281,9 @@
 - **Summary:** Raised DEFAULT_TASK_TIMEOUT_S 1200→3600 and DEFAULT_TASK_MAX_TURNS 200→500 in config.py (schema/call-sites/ENV_TEMPLATE reference the constants so they propagate automatically), refreshed init.py + howto.md prose to the new shipped defaults while preserving the TB-122 rationale, and bumped the two tests pinning the old 200 default; full suite 2792 passed.
 - **Files:** ap2/config.py, ap2/init.py, ap2/howto.md, ap2/tests/test_tb210_env_knobs.py, ap2/tests/test_tb334_core_cfg_reads.py
 - **Tests:** pass
+
+## [2026-05-30] TB-345: Merge focus_advance into core as ideation-halt; rename the AP2_FOCUS_ADVANCE knobs to the AP2_IDEATION_HALT namespace
+- **Commit:** `25827ac`
+- **Summary:** Previously committed in be5d35f (+ comment-cleanup follow-up 25827ac); work fully covers the briefing — verified completeness by auditing the diff against every scope item and re-running the gate: non-smoke suite 2786 passed, real-SDK smoke 6 passed (= 2792, the daemon's recurring verification_failed was the unrelated flaky test_prose_judge_real_sdk.py, which now passes); focus_advance merged into core ap2/ideation_halt.py with cleaned maybe_halt_on_exhaustion(cfg) signature, component deleted (no longer registry-discovered), knobs renamed to AP2_IDEATION_HALT_* with AP2_FOCUS_* deprecated aliases mapping to core.ideation_halt_*, core schema + config_compat + daemon _tick + docs all updated, back-compat + import-direction + disabled-config tests pass.
+- **Files:** ap2/ideation_halt.py, ap2/daemon.py, ap2/components/focus_advance/ (deleted), ap2/core_config_schema.py, ap2/config_compat.py, ap2/config.py, ap2/howto.md, ap2/architecture.md, ap2/init.py, ap2/env_reload.py, ap2/goal.py, ap2/registry.py, ap2/events.py, ap2/tests/test_ideation_halt.py, ap2/tests/test_components_disabled.py, ap2/tests/test_core_import_direction.py, ap2/tests/test_docs_drift.py
+- **Tests:** pass
