@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-343** **Extract component bodies from __init__.py into impl.py (+ thin re-export)** `#autopilot` `#components` `#refactor` `#oss-prep` `#canary` [→ brief](.cc-autopilot/tasks/extract-component-bodies-from-init-py-in.md)
 
 ## Pipeline Pending
 
@@ -228,5 +227,6 @@
 - [x] **TB-339** **Drain `_PENDING_MIGRATION_KNOBS` to empty: migrate AP2_VERIFY_JUDGE_EFFORT + AP2_STATUS_REPORT_EFFORT via cfg.get_core_value (axis-5 cleanup)** `#autopilot` `#components` `#config` `#axis-5` `#core` `#migration` `#cut-line` `@blocked:TB-338` — Axis (5) final cleanup of the structured-config focus: drain the documented `_PENDING_MIGRATION_KNOBS` debt set (test_tb338_env_only_cut_line.py L133-145) to empty by declaring `verify_judge_effort` + `status_report_effort` in `CORE_CONFIG_SCHEMA` and swapping the two direct env reads (verify.py L588, status_report.py L2028) to `cfg.get_core_value(...) or cfg.get_core_value("agent_effort", ...)`. FLAT_TO_SECTIONED already maps both knobs (config_compat.py L105-106), so the env-override layer wires through automatically once schema entries land. Pure read-path swap; back-compat preserved. [→ brief](.cc-autopilot/tasks/drain-pending-migration-knobs-to-empty-m.md)
 - [x] **TB-340** **Fix `ack roadmap_complete` semantics: dismiss-the-notice, never resume-ideation** `#autopilot` `#bug` `#roadmap-complete` `#focus-advance` `#ideation` `#operator-ux` [→ brief](.cc-autopilot/tasks/fix-ack-roadmap-complete-semantics-dismi.md)
 - [x] **TB-342** **Collapse multi-focus rotation to a single ideation-exhaustion halt** `#autopilot` `#focus-advance` `#ideation` `#refactor` `#simplification` `#operator-ux` `@blocked:TB-340` [→ brief](.cc-autopilot/tasks/collapse-multi-focus-rotation-to-a-singl.md)
+- [x] **TB-343** **Extract component bodies from __init__.py into impl.py (+ thin re-export)** `#autopilot` `#components` `#refactor` `#oss-prep` `#canary` [→ brief](.cc-autopilot/tasks/extract-component-bodies-from-init-py-in.md)
 
 ## Frozen

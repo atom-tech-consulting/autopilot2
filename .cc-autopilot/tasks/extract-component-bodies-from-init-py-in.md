@@ -125,3 +125,11 @@ For EACH of the 7 components — `attention`, `auto_approve`,
   file-move + re-export refactor only.
 - Touching core modules or the import-direction gate — nothing
   outside `ap2/components/<name>/` changes.
+## Attempts
+
+### 2026-05-30 — error
+(no summary)
+- **error:** Exception: Command failed with exit code 1 (exit code: 1)
+Error output: Check stderr output for details
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260530T023517Z-TB-343.prompt.md`, `stream: .cc-autopilot/debug/20260530T023517Z-TB-343.stream.jsonl`, `messages: .cc-autopilot/debug/20260530T023517Z-TB-343.messages.jsonl`
