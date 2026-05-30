@@ -1293,3 +1293,9 @@
 - **Summary:** Repointed every per-cycle proposal-count reference in ap2/ideation.default.md (Proposals-this-cycle schema, follow-up fallback, failure-remediation budget, Ranking line) at the dynamic `proposal slots this cycle` N, and aligned the rotation-era citations to post-TB-345 reality (ap2/ideation_halt.py::_consecutive_empty_ideation_cycles, AP2_IDEATION_HALT_EMPTY_CYCLES, whole-goal halt framing); full suite 2794 passed.
 - **Files:** ap2/ideation.default.md
 - **Tests:** pass
+
+## [2026-05-30] TB-349: Fix stale focus_advance module and symbol references in source comments after the ideation-halt rename
+- **Commit:** `25827ac`
+- **Summary:** Previously committed in 25827ac (TB-345's retry, "update stale cross-reference comments to the renamed ideation_halt helpers"), which corrected all five comment sites before TB-349 was dispatched; verified completeness — grep V2 finds zero `focus_advance.py`/`_ideation_empty_against_focus` refs in events.py/goal.py/ideation.py/tools.py, V3 confirms `_consecutive_empty_ideation_cycles` present at all 5 sites (events.py:128, events.py:403 as `ideation_halt._consecutive_empty_ideation_cycles`, goal.py:521, ideation.py:1139, tools.py:1142 as `ap2/ideation_halt.py:_consecutive_empty_ideation_cycles`), V4 confirms the AP2_FOCUS_ADVANCE_EMPTY_CYCLES backward-compat alias is preserved in config_compat.py, and `uv run --extra dev pytest -q ap2/tests/` passes 2794/2794; no new commit needed.
+- **Files:** ap2/events.py, ap2/goal.py, ap2/ideation.py, ap2/tools.py
+- **Tests:** pass
