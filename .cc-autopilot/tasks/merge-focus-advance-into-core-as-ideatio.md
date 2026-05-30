@@ -167,3 +167,12 @@ Work this as a checklist — the Verification section pins completeness.
   missing from CORE_CONFIG_SCHEMA) — unrelated.
 - Multi-focus headings in goal.md — they remain operator prose (TB-342);
   this task doesn't touch goal.md parsing.
+## Attempts
+
+### 2026-05-30 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260530T042637Z-TB-345.prompt.md`, `stream: .cc-autopilot/debug/20260530T042637Z-TB-345.stream.jsonl`, `messages: .cc-autopilot/debug/20260530T042637Z-TB-345.messages.jsonl`
