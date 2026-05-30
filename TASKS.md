@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-344** **Fix `ap2 config get/list` core-value resolution + agent_model default drift** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` [→ brief](.cc-autopilot/tasks/fix-ap2-config-get-list-core-value-resol.md)
 
 ## Pipeline Pending
 
@@ -229,5 +228,6 @@
 - [x] **TB-340** **Fix `ack roadmap_complete` semantics: dismiss-the-notice, never resume-ideation** `#autopilot` `#bug` `#roadmap-complete` `#focus-advance` `#ideation` `#operator-ux` [→ brief](.cc-autopilot/tasks/fix-ack-roadmap-complete-semantics-dismi.md)
 - [x] **TB-342** **Collapse multi-focus rotation to a single ideation-exhaustion halt** `#autopilot` `#focus-advance` `#ideation` `#refactor` `#simplification` `#operator-ux` `@blocked:TB-340` [→ brief](.cc-autopilot/tasks/collapse-multi-focus-rotation-to-a-singl.md)
 - [x] **TB-343** **Extract component bodies from __init__.py into impl.py (+ thin re-export)** `#autopilot` `#components` `#refactor` `#oss-prep` `#canary` [→ brief](.cc-autopilot/tasks/extract-component-bodies-from-init-py-in.md)
+- [x] **TB-344** **Fix `ap2 config get/list` core-value resolution + agent_model default drift** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` [→ brief](.cc-autopilot/tasks/fix-ap2-config-get-list-core-value-resol.md)
 
 ## Frozen
