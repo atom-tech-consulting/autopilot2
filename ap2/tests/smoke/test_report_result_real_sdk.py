@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+from ._transient import call_with_transient_retry
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("AP2_REAL_SDK"),
     reason="real-SDK smoke; set AP2_REAL_SDK=1 to run",
@@ -114,7 +116,16 @@ def test_report_result_round_trip_via_real_sdk():
                         final_text = text
             return tool_calls, final_text
 
-    tool_calls, final_text = asyncio.run(go())
+    # TB-351: a transient SDK transport/service error is *raised* out of
+    # the `sdk.query` loop (the SDK surfaces a CLI is_error result as
+    # `Exception("Claude Code returned an error result: ...")`). That means
+    # the wiring couldn't be exercised this run — retry once, then skip
+    # (not error). A genuine wiring regression (tool not called) flows to
+    # the `assert completes` below and still fails.
+    tool_calls, final_text = call_with_transient_retry(
+        lambda: asyncio.run(go()),
+        describe="report_result round-trip smoke",
+    )
 
     print(f"\n[smoke] {len(tool_calls)} tool calls observed:")
     for tc in tool_calls:

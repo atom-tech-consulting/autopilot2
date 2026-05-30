@@ -34,9 +34,12 @@ validator-judge knob doc).
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 
 import pytest
+
+from ._transient import call_with_transient_retry, transient_signature
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("AP2_REAL_SDK"),
@@ -99,18 +102,58 @@ def test_validator_judge_real_sdk_happy_path(tmp_path, monkeypatch):
     monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
     monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
 
-    events_file = tmp_path / "events.jsonl"
-    err = tools._validate_briefing_structure(
-        _GOOD_BRIEFING,
-        description="add a no-op helper",
-        blocked_csv="",
-        events_file=events_file,
-        # dep_judge_fn=None → real SDK path
-    )
+    def _run_once():
+        """One live validator round-trip against a FRESH events file.
 
-    evts = events.tail(events_file, 50) if events_file.exists() else []
-    fails = [e for e in evts if e.get("type") == "validator_judge_fail"]
-    timeouts = [e for e in evts if e.get("type") == "validator_judge_timeout"]
+        A fresh file per attempt is load-bearing for TB-351's bounded
+        retry: the validator appends to `events_file`, so reusing one file
+        would carry attempt-1's fail/timeout events into attempt-2's tail
+        and defeat the "still transient after a retry?" check.
+        """
+        ev_file = tmp_path / f"events-{uuid.uuid4().hex}.jsonl"
+        err = tools._validate_briefing_structure(
+            _GOOD_BRIEFING,
+            description="add a no-op helper",
+            blocked_csv="",
+            events_file=ev_file,
+            # dep_judge_fn=None → real SDK path
+        )
+        evts = events.tail(ev_file, 50) if ev_file.exists() else []
+        fails = [e for e in evts if e.get("type") == "validator_judge_fail"]
+        timeouts = [
+            e for e in evts if e.get("type") == "validator_judge_timeout"
+        ]
+        return err, fails, timeouts
+
+    def _validator_transient(ret):
+        """Map a validator run to a transient signature (or None).
+
+        The validator fails open: a transient SDK transport/service error
+        surfaces as a `validator_judge_fail` event whose `error` string
+        carries the signature, or a `validator_judge_timeout` event (the
+        judge didn't answer in budget this run — inconclusive for wiring).
+        A genuine wiring regression (e.g. TB-249's `--max-tokens`
+        arg rejection → `error="... unknown option ..."`) matches NO
+        transient signature, so this returns None → the assert below still
+        fires and the smoke fails, exactly as intended.
+        """
+        _err, fails, timeouts = ret
+        for ev in (*fails, *timeouts):
+            sig = transient_signature(ev)
+            if sig is not None:
+                return sig
+        # A timeout event whose message doesn't literally spell "timeout"
+        # is still inconclusive — the live judge overran its budget.
+        if timeouts:
+            return "timeout"
+        return None
+
+    # TB-351: retry once on a transient SDK error, then skip (not fail).
+    err, fails, timeouts = call_with_transient_retry(
+        _run_once,
+        describe="validator dep-coherence smoke",
+        transient_of=_validator_transient,
+    )
     print(
         f"\n[smoke] validator returned err={err!r}; "
         f"fails={len(fails)}; timeouts={len(timeouts)}"

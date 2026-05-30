@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from ._transient import call_with_transient_retry
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("AP2_REAL_SDK"),
     reason="real-SDK smoke; set AP2_REAL_SDK=1 to run",
@@ -115,7 +117,14 @@ def test_cron_propose_round_trip_via_real_sdk():
                         tool_calls.append({"name": name, "input": inp})
             return tool_calls
 
-    tool_calls = asyncio.run(go())
+    # TB-351: a transient SDK transport/service error is *raised* out of
+    # the `sdk.query` loop — retry once, then skip (not error). A genuine
+    # wiring regression (cron_propose not called) flows to the
+    # `assert proposals` below and still fails.
+    tool_calls = call_with_transient_retry(
+        lambda: asyncio.run(go()),
+        describe="cron_propose round-trip smoke",
+    )
 
     print(f"\n[smoke] {len(tool_calls)} tool calls observed:")
     for tc in tool_calls:

@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from ._transient import call_with_transient_retry
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("AP2_REAL_SDK"),
     reason="real-SDK smoke; set AP2_REAL_SDK=1 to run",
@@ -74,25 +76,33 @@ def test_prose_judge_passes_obvious_pass_case():
     in the working tree (not only in the diff), since the judge treats
     HEAD as authoritative when diff and working tree disagree.
     """
-    result = _run_judge(
-        bullet_text="`scripts/run_foo.py` exists with a function `build_grid` returning 6 entries.",
-        diff_text=(
-            "+++ b/scripts/run_foo.py\n"
-            "+def build_grid():\n"
-            "+    return [\n"
-            "+        {'a': 1}, {'a': 2}, {'a': 3},\n"
-            "+        {'b': 1}, {'b': 2}, {'b': 3},\n"
-            "+    ]\n"
-        ),
-        working_tree={
-            "scripts/run_foo.py": (
-                "def build_grid():\n"
-                "    return [\n"
-                "        {'a': 1}, {'a': 2}, {'a': 3},\n"
-                "        {'b': 1}, {'b': 2}, {'b': 3},\n"
-                "    ]\n"
+    # TB-351: a transient SDK transport/service error surfaces as a
+    # CriterionResult(status="unverified", notes="judge error: ...").
+    # That means the wiring couldn't be exercised this run — retry once,
+    # then skip (not fail). A clean pass/fail (right or wrong) flows to
+    # the assert below unchanged.
+    result = call_with_transient_retry(
+        lambda: _run_judge(
+            bullet_text="`scripts/run_foo.py` exists with a function `build_grid` returning 6 entries.",
+            diff_text=(
+                "+++ b/scripts/run_foo.py\n"
+                "+def build_grid():\n"
+                "+    return [\n"
+                "+        {'a': 1}, {'a': 2}, {'a': 3},\n"
+                "+        {'b': 1}, {'b': 2}, {'b': 3},\n"
+                "+    ]\n"
             ),
-        },
+            working_tree={
+                "scripts/run_foo.py": (
+                    "def build_grid():\n"
+                    "    return [\n"
+                    "        {'a': 1}, {'a': 2}, {'a': 3},\n"
+                    "        {'b': 1}, {'b': 2}, {'b': 3},\n"
+                    "    ]\n"
+                ),
+            },
+        ),
+        describe="prose judge obvious-pass smoke",
     )
     print(f"[smoke] obvious-pass result: status={result.status!r} "
           f"notes={result.notes!r}")
@@ -104,15 +114,20 @@ def test_prose_judge_passes_obvious_pass_case():
 
 def test_prose_judge_fails_obvious_fail_case():
     """Diff is clearly empty / unrelated → fail."""
-    result = _run_judge(
-        bullet_text="`scripts/run_foo.py` exists with a function `build_grid` returning 6 entries.",
-        diff_text=(
-            "+++ b/README.md\n"
-            "+\n"
-            "+## Update\n"
-            "+\n"
-            "+Documentation cleanup, no source changes.\n"
+    # TB-351: skip (not fail) on a transient SDK error; a clean verdict
+    # flows to the assert below. A wrong "pass" here would still fail.
+    result = call_with_transient_retry(
+        lambda: _run_judge(
+            bullet_text="`scripts/run_foo.py` exists with a function `build_grid` returning 6 entries.",
+            diff_text=(
+                "+++ b/README.md\n"
+                "+\n"
+                "+## Update\n"
+                "+\n"
+                "+Documentation cleanup, no source changes.\n"
+            ),
         ),
+        describe="prose judge obvious-fail smoke",
     )
     print(f"[smoke] obvious-fail result: status={result.status!r} "
           f"notes={result.notes!r}")

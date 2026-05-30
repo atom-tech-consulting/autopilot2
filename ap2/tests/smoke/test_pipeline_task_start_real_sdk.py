@@ -35,6 +35,8 @@ from pathlib import Path
 
 import pytest
 
+from ._transient import call_with_transient_retry
+
 pytestmark = pytest.mark.skipif(
     not os.environ.get("AP2_REAL_SDK"),
     reason="real-SDK smoke; set AP2_REAL_SDK=1 to run",
@@ -118,7 +120,14 @@ def test_pipeline_task_start_round_trip_via_real_sdk():
             board = Board.load(cfg.tasks_file)
             return tool_calls, pipe_starts, board, root
 
-    tool_calls, pipe_starts, board, root = asyncio.run(go())
+    # TB-351: a transient SDK transport/service error is *raised* out of
+    # the `sdk.query` loop — retry once, then skip (not error). A genuine
+    # wiring regression (pipeline_task_start not called / no event) flows
+    # to the asserts below and still fails.
+    tool_calls, pipe_starts, board, root = call_with_transient_retry(
+        lambda: asyncio.run(go()),
+        describe="pipeline_task_start round-trip smoke",
+    )
 
     print(f"\n[smoke] {len(tool_calls)} tool calls observed:")
     for tc in tool_calls:
