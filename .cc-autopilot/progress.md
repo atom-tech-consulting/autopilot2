@@ -1317,3 +1317,9 @@
 - **Summary:** Added a shared narrow transient-SDK-error classifier (ap2/tests/smoke/_transient.py) with a bounded single-retry helper, wired it into all five real-SDK smokes so a transport/service blip retries once then pytest.skips (clean-but-wrong verdicts still fail; the TB-249 --max-tokens arg-rejection matches no transient signature so the validator smoke still catches it), and pinned the mapping with a non-live unit test that runs in the normal gate; full descoped gate green (2817 passed).
 - **Files:** ap2/tests/smoke/_transient.py, ap2/tests/test_tb351_transient_classifier.py, ap2/tests/smoke/test_prose_judge_real_sdk.py, ap2/tests/smoke/test_validator_judge_real_sdk.py, ap2/tests/smoke/test_cron_propose_real_sdk.py, ap2/tests/smoke/test_pipeline_task_start_real_sdk.py, ap2/tests/smoke/test_report_result_real_sdk.py
 - **Tests:** pass
+
+## [2026-05-30] TB-352: Add a --follow live event-monitor mode to ap2 logs (fold in scripts/monitor_events.py)
+- **Commit:** `8addc28`
+- **Summary:** Added `ap2 logs --follow`/`-f` live event-monitor mode backed by new packaged ap2/event_monitor.py (KEEP allowlist + _format_event + tail -F loop), with --all/--json variants; reduced scripts/monitor_events.py to a delegating shim; one-shot logs unchanged; full suite passes (2833).
+- **Files:** ap2/event_monitor.py, ap2/cli.py, ap2/cli_diagnostic.py, scripts/monitor_events.py, ap2/howto.md, ap2/tests/test_tb352_logs_follow.py
+- **Tests:** pass

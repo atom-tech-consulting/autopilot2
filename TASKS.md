@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-352** **Add a --follow live event-monitor mode to ap2 logs (fold in scripts/monitor_events.py)** `#autopilot` `#cli` `#logs` `#operator-ux` `#monitoring` `#refactor` [→ brief](.cc-autopilot/tasks/add-a-follow-live-event-monitor-mode-to.md)
 
 ## Pipeline Pending
 
@@ -237,5 +236,6 @@
 - [x] **TB-346** **Config-correctness cleanup: component-value resolution + inline-default consistency + auto_diagnose schema coverage** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/config-correctness-cleanup-component-val.md)
 - [x] **TB-350** **Add a 6-hourly real-SDK smoke cron job dispatched through a dedicated routine** `#autopilot` `#cron` `#real-sdk` `#smoke` `#verification` `#monitoring` [→ brief](.cc-autopilot/tasks/add-a-6-hourly-real-sdk-smoke-cron-job-d.md)
 - [x] **TB-351** **Harden real-SDK smokes to skip on transient SDK errors instead of false-failing** `#autopilot` `#smoke` `#real-sdk` `#test-reliability` `#monitoring` [→ brief](.cc-autopilot/tasks/harden-real-sdk-smokes-to-skip-on-transi.md)
+- [x] **TB-352** **Add a --follow live event-monitor mode to ap2 logs (fold in scripts/monitor_events.py)** `#autopilot` `#cli` `#logs` `#operator-ux` `#monitoring` `#refactor` [→ brief](.cc-autopilot/tasks/add-a-follow-live-event-monitor-mode-to.md)
 
 ## Frozen
