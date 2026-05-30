@@ -80,7 +80,11 @@ def test_subpackage_init_file_exists():
         "`ap2/components/attention/__init__.py` after the axis-5 "
         "relocation."
     )
-    src = init_path.read_text(encoding="utf-8")
+    # TB-343: the body moved to the sibling `impl.py`; read it there (the
+    # `__init__.py` shim above re-exports the surface).
+    src = (
+        _REPO_ROOT / "ap2/components/attention/impl.py"
+    ).read_text(encoding="utf-8")
     # Sanity: the body file carries the real module — the detectors
     # and the daemon-side wire-up are defined in source, not stubs.
     assert "def detect_attention_conditions" in src, (
@@ -135,7 +139,8 @@ def test_env_knobs_preserved_verbatim():
     `AP2_AUTO_APPROVE_COST_APPROACH_PCT`) are pinned the same way —
     any rename would be an operator-visible regression.
     """
-    init_path = _REPO_ROOT / "ap2/components/attention/__init__.py"
+    # TB-343: the body (and its env-knob references) moved to `impl.py`.
+    init_path = _REPO_ROOT / "ap2/components/attention/impl.py"
     src = init_path.read_text(encoding="utf-8")
     for knob in (
         "AP2_ATTENTION_DEBOUNCE_S",

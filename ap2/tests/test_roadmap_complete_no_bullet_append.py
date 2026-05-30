@@ -323,7 +323,9 @@ def test_kill_switch_helper_import_retained():
     pins is "the helper import is retained somewhere in the module,"
     not the exact syntactic shape of the import statement.
     """
-    src = Path(focus_advance.__file__).read_text()
+    # TB-343: the body (and this import) moved to the sibling impl.py; the
+    # focus_advance package __init__ is now a re-export-only shim.
+    src = Path(focus_advance.impl.__file__).read_text()
     assert (
         "from ap2.components.auto_approve import _append_decisions_needed_bullet"
         in src
@@ -345,7 +347,8 @@ def test_no_bullet_call_within_roadmap_complete_branch():
     bullet checks; pinning it here surfaces a regression even
     when the bullet call moves to a slightly different line
     number."""
-    src_path = Path(focus_advance.__file__)
+    # TB-343: the body moved to the sibling impl.py.
+    src_path = Path(focus_advance.impl.__file__)
     lines = src_path.read_text().splitlines()
     violations = []
     for i, line in enumerate(lines):
@@ -370,7 +373,9 @@ def test_module_docstring_documents_no_bullet_behavior():
     docstring must document the TB-302 behavior change (no bullet
     write on roadmap-complete). A future docs-drift refactor that
     loses this note would surface cleanly on this test."""
-    doc = focus_advance.__doc__ or ""
+    # TB-343: the body's module docstring (with the TB-302 note) moved to
+    # the sibling impl.py; the package __init__ now carries a thin shim doc.
+    doc = focus_advance.impl.__doc__ or ""
     assert "TB-302" in doc, (
         "module docstring must reference TB-302's no-bullet "
         "behavior change"

@@ -92,7 +92,7 @@ def test_chat_triggered_status_report_routes_through_shared_routine(
             }
         )
     )
-    monkeypatch.setattr("ap2.components.mattermost._api_get", _fake_mm_api_status())  # TB-312
+    monkeypatch.setattr("ap2.components.mattermost.impl._api_get", _fake_mm_api_status())  # TB-312/TB-343
 
     # Seed activity AFTER the most recent status-report cron_complete so
     # the skip-gate doesn't fire (we want the run path, not the skip

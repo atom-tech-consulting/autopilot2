@@ -650,7 +650,8 @@ def test_briefing_verification_greps_match():
     a refactor that violates the structural pins surfaces here as a
     clean test failure (parallel to TB-280's pin)."""
     repo_root = Path(__file__).resolve().parent.parent
-    attention_src = (repo_root / "components" / "attention" / "__init__.py").read_text()
+    # TB-343: the attention body moved to the sibling impl.py.
+    attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
     events_src = (repo_root / "events.py").read_text()
     config_src = (repo_root / "config.py").read_text()
     status_report_src = (repo_root / "status_report.py").read_text()

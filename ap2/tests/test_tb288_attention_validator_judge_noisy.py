@@ -452,7 +452,8 @@ def test_briefing_verification_greps_match():
         recursive grep — pinning it here documents the contract.)
     """
     repo_root = Path(__file__).resolve().parent.parent
-    attention_src = (repo_root / "components" / "attention" / "__init__.py").read_text()
+    # TB-343: the attention body moved to the sibling impl.py.
+    attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
     howto_src = (repo_root / "howto.md").read_text()
     architecture_src = (repo_root / "architecture.md").read_text()
     this_test_src = Path(__file__).read_text()

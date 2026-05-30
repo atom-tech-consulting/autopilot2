@@ -75,7 +75,11 @@ def test_subpackage_init_file_exists():
     )
     # Sanity: the body file carries the real module — `_maybe_auto_unfreeze`
     # and `_apply_auto_unfreeze_patch` are defined in source, not stubs.
-    src = init_path.read_text(encoding="utf-8")
+    # TB-343: the body moved to the sibling `impl.py`; read it there (the
+    # `__init__.py` shim above re-exports the surface).
+    src = (
+        _REPO_ROOT / "ap2/components/auto_unfreeze/impl.py"
+    ).read_text(encoding="utf-8")
     assert "def _maybe_auto_unfreeze" in src, (
         "TB-314: the subpackage `__init__.py` should carry the real "
         "module body, not the pre-migration stub-marker file."
@@ -122,7 +126,8 @@ def test_kill_switch_env_knob_preserved_verbatim():
     `AP2_AUTO_UNFREEZE_MAX_PER_DAY`) are pinned the same way — any
     rename would be an operator-visible regression.
     """
-    init_path = _REPO_ROOT / "ap2/components/auto_unfreeze/__init__.py"
+    # TB-343: the body (and its env-knob references) moved to `impl.py`.
+    init_path = _REPO_ROOT / "ap2/components/auto_unfreeze/impl.py"
     src = init_path.read_text(encoding="utf-8")
     for knob in (
         "AP2_AUTO_UNFREEZE_FIX_SHAPES",

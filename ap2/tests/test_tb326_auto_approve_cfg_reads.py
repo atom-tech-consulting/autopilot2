@@ -174,8 +174,9 @@ def test_cfg_get_component_value_path_present_in_component_body():
     surfaces here so the documented pilot pattern stays the canonical
     template for the remaining six clusters.
     """
+    # TB-343: the body (with its cfg.get_component_value calls) moved to impl.py.
     init_src = (
-        _REPO_ROOT / "ap2/components/auto_approve/__init__.py"
+        _REPO_ROOT / "ap2/components/auto_approve/impl.py"
     ).read_text(encoding="utf-8")
     assert "cfg.get_component_value" in init_src, (
         "TB-326: the auto_approve component body should use "

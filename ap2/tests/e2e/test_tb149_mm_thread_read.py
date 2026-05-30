@@ -67,7 +67,10 @@ def test_mm_handler_reads_thread_then_replies_with_context(
         fetch_calls.append((thread_id, max_messages))
         return list(prior)
 
-    monkeypatch.setattr(mattermost, "fetch_thread", fake_fetch_thread)
+    # TB-343: patch the seam on the impl module — `do_mattermost_thread_read`
+    # (now in `impl.py`) resolves `fetch_thread` in `impl`'s namespace, so a
+    # patch on the package shim would not be seen.
+    monkeypatch.setattr(mattermost.impl, "fetch_thread", fake_fetch_thread)
 
     # Capture mattermost_reply calls so we can assert on the composed text.
     posts: list[dict] = []

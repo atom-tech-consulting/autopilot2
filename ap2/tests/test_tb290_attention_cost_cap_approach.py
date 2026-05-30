@@ -733,7 +733,8 @@ def test_briefing_verification_greps_match():
         the gate stays the trip check, attention stays the surface.)
     """
     repo_root = Path(__file__).resolve().parent.parent
-    attention_src = (repo_root / "components" / "attention" / "__init__.py").read_text()
+    # TB-343: the attention body moved to the sibling impl.py.
+    attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
     config_src = (repo_root / "config.py").read_text()
     env_reload_src = (repo_root / "env_reload.py").read_text()
     howto_src = (repo_root / "howto.md").read_text()
@@ -743,7 +744,8 @@ def test_briefing_verification_greps_match():
     # pins the same invariant (the detector must NOT live in the
     # auto_approve subpackage body) against the new canonical path.
     auto_approve_src = (
-        repo_root / "components" / "auto_approve" / "__init__.py"
+        # TB-343: the auto_approve body moved to the sibling impl.py.
+        repo_root / "components" / "auto_approve" / "impl.py"
     ).read_text()
     this_test_src = Path(__file__).read_text()
 

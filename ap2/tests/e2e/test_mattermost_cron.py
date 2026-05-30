@@ -162,7 +162,7 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
             }
         )
     )
-    monkeypatch.setattr("ap2.components.mattermost._api_get", _fake_mm_api())  # TB-312
+    monkeypatch.setattr("ap2.components.mattermost.impl._api_get", _fake_mm_api())  # TB-312/TB-343
 
     # --- scripted SDK. ---
     sdk = FakeSDK()

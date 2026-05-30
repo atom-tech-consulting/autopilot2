@@ -74,7 +74,11 @@ def test_subpackage_init_file_exists():
     )
     # Sanity: the body file carries the real module — `_maybe_advance_focus`
     # and `_ideation_empty_against_focus` are defined in source, not stubs.
-    src = init_path.read_text(encoding="utf-8")
+    # TB-343: the body moved to the sibling `impl.py`; read it there (the
+    # `__init__.py` shim above re-exports the surface).
+    src = (
+        _REPO_ROOT / "ap2/components/focus_advance/impl.py"
+    ).read_text(encoding="utf-8")
     assert "async def _maybe_advance_focus" in src, (
         "TB-313: the subpackage `__init__.py` should carry the real "
         "module body, not the pre-migration stub-marker file."
@@ -116,7 +120,8 @@ def test_kill_switch_preserved_verbatim():
     operator-facing env knob name is not renamed across the
     relocation.
     """
-    init_path = _REPO_ROOT / "ap2/components/focus_advance/__init__.py"
+    # TB-343: the body (and its env-knob references) moved to `impl.py`.
+    init_path = _REPO_ROOT / "ap2/components/focus_advance/impl.py"
     src = init_path.read_text(encoding="utf-8")
     assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" in src, (
         "TB-313: the kill switch `AP2_FOCUS_AUTO_ADVANCE_DISABLED` "

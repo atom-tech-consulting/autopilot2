@@ -103,10 +103,14 @@ def test_subpackage_init_file_exists_and_non_empty():
         "`ap2/components/auto_approve/__init__.py` after the axis-5 "
         "relocation."
     )
-    src = init_path.read_text(encoding="utf-8")
+    # TB-343: the body moved to the sibling `impl.py`; read it there for the
+    # body-content pins (the `__init__.py` shim above re-exports the surface).
+    src = (
+        _REPO_ROOT / "ap2/components/auto_approve/impl.py"
+    ).read_text(encoding="utf-8")
     assert src.strip(), (
-        "TB-318: the relocated `__init__.py` must be non-empty — the "
-        "pre-migration stub marker is replaced by the full module body."
+        "TB-343: the relocated `impl.py` must be non-empty — it carries "
+        "the full module body that the `__init__.py` shim re-exports."
     )
     # Sanity: the body file carries the real implementation, not the
     # pre-TB-318 stub-marker placeholder.
@@ -154,7 +158,8 @@ def test_env_knobs_preserved_verbatim():
     would be an operator-visible regression — the briefing's
     Out-of-scope clause explicitly prohibits knob renames.
     """
-    init_path = _REPO_ROOT / "ap2/components/auto_approve/__init__.py"
+    # TB-343: the body (and its env-knob references) moved to `impl.py`.
+    init_path = _REPO_ROOT / "ap2/components/auto_approve/impl.py"
     src = init_path.read_text(encoding="utf-8")
     for knob in (
         "AP2_AUTO_APPROVE",

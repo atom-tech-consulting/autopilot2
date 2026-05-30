@@ -218,8 +218,9 @@ def test_cfg_get_component_value_path_present_in_component_body():
     surfaces here so the documented TB-326 pilot pattern stays the
     canonical template for the cluster.
     """
+    # TB-343: the body (with its cfg.get_component_value calls) moved to impl.py.
     init_src = (
-        _REPO_ROOT / "ap2/components/validator_judge/__init__.py"
+        _REPO_ROOT / "ap2/components/validator_judge/impl.py"
     ).read_text(encoding="utf-8")
     assert "cfg.get_component_value" in init_src, (
         "TB-331: the validator_judge component body should use "
@@ -237,8 +238,10 @@ def test_validator_judge_no_os_import_in_init():
     so dropping the import is a defensive check that no other env read
     has snuck in.
     """
+    # TB-343: the body moved to impl.py; the `import os` absence pin tracks
+    # the body, so read impl.py (the __init__.py shim is re-export-only).
     src = (
-        _REPO_ROOT / "ap2/components/validator_judge/__init__.py"
+        _REPO_ROOT / "ap2/components/validator_judge/impl.py"
     ).read_text(encoding="utf-8")
     # Look for line-anchored bare `import os` (not `from os import …`
     # which is a separate path we'd want to flag too).

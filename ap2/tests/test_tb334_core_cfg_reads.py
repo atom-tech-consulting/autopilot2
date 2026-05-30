@@ -81,7 +81,8 @@ _MIGRATED_FILES: tuple[str, ...] = (
     "ap2/daemon.py",
     "ap2/verify.py",
     "ap2/status_report.py",
-    "ap2/components/janitor/__init__.py",
+    # TB-343: the janitor body (with its get_core_value calls) moved to impl.py.
+    "ap2/components/janitor/impl.py",
 )
 
 

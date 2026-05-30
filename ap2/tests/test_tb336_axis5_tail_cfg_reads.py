@@ -145,7 +145,8 @@ _GREP_ABSENCE_CASES = [
     ),
     ("ap2/ideation.py", r"os\.environ\.get\([\"']AP2_IDEATION_MAX_TURNS"),
     (
-        "ap2/components/attention/__init__.py",
+        # TB-343: the attention body moved to impl.py.
+        "ap2/components/attention/impl.py",
         r"os\.environ\.get\([\"']AP2_AUTO_APPROVE_COST_APPROACH_PCT",
     ),
 ]
@@ -191,7 +192,8 @@ def test_positive_cfg_helper_read_path_present_in_migrated_files():
         ("ap2/doctor.py", r"get_core_value\([\"']verify_(cmd|timeout_s)[\"']"),
         ("ap2/ideation.py", r"get_core_value\([\"']ideation_max_turns[\"']"),
         (
-            "ap2/components/attention/__init__.py",
+            # TB-343: the attention body moved to impl.py.
+            "ap2/components/attention/impl.py",
             r"get_component_value\([\"']auto_approve[\"']",
         ),
     ]

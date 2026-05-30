@@ -199,8 +199,9 @@ def test_cfg_get_component_value_path_present_in_component_body():
     surfaces here so the documented TB-326 pilot pattern stays the
     canonical template for the cluster.
     """
+    # TB-343: the body (with its cfg.get_component_value calls) moved to impl.py.
     init_src = (
-        _REPO_ROOT / "ap2/components/focus_advance/__init__.py"
+        _REPO_ROOT / "ap2/components/focus_advance/impl.py"
     ).read_text(encoding="utf-8")
     assert "cfg.get_component_value" in init_src, (
         "TB-329: the focus_advance component body should use "

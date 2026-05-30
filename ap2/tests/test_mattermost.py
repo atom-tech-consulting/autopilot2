@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from ap2.components import mattermost  # TB-312: moved from `ap2.mattermost`
+# TB-343: the body moved to `ap2/components/mattermost/impl.py`; tests
+# stub intra-body seams (`_api_get`, `fetch_thread`) so bind the impl
+# module here — a patch on the package shim would not be seen by the
+# in-body callers (`check_new_messages` et al.) that resolve those
+# names in `impl`'s namespace. (TB-312 first moved it from `ap2.mattermost`.)
+from ap2.components.mattermost import impl as mattermost
 from ap2.config import Config
 
 

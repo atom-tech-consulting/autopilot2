@@ -87,7 +87,11 @@ def test_subpackage_init_file_exists():
         "`ap2/components/validator_judge/__init__.py` after the axis-5 "
         "relocation."
     )
-    src = init_path.read_text(encoding="utf-8")
+    # TB-343: the body moved to the sibling `impl.py`; read it there (the
+    # `__init__.py` shim above re-exports the surface).
+    src = (
+        _REPO_ROOT / "ap2/components/validator_judge/impl.py"
+    ).read_text(encoding="utf-8")
     # Sanity: the body file carries the real module — the dispatcher
     # and the SDK helper are defined in source, not stubs.
     assert "def _check_dependency_coherence" in src, (
@@ -131,7 +135,8 @@ def test_env_knobs_preserved_verbatim():
     the operator-facing knob names are not renamed across the
     relocation. Any rename would be an operator-visible regression.
     """
-    init_path = _REPO_ROOT / "ap2/components/validator_judge/__init__.py"
+    # TB-343: the body (and its env-knob references) moved to `impl.py`.
+    init_path = _REPO_ROOT / "ap2/components/validator_judge/impl.py"
     src = init_path.read_text(encoding="utf-8")
     for knob in (
         "AP2_VALIDATOR_JUDGE_DISABLED",
