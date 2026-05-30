@@ -518,7 +518,7 @@ def reset_pointer_on_goal_updated(cfg, foci: list[FocusItem]) -> dict[str, Any]:
     (TB-342 collapse): the empty-cycles counter zeroes (the post-edit
     runway is fresh), the halt flag clears, and the dismissal marker
     clears so a future re-exhaustion at the same foci count re-arms the
-    operator nag cleanly. `_ideation_empty_against_focus` also resets
+    operator nag cleanly. `_consecutive_empty_ideation_cycles` also resets
     its cycle window at the `goal_updated` cutoff, so the in-memory
     counter and the pointer's forensic `empty_cycles` field agree on
     the next tick.

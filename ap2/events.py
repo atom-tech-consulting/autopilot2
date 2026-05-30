@@ -125,7 +125,7 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     (ideation never actually scoped itself to the active focus, so the
     pointer walk changed nothing about what got proposed); the event
     is no longer emitted, the `rewind-focus` verb went away, and the
-    `_ideation_empty_against_focus` counter now resets at
+    `_consecutive_empty_ideation_cycles` counter now resets at
     `goal_updated` instead of `focus_advanced to=<focus_title>`. The
     event name is retained in this docstring for historical-grep
     discovery against pre-TB-342 `events.jsonl` files; downstream
@@ -149,7 +149,7 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `exhausted_count` (the foci-list length at halt time), `trigger`
     (`empty_cycles_heuristic` post-TB-342 — the pre-TB-342
     `pointer_past_last` value retired with the rotation pointer walk).
-    Fired once per exhaustion episode; the `_maybe_advance_focus`
+    Fired once per exhaustion episode; the `maybe_halt_on_exhaustion`
     pass suppresses re-emission via the pointer's
     `roadmap_complete_emitted` flag, which resets on the next
     `goal_updated` event.
@@ -400,7 +400,7 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     NO-PROPOSAL-REASONING summary (used when 0 proposals landed this
     cycle — e.g. "0 proposals; focus-2 marked exhausted-needs-
     operator"). Both close the cycle from the empty-cycles counter's
-    perspective: `focus_advance._ideation_empty_against_focus` (TB-292
+    perspective: `ideation_halt._consecutive_empty_ideation_cycles` (TB-292
     cycle-grouped accounting, TB-300 dual-name exit-marker set)
     treats either name as the cycle-end signal — increment if no
     `ideation_proposal_recorded` fired within the cycle, reset to 0

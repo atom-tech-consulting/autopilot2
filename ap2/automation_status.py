@@ -1099,7 +1099,7 @@ def collect_window_focus_rotation(
         retained for parser stability across the event-type docs-drift
         gate + downstream consumers that read the key. TB-342 collapsed
         the multi-focus rotation pointer walk into a single ideation-
-        exhaustion detector, so `_maybe_advance_focus` no longer emits
+        exhaustion detector, so `maybe_halt_on_exhaustion` no longer emits
         `focus_advanced` events. Historical tail entries from before
         TB-342 also stop appearing here once the 2000-event tail rolls
         past the cutover; consumers should treat the empty list as the

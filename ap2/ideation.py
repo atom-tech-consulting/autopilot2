@@ -1112,7 +1112,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
         mark_run(cfg.cron_state_file, IDEATION_NAME)
         return
     # TB-246: roadmap-complete gate — when the ideation-exhaustion
-    # detector (`_maybe_advance_focus`) has emitted `roadmap_complete`
+    # detector (`maybe_halt_on_exhaustion`) has emitted `roadmap_complete`
     # after the empty-cycles threshold tripped AND the operator has
     # not yet edited goal.md (which would clear the halt via
     # `reset_pointer_on_goal_updated`), ideation is parked. Without a
@@ -1132,7 +1132,7 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
     # ideation-exhaustion detector means resume is now goal.md edit
     # only — the pre-TB-342 `ap2 rewind-focus` recovery verb went
     # away with the rotation theatre, and the
-    # `_ideation_empty_against_focus` counter resets at the most
+    # `_consecutive_empty_ideation_cycles` counter resets at the most
     # recent `goal_updated` event (the operator's resume signal)
     # instead of the deleted `focus_advanced` rotation event.
     #

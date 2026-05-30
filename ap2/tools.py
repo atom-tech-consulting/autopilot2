@@ -1139,7 +1139,7 @@ CONTROL_AGENT_TOOLS = [
 # preference desynced the empty-cycles counter on 2026-05-26: the queue
 # path emits `operator_queue_append op=add_backlog`, NOT
 # `ideation_proposal_recorded` — and the counter in
-# `ap2/focus_advance.py:_ideation_empty_against_focus` only treats
+# `ap2/ideation_halt.py:_consecutive_empty_ideation_cycles` only treats
 # `ideation_proposal_recorded` as a reset signal. One productive cycle
 # (TB-290) routed via the queue ticked the counter as if empty, falsely
 # advancing the focus to ROADMAP_COMPLETE. Fencing the toolset forces

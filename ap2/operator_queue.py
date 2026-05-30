@@ -1673,7 +1673,7 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             bytes=len(goal_content),
         )
         # TB-342: a `goal_updated` event resets the ideation-exhaustion
-        # halt. The collapsed `_maybe_advance_focus` detector resets its
+        # halt. The collapsed `maybe_halt_on_exhaustion` detector resets its
         # empty-cycles window at the most recent `goal_updated` cutoff,
         # but the pointer's forensic `empty_cycles` field, the one-shot
         # `roadmap_complete_emitted` flag, and the dismissal marker live
@@ -1696,7 +1696,7 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             _goal.save_pointer(cfg, new_pointer)
         except OSError:
             # Best-effort: failure to rewrite the pointer leaves the
-            # halt flag stale, but the next `_maybe_advance_focus` tick
+            # halt flag stale, but the next `maybe_halt_on_exhaustion` tick
             # re-reads the events tail and observes the `goal_updated`
             # cutoff — the counter zeroes naturally, and the operator
             # can re-emit the halt by running through threshold empty
