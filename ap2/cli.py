@@ -72,7 +72,6 @@ from .cli_review import (  # noqa: F401
     cmd_audit,
     cmd_backfill_proposals,
     cmd_ideate,
-    cmd_rewind_focus,
     cmd_rollback,
     cmd_update_goal,
 )
@@ -513,41 +512,6 @@ def build_parser() -> argparse.ArgumentParser:
              "ideation cycles read this as a goal-drift signal.",
     )
     s.set_defaults(func=cmd_update_goal)
-
-    s = sub.add_parser(
-        "rewind-focus",
-        help="re-engage an exhausted `## Current focus:` heading "
-             "(TB-295): updates `.cc-autopilot/focus_pointer.json` to "
-             "point at <title>, emits a synthetic `focus_advanced "
-             "trigger=operator_rewind` event so the empty-cycles "
-             "counter's cutoff respects the rewind, and writes an "
-             "operator_log.md audit line. Routed through the "
-             "operator queue so the mutation lands at a tick "
-             "boundary, never mid-task-run. Canonical recovery path "
-             "for a falsely-advanced focus — direct edits of "
-             "`focus_pointer.json` produce no event and leave "
-             "pre-rewind empty cycles counting against the rewound "
-             "focus's counter.",
-    )
-    s.add_argument(
-        "title",
-        help="target focus title — must match (exact-string) one of "
-             "the `## Current focus:` headings in goal.md. The "
-             "title-to-index resolution happens at drain time, so an "
-             "operator-edited goal.md between this invocation and the "
-             "next tick produces a clean rejection rather than a "
-             "silent rewind to the wrong index.",
-    )
-    s.add_argument(
-        "--reason",
-        default=None,
-        help="single-line operator intent captured in operator_log.md "
-             "as `<ts> — operator rewound focus pointer (<old> → "
-             "<target>): <reason>`. Optional but encouraged — the "
-             "verb itself is signal; a reason converts it into a "
-             "learnable signal for ideation cycles.",
-    )
-    s.set_defaults(func=cmd_rewind_focus)
 
     s = sub.add_parser(
         "rollback",

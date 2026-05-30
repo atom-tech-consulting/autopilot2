@@ -115,18 +115,15 @@ def _write_goal_with_focus(cfg: Config, foci: list[str]) -> None:
 
 
 def _set_pointer_past_last_focus(cfg: Config, foci_count: int) -> None:
-    """Write `focus_pointer.json` with `active_index = foci_count` so
-    `goal.roadmap_exhausted(cfg)` returns True (pointer past the
-    last focus AND no `operator_ack roadmap_complete` event in
-    `events.jsonl`).
-    """
+    """Write `focus_pointer.json` with `roadmap_complete_emitted=True`
+    so `goal.roadmap_exhausted(cfg)` returns True (the halt flag set
+    by the TB-342-collapsed detector). `foci_count` is retained for
+    call-site parity with the pre-TB-342 helper signature; the new
+    schema has no per-focus pointer fields."""
     import json
     payload = {
         "schema": 1,
-        "active_index": foci_count,
-        "active_title": "",
         "empty_cycles": 0,
-        "exhausted_titles": [],
         "roadmap_complete_ack_idx": None,
         "roadmap_complete_emitted": True,
         "updated_ts": "2026-05-17T00:00:00Z",
@@ -208,9 +205,9 @@ def test_maybe_ideate_runs_when_roadmap_not_exhausted(tmp_path, monkeypatch):
         sections={"Backlog": [("TB-1", "first")]},
     )
     _write_goal_with_focus(cfg, ["axis 1: foo", "axis 2: bar"])
-    # Pointer at index 0 — squarely inside the focus list. Default
-    # pointer (file absent) already returns active_index=0; write
-    # nothing so the load_pointer fallback is exercised too.
+    # Default pointer (file absent) has `roadmap_complete_emitted=False`,
+    # so `goal.roadmap_exhausted(cfg)` returns False naturally — the
+    # ideation gate doesn't trip.
     calls = _stub_run_control_agent(monkeypatch)
 
     asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))

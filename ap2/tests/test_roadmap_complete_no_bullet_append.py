@@ -40,22 +40,24 @@ Why this matters (the two bugs the prior bullet write caused):
 The fix (TB-302) drops the single
 `_append_decisions_needed_bullet` call from the
 `roadmap_complete_emitted` branch. The roadmap-complete signal is
-already surfaced redundantly via five other channels:
-  (a) `focus_advanced` / `roadmap_complete` events in
-      `events.jsonl`,
-  (b) `focus_pointer.json` (`active_index past end`,
-      `exhausted_titles`, `roadmap_complete_emitted=true`,
-      empty `active_title`),
-  (c) `ap2 status`'s focus line
-      (`focus: ROADMAP_COMPLETE — ideation parked;
-      `ap2 update-goal` to resume or `ap2 ack roadmap_complete`
-      to dismiss`), derived from `focus_pointer.json` via
+already surfaced redundantly via four other channels:
+  (a) the `roadmap_complete` event in `events.jsonl`,
+  (b) `focus_pointer.json` (`roadmap_complete_emitted=true`),
+  (c) `ap2 status`'s focus line (`focus: parked — ideation
+      exhausted; extend goal.md via `ap2 update-goal` to resume,
+      or `ap2 ack roadmap_complete` to dismiss this notice`),
+      derived from `focus_pointer.json` via
       `goal.roadmap_exhausted`,
-  (d) the web home page's
-      `Focus — ROADMAP_COMPLETE` header, derived from the same
-      pointer, and
-  (e) the TB-244 focus-rotation digest in the cron
-      `status_report` post.
+  (d) the web home page's `Focus — parked` header, derived from
+      the same pointer, and
+  (e) the TB-244 focus-rotation digest in the cron `status_report`
+      post.
+
+TB-342 collapsed the pre-existing multi-focus rotation pointer walk
+into a single ideation-exhaustion detector; this test's assertions
+were updated to use the new `trigger=empty_cycles_heuristic` shape
+(replacing the now-retired `trigger=pointer_past_last` from the
+rotation pass).
 
 Other callers of `_append_decisions_needed_bullet` STAY
 unchanged — they surface conditions that are NOT redundantly
@@ -158,17 +160,25 @@ def _ideation_state_path(cfg: Config) -> Path:
 # ===========================================================================
 
 
+def _emit_empty_cycle(cfg: Config) -> None:
+    """Append one full empty ideation cycle (entry + complete, no
+    proposal) so the counter sees it."""
+    events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
+    events.append(cfg.events_file, "ideation_complete", summary="empty cycle")
+
+
 def test_roadmap_complete_emits_event_and_sets_pointer_flag(cfg, monkeypatch):
-    """When the pointer crosses the last focus, the advance pass
-    emits exactly one `roadmap_complete` event and sets
+    """When the empty-cycles threshold trips, the detector pass emits
+    exactly one `roadmap_complete` event and sets
     `pointer['roadmap_complete_emitted']` to True. Pins that the
     side effects we KEEP still happen — only the bullet write was
-    removed."""
+    removed (TB-302). TB-342: the trigger is now
+    `empty_cycles_heuristic` (the rotation `pointer_past_last`
+    value retired with the multi-focus pointer walk)."""
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 1  # past the only focus
-    goal.save_pointer(cfg, pointer)
+    _emit_empty_cycle(cfg)
 
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
@@ -176,7 +186,7 @@ def test_roadmap_complete_emits_event_and_sets_pointer_flag(cfg, monkeypatch):
     rc = [e for e in tail if e.get("type") == "roadmap_complete"]
     assert len(rc) == 1, "roadmap_complete event must fire exactly once"
     assert rc[0]["exhausted_count"] == 1
-    assert rc[0]["trigger"] == "pointer_past_last"
+    assert rc[0]["trigger"] == "empty_cycles_heuristic"
 
     loaded = goal.load_pointer(cfg)
     assert loaded["roadmap_complete_emitted"] is True
@@ -184,21 +194,14 @@ def test_roadmap_complete_emits_event_and_sets_pointer_flag(cfg, monkeypatch):
 
 
 def test_roadmap_complete_does_not_create_ideation_state(cfg, monkeypatch):
-    """When `ideation_state.md` does NOT exist before the advance
-    pass, the roadmap-complete branch must NOT create it. Pre-TB-302
-    the daemon would call `_append_decisions_needed_bullet` which
-    creates the file with a `# Ideation State` header + a
-    `## Decisions needed from operator` section + the
-    `Roadmap complete: ...` bullet."""
+    """When `ideation_state.md` does NOT exist before the detector
+    pass, the roadmap-complete branch must NOT create it."""
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 1
-    goal.save_pointer(cfg, pointer)
+    _emit_empty_cycle(cfg)
 
     ideation_state = _ideation_state_path(cfg)
-    # Sanity: fresh init may or may not seed the file; remove it if
-    # present so we can pin the no-create behavior unambiguously.
     if ideation_state.exists():
         ideation_state.unlink()
     assert not ideation_state.exists()
@@ -207,26 +210,18 @@ def test_roadmap_complete_does_not_create_ideation_state(cfg, monkeypatch):
 
     assert not ideation_state.exists(), (
         "TB-302: the roadmap-complete branch must not create "
-        "ideation_state.md. The pointer-driven `ap2 status` focus "
-        "line carries the operator-facing signal; the daemon-owned "
-        "bullet write was the priming-leak surface this fix "
-        "eliminated."
+        "ideation_state.md."
     )
 
 
 def test_roadmap_complete_does_not_modify_existing_ideation_state(cfg, monkeypatch):
-    """When `ideation_state.md` exists before the advance pass with
-    pre-existing content, the roadmap-complete branch must leave
-    its bytes unchanged. This is the single-writer invariant the
-    fix restores: only the ideation agent
-    (`do_ideation_state_write`) and halt-style callers in
-    `_run_ideation`'s window write to the file; the focus-advance
-    pass does not."""
+    """When `ideation_state.md` exists before the detector pass with
+    pre-existing content, the roadmap-complete branch must leave its
+    bytes unchanged."""
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 1
-    goal.save_pointer(cfg, pointer)
+    _emit_empty_cycle(cfg)
 
     ideation_state = _ideation_state_path(cfg)
     ideation_state.parent.mkdir(parents=True, exist_ok=True)
@@ -241,10 +236,7 @@ def test_roadmap_complete_does_not_modify_existing_ideation_state(cfg, monkeypat
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
     post_bytes = ideation_state.read_bytes()
-    assert post_bytes == pre_bytes, (
-        "TB-302: the roadmap-complete branch must not modify "
-        "ideation_state.md. Pre/post bytes must match exactly."
-    )
+    assert post_bytes == pre_bytes
     text = ideation_state.read_text()
     assert "Roadmap complete" not in text
     assert "Decisions needed from operator" not in text
@@ -253,14 +245,11 @@ def test_roadmap_complete_does_not_modify_existing_ideation_state(cfg, monkeypat
 def test_subsequent_ticks_dont_re_emit_or_modify_state(cfg, monkeypatch):
     """After the first detection sets
     `roadmap_complete_emitted=true`, subsequent calls to
-    `_maybe_advance_focus` short-circuit: no duplicate
-    `roadmap_complete` event, no further write to
-    `ideation_state.md`."""
+    `_maybe_advance_focus` short-circuit."""
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 1
-    goal.save_pointer(cfg, pointer)
+    _emit_empty_cycle(cfg)
 
     # First tick: emits the event, sets the flag.
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
@@ -279,11 +268,9 @@ def test_subsequent_ticks_dont_re_emit_or_modify_state(cfg, monkeypatch):
     rc = [e for e in tail if e.get("type") == "roadmap_complete"]
     assert len(rc) == 1, (
         "roadmap_complete must fire exactly once across multiple "
-        "ticks past the last focus"
+        "ticks"
     )
 
-    # ideation_state.md state is identical pre/post the subsequent
-    # ticks (whether or not the file existed at the snapshot point).
     if snapshot_exists:
         assert ideation_state.read_bytes() == snapshot_bytes
     else:
@@ -295,29 +282,17 @@ def test_kill_switch_path_still_writes_decisions_needed_bullet(cfg, monkeypatch)
     set when criteria would advance) DOES still write a
     `## Decisions needed from operator` bullet via
     `_append_decisions_needed_bullet`. TB-302 scoped the removal
-    to the roadmap-complete branch ONLY — operator-killed-but-
-    criteria-met has no naturally-observable focus-line surface, so
-    the bullet is the only push channel.
-
-    Setup mirrors `test_auto_advance_disabled_short_circuits` in
-    `test_tb226_focus_rotation.py`: enough empty cycles to trip
-    the heuristic, kill-switch on, multi-focus goal.md so the
-    advance attempt is in-bounds (the kill-switch branch only
-    fires for in-bounds advance attempts, never for the
-    past-last-focus exhaustion branch)."""
+    to the roadmap-complete branch ONLY."""
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
-    # Emit one full empty ideation cycle so the heuristic counter
-    # sees it (cycle-grouped: entry + exit, no proposal).
-    events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
-    events.append(cfg.events_file, "ideation_complete", summary="empty cycle")
+    _emit_empty_cycle(cfg)
 
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
     pointer = goal.load_pointer(cfg)
-    assert pointer["active_index"] == 0, (
-        "kill-switch must block the in-bounds advance"
+    assert pointer["roadmap_complete_emitted"] is False, (
+        "kill-switch must block the halt emission"
     )
 
     ideation_state = _ideation_state_path(cfg)
@@ -403,9 +378,11 @@ def test_module_docstring_documents_no_bullet_behavior():
     # Either the explicit phrase or the no-longer-appends shape
     # qualifies; the parser-friendly grep is the phrase below.
     assert re.search(
-        r"no longer appends.*Roadmap complete", doc, re.S,
+        r"does not append.*Roadmap complete", doc, re.S,
+    ) or re.search(
+        r"no longer append.*Roadmap complete", doc, re.S,
     ), (
-        "module docstring must explain that the daemon no longer "
-        "appends a `Roadmap complete: ...` bullet to "
+        "module docstring must explain that the daemon does not "
+        "append a `Roadmap complete: ...` bullet to "
         "ideation_state.md"
     )

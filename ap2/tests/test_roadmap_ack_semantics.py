@@ -1,14 +1,18 @@
-"""TB-340: dismiss-the-notice vs resume-ideation semantics for the
-roadmap-complete halt.
+"""TB-340 (+ TB-342 collapse): dismiss-the-notice vs resume-ideation
+semantics for the ideation-exhaustion halt.
 
 Pins the corrected contract:
 
-  - `goal.roadmap_exhausted` is a PURE function of the focus pointer
-    (`active_index >= len(foci)`, with a `total == 0` guard). No
-    events-scan, no `roadmap_complete_ack_idx` read — an
+  - `goal.roadmap_exhausted` is a PURE function of the pointer
+    (`roadmap_complete_emitted` flag post-TB-342, gated by an
+    `len(foci) == 0` guard). No events-scan, no
+    `roadmap_complete_ack_idx` read — an
     `operator_ack[roadmap_complete]` in the events tail does NOT clear
     the gate. (Pre-TB-340 the ack flipped the gate to False, wrongly
-    un-parking ideation against an already-exhausted roadmap.)
+    un-parking ideation against an already-exhausted goal; TB-342 then
+    collapsed the multi-focus rotation pointer walk into a single
+    exhaustion detector, so the predicate became the flag the detector
+    sets rather than an index comparison.)
 
   - `goal.roadmap_complete_notice_dismissed` is the ONLY consumer of
     the dismissal marker. It gates SURFACING (the operator nag), never
@@ -23,12 +27,15 @@ Pins the corrected contract:
     forensic field authoritative (one writer clears, one writer sets,
     one reader).
 
-  - Resuming ideation is a POINTER MOVE: `rewind-focus` (pointer back
-    in range) and a simulated `update-goal` pointer reset both make
-    `roadmap_exhausted` return False with NO ack involved.
+  - Resuming ideation is editing goal.md (TB-342 collapsed the
+    pre-existing `rewind-focus` recovery verb away with the rotation
+    pointer walk). A `goal_updated` event triggers
+    `reset_pointer_on_goal_updated`, which clears
+    `roadmap_complete_emitted` so `roadmap_exhausted` returns False
+    naturally — no ack involved.
 
-Sibling to `test_tb226_focus_rotation.py` (which pins the advance
-heuristic + the now-flipped ack expectation) and
+Sibling to `test_tb226_focus_rotation.py` (which pins the exhaustion
+detector + the now-flipped ack expectation) and
 `test_tb242_status_active_focus_surface.py` (which pins the
 surfacing-vs-state split on the `ap2 status` / web surfaces).
 """
@@ -77,14 +84,18 @@ def cfg(tmp_path: Path, monkeypatch) -> Config:
     return cfg
 
 
-def _exhaust(cfg: Config, *titles: str) -> None:
-    """Write a goal.md with `titles`, push the pointer past the last
-    focus, and run the advance pass so `roadmap_complete` emits (which
-    also clears the dismissal marker per TB-340)."""
+def _exhaust(cfg: Config, *titles: str, monkeypatch=None) -> None:
+    """Write a goal.md with `titles`, accumulate enough empty ideation
+    cycles to trip the threshold, and run the detector pass so
+    `roadmap_complete` emits (which also clears the dismissal marker
+    per TB-340). TB-342: the helper no longer pre-positions an
+    `active_index` past the last focus — the rotation pointer walk is
+    gone, so the halt fires from the empty-cycles detector directly."""
     _write_goal_with_foci(cfg, *titles)
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = len(titles)
-    goal.save_pointer(cfg, pointer)
+    if monkeypatch is not None:
+        monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
+    events.append(cfg.events_file, "ideation_complete", summary="empty")
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
 
@@ -102,20 +113,20 @@ def _ack_roadmap_complete(cfg: Config) -> None:
 # ===========================================================================
 
 
-def test_roadmap_exhausted_pure_pointer_predicate(cfg):
-    """`roadmap_exhausted` returns True when `active_index >= len(foci)`
+def test_roadmap_exhausted_pure_pointer_predicate(cfg, monkeypatch):
+    """`roadmap_exhausted` returns True when
+    `roadmap_complete_emitted` is set (TB-342 collapsed gate)
     regardless of any `operator_ack[roadmap_complete]` in the events
     tail (the ack does NOT clear the gate)."""
-    _exhaust(cfg, "alpha", "beta")
+    _exhaust(cfg, "alpha", "beta", monkeypatch=monkeypatch)
     assert goal.roadmap_exhausted(cfg) is True
 
     # An ack lands AFTER the most recent roadmap_complete with the
     # token in its note — pre-TB-340 this flipped the gate to False.
     _ack_roadmap_complete(cfg)
     assert goal.roadmap_exhausted(cfg) is True, (
-        "the ack must NOT clear the gate — `roadmap_exhausted` is a pure "
-        "function of the pointer and the pointer is still past the last "
-        "focus"
+        "the ack must NOT clear the gate — `roadmap_exhausted` is the "
+        "`roadmap_complete_emitted` flag and the detector has set it"
     )
 
 
@@ -126,7 +137,6 @@ def test_roadmap_exhausted_ignores_ack_idx_field(cfg):
     by `roadmap_complete_notice_dismissed`, never by the gate."""
     _write_goal_with_foci(cfg, "alpha", "beta")
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 2
     pointer["roadmap_complete_emitted"] = True
     pointer["roadmap_complete_ack_idx"] = 2  # marker == foci count
     goal.save_pointer(cfg, pointer)
@@ -145,7 +155,7 @@ def test_roadmap_exhausted_total_zero_guard(cfg):
 # ===========================================================================
 
 
-def test_fresh_emit_clears_stale_dismissal_marker(cfg):
+def test_fresh_emit_clears_stale_dismissal_marker(cfg, monkeypatch):
     """After a fresh `roadmap_complete` emit, a dismissal marker set by
     a PRIOR episode at the SAME foci count does NOT suppress the nag.
 
@@ -155,15 +165,18 @@ def test_fresh_emit_clears_stale_dismissal_marker(cfg):
     action. TB-340 clears the marker at emit time so each episode
     re-nags exactly once.
     """
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 2
     # Stale dismissal from a PRIOR episode at the same foci count (2),
-    # and `roadmap_complete_emitted=False` so the advance pass treats
+    # and `roadmap_complete_emitted=False` so the detector pass treats
     # this as a FRESH exhaustion episode and emits.
     pointer["roadmap_complete_ack_idx"] = 2
     pointer["roadmap_complete_emitted"] = False
     goal.save_pointer(cfg, pointer)
+    # Seed an empty cycle so the threshold (1) trips.
+    events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
+    events.append(cfg.events_file, "ideation_complete", summary="empty")
 
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
@@ -188,12 +201,12 @@ def test_fresh_emit_clears_stale_dismissal_marker(cfg):
 # ===========================================================================
 
 
-def test_notice_dismissed_lifecycle(cfg):
+def test_notice_dismissed_lifecycle(cfg, monkeypatch):
     """`roadmap_complete_notice_dismissed` returns True only after an
     ack for the CURRENT episode, and False again after the next fresh
     `roadmap_complete` emit."""
     # Episode 1: exhaust → not dismissed yet.
-    _exhaust(cfg, "alpha", "beta")
+    _exhaust(cfg, "alpha", "beta", monkeypatch=monkeypatch)
     assert goal.roadmap_complete_notice_dismissed(cfg) is False
 
     # Operator dismisses THIS episode.
@@ -204,22 +217,23 @@ def test_notice_dismissed_lifecycle(cfg):
     # Gate is unaffected — ideation stays parked.
     assert goal.roadmap_exhausted(cfg) is True
 
-    # Operator extends the roadmap (resume), works it, and the daemon
-    # re-exhausts → a fresh `roadmap_complete` emit. Simulate the
-    # extend by adding a focus and resetting the pointer onto it, then
-    # exhausting again.
+    # Operator extends goal.md (resume); the `update_goal` drain
+    # handler calls `reset_pointer_on_goal_updated` which clears the
+    # halt. Simulate the reset directly here.
     _write_goal_with_foci(cfg, "alpha", "beta", "gamma")
     foci = goal.read_focus_list(cfg)
-    resumed = goal.reset_pointer_on_roadmap_extension(cfg, foci)
+    resumed = goal.reset_pointer_on_goal_updated(cfg, foci)
     goal.save_pointer(cfg, resumed)
     # Resume cleared the gate.
     assert goal.roadmap_exhausted(cfg) is False
     assert goal.roadmap_complete_notice_dismissed(cfg) is False
 
-    # Re-exhaust the extended roadmap.
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 3
-    goal.save_pointer(cfg, pointer)
+    # Re-exhaust: emit `goal_updated` so the empty-cycles counter's
+    # cutoff resets onto the post-edit runway, then seed an empty
+    # cycle and let the detector re-emit.
+    events.append(cfg.events_file, "goal_updated", reason="extension")
+    events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
+    events.append(cfg.events_file, "ideation_complete", summary="empty")
     asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
 
     # Fresh episode → notice NOT dismissed even though episode 1 was.
@@ -236,7 +250,6 @@ def test_notice_dismissed_requires_matching_foci_count(cfg):
     marker reflects an older, smaller count)."""
     _write_goal_with_foci(cfg, "alpha", "beta", "gamma")
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 3
     pointer["roadmap_complete_emitted"] = True
     pointer["roadmap_complete_ack_idx"] = 2  # stale: only 2 at ack time
     goal.save_pointer(cfg, pointer)
@@ -250,7 +263,7 @@ def test_notice_dismissed_false_when_not_exhausted(cfg):
     meaningless when there's no halt to dismiss."""
     _write_goal_with_foci(cfg, "alpha", "beta")
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 0  # squarely inside the roadmap
+    pointer["roadmap_complete_emitted"] = False  # not halted
     pointer["roadmap_complete_ack_idx"] = 2
     goal.save_pointer(cfg, pointer)
     assert goal.roadmap_exhausted(cfg) is False
@@ -262,37 +275,21 @@ def test_notice_dismissed_false_when_not_exhausted(cfg):
 # ===========================================================================
 
 
-def test_rewind_focus_pointer_clears_gate_without_ack(cfg):
-    """A `rewind-focus`-style pointer move (active_index back in range)
-    makes `roadmap_exhausted` return False with NO ack."""
-    _exhaust(cfg, "alpha", "beta")
+def test_update_goal_pointer_reset_clears_gate_without_ack(cfg, monkeypatch):
+    """A simulated `update-goal` reset
+    (`reset_pointer_on_goal_updated`) makes `roadmap_exhausted` return
+    False with NO ack. TB-342: editing goal.md via `ap2 update-goal`
+    is the sole resume signal post-collapse — the pre-TB-342
+    `rewind-focus` pointer move went away with the rotation theatre.
+    """
+    _exhaust(cfg, "alpha", "beta", monkeypatch=monkeypatch)
     assert goal.roadmap_exhausted(cfg) is True
 
-    # Rewind to the second (exhausted) focus.
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 1
-    pointer["roadmap_complete_emitted"] = False
-    goal.save_pointer(cfg, pointer)
-    assert goal.roadmap_exhausted(cfg) is False, (
-        "re-pointing `active_index` back in range must clear the gate "
-        "without any ack"
-    )
-
-
-def test_update_goal_pointer_reset_clears_gate_without_ack(cfg):
-    """A simulated `update-goal` extension
-    (`reset_pointer_on_roadmap_extension`) makes `roadmap_exhausted`
-    return False with NO ack."""
-    _exhaust(cfg, "alpha", "beta")
-    assert goal.roadmap_exhausted(cfg) is True
-
-    # Operator extends the roadmap; the helper snaps the pointer onto
-    # the first newly-added focus.
+    # Operator extends goal.md; the helper resets the halt flag.
     _write_goal_with_foci(cfg, "alpha", "beta", "gamma")
     foci = goal.read_focus_list(cfg)
-    resumed = goal.reset_pointer_on_roadmap_extension(cfg, foci)
+    resumed = goal.reset_pointer_on_goal_updated(cfg, foci)
     goal.save_pointer(cfg, resumed)
     assert goal.roadmap_exhausted(cfg) is False, (
-        "extending the roadmap (pointer reset) must clear the gate "
-        "without any ack"
+        "extending goal.md must clear the gate without any ack"
     )

@@ -333,32 +333,36 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         )
     except Exception:  # noqa: BLE001 — never break the status surface
         attention_conditions = []
-    # TB-242: axis-4 focus-rotation surface — read the focus list +
-    # active focus + halt state once so both the text and JSON branches
-    # can render them. Pure read-layer composition over TB-226's
-    # `goal.read_focus_list` + `goal.active_focus` + `goal.load_pointer`
-    # + `goal.roadmap_exhausted`; no new state files, no daemon-side
-    # mutation. The render-symmetry mirrors TB-227's auto-approve
-    # surface — fresh / pre-pivot projects (goal.md absent OR no
-    # `## Current focus:` headings) get `active_focus: null` in JSON
-    # and zero text-render lines.
+    # TB-242 / TB-342: axis-4 focus-rotation surface — read the focus
+    # list + the halt state once so both the text and JSON branches can
+    # render them. Pure read-layer composition over `goal.read_focus_list`
+    # + `goal.load_pointer` + `goal.roadmap_exhausted`; no new state
+    # files, no daemon-side mutation. The render-symmetry mirrors
+    # TB-227's auto-approve surface — fresh / pre-pivot projects
+    # (goal.md absent OR no `## Current focus:` headings) get
+    # `active_focus: null` in JSON and zero text-render lines.
+    #
+    # TB-342: the multi-focus rotation pointer was collapsed into a
+    # single ideation-exhaustion detector. `goal.active_focus()` /
+    # `(N of M)` position display went away with the pointer walk;
+    # the focus line now renders the operator-authored `## Current
+    # focus:` headings as a plain priority-ordered list (the operator's
+    # prose/intent surface) plus the ideation halt state.
     from . import goal as _goal
 
     _foci = _goal.read_focus_list(cfg)
     if _foci:
         _focus_pointer = _goal.load_pointer(cfg)
-        _focus_item = _goal.active_focus(cfg, _foci)
         _focus_roadmap_complete = _goal.roadmap_exhausted(cfg, _foci)
         # TB-340: surfacing-vs-state split. `roadmap_complete` is the
         # always-on parked-ideation STATE; `notice_dismissed` only
-        # quiets the actionable "extend the roadmap" nag once the
+        # quiets the actionable "extend goal.md" nag once the
         # operator has acked THIS exhaustion episode.
         _focus_notice_dismissed = _goal.roadmap_complete_notice_dismissed(
             cfg, _foci
         )
     else:
         _focus_pointer = None
-        _focus_item = None
         _focus_roadmap_complete = False
         _focus_notice_dismissed = False
     # TB-130: when the daemon is up and the web UI wasn't disabled, surface
@@ -442,25 +446,26 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
                         ],
                 },
             },
-            # TB-242: axis-4 focus-rotation state. Renders as `null`
-            # when goal.md is missing or has zero `## Current focus:`
-            # headings (fresh / pre-pivot projects) so machine
-            # consumers can distinguish "no roadmap" from "roadmap
-            # exhausted" — the `roadmap_complete` boolean field
-            # disambiguates the latter on populated roadmaps. `index`
-            # is 0-based (matches `focus_pointer.json`'s
-            # `active_index`); the text branch displays it as `idx+1`
-            # for human readability. `title` is the active focus title
-            # when one is in flight; it falls back to "" when the
-            # pointer is past the last focus (halt state) — the
-            # `roadmap_complete: true` flag carries the meaning there.
+            # TB-242 / TB-342: axis-4 focus-rotation state. Renders as
+            # `null` when goal.md is missing or has zero
+            # `## Current focus:` headings (fresh / pre-pivot projects)
+            # so machine consumers can distinguish "no roadmap" from
+            # "roadmap exhausted" — the `roadmap_complete` boolean field
+            # disambiguates the latter on populated roadmaps. TB-342
+            # collapsed the multi-focus rotation pointer walk, so the
+            # `index` / `total` position fields went away with the
+            # pointer; the operator-authored `## Current focus:`
+            # headings remain priority-ordered prose/intent for the
+            # ideation agent, surfaced here as `titles` so machine
+            # consumers can render them as a list. `roadmap_complete`
+            # is the ideation-halt flag (the detector tripped after
+            # `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive empty
+            # cycles).
             "active_focus": (
                 None
                 if not _foci
                 else {
-                    "title": _focus_item.title if _focus_item else "",
-                    "index": _focus_pointer["active_index"],
-                    "total": len(_foci),
+                    "titles": [f.title for f in _foci],
                     "roadmap_complete": _focus_roadmap_complete,
                 }
             ),
@@ -552,54 +557,53 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     print(f"daemon:   {'running' if running else 'stopped'} (pid {pid or '-'}){' [paused]' if paused else ''}")
     print(f"version:  ap2 {version}")
     print(f"tick:     {cfg.tick_interval_s}s")
-    # TB-242: surface axis-4 focus-rotation state near the top of the
+    # TB-242 / TB-342: surface axis-4 focus state near the top of the
     # report so an operator returning after walk-away can answer
-    # "what focus am I on, and how many remain?" without grepping
-    # events.jsonl or reading `focus_pointer.json` by hand. Three
-    # render shapes (mirrors the JSON branch):
-    #   - parked-ideation state (pointer past last focus) → the
-    #     `ROADMAP_COMPLETE — ideation parked` line. The state line is
-    #     ALWAYS shown while exhausted; the actionable three-verb
-    #     resume/dismiss nag is suppressed once the operator dismissed
-    #     THIS episode (TB-340; TB-275 reword — dispatch is NOT halted).
-    #   - multi-focus → `focus: <title> (<idx+1> of <total>)`.
-    #   - single-focus → `focus: <title>` (no `(1 of 1)` suffix —
-    #     single-focus projects don't need a position counter).
+    # "what's the project working on, and is ideation parked?" without
+    # grepping events.jsonl or reading `focus_pointer.json` by hand.
+    # Two render shapes:
+    #   - parked-ideation state (`roadmap_complete_emitted=True`) →
+    #     `focus:    parked — ideation exhausted; extend goal.md (`ap2
+    #     update-goal`) to resume, or `ap2 ack roadmap_complete` to
+    #     dismiss this notice (ideation stays parked)`. The state line
+    #     is ALWAYS shown while parked; the actionable nag is
+    #     suppressed once the operator dismissed THIS episode (TB-340;
+    #     TB-275 reword — dispatch is NOT halted).
+    #   - active → `focus:    <title>[, <title>...]`. The operator-
+    #     authored `## Current focus:` headings render as a priority-
+    #     ordered comma-separated list (top → bottom of goal.md). The
+    #     daemon does not sequence them post-TB-342; the list is the
+    #     operator's intent, the ideation agent reads them all each
+    #     cycle, and the goal-anchor validator accepts any of them.
     # Omitted entirely when goal.md is missing or has zero
     # `## Current focus:` headings (fresh / pre-pivot projects) so
     # the default-off output stays byte-identical to pre-TB-242.
     if _foci:
         if _focus_roadmap_complete:
-            # TB-275/TB-340: roadmap_complete parks the ideation trigger
-            # only — task dispatch continues. The ROADMAP_COMPLETE state
+            # TB-275/TB-340/TB-342: roadmap_complete parks the ideation
+            # trigger only — task dispatch continues. The parked state
             # line always renders so the operator knows the daemon is
-            # parked. Resume is a POINTER MOVE — `ap2 update-goal`
-            # (extend → resume on a new focus) or `ap2 rewind-focus
-            # <title>` (resume on an exhausted focus); `ap2 ack
-            # roadmap_complete` only DISMISSES this nag (ideation stays
-            # parked). Once dismissed, the nag is suppressed but the
-            # state line stays. `ap2 pause` is the explicit full-stop.
+            # parked. Resume is `ap2 update-goal` (editing goal.md
+            # clears the halt via `reset_pointer_on_goal_updated`);
+            # `ap2 ack roadmap_complete` only DISMISSES this nag
+            # (ideation stays parked). Once dismissed, the nag is
+            # suppressed but the state line stays. `ap2 pause` is the
+            # explicit full-stop.
             if _focus_notice_dismissed:
                 print(
-                    "focus:    ROADMAP_COMPLETE — ideation parked "
+                    "focus:    parked — ideation exhausted "
                     "(notice dismissed)"
                 )
             else:
                 print(
-                    "focus:    ROADMAP_COMPLETE — ideation parked; "
-                    "`ap2 update-goal` to extend the roadmap (resume on a "
-                    "new focus), `ap2 rewind-focus <title>` to resume on an "
-                    "exhausted focus, or `ap2 ack roadmap_complete` to "
-                    "dismiss this notice (ideation stays parked)"
+                    "focus:    parked — ideation exhausted; extend "
+                    "`goal.md` via `ap2 update-goal` to resume, or "
+                    "`ap2 ack roadmap_complete` to dismiss this notice "
+                    "(ideation stays parked)"
                 )
-        elif len(_foci) == 1:
-            _title = _focus_item.title if _focus_item else ""
-            print(f"focus:    {_title}")
-        elif _focus_item is not None:
-            _idx_display = _focus_pointer["active_index"] + 1
+        else:
             print(
-                f"focus:    {_focus_item.title} "
-                f"({_idx_display} of {len(_foci)})"
+                "focus:    " + ", ".join(f.title for f in _foci)
             )
     print(
         f"board:    {counts['Active']}A / {counts['Ready']}R / "

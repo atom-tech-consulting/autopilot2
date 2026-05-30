@@ -25,12 +25,14 @@ What this regression covers:
       `_maybe_advance_focus` end-to-end against a stubbed event tail
       / pointer state (no SDK calls needed — TB-283 deleted the
       LLM-judge path; `sdk` is vestigial). The hook returns without
-      raising and the pointer's `active_index` advances when the
-      empty-cycles threshold trips.
-  (d) `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` still suppresses the inner
-      advance — the kill switch (goal.md L64-67) is preserved
-      verbatim across the relocation. A decisions-needed bullet is
-      emitted instead.
+      raising and the pointer's `roadmap_complete_emitted` flag flips
+      to True when the empty-cycles threshold trips (TB-342: the
+      pre-existing multi-focus rotation pointer walk was collapsed
+      into a single ideation-exhaustion detector; the test reflects
+      the new shape).
+  (d) `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` still suppresses the halt —
+      the kill switch (goal.md L64-67) is preserved verbatim across
+      the relocation. A decisions-needed bullet is emitted instead.
 
 The tests live under `ap2/tests/` and are therefore allowed to
 import `ap2.components.focus_advance` directly per the TB-311 gate's
@@ -305,14 +307,16 @@ def test_manifest_tick_hook_executes_maybe_advance_focus_end_to_end(
 ) -> None:
     """The manifest's `tick_hook` (registered on PRE_DISPATCH) wraps
     `_maybe_advance_focus` and, given a goal.md with a multi-focus
-    list + enough empty cycles to trip the threshold, advances the
-    pointer end-to-end. SDK is `None` — vestigial since TB-283.
+    list + enough empty cycles to trip the threshold, emits the
+    `roadmap_complete` halt event end-to-end. SDK is `None` —
+    vestigial since TB-283. TB-342: the detector emits the halt
+    directly (the pre-TB-342 multi-focus rotation pointer walk + the
+    `focus_advanced` event were collapsed into a single exhaustion
+    detector).
     """
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
     cfg = _make_cfg(tmp_path, "first focus", "second focus")
-    # Seed three consecutive empty cycles against the active focus
-    # — the default threshold the test pinned above (3).
     _emit_empty_cycles(cfg, "first focus", 3)
 
     # Resolve the tick hook via the registry — the same path the
@@ -324,38 +328,35 @@ def test_manifest_tick_hook_executes_maybe_advance_focus_end_to_end(
 
     asyncio.run(tick_hook(cfg, None))
 
-    # The pointer advanced from index 0 to index 1 (the second focus).
+    # TB-342: the halt event landed (the briefing-promised event
+    # surface, preserved across the relocation + the TB-342 collapse).
     pointer = goal.load_pointer(cfg)
-    assert pointer["active_index"] == 1, (
-        f"TB-313: the manifest's tick hook should have advanced the "
-        f"focus pointer from 0 to 1 after 3 empty cycles tripped the "
-        f"threshold; got active_index={pointer['active_index']}, "
-        f"pointer={pointer}"
+    assert pointer["roadmap_complete_emitted"] is True, (
+        f"TB-313 / TB-342: the manifest's tick hook should have "
+        f"emitted `roadmap_complete` after 3 empty cycles tripped "
+        f"the threshold; got pointer={pointer}"
     )
-    assert pointer["active_title"] == "second focus", pointer
 
-    # A `focus_advanced` event landed (the briefing-promised event
-    # surface, preserved across the relocation).
     tail = events.tail(cfg.events_file, 200)
-    advanced = [e for e in tail if e.get("type") == "focus_advanced"]
-    assert advanced, (
-        "TB-313: a `focus_advanced` event should fire when the tick "
-        "hook advances the pointer."
+    rc = [e for e in tail if e.get("type") == "roadmap_complete"]
+    assert rc, (
+        "TB-313 / TB-342: a `roadmap_complete` event should fire when "
+        "the tick hook halts."
     )
-    assert advanced[-1].get("to") == "second focus", advanced[-1]
+    assert rc[-1].get("trigger") == "empty_cycles_heuristic", rc[-1]
 
 
 def test_kill_switch_suppresses_inner_advance(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits the
-    advance even when the empty-cycles threshold is met — the
-    kill-switch behavior the briefing pins from goal.md L64-67 is
-    preserved verbatim across the relocation.
+    """`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits the halt
+    even when the empty-cycles threshold is met — the kill-switch
+    behavior the briefing pins from goal.md L64-67 is preserved
+    verbatim across the relocation + the TB-342 collapse.
 
     Operator-facing surface: a `## Decisions needed from operator`
-    bullet is appended instead, so the operator can advance manually
-    via `ap2 update-goal`.
+    bullet is appended instead, so the operator can halt manually by
+    editing goal.md.
     """
     monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
@@ -367,20 +368,19 @@ def test_kill_switch_suppresses_inner_advance(
     tick_hook = manifest.hook_points["tick_hook"]
     asyncio.run(tick_hook(cfg, None))
 
-    # Pointer did NOT advance — kill switch held.
+    # Halt did NOT fire — kill switch held.
     pointer = goal.load_pointer(cfg)
-    assert pointer["active_index"] == 0, (
-        f"TB-313: AP2_FOCUS_AUTO_ADVANCE_DISABLED=1 must suppress "
-        f"the advance even when criteria are met; pointer advanced "
-        f"to {pointer['active_index']}"
+    assert pointer["roadmap_complete_emitted"] is False, (
+        f"TB-313 / TB-342: AP2_FOCUS_AUTO_ADVANCE_DISABLED=1 must "
+        f"suppress the halt even when criteria are met; pointer={pointer}"
     )
 
-    # No `focus_advanced` event fired.
+    # No `roadmap_complete` event fired.
     tail = events.tail(cfg.events_file, 200)
-    advanced = [e for e in tail if e.get("type") == "focus_advanced"]
-    assert not advanced, (
-        "TB-313: AP2_FOCUS_AUTO_ADVANCE_DISABLED=1 must suppress the "
-        "`focus_advanced` event emission too."
+    rc = [e for e in tail if e.get("type") == "roadmap_complete"]
+    assert not rc, (
+        "TB-313 / TB-342: AP2_FOCUS_AUTO_ADVANCE_DISABLED=1 must "
+        "suppress the `roadmap_complete` event emission too."
     )
 
     # The operator-facing decisions-needed bullet WAS appended — the

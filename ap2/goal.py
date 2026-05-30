@@ -2,33 +2,34 @@
 
 Implements the multi-`## Current focus:` heading contract from goal.md
 L115-138: the operator can list multiple `## Current focus:` headings in
-priority order (top = active), each optionally carrying a
-`Progress signals:` sub-block (an inline `Progress signals:` line whose
-immediately-following bullets are advisory outcome guidance for the
-ideation prompt, or a nested `### Progress signals` sub-heading whose
-body bullets serve the same role). The sub-block is OPTIONAL — a focus
-heading with no `Progress signals:` block parses cleanly as a focus
-with `progress_signals_bullets=None`.
+priority order (top = highest priority for the operator's intent), each
+optionally carrying a `Progress signals:` sub-block (an inline
+`Progress signals:` line whose immediately-following bullets are
+advisory outcome guidance for the ideation prompt, or a nested
+`### Progress signals` sub-heading whose body bullets serve the same
+role). The sub-block is OPTIONAL — a focus heading with no
+`Progress signals:` block parses cleanly as a focus with
+`progress_signals_bullets=None`.
 
-The daemon advances its in-memory pointer (`focus_pointer.json`) to the
-next focus via the empty-cycles heuristic (N consecutive 0-proposal
-ideation cycles against the active focus, configurable via
-`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`, default 3); see `ap2/focus_advance.py`.
-The `Progress signals:` bullets are advisory ideation-prompt context
-only — they do NOT gate the pointer (TB-283 deleted the prior LLM-judge
-advance path; TB-285 renamed the sub-block to reflect the new advisory
-semantics).
-
-When all foci exhaust, the daemon emits a `roadmap_complete` event +
-decisions-needed bullet and parks the ideation trigger (task dispatch
-is unaffected — TB-275). Resuming ideation is a POINTER MOVE: `ap2
-update-goal` (extend the roadmap → pointer resets onto the new focus)
-or `ap2 rewind-focus <title>` (re-point at an exhausted focus). `ap2
-ack roadmap_complete` does NOT resume — it only DISMISSES the
-operator-facing nag while ideation stays parked (TB-340). The
-`roadmap_exhausted` gate is a pure function of the pointer; the
-dismissal marker is read only by `roadmap_complete_notice_dismissed`,
-which gates surfacing, not parking.
+TB-342: the multi-focus rotation state machine was collapsed to a
+single ideation-exhaustion detector. The daemon no longer sequences
+foci with a pointer walk — `## Current focus:` headings are now
+operator-authored prose + priority hints the ideation agent reads in
+full each cycle (its goal-anchor validator accepts any of them). The
+daemon's runtime pointer (`focus_pointer.json`) only tracks the
+empty-cycles counter + the halt-state flag. When ideation produces
+zero proposals for `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive cycles,
+the daemon emits `roadmap_complete` once and parks the ideation
+trigger (task dispatch is unaffected — TB-275). The operator resumes
+by editing goal.md via `ap2 update-goal` (the operator-queue
+`update_goal` drain handler calls `reset_pointer_on_goal_updated` to
+clear the halt) or by firing `ap2 ideate --force`. `ap2 ack
+roadmap_complete` does NOT resume — it only DISMISSES the operator-
+facing nag while ideation stays parked (TB-340). The
+`roadmap_exhausted` gate reads the pointer's `roadmap_complete_emitted`
+flag; the dismissal marker is read only by
+`roadmap_complete_notice_dismissed`, which gates surfacing, not
+parking.
 
 The daemon NEVER mutates goal.md itself (goal.md L187-191 "Goal.md
 auto-rotation" Non-goal); the pointer is in-memory runtime state only.
@@ -326,10 +327,7 @@ def _collect_bullets(text: str, start_offset: int) -> list[str]:
 
 _DEFAULT_POINTER: dict[str, Any] = {
     "schema": POINTER_SCHEMA_VERSION,
-    "active_index": 0,
-    "active_title": "",
     "empty_cycles": 0,
-    "exhausted_titles": [],
     "roadmap_complete_ack_idx": None,
     "roadmap_complete_emitted": False,
     "updated_ts": "",
@@ -367,16 +365,9 @@ def load_pointer(cfg) -> dict[str, Any]:
     merged.update({k: v for k, v in data.items() if k in _DEFAULT_POINTER})
     # Defensive coercions — a hand-edited file shouldn't crash the daemon.
     try:
-        merged["active_index"] = int(merged.get("active_index", 0))
-    except (TypeError, ValueError):
-        merged["active_index"] = 0
-    try:
         merged["empty_cycles"] = int(merged.get("empty_cycles", 0))
     except (TypeError, ValueError):
         merged["empty_cycles"] = 0
-    if not isinstance(merged.get("exhausted_titles"), list):
-        merged["exhausted_titles"] = []
-    merged["active_title"] = str(merged.get("active_title") or "")
     merged["roadmap_complete_emitted"] = bool(merged.get("roadmap_complete_emitted") or False)
     rci = merged.get("roadmap_complete_ack_idx")
     if rci is not None:
@@ -539,69 +530,54 @@ def read_focus_list(cfg) -> list[FocusItem]:
     return parse_focus_list(text)
 
 
-def active_focus(cfg, foci: list[FocusItem] | None = None) -> FocusItem | None:
-    """Return the FocusItem at the pointer's `active_index`, or None
-    when the pointer is out of bounds (all foci exhausted, fresh
-    pointer against a goal.md with no focus headings, etc.).
-    """
-    if foci is None:
-        foci = read_focus_list(cfg)
-    if not foci:
-        return None
-    pointer = load_pointer(cfg)
-    idx = pointer["active_index"]
-    if idx < 0 or idx >= len(foci):
-        return None
-    return foci[idx]
-
-
 ROADMAP_COMPLETE_ACK_TOKEN = "roadmap_complete"
 
 
 def roadmap_exhausted(cfg, foci: list[FocusItem] | None = None) -> bool:
-    """True iff the focus pointer has advanced past the last focus.
+    """True iff the ideation-exhaustion halt is active.
 
-    Pure function of pointer state: `total == 0 → False` (a pre-pivot
-    goal.md with no `## Current focus:` headings has nothing to
-    exhaust); else `pointer["active_index"] >= total`. No events-scan,
-    no `roadmap_complete_ack_idx` read — the operator ack does NOT
+    Pure function of pointer state (TB-342 collapse): returns
+    `pointer["roadmap_complete_emitted"]` — the one-shot flag the
+    `_maybe_advance_focus` detector sets when ideation has produced
+    zero proposals for `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive
+    cycles. `total == 0` (no `## Current focus:` headings) → False
+    (there's nothing to exhaust). No events-scan, no
+    `roadmap_complete_ack_idx` read — the operator ack does NOT
     participate in this gate.
 
     This gate PARKS ideation (`_maybe_ideate` skips while it's True).
-    Resuming ideation is therefore a POINTER MOVE, never an ack:
-    `ap2 rewind-focus <title>` re-points `active_index` back inside
-    range → False naturally; `ap2 update-goal` calls
-    `reset_pointer_on_roadmap_extension` (resets `active_index` +
-    `roadmap_complete_emitted`) → False naturally. `ap2 ack
-    roadmap_complete` only DISMISSES the operator-facing nag (see
+    The halt clears when the operator edits goal.md via
+    `ap2 update-goal` — the operator-queue drain handler calls
+    `reset_pointer_on_goal_updated`, which flips
+    `roadmap_complete_emitted` back to False. `ap2 ideate --force`
+    also bypasses the gate for one cycle. `ap2 ack roadmap_complete`
+    only DISMISSES the operator-facing nag (see
     `roadmap_complete_notice_dismissed`); it never un-parks ideation.
 
-    TB-340 reduced this to the pure predicate. It previously folded an
-    events-scan + a forensic `roadmap_complete_ack_idx >= total`
-    fallback into the gate so an ack flipped it to False — wrongly
-    un-parking ideation against an already-exhausted roadmap, and
-    (worse) a stale `ack_idx` left by a PRIOR extend→re-exhaust episode
-    at the same foci count defeated the cheap-skip with no operator
-    action, so ideation auto-resumed full ~$1-3 SDK cycles every
-    cooldown. Both the events-scan and the forensic fallback are gone.
+    TB-340 reduced this from an events-scan + forensic-ack-fallback
+    gate to a pure pointer predicate (pre-TB-342: pointer-index past
+    foci length). TB-342 collapsed the multi-focus rotation pointer
+    walk into a single ideation-exhaustion detector, so the predicate
+    is now the flag the detector set rather than an index comparison;
+    the pre-TB-342 rotation pointer fields went away with the
+    rotation.
     """
     if foci is None:
         foci = read_focus_list(cfg)
-    total = len(foci)
-    if total == 0:
+    if len(foci) == 0:
         return False
     pointer = load_pointer(cfg)
-    return pointer["active_index"] >= total
+    return bool(pointer.get("roadmap_complete_emitted"))
 
 
 def roadmap_complete_notice_dismissed(
     cfg, foci: list[FocusItem] | None = None
 ) -> bool:
-    """True iff the roadmap is exhausted AND the operator has dismissed
+    """True iff the halt is active AND the operator has dismissed
     THIS exhaustion episode's recurring notice.
 
     The ONLY consumer of the `roadmap_complete_ack_idx` pointer field
-    (TB-340). It gates SURFACING — the actionable "extend the roadmap"
+    (TB-340). It gates SURFACING — the actionable "extend goal.md"
     nag on `ap2 status` / web home / cron digest — never PARKING (which
     is `roadmap_exhausted` alone). The marker is set to the current
     foci count by the `ap2 ack roadmap_complete` drain handler
@@ -619,29 +595,30 @@ def roadmap_complete_notice_dismissed(
     return pointer.get("roadmap_complete_ack_idx") == len(foci)
 
 
-def reset_pointer_on_roadmap_extension(cfg, foci: list[FocusItem]) -> dict[str, Any]:
+def reset_pointer_on_goal_updated(cfg, foci: list[FocusItem]) -> dict[str, Any]:
     """Side-effect-free: returns the pointer dict that SHOULD apply
-    after a roadmap extension drained from the operator queue.
+    after a `goal_updated` event (operator edited goal.md via
+    `ap2 update-goal`).
 
-    Called from the operator-queue `update_goal` drain handler when
-    a goal.md write landed AND the new file's focus-list length is
-    longer than the pointer's prior exhaustion count. Snaps the
-    active_index to the FIRST newly-added focus so work resumes on
-    fresh ground rather than re-walking already-exhausted entries.
+    Called from the operator-queue `update_goal` drain handler. Editing
+    goal.md is the resume signal for the ideation-exhaustion halt
+    (TB-342 collapse): the empty-cycles counter zeroes (the post-edit
+    runway is fresh), the halt flag clears, and the dismissal marker
+    clears so a future re-exhaustion at the same foci count re-arms the
+    operator nag cleanly. `_ideation_empty_against_focus` also resets
+    its cycle window at the `goal_updated` cutoff, so the in-memory
+    counter and the pointer's forensic `empty_cycles` field agree on
+    the next tick.
+
+    `foci` is the post-edit focus list (passed in by the drain handler
+    so this helper doesn't re-read goal.md). The parameter is retained
+    for parity with the pre-TB-342 `reset_pointer_on_roadmap_extension`
+    signature even though the new helper doesn't read it — the operator
+    can extend, shrink, or reword goal.md and the reset is the same
+    shape either way.
     """
     pointer = load_pointer(cfg)
-    prior_count = max(
-        pointer.get("active_index", 0),
-        len(pointer.get("exhausted_titles", [])),
-    )
-    new_count = len(foci)
-    if new_count <= prior_count:
-        # No extension — leave the pointer alone.
-        return pointer
-    # First newly-added focus is at index `prior_count`. Reset
-    # bookkeeping so the heuristic starts fresh.
-    pointer["active_index"] = prior_count
-    pointer["active_title"] = foci[prior_count].title if prior_count < new_count else ""
     pointer["empty_cycles"] = 0
     pointer["roadmap_complete_emitted"] = False
+    pointer["roadmap_complete_ack_idx"] = None
     return pointer

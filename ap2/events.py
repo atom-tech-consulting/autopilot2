@@ -114,51 +114,44 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     operator triage. Counter-event-of-record for the
     `AP2_VALIDATOR_JUDGE_DISABLED` operator escape hatch (when set,
     the check is bypassed entirely and neither event fires).
-  - `focus_advanced` (TB-226) — daemon advanced its in-memory focus
-    pointer past an exhausted `## Current focus:` heading in
-    goal.md. TB-283: the natural advance signal is the empty-cycles
-    heuristic (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive
-    0-proposal ideation cycles against the active focus). The
-    prior LLM-judge path against per-focus bullets was deleted
-    because it collapsed multi-week foci into ~3-task cycles by
-    diff-reading commit shape; TB-285 renamed the sub-block from
-    `Done when:` to `Progress signals:` to reflect the new
-    advisory semantics. TB-295: a synthetic variant of this same
-    event also fires from the operator-CLI `ap2 rewind-focus`
-    drain branch (with `trigger=operator_rewind`) so the empty-
-    cycles counter's cutoff scan
-    (`focus_advance._ideation_empty_against_focus`'s most-recent
-    `focus_advanced to=<focus_title>` lookup) anchors at the
-    rewind — without the synthetic emit, pre-rewind empty cycles
-    would keep counting against the rewound focus's counter
-    (`cutoff_idx = -1` walks the whole tail). Payload: `from`
-    (old focus title — the previously-active focus the pointer
-    just moved off; for the rewind variant, this is the pointer's
-    prior `active_title`), `to` (new focus title — for the natural
-    path an empty string when the advance crossed the last focus
-    into roadmap-exhausted state; for the rewind variant always
-    the target focus title), `trigger` (one of
-    `empty_cycles_heuristic` / `pointer_past_last` /
-    `operator_rewind` — the recovery-path discriminator that lets
-    downstream consumers tell natural advances from operator
-    interventions), `new_index` (the pointer's new
-    `active_index`), `total_foci` (current foci-list length),
-    plus (rewind variant only) `reason` (the operator's free-form
-    intent, possibly empty).
-  - `roadmap_complete` (TB-226) — focus pointer has advanced past
-    the last `## Current focus:` heading in goal.md. TB-275:
-    ideation parks on subsequent ticks (`_maybe_ideate` skips with
-    `reason=roadmap_complete`) until the operator extends the
-    roadmap (adding new `## Current focus:` headings via
-    `ap2 update-goal`) OR emits `ap2 ack roadmap_complete` to
-    dismiss the notice. Task dispatch is NOT affected; already-
-    queued Backlog tasks continue to drain. `ap2 pause` remains
-    the explicit full-stop verb. Payload: `exhausted_count`
-    (the foci-list length at exhaustion), `trigger`
-    (`pointer_past_last`). Fired once per exhaustion episode; the
-    `_maybe_advance_focus` pass suppresses re-emission via the
-    pointer's `roadmap_complete_emitted` flag, which resets on
-    the next advance after the operator extends the roadmap.
+  - `focus_advanced` (TB-226, retired TB-342) — pre-TB-342 the daemon
+    emitted this event when the multi-focus rotation pointer walk
+    advanced past an exhausted `## Current focus:` heading (with
+    `trigger=empty_cycles_heuristic`), when the pointer crossed past
+    the final focus (with `trigger=pointer_past_last`), or when the
+    operator-CLI `ap2 rewind-focus` recovery verb re-engaged an
+    exhausted focus (with `trigger=operator_rewind`). TB-342 collapsed
+    the rotation theatre into a single ideation-exhaustion detector
+    (ideation never actually scoped itself to the active focus, so the
+    pointer walk changed nothing about what got proposed); the event
+    is no longer emitted, the `rewind-focus` verb went away, and the
+    `_ideation_empty_against_focus` counter now resets at
+    `goal_updated` instead of `focus_advanced to=<focus_title>`. The
+    event name is retained in this docstring for historical-grep
+    discovery against pre-TB-342 `events.jsonl` files; downstream
+    consumers (`automation_status.collect_window_focus_rotation`'s
+    `focus_advanced` list, the cron status-report digest) treat the
+    event as a no-op going forward.
+  - `roadmap_complete` (TB-226 / collapsed TB-342) — ideation has
+    produced zero proposals for `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+    consecutive cycles (TB-342 collapsed the pre-existing multi-focus
+    rotation halt into this single detector; the event name is
+    preserved verbatim across the collapse to bound blast radius —
+    cosmetic rename is a follow-up). TB-275: ideation parks on
+    subsequent ticks (`_maybe_ideate` skips with
+    `reason=roadmap_complete`) until the operator edits goal.md via
+    `ap2 update-goal` (the drain handler emits `goal_updated` and
+    calls `reset_pointer_on_goal_updated` to clear the halt) OR emits
+    `ap2 ack roadmap_complete` to dismiss the notice. Task dispatch is
+    NOT affected; already-queued Backlog tasks continue to drain.
+    `ap2 pause` remains the explicit full-stop verb. Payload:
+    `exhausted_count` (the foci-list length at halt time), `trigger`
+    (`empty_cycles_heuristic` post-TB-342 — the pre-TB-342
+    `pointer_past_last` value retired with the rotation pointer walk).
+    Fired once per exhaustion episode; the `_maybe_advance_focus`
+    pass suppresses re-emission via the pointer's
+    `roadmap_complete_emitted` flag, which resets on the next
+    `goal_updated` event.
   - `env_reloaded` (TB-271) — daemon `_tick` re-sourced
     `.cc-autopilot/env` at tick-top and detected at least one knob
     whose value changed since the last reload. Mutates the tunable

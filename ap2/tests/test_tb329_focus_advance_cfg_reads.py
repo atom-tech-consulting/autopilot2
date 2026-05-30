@@ -477,15 +477,18 @@ def _emit_ideation_empty_cycle(cfg: Config) -> None:
     events.append(cfg.events_file, "ideation_complete", summary="empty cycle")
 
 
-def test_kill_switch_via_cfg_route_blocks_advance(cfg, clean_env, emit_reset):
+def test_kill_switch_via_cfg_route_blocks_halt(cfg, clean_env, emit_reset):
     """End-to-end pin: setting `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1`
     after cfg load (the operator's shell-export pattern + the
     `monkeypatch.setenv(...); helper(cfg)` test idiom) blocks the
-    in-bounds advance even when the empty-cycles threshold trips. The
-    cfg-routed read path (`_focus_auto_advance_disabled(cfg)` inside
+    halt even when the empty-cycles threshold trips. The cfg-routed
+    read path (`_focus_auto_advance_disabled(cfg)` inside
     `_maybe_advance_focus`) propagates the env value at call time
     without rebuilding cfg, mirroring the pre-TB-329
-    `goal.auto_advance_disabled()` lazy-read behavior.
+    `goal.auto_advance_disabled()` lazy-read behavior. TB-342: the
+    detector now emits `roadmap_complete` instead of walking the
+    pointer; the kill-switch path still surfaces a decisions-needed
+    bullet.
     """
     clean_env.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     clean_env.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
@@ -495,9 +498,9 @@ def test_kill_switch_via_cfg_route_blocks_advance(cfg, clean_env, emit_reset):
     asyncio.run(_maybe_advance_focus(cfg, sdk=None))
 
     pointer = goal.load_pointer(cfg)
-    assert pointer["active_index"] == 0, (
-        "kill-switch should have blocked the in-bounds advance via "
-        "the cfg-routed read"
+    assert pointer["roadmap_complete_emitted"] is False, (
+        "kill-switch should have blocked the halt via the cfg-routed "
+        "read"
     )
     # Decisions-needed bullet still surfaces (kill-switch branch
     # writes it regardless of the read source).
@@ -510,13 +513,14 @@ def test_kill_switch_via_cfg_route_blocks_advance(cfg, clean_env, emit_reset):
     assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" in text
 
 
-def test_threshold_via_cfg_route_drives_advance(cfg, clean_env, emit_reset):
+def test_threshold_via_cfg_route_drives_halt(cfg, clean_env, emit_reset):
     """End-to-end pin: setting `AP2_FOCUS_ADVANCE_EMPTY_CYCLES=1`
-    after cfg load makes one empty cycle trip the heuristic and
-    advances the pointer. Exercises the cfg-routed read path
-    (`_advance_empty_cycles_threshold(cfg)` inside
+    after cfg load makes one empty cycle trip the heuristic and emits
+    the `roadmap_complete` halt event. Exercises the cfg-routed read
+    path (`_advance_empty_cycles_threshold(cfg)` inside
     `_maybe_advance_focus`) for the threshold lookup; kill-switch off
-    so the advance lands.
+    so the halt lands. TB-342: the detector emits the halt directly
+    (the pre-TB-342 pointer walk is gone).
     """
     clean_env.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
@@ -525,8 +529,12 @@ def test_threshold_via_cfg_route_drives_advance(cfg, clean_env, emit_reset):
     asyncio.run(_maybe_advance_focus(cfg, sdk=None))
 
     pointer = goal.load_pointer(cfg)
-    assert pointer["active_index"] == 1, (
-        "one empty cycle at threshold=1 should advance the pointer "
-        "via the cfg-routed threshold read"
+    assert pointer["roadmap_complete_emitted"] is True, (
+        "one empty cycle at threshold=1 should trip the halt via the "
+        "cfg-routed threshold read"
     )
-    assert pointer["active_title"] == "beta"
+    # Event landed.
+    tail = events.tail(cfg.events_file, 50)
+    rc = [e for e in tail if e.get("type") == "roadmap_complete"]
+    assert len(rc) == 1
+    assert rc[-1]["trigger"] == "empty_cycles_heuristic"

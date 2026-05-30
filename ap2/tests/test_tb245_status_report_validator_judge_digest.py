@@ -359,10 +359,9 @@ def test_automation_interesting_types_carries_axis_1_tokens():
         "auto_unfreeze_applied"
         in _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES
     )
-    assert (
-        "focus_advanced"
-        in _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES
-    )
+    # TB-342: `focus_advanced` retired with the multi-focus rotation
+    # pointer walk; only `roadmap_complete` remains as the axis-4
+    # interesting event.
     assert (
         "roadmap_complete"
         in _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES

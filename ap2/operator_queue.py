@@ -265,16 +265,17 @@ def _apply_operator_ack(cfg: Config, args: dict) -> dict:
     # token, set the focus-pointer's `roadmap_complete_ack_idx` to the
     # current focus-list length. This DISMISSES the recurring operator
     # notice (`ap2 status` / web / cron digest stop showing the
-    # actionable "extend the roadmap" nag once
+    # actionable "extend goal.md" nag once
     # `goal.roadmap_complete_notice_dismissed` reads this marker == the
     # foci count); it does NOT resume ideation. Ideation stays PARKED
-    # — `goal.roadmap_exhausted` is now a pure pointer predicate that
-    # the ack no longer touches. Resuming is a separate pointer move:
-    # `ap2 update-goal` (extend the roadmap) or `ap2 rewind-focus
-    # <title>` (re-point at an exhausted focus). focus_advance clears
-    # this marker to None on each fresh `roadmap_complete` emit, so the
-    # dismissal is strictly per-episode (can't go stale across an
-    # extend→re-exhaust cycle).
+    # — `goal.roadmap_exhausted` is a pure pointer predicate that the
+    # ack no longer touches. Resuming is `ap2 update-goal` (which emits
+    # `goal_updated` and triggers `reset_pointer_on_goal_updated` —
+    # TB-342 collapsed the pre-existing `ap2 rewind-focus` recovery
+    # verb away with the multi-focus rotation pointer walk).
+    # focus_advance clears this marker to None on each fresh
+    # `roadmap_complete` emit, so the dismissal is strictly per-episode
+    # (can't go stale across an extend→re-exhaust cycle).
     from ap2 import goal as _goal
     if _goal.ROADMAP_COMPLETE_ACK_TOKEN in note:
         try:
@@ -474,34 +475,6 @@ OPERATOR_QUEUE_OPS = (
     # would race the daemon's own writes. Symmetric to `ack` /
     # `classify` / `reject` audit shape.
     "audit_skip",
-    # TB-295: operator-CLI-only verb that re-engages an exhausted
-    # `## Current focus:` heading. The op carries `title` (required —
-    # exact-string match against goal.md's current focus headings) and
-    # an optional `reason`. Drain-side handler updates
-    # `focus_pointer.json` (active_index/active_title resolved from
-    # title; exhausted_titles drops the target; empty_cycles=0;
-    # roadmap_complete_emitted=False), emits a synthetic
-    # `focus_advanced trigger=operator_rewind` event so
-    # `focus_advance._ideation_empty_against_focus`'s cutoff scan
-    # respects the rewind (the counter looks for `focus_advanced
-    # to=<focus_title>` regardless of `trigger`), and appends a richer
-    # `<ts> — operator rewound focus pointer (<old> → <target>):
-    # <reason>` line via `_append_operator_audit_line`'s rewind_focus
-    # branch. Routed through the queue (rather than mutating the
-    # pointer directly from the CLI) so the write lands at a tick
-    # boundary under `board_file_lock` and never races an in-flight
-    # ideation cycle's pointer read. Title-as-key (not index): the
-    # title → index resolution happens at drain time so an operator-
-    # edited goal.md between CLI invocation and drain produces a
-    # clean rejection rather than a silent rewind to the wrong
-    # index. Closes the 2026-05-26 false-advance recovery hole —
-    # before this verb, the only recovery path was direct edit of
-    # `.cc-autopilot/focus_pointer.json`, which emitted no event and
-    # left pre-rewind empty cycles counting against the rewound
-    # focus's counter (the empty-cycles counter scans for the most
-    # recent `focus_advanced to=<focus_title>` event to set its
-    # cutoff_idx; with no rewind event, cutoff_idx = -1).
-    "rewind_focus",
     # TB-324 (axis 4): operator-CLI `ap2 config set <path> <value>`. The
     # op carries `path` (`core.<field>` or `components.<name>.<key>`)
     # and `value` (raw string; the drain-side coerces against the
@@ -929,41 +902,6 @@ def do_operator_queue_append(cfg: Config, args: dict) -> dict:
                     f"(coerced to {type(coerced).__name__})"
                 )
         rec_args = {"path": path, "value": str(raw_value)}
-    elif op == "rewind_focus":
-        # TB-295: operator-CLI-only verb. Validates the title against
-        # goal.md's current `## Current focus:` headings at append
-        # time so an obvious typo is rejected immediately; the drain
-        # side re-resolves under `board_file_lock` (the operator may
-        # have edited goal.md between CLI invocation and drain, in
-        # which case the drain raises and the op is recorded as
-        # operator_queue_error). Title-as-key (not index) so operator
-        # intent is durable across goal.md re-orderings.
-        from . import goal as _goal
-        title = (args.get("title") or "").strip()
-        if not title:
-            return _err("title is required for rewind_focus")
-        foci = _goal.read_focus_list(cfg)
-        titles = [f.title for f in foci]
-        if title not in titles:
-            if titles:
-                available = ", ".join(repr(t) for t in titles)
-            else:
-                available = (
-                    "(none — goal.md has no `## Current focus:` "
-                    "headings)"
-                )
-            return _err(
-                f"rewind_focus title {title!r} does not match any "
-                f"`## Current focus:` heading in goal.md. Available: "
-                f"{available}"
-            )
-        raw_reason = args.get("reason")
-        reason = (raw_reason if raw_reason is not None else "").strip()
-        if reason:
-            err = _validate_single_line("reason", reason)
-            if err:
-                return _err(err)
-        rec_args = {"title": title, "reason": reason}
     else:
         task_id = (args.get("task_id") or "").strip()
         if not task_id:
@@ -1716,6 +1654,7 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
         # commit together form a single observable transition for any
         # subsequent reader.
         import os
+        from . import goal as _goal
         goal_content = args.get("goal_content")
         reason = args.get("reason") or ""
         if not isinstance(goal_content, str) or not goal_content.strip():
@@ -1733,6 +1672,38 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             reason=reason,
             bytes=len(goal_content),
         )
+        # TB-342: a `goal_updated` event resets the ideation-exhaustion
+        # halt. The collapsed `_maybe_advance_focus` detector resets its
+        # empty-cycles window at the most recent `goal_updated` cutoff,
+        # but the pointer's forensic `empty_cycles` field, the one-shot
+        # `roadmap_complete_emitted` flag, and the dismissal marker live
+        # on disk and must be cleared here so:
+        #   - `goal.roadmap_exhausted` flips to False immediately
+        #     (un-parks ideation on the next tick, no `--force` needed).
+        #   - `goal.roadmap_complete_notice_dismissed` flips to False
+        #     so a future re-exhaustion re-arms the operator nag.
+        #   - `ap2 status` / web home / cron digest stop rendering the
+        #     halt state on the very next render.
+        # The reset is the sole resume signal post-TB-342: the
+        # pre-TB-342 `ap2 rewind-focus` recovery verb went away with
+        # the rotation theatre — direct re-engagement of an exhausted
+        # focus is meaningless when the daemon never sequenced foci to
+        # begin with. The reset helper is idempotent (re-running it
+        # against a not-halted pointer is a no-op semantically).
+        try:
+            foci_now = _goal.read_focus_list(cfg)
+            new_pointer = _goal.reset_pointer_on_goal_updated(cfg, foci_now)
+            _goal.save_pointer(cfg, new_pointer)
+        except OSError:
+            # Best-effort: failure to rewrite the pointer leaves the
+            # halt flag stale, but the next `_maybe_advance_focus` tick
+            # re-reads the events tail and observes the `goal_updated`
+            # cutoff — the counter zeroes naturally, and the operator
+            # can re-emit the halt by running through threshold empty
+            # cycles again. Logging-only here keeps the goal.md write
+            # path atomic for the read-the-content-back code paths
+            # downstream.
+            pass
         return
     if op == "classify":
         # TB-189: operator-authored retrospective verdict. Two writes
@@ -1919,89 +1890,6 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
             fields=fields,
         )
         return
-    if op == "rewind_focus":
-        # TB-295: re-engage an exhausted `## Current focus:` heading.
-        # Re-resolves the title → index against goal.md at drain time
-        # (the operator may have edited goal.md between CLI invocation
-        # and drain), updates `focus_pointer.json` (drops the rewound
-        # title from `exhausted_titles`, resets `empty_cycles` and
-        # `roadmap_complete_emitted`), and emits a synthetic
-        # `focus_advanced trigger=operator_rewind` event so the
-        # empty-cycles counter's cutoff_idx scan
-        # (`focus_advance._ideation_empty_against_focus`) anchors at
-        # the rewind — without this event, pre-rewind empty cycles
-        # would keep counting against the rewound focus's counter.
-        # The counter looks for `focus_advanced to=<focus_title>`
-        # regardless of the `trigger` value, so the synthetic event
-        # closes the loophole without any focus_advance.py change.
-        from . import goal as _goal
-        title = (args.get("title") or "").strip()
-        if not title:
-            raise RuntimeError("rewind_focus op missing title")
-        foci = _goal.read_focus_list(cfg)
-        titles = [f.title for f in foci]
-        if title not in titles:
-            # The operator may have edited goal.md between CLI
-            # invocation and drain — refuse loudly rather than rewind
-            # to the wrong index. Pointer left untouched.
-            if titles:
-                available = ", ".join(repr(t) for t in titles)
-            else:
-                available = (
-                    "(none — goal.md has no `## Current focus:` "
-                    "headings)"
-                )
-            raise RuntimeError(
-                f"rewind_focus title {title!r} no longer matches any "
-                f"`## Current focus:` heading in goal.md (operator "
-                f"edited goal.md between CLI invocation and drain?). "
-                f"Available: {available}"
-            )
-        target_idx = titles.index(title)
-        pointer = _goal.load_pointer(cfg)
-        old_title = pointer.get("active_title") or ""
-        # Stash the old title onto the queue record's args so
-        # `_append_operator_audit_line`'s rewind_focus branch can
-        # render the `(old → target)` audit line without re-reading
-        # the pointer (the pointer is already mutated below by the
-        # time the audit-line writer runs). Append-only mutation
-        # under the `_` prefix so the queue record's payload schema
-        # stays operator-authored vs daemon-augmented at a glance.
-        args["_old_title"] = old_title
-        exhausted = [
-            t for t in (pointer.get("exhausted_titles") or [])
-            if t != title
-        ]
-        pointer["active_index"] = target_idx
-        pointer["active_title"] = title
-        pointer["exhausted_titles"] = exhausted
-        pointer["empty_cycles"] = 0
-        # Clear the one-shot roadmap_complete suppression flag so a
-        # future re-exhaustion (the rewound focus genuinely exhausts
-        # again) re-fires `roadmap_complete` cleanly. Per the
-        # briefing's Design note, we do NOT auto-ack the
-        # roadmap_complete decisions-needed bullet — operator clears
-        # via `ap2 ack roadmap_complete` separately if desired.
-        pointer["roadmap_complete_emitted"] = False
-        _goal.save_pointer(cfg, pointer)
-        # Synthetic event: same shape as the natural advance path's
-        # `focus_advanced` emit, with `trigger=operator_rewind` as the
-        # discriminator. The counter's cutoff_idx scan keys off
-        # `to=<focus_title>` regardless of `trigger`, so this single
-        # write closes both the audit-trail gap AND the counter-
-        # cutoff hole.
-        reason = (args.get("reason") or "").strip()
-        events.append(
-            cfg.events_file,
-            "focus_advanced",
-            **{"from": old_title},
-            to=title,
-            trigger="operator_rewind",
-            new_index=target_idx,
-            total_foci=len(foci),
-            reason=reason,
-        )
-        return
     if op == "config_set":
         # TB-324 (axis 4): write the operator's requested
         # `<path>=<value>` into `.cc-autopilot/config.toml`. The drain
@@ -2162,31 +2050,6 @@ def _append_operator_audit_line(cfg: Config, rec: dict) -> None:
         s_reason = (args.get("reason") or "").strip() or "(no reason given)"
         lines.append(
             f"- {ts} — audit-skipped {task}: {s_reason}\n"
-        )
-    if op == "rewind_focus":
-        # TB-295: in addition to the standard `applied operator-queued
-        # rewind_focus` audit line above, emit the richer
-        # `<ts> — operator rewound focus pointer (<old> → <target>):
-        # <reason>` line that mirrors `ap2 update-goal`'s richer-line
-        # shape and gives ideation Step 0 / future operator audit
-        # walks a single-shape grep target for the recovery verb.
-        # Empty reason renders without the trailing colon
-        # (`<ts> — operator rewound focus pointer (<old> → <target>)`)
-        # so a quick fix-and-move-on rewind still produces a clean
-        # line. We don't carry `old_title` on the queue record (the
-        # rewind is title-as-key, not from→to-as-key), so the audit
-        # line reads "<unknown> → <target>" when the pointer's prior
-        # `active_title` wasn't snapshotted — drain-side fills the
-        # value via the drain handler stashing it onto `args` before
-        # this writer runs (see `_apply_operator_op` rewind_focus
-        # branch).
-        target_title = (args.get("title") or "") or "(unknown)"
-        old_title = (args.get("_old_title") or "") or "(unknown)"
-        r_reason = (args.get("reason") or "").strip()
-        r_reason_part = f": {r_reason}" if r_reason else ""
-        lines.append(
-            f"- {ts} — operator rewound focus pointer "
-            f"({old_title} → {target_title}){r_reason_part}\n"
         )
     with log_path.open("a") as f:
         for line in lines:

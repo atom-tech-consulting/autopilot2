@@ -1,30 +1,30 @@
-"""TB-242: behavioral pinning for the axis-4 focus-rotation operator
-surface on `ap2 status` (text + JSON) and the web home.
+"""TB-242 / TB-342: behavioral pinning for the axis-4 focus surface on
+`ap2 status` (text + JSON) and the web home.
 
-TB-226 (`b8a3...` parser + `focus_pointer.json`) and TB-237 (`b2fb6b1`
-axis-4 e2e walk-away pin) shipped the multi-focus rotation
-machinery, but until TB-242 the only way for an operator to answer
-"what focus am I on, and how many remain?" was to grep events.jsonl
-for `focus_advanced` or read `focus_pointer.json` by hand. That
-left the axis-4 walk-away promise (goal.md L131-138: "walk-away
-time scales with the operator-declared roadmap length") technically
-shipped but operationally unverifiable on demand.
+TB-226 (`b8a3...` parser + `focus_pointer.json`) and TB-237 (axis-4
+e2e walk-away pin) shipped the multi-focus rotation machinery; TB-242
+added pull-surface visibility on `ap2 status` / web home so the
+operator could answer "what focus am I on, and how many remain?" on
+demand. TB-342 then collapsed the multi-focus rotation pointer walk
+into a single ideation-exhaustion detector (ideation never actually
+scoped itself to the active focus, so the walk changed nothing about
+what got proposed). The pull-surface contract this module pins moved
+with the collapse:
 
-This module pins the render contract on three surfaces:
-
-  (1) `cmd_status` text: single-focus goal.md → `focus: <title>`
-      (no `(N of M)` suffix — single-focus projects don't need a
-      position counter).
-  (2) `cmd_status` text: multi-focus goal.md → `focus: <title>
-      (1 of 3)`.
-  (3) `cmd_status` text: roadmap-complete halt state → the halt-state
-      line "focus: ROADMAP_COMPLETE — ap2 ack roadmap_complete to
-      resume", mirroring TB-227's auto-approve PAUSED line shape.
+  (1) `cmd_status` text: single-focus goal.md → `focus: <title>` (no
+      position counter — TB-342 dropped `(N of M)` since the daemon no
+      longer sequences foci).
+  (2) `cmd_status` text: multi-focus goal.md → `focus: <title1>,
+      <title2>, <title3>` (priority-ordered prose list, no position
+      counter post-TB-342).
+  (3) `cmd_status` text: parked-ideation state → the halt-state line
+      "focus: parked — ideation exhausted; extend goal.md to resume,
+      or `ap2 ack roadmap_complete` to dismiss this notice".
   (4) `cmd_status` JSON: `active_focus` block carries
-      `title` / `index` / `total` / `roadmap_complete` keys, and
-      falls back to `null` when no `## Current focus:` headings
-      exist (fresh-project no-op path).
-  (5) `web._render_home` HTML: focus title + position rendered
+      `titles` / `roadmap_complete` keys, and falls back to `null`
+      when no `## Current focus:` headings exist (fresh-project no-op
+      path).
+  (5) `web._render_home` HTML: focus titles + halt state rendered
       above the automation card.
 
 Fixtures mirror TB-241 / TB-227 — `init_project` + a goal.md write
@@ -46,11 +46,9 @@ from ap2.init import init_project
 
 # Direct references to the names the briefing's `## Verification`
 # bullets / coverage-drift gates expect to see in this test file.
-# Loaded at module top so a refactor that removes them surfaces
-# cleanly on import.
+# TB-342: `goal.active_focus` retired with the rotation pointer walk.
 _NAMES_FOR_DRIFT_GATE = (
     goal.read_focus_list,
-    goal.active_focus,
     goal.load_pointer,
     goal.save_pointer,
     goal.roadmap_exhausted,
@@ -76,9 +74,7 @@ _GOAL_MD_TEMPLATE = (
 
 def _write_goal_md(cfg: Config, focus_section: str) -> None:
     """Overwrite the project's goal.md with the canonical scaffold +
-    the supplied `focus_section`. Tests use this to control the
-    number / shape of `## Current focus:` headings the unit under
-    test sees."""
+    the supplied `focus_section`."""
     (cfg.project_root / "goal.md").write_text(
         _GOAL_MD_TEMPLATE.format(focus_section=focus_section)
     )
@@ -86,11 +82,7 @@ def _write_goal_md(cfg: Config, focus_section: str) -> None:
 
 @pytest.fixture
 def cfg(tmp_path: Path) -> Config:
-    """Project root with the standard ap2 init layout. Tests write
-    goal.md themselves before invoking the unit under test (the
-    default `init_project` scaffold uses `## Current focus` without
-    the trailing colon, so the focus-list parser returns [] until
-    the test explicitly writes a colon-bearing focus section)."""
+    """Project root with the standard ap2 init layout."""
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()
@@ -98,18 +90,14 @@ def cfg(tmp_path: Path) -> Config:
 
 
 # ===========================================================================
-# (1) Single-focus goal.md → text shows `focus: <title>` without
-# the `(N of M)` suffix.
+# (1) Single-focus goal.md → text shows `focus: <title>`.
 # ===========================================================================
 
 
-def test_cli_status_single_focus_text_omits_position(
-    cfg: Config, capsys,
-):
+def test_cli_status_single_focus_text(cfg: Config, capsys):
     """One `## Current focus:` heading → the text-render shows
-    `focus:    <title>` with no position counter. Single-focus
-    projects don't need an N-of-M suffix (and the operator reading
-    `(1 of 1)` would correctly suspect the surface is broken)."""
+    `focus:    <title>` with no position counter (TB-342 dropped the
+    `(N of M)` display)."""
     from ap2.cli import cmd_status
 
     _write_goal_md(cfg, "## Current focus: bootstrap\n\nbody.\n\n")
@@ -118,22 +106,21 @@ def test_cli_status_single_focus_text_omits_position(
     out = capsys.readouterr().out
     assert "focus:" in out
     assert "bootstrap" in out
-    # Single-focus projects don't grow a `(1 of 1)` counter.
+    # TB-342: no position counter on any focus surface.
     assert "1 of 1" not in out
     assert "(1 of " not in out
 
 
 # ===========================================================================
-# (2) Multi-focus goal.md → text shows `focus: <title> (1 of 3)`.
+# (2) Multi-focus goal.md → text shows comma-separated priority list.
 # ===========================================================================
 
 
-def test_cli_status_multi_focus_text_shows_position(
-    cfg: Config, capsys,
-):
-    """Three `## Current focus:` headings → text-render shows the
-    first focus's title with `(1 of 3)` position counter. Pins the
-    multi-focus walk-away render."""
+def test_cli_status_multi_focus_text_shows_all_titles(cfg: Config, capsys):
+    """Three `## Current focus:` headings → text-render shows all
+    three titles in priority order, comma-separated. TB-342: the
+    daemon no longer sequences foci; the list is the operator's
+    intent."""
     from ap2.cli import cmd_status
 
     _write_goal_md(
@@ -146,49 +133,26 @@ def test_cli_status_multi_focus_text_shows_position(
     assert rc == 0
     out = capsys.readouterr().out
     assert "focus:" in out
-    assert "alpha (1 of 3)" in out, out
-
-
-def test_cli_status_multi_focus_text_reflects_pointer_advance(
-    cfg: Config, capsys,
-):
-    """After the pointer advances (e.g. to index 1), text-render
-    reflects the NEW active focus title + `(2 of 3)` position. Pins
-    that the surface is pointer-driven, not always-first-focus."""
-    from ap2.cli import cmd_status
-
-    _write_goal_md(
-        cfg,
-        "## Current focus: alpha\n\nalpha body.\n\n"
-        "## Current focus: beta\n\nbeta body.\n\n"
-        "## Current focus: gamma\n\ngamma body.\n\n",
-    )
-    pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 1
-    pointer["active_title"] = "beta"
-    goal.save_pointer(cfg, pointer)
-
-    rc = cmd_status(cfg, Namespace(json=False))
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "beta (2 of 3)" in out, out
+    assert "alpha, beta, gamma" in out, out
+    # No position counter.
+    assert "(1 of 3)" not in out
+    assert "(2 of 3)" not in out
 
 
 # ===========================================================================
-# (3) Roadmap-complete halt → text shows the halt-state line with
-# the `ap2 ack roadmap_complete` resume hint.
+# (3) Roadmap-complete halt → text shows the halt-state line with the
+# resume/dismiss hint.
 # ===========================================================================
 
 
 def test_cli_status_roadmap_complete_text_shows_halt_line(
     cfg: Config, capsys,
 ):
-    """Pointer past the last focus, notice NOT yet dismissed →
-    text-render shows the `focus: ROADMAP_COMPLETE — ideation parked`
-    state line WITH the three-verb resume/dismiss nag (TB-340), which
-    names `ap2 ack roadmap_complete` (dismiss) alongside the resume
-    verbs. Mirrors TB-227's auto-approve PAUSED line shape so the
-    operator's eye picks up the halt without a second pass."""
+    """`roadmap_complete_emitted=True` → text-render shows the
+    `focus: parked — ideation exhausted` state line WITH the
+    two-verb resume/dismiss nag (TB-340 / TB-342: ack dismisses, edit
+    goal.md to resume — the pre-TB-342 `ap2 rewind-focus` verb went
+    away with the rotation pointer walk)."""
     from ap2.cli import cmd_status
 
     _write_goal_md(
@@ -196,44 +160,28 @@ def test_cli_status_roadmap_complete_text_shows_halt_line(
         "## Current focus: alpha\n\nalpha body.\n\n"
         "## Current focus: beta\n\nbeta body.\n\n",
     )
-    # Push the pointer past the last focus (active_index >= len(foci))
-    # to simulate the halt state. TB-340: `roadmap_exhausted` is a pure
-    # pointer predicate — `active_index >= total` alone trips it; no
-    # events-scan, no ack involvement.
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 2  # past the last 0-indexed focus
     pointer["roadmap_complete_emitted"] = True
     goal.save_pointer(cfg, pointer)
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
-    assert "ROADMAP_COMPLETE" in out, out
-    # Nag NOT dismissed → the resume/dismiss hint is present, naming
-    # both the resume verbs and the `ap2 ack roadmap_complete` dismiss.
-    assert "`ap2 ack roadmap_complete`" in out, out
-    assert "rewind-focus" in out, out
-    # Halt-state render replaces the position counter entirely — no
-    # stale `(N of M)` should leak through.
-    assert "(3 of 2)" not in out
+    assert "parked" in out, out
+    assert "ideation exhausted" in out, out
+    # Nag NOT dismissed → the resume/dismiss hint is present.
+    assert "ap2 update-goal" in out, out
+    assert "ap2 ack roadmap_complete" in out, out
+    # TB-342: rewind-focus is gone.
+    assert "rewind-focus" not in out, out
 
 
 def test_cli_status_roadmap_complete_nag_suppressed_after_dismiss(
     cfg: Config, capsys,
 ):
     """TB-340 surfacing-vs-state split: after the operator DISMISSES
-    the notice (the ack drain handler sets the pointer's
-    `roadmap_complete_ack_idx` to the foci count), the text-render
-    STILL shows the `ROADMAP_COMPLETE` state line (the daemon is still
-    parked — dismissal quiets the nag, not the state) but suppresses
-    the actionable resume/dismiss hint.
-
-    Pre-TB-340 this pin asserted the `ROADMAP_COMPLETE` marker
-    DISAPPEARED after an ack — the old wiring let the ack flip
-    `goal.roadmap_exhausted` to False, un-parking ideation. The
-    corrected gate is a pure pointer predicate; the ack only sets the
-    dismissal marker that `goal.roadmap_complete_notice_dismissed`
-    reads."""
+    the notice, the text-render STILL shows the parked state line but
+    suppresses the actionable resume/dismiss hint."""
     from ap2.cli import cmd_status
 
     _write_goal_md(
@@ -242,10 +190,8 @@ def test_cli_status_roadmap_complete_nag_suppressed_after_dismiss(
         "## Current focus: beta\n\nbeta body.\n\n",
     )
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 2
     pointer["roadmap_complete_emitted"] = True
-    # Simulate the ack drain handler having dismissed THIS episode:
-    # the marker == the current foci count (2).
+    # Simulate the ack drain handler having dismissed THIS episode.
     pointer["roadmap_complete_ack_idx"] = 2
     goal.save_pointer(cfg, pointer)
     events.append(cfg.events_file, "roadmap_complete", reason="exhausted")
@@ -254,11 +200,10 @@ def test_cli_status_roadmap_complete_nag_suppressed_after_dismiss(
     assert rc == 0
     out = capsys.readouterr().out
     # State line preserved: still parked.
-    assert "ROADMAP_COMPLETE" in out, out
+    assert "parked" in out, out
     assert "notice dismissed" in out, out
-    # Actionable nag suppressed: the resume verbs are NOT re-offered.
-    assert "rewind-focus" not in out, out
-    assert "extend the roadmap" not in out, out
+    # Actionable nag suppressed.
+    assert "extend" not in out or "to resume" not in out, out
 
 
 # ===========================================================================
@@ -266,14 +211,11 @@ def test_cli_status_roadmap_complete_nag_suppressed_after_dismiss(
 # ===========================================================================
 
 
-def test_cli_status_json_carries_active_focus_block(
-    cfg: Config, capsys,
-):
-    """Multi-focus goal.md → JSON output has an `active_focus`
-    object with the four contracted keys (`title`, `index`,
-    `total`, `roadmap_complete`). `index` is 0-based to match the
-    underlying `focus_pointer.json`'s `active_index` field; the
-    text branch displays it as `idx+1` for human readability."""
+def test_cli_status_json_carries_active_focus_block(cfg: Config, capsys):
+    """Multi-focus goal.md → JSON output has an `active_focus` object
+    with the TB-342 contracted keys (`titles`, `roadmap_complete`).
+    The pre-TB-342 `title` / `index` / `total` fields went away with
+    the rotation pointer walk."""
     from ap2.cli import cmd_status
 
     _write_goal_md(
@@ -287,9 +229,7 @@ def test_cli_status_json_carries_active_focus_block(
     assert "active_focus" in payload
     af = payload["active_focus"]
     assert af is not None
-    assert af["title"] == "alpha"
-    assert af["index"] == 0
-    assert af["total"] == 2
+    assert af["titles"] == ["alpha", "beta"]
     assert af["roadmap_complete"] is False
 
 
@@ -297,15 +237,10 @@ def test_cli_status_json_active_focus_null_when_no_focus_headings(
     cfg: Config, capsys,
 ):
     """Fresh-project no-op path: goal.md present but no
-    `## Current focus:` headings (the default `ap2 init` scaffold
-    uses `## Current focus` WITHOUT the trailing colon, so the
-    parser returns []) → JSON exposes the key but with a `null`
-    value so machine consumers can distinguish "no roadmap" from
-    "roadmap exhausted"."""
+    `## Current focus:` headings → JSON exposes the key but with a
+    `null` value."""
     from ap2.cli import cmd_status
 
-    # No goal.md write — use the bare `init_project` scaffold which
-    # has `## Current focus` (no colon) and therefore parses to [].
     rc = cmd_status(cfg, Namespace(json=True))
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -316,10 +251,7 @@ def test_cli_status_json_active_focus_null_when_no_focus_headings(
 def test_cli_status_json_active_focus_carries_roadmap_complete_flag(
     cfg: Config, capsys,
 ):
-    """Halt state → JSON's `active_focus.roadmap_complete` is True.
-    Pins that machine consumers (web UI, external monitors) can read
-    the halt state from one boolean field instead of replicating the
-    events-scan logic."""
+    """Halt state → JSON's `active_focus.roadmap_complete` is True."""
     from ap2.cli import cmd_status
 
     _write_goal_md(
@@ -328,7 +260,6 @@ def test_cli_status_json_active_focus_carries_roadmap_complete_flag(
         "## Current focus: beta\n\nbeta body.\n\n",
     )
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 2
     pointer["roadmap_complete_emitted"] = True
     goal.save_pointer(cfg, pointer)
     events.append(cfg.events_file, "roadmap_complete", reason="exhausted")
@@ -338,18 +269,15 @@ def test_cli_status_json_active_focus_carries_roadmap_complete_flag(
     payload = json.loads(capsys.readouterr().out)
     af = payload["active_focus"]
     assert af is not None
-    assert af["total"] == 2
+    assert af["titles"] == ["alpha", "beta"]
     assert af["roadmap_complete"] is True
 
 
 def test_cli_status_text_omits_focus_line_when_no_focus_headings(
     cfg: Config, capsys,
 ):
-    """Fresh-project no-op path on the text surface: the default
-    `init_project` goal.md (no `## Current focus:` colon-headings)
-    → no `focus:` line in the text output. Preserves byte-identical
-    pre-TB-242 output for projects that haven't pivoted to the
-    focus-rotation model yet."""
+    """Fresh-project no-op path on the text surface: no
+    `## Current focus:` heading → no `focus:` line."""
     from ap2.cli import cmd_status
 
     rc = cmd_status(cfg, Namespace(json=False))
@@ -361,10 +289,7 @@ def test_cli_status_text_omits_focus_line_when_no_focus_headings(
 def test_cli_status_text_omits_focus_line_when_goal_md_missing(
     cfg: Config, capsys,
 ):
-    """Even more aggressive no-op path: goal.md doesn't exist at
-    all → the surface is silent (no `focus:` line in text). Pins
-    that `read_focus_list`'s missing-file path is respected end
-    to end."""
+    """goal.md doesn't exist → no `focus:` line."""
     from ap2.cli import cmd_status
 
     (cfg.project_root / "goal.md").unlink()
@@ -375,14 +300,13 @@ def test_cli_status_text_omits_focus_line_when_goal_md_missing(
 
 
 # ===========================================================================
-# (5) Web home HTML renders the focus title + position.
+# (5) Web home HTML renders the focus titles + halt state.
 # ===========================================================================
 
 
-def test_web_home_renders_focus_card_with_position(cfg: Config):
-    """Multi-focus goal.md → the home HTML includes the focus
-    title AND the `1 of 3` position string. Pins the parallel
-    surface to the CLI's text render."""
+def test_web_home_renders_focus_card_with_titles(cfg: Config):
+    """Multi-focus goal.md → the home HTML includes all focus titles
+    in a comma-separated priority list. TB-342: no position counter."""
     from ap2 import web
 
     _write_goal_md(
@@ -393,15 +317,18 @@ def test_web_home_renders_focus_card_with_position(cfg: Config):
     )
     html_out = web._render_home(cfg)
     assert "alpha" in html_out
-    assert "1 of 3" in html_out, html_out
+    assert "beta" in html_out
+    assert "gamma" in html_out
     # Card uses a `Focus` header label so it's findable in the DOM.
     assert ">Focus<" in html_out, html_out
+    # No `(N of M)` post-TB-342.
+    assert "1 of 3" not in html_out
+    assert "2 of 3" not in html_out
 
 
-def test_web_home_renders_focus_card_single_focus_without_position(cfg: Config):
-    """Single-focus goal.md → the home HTML includes the focus
-    title and a `Focus` header label, but no `(1 of 1)` position
-    counter (symmetry with the CLI text render)."""
+def test_web_home_renders_focus_card_single_focus(cfg: Config):
+    """Single-focus goal.md → the home HTML includes the focus title
+    and a `Focus` header label."""
     from ap2 import web
 
     _write_goal_md(cfg, "## Current focus: bootstrap\n\nbody.\n\n")
@@ -412,11 +339,8 @@ def test_web_home_renders_focus_card_single_focus_without_position(cfg: Config):
 
 
 def test_web_home_renders_focus_card_halt_state(cfg: Config):
-    """Halt state → the home HTML includes the `ROADMAP_COMPLETE`
-    marker and the `ap2 ack roadmap_complete` resume verb rendered
-    as `<code>`. Parallel to TB-227's auto-approve PAUSED card
-    shape so the operator's eye picks up both halts as one cluster
-    of urgent operator-attention surfaces."""
+    """Halt state → the home HTML includes a `parked` marker and the
+    `ap2 ack roadmap_complete` resume verb rendered as `<code>`."""
     from ap2 import web
 
     _write_goal_md(
@@ -425,23 +349,20 @@ def test_web_home_renders_focus_card_halt_state(cfg: Config):
         "## Current focus: beta\n\nbeta body.\n\n",
     )
     pointer = goal.load_pointer(cfg)
-    pointer["active_index"] = 2
     pointer["roadmap_complete_emitted"] = True
     goal.save_pointer(cfg, pointer)
     events.append(cfg.events_file, "roadmap_complete", reason="exhausted")
 
     html_out = web._render_home(cfg)
-    assert "ROADMAP_COMPLETE" in html_out, html_out
+    assert "parked" in html_out, html_out
     assert "ap2 ack roadmap_complete" in html_out, html_out
 
 
 def test_web_home_omits_focus_card_when_no_focus_headings(cfg: Config):
     """Fresh-project no-op path on the web surface: the card is
     omitted entirely when goal.md has no `## Current focus:`
-    headings. Preserves byte-identical pre-TB-242 output for
-    projects that haven't pivoted to the focus-rotation model."""
+    headings."""
     from ap2 import web
 
-    # Bare `init_project` scaffold (no colon-headings) → empty.
     html_out = web._render_home(cfg)
     assert ">Focus<" not in html_out

@@ -1111,30 +1111,35 @@ async def _maybe_ideate(cfg: Config, sdk, mcp_server) -> None:
         )
         mark_run(cfg.cron_state_file, IDEATION_NAME)
         return
-    # TB-246: roadmap-complete gate — when the focus-list pointer has
-    # advanced past the LAST `## Current focus:` heading in goal.md AND
-    # the operator has not yet acked the `roadmap_complete` halt for
-    # the current foci-list length, the daemon's axis-4 dispatch
-    # (`daemon.py`) and auto-approve (`tools.py`) paths already block
-    # forward motion via `goal.roadmap_exhausted(cfg)`. Without a
+    # TB-246: roadmap-complete gate — when the ideation-exhaustion
+    # detector (`_maybe_advance_focus`) has emitted `roadmap_complete`
+    # after the empty-cycles threshold tripped AND the operator has
+    # not yet edited goal.md (which would clear the halt via
+    # `reset_pointer_on_goal_updated`), ideation is parked. Without a
     # matching ideation gate, ideation keeps firing every cooldown
     # window during a walk-away weekend and proposals pile up as
-    # `@blocked:review` against an already-exhausted roadmap (up to
-    # ~48 wasted SDK calls per 48h × 60-min cooldown). Uses the SAME
-    # canonical predicate the dispatch + auto-approve gates use —
-    # single source of truth, no new state file. `force_ideate`
-    # bypasses this gate so the operator's recovery path (`ap2
-    # update-goal && ap2 ideate --force`, or `ap2 rewind-focus <title>
-    # && ap2 ideate --force`) still works before the pointer move has
-    # landed at a tick boundary. TB-340: the dismiss verb is NOT part
-    # of resume — `ap2 ack roadmap_complete` only quiets the operator
-    # nag; ideation stays parked until a pointer move (update-goal /
-    # rewind-focus) lands.
+    # `@blocked:review` against an already-exhausted goal (up to ~48
+    # wasted SDK calls per 48h × 60-min cooldown). Uses the canonical
+    # `goal.roadmap_exhausted` predicate — single source of truth, no
+    # new state file. `force_ideate` bypasses this gate so the
+    # operator's recovery path (`ap2 update-goal && ap2 ideate
+    # --force`) still works before the goal-updated reset has landed
+    # at a tick boundary. TB-340: the dismiss verb is NOT part of
+    # resume — `ap2 ack roadmap_complete` only quiets the operator
+    # nag; ideation stays parked until the operator extends goal.md.
+    #
+    # TB-342: the collapse from multi-focus rotation to a single
+    # ideation-exhaustion detector means resume is now goal.md edit
+    # only — the pre-TB-342 `ap2 rewind-focus` recovery verb went
+    # away with the rotation theatre, and the
+    # `_ideation_empty_against_focus` counter resets at the most
+    # recent `goal_updated` event (the operator's resume signal)
+    # instead of the deleted `focus_advanced` rotation event.
     #
     # TB-284 deleted the predecessor focus-exhausted gate that read
     # `parse_focus_statuses(ideation_state.md)` and skipped when
     # every focus item self-reported `exhausted-needs-operator`.
-    # The empty-cycles focus-advance heuristic (TB-283) is now the
+    # The empty-cycles heuristic (TB-283 / TB-342) is now the
     # authority on exhaustion; the post-write scrub
     # (`ideation_scrub.scrub_exhaustion_language`) strips the verdict
     # language that was the only thing producing the cached statuses
@@ -1163,11 +1168,14 @@ async def force_ideate(cfg: Config, sdk, mcp_server) -> None:
     first proposals), AND the TB-246 roadmap-complete gate (i.e.
     fires even when `goal.roadmap_exhausted(cfg)` is True — the
     operator's standard recovery path is `ap2 update-goal && ap2
-    ideate --force` (or `ap2 rewind-focus <title> && ap2 ideate
-    --force`), and the forced run must work even before the pointer
-    move has landed at a tick boundary. TB-340: `ap2 ack
-    roadmap_complete` is NOT part of resume — it only dismisses the
-    operator nag; resume is a pointer move). Does NOT bypass the
+    ideate --force`, and the forced run must work even before the
+    goal_updated reset has landed at a tick boundary. TB-340: `ap2
+    ack roadmap_complete` is NOT part of resume — it only dismisses
+    the operator nag; resume is editing goal.md (which the
+    `update_goal` drain handler turns into a
+    `reset_pointer_on_goal_updated` call). TB-342: the pre-existing
+    `ap2 rewind-focus` recovery verb went away with the multi-focus
+    rotation; resume is goal.md edit only.). Does NOT bypass the
     Active hard gate — that check lives
     at queue-append time in `do_operator_queue_append({"op":
     "ideate", ...})` and at drain time is implicit (the daemon won't

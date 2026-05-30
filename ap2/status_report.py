@@ -412,22 +412,20 @@ def render_focus_rotation_activity_section(
 
         ## Focus rotation activity
 
-        - focus_advanced: <from-title> → <to-title> (N of M)
-        - roadmap_complete: all foci exhausted — ideation parked; `ap2 update-goal` to extend the roadmap (resume on a new focus), `ap2 rewind-focus <title>` to resume on an exhausted focus, or `ap2 ack roadmap_complete` to dismiss this notice (ideation stays parked)
+        - roadmap_complete: ideation exhausted — `ap2 update-goal` to extend goal.md and resume, or `ap2 ack roadmap_complete` to dismiss this notice (ideation stays parked)
 
-    Each line is rendered once per event in the window (so a window
-    with 2 advances + 1 halt yields 3 lines). The lines preserve
-    tail order (TB-226 emits `focus_advanced` first when the advance
-    crosses the last focus, then `roadmap_complete` on the same
-    tick) so a multi-event window reads chronologically.
+    Each line is rendered once per `roadmap_complete` event in the
+    window. TB-342 collapsed the multi-focus rotation state machine
+    into a single ideation-exhaustion detector, so the
+    `focus_advanced` rotation event is no longer emitted — only the
+    halt event remains, and the heading is kept verbatim to avoid
+    churning the event-type docs-drift gate + the TB-244 cross-
+    reference surface (a cosmetic rename of both the section heading
+    and the underlying event name is a follow-up).
 
     Omit-on-empty: returns "" when the helper's `total` is 0 — no
     axis-4 events in the window means no sub-block. Symmetric to
-    TB-228's `render_automation_loop_activity_section` rule (knob
-    off + all counters zero); axis 4 has no opt-in knob (the focus
-    list is operator-curated and the daemon always tracks the
-    pointer when the focus list is non-empty), so the only gate is
-    the "did something happen" counter.
+    TB-228's `render_automation_loop_activity_section` rule.
     """
     if tail is None:
         if cfg.events_file.exists():
@@ -442,53 +440,30 @@ def render_focus_rotation_activity_section(
         return ""
 
     lines: list[str] = [_FOCUS_ROTATION_HEADING, ""]
-    # `focus_advanced` rendering: include the (N of M) position when
-    # the daemon's payload carried it (TB-226 always does, but be
-    # defensive about a future schema change). `from` / `to` are
-    # always present in the payload; an empty `to` means the advance
-    # crossed past the last focus (and `roadmap_complete` fired on
-    # the same tick — see the second loop below).
-    for ev in activity["focus_advanced"]:
-        from_title = ev.get("from") or "(none)"
-        to_title = ev.get("to") or "(none)"
-        new_index = ev.get("new_index")
-        total_foci = ev.get("total_foci")
-        if isinstance(new_index, int) and isinstance(total_foci, int):
-            # `new_index` is 0-based in the event payload; the
-            # operator-facing "N of M" uses 1-based to match
-            # TB-242's `ap2 status` rendering (`alpha (1 of 3)`).
-            position = f" ({new_index + 1} of {total_foci})"
-        else:
-            position = ""
-        lines.append(
-            f"- focus_advanced: {from_title} → {to_title}{position}"
-        )
-    # `roadmap_complete` rendering: the "all foci exhausted — ideation
-    # parked" STATE line always renders (it's a digest of the episode
-    # that fired in the window). TB-275: this is an ideation-trigger
-    # park, not a dispatch halt. TB-340: the actionable resume/dismiss
-    # hint is suppressed once the operator dismissed THIS episode (so a
-    # window that both exhausted AND was acked doesn't re-nag); the
-    # hint names the three-verb model verbatim so the operator can
-    # copy-paste — `ap2 update-goal` (extend → resume on a new focus)
-    # and `ap2 rewind-focus <title>` (resume on an exhausted focus)
-    # RESUME, while `ap2 ack roadmap_complete` only DISMISSES the
-    # notice (ideation stays parked).
+    # `roadmap_complete` rendering: the "ideation exhausted" STATE line
+    # always renders (it's a digest of the episode that fired in the
+    # window). TB-275: this is an ideation-trigger park, not a dispatch
+    # halt. TB-340: the actionable resume/dismiss hint is suppressed
+    # once the operator dismissed THIS episode (so a window that both
+    # exhausted AND was acked doesn't re-nag); the hint names the
+    # two-verb model verbatim so the operator can copy-paste —
+    # `ap2 update-goal` RESUMES (editing goal.md clears the halt via
+    # `reset_pointer_on_goal_updated`), while `ap2 ack roadmap_complete`
+    # only DISMISSES the notice (ideation stays parked).
     from . import goal as _goal  # local import to avoid module-load cycle
     _notice_dismissed = _goal.roadmap_complete_notice_dismissed(cfg)
     for _ev in activity["roadmap_complete"]:
         if _notice_dismissed:
             lines.append(
-                "- roadmap_complete: all foci exhausted — "
-                "ideation parked (notice dismissed)"
+                "- roadmap_complete: ideation exhausted "
+                "(notice dismissed)"
             )
         else:
             lines.append(
-                "- roadmap_complete: all foci exhausted — "
-                "ideation parked; `ap2 update-goal` to extend the roadmap "
-                "(resume on a new focus), `ap2 rewind-focus <title>` to "
-                "resume on an exhausted focus, or `ap2 ack roadmap_complete` "
-                "to dismiss this notice (ideation stays parked)"
+                "- roadmap_complete: ideation exhausted — "
+                "`ap2 update-goal` to extend `goal.md` and resume, "
+                "or `ap2 ack roadmap_complete` to dismiss this notice "
+                "(ideation stays parked)"
             )
     return "\n".join(lines)
 
@@ -1686,8 +1661,12 @@ _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES = frozenset({
     "auto_unfreeze_applied",
     "auto_unfreeze_skipped",
     "auto_approved",
-    # TB-244: axis-4 focus-rotation events.
-    "focus_advanced",
+    # TB-244: axis-4 focus-rotation events. TB-342 collapsed the
+    # multi-focus rotation state machine into a single ideation-
+    # exhaustion detector — `focus_advanced` is no longer emitted.
+    # Only `roadmap_complete` remains; the constant name +
+    # docstring cross-reference are retained verbatim to avoid
+    # churning the event-type docs-drift gate.
     "roadmap_complete",
     # TB-245: axis-1 validator-judge fail-open events.
     "validator_judge_fail",

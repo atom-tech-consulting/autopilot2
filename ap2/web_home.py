@@ -566,27 +566,29 @@ def _render_sparkline_svg(
 
 
 def _render_focus_card(cfg: Config) -> str:
-    """Render the axis-4 focus-rotation state card for the home page
-    (TB-242).
+    """Render the axis-4 focus state card for the home page (TB-242).
 
-    Renders the active focus title + `N of M` position above the
-    automation card so an operator returning after walk-away can
-    answer "what focus am I on, and how many remain?" without
-    leaving the home page. Three shapes (mirrors the
-    `cmd_status` text branch):
+    Renders the operator-authored `## Current focus:` headings + the
+    ideation halt state above the automation card so an operator
+    returning after walk-away can answer "what's the project working
+    on, and is ideation parked?" without leaving the home page. Two
+    shapes (mirrors the `cmd_status` text branch):
 
-      - halt state (pointer past last focus) → red-tinted
-        `is-paused` card. The card always renders the ROADMAP_COMPLETE
-        state while exhausted; the three-verb resume/dismiss hint
-        (`ap2 update-goal` / `ap2 rewind-focus` resume; `ap2 ack
-        roadmap_complete` dismisses) is rendered as `<code>` unless the
-        operator has dismissed THIS episode, in which case the body
-        collapses to `ideation parked (notice dismissed)` (TB-340).
-      - multi-focus → green-tinted `is-healthy` card with
-        `<title> (<idx+1> of <total>)`.
-      - single-focus → green-tinted `is-healthy` card with `<title>`
-        (no `(1 of 1)` suffix — single-focus projects don't need a
-        position counter).
+      - halt state (`roadmap_complete_emitted=True`) → red-tinted
+        `is-paused` card. The card always renders the parked state
+        while exhausted; the actionable resume/dismiss hint
+        (`ap2 update-goal` resumes by editing goal.md; `ap2 ack
+        roadmap_complete` dismisses the notice) is rendered as `<code>`
+        unless the operator has dismissed THIS episode, in which case
+        the body collapses to `ideation parked (notice dismissed)`
+        (TB-340).
+      - active → green-tinted `is-healthy` card listing all focus
+        titles in priority order (top → bottom of goal.md), comma-
+        separated. TB-342 collapsed the multi-focus pointer walk into a
+        single ideation-exhaustion detector, so the daemon does not
+        sequence foci — the list is the operator's intent, the ideation
+        agent reads them all each cycle, and the goal-anchor validator
+        accepts any of them.
 
     Omitted entirely (empty string) when goal.md is missing or has
     zero `## Current focus:` headings (fresh / pre-pivot projects),
@@ -597,11 +599,9 @@ def _render_focus_card(cfg: Config) -> str:
     it — the operator reads them as one cluster of "what is the
     daemon's automation doing right now?" state.
 
-    Reads `goal.read_focus_list(cfg)`, `goal.active_focus(cfg)`, and
-    `focus_pointer.json` (via `goal.load_pointer`) — no new state
-    files, no daemon-side mutation. The halt branch reads
-    `goal.roadmap_exhausted` (a pure pointer predicate post-TB-340)
-    and `goal.roadmap_complete_notice_dismissed` (reads the pointer's
+    Reads `goal.read_focus_list(cfg)`, `goal.roadmap_exhausted` (a pure
+    pointer predicate post-TB-340/TB-342), and
+    `goal.roadmap_complete_notice_dismissed` (reads the pointer's
     dismissal marker) — neither walks the events tail.
     """
     from . import goal as _goal
@@ -609,45 +609,33 @@ def _render_focus_card(cfg: Config) -> str:
     foci = _goal.read_focus_list(cfg)
     if not foci:
         return ""
-    focus_pointer = _goal.load_pointer(cfg)
     if _goal.roadmap_exhausted(cfg, foci):
-        # TB-275/TB-340: roadmap_complete parks the ideation trigger
-        # only — task dispatch continues normally. The
-        # ROADMAP_COMPLETE state card always renders while exhausted;
-        # the actionable resume/dismiss nag is suppressed once the
-        # operator dismissed THIS episode (surfacing-vs-state split).
-        # Resume is a POINTER MOVE — `ap2 update-goal` (extend → resume
-        # on a new focus) or `ap2 rewind-focus <title>` (resume on an
-        # exhausted focus); `ap2 ack roadmap_complete` only DISMISSES
-        # this notice (ideation stays parked). `ap2 pause` is the
-        # explicit full-stop verb.
+        # TB-275/TB-340/TB-342: roadmap_complete parks the ideation
+        # trigger only — task dispatch continues normally. The parked
+        # state card always renders while exhausted; the actionable
+        # resume/dismiss nag is suppressed once the operator dismissed
+        # THIS episode (surfacing-vs-state split). Resume is editing
+        # goal.md via `ap2 update-goal` (the operator-queue handler
+        # calls `reset_pointer_on_goal_updated` to clear the halt);
+        # `ap2 ack roadmap_complete` only DISMISSES this notice
+        # (ideation stays parked). `ap2 pause` is the explicit
+        # full-stop verb.
         klass = "automation-status is-paused"
-        header = "Focus — ROADMAP_COMPLETE"
+        header = "Focus — parked"
         if _goal.roadmap_complete_notice_dismissed(cfg, foci):
             body = "ideation parked (notice dismissed)"
         else:
             body = (
-                "ideation parked — "
-                "<code>ap2 update-goal</code> to extend the roadmap "
-                "(resume on a new focus), "
-                "<code>ap2 rewind-focus &lt;title&gt;</code> to resume on "
-                "an exhausted focus, or "
+                "ideation parked — extend "
+                "<code>goal.md</code> via "
+                "<code>ap2 update-goal</code> to resume, or "
                 "<code>ap2 ack roadmap_complete</code> to dismiss this "
                 "notice (ideation stays parked)"
             )
     else:
         klass = "automation-status is-healthy"
         header = "Focus"
-        item = _goal.active_focus(cfg, foci)
-        title = item.title if item else ""
-        if len(foci) > 1:
-            idx_display = focus_pointer["active_index"] + 1
-            body = (
-                f"{html.escape(title)} "
-                f"({idx_display} of {len(foci)})"
-            )
-        else:
-            body = html.escape(title)
+        body = ", ".join(html.escape(f.title) for f in foci)
     return (
         f'<div class="{klass}">'
         f'<span class="as-header">{html.escape(header)}</span>'

@@ -1095,24 +1095,28 @@ def collect_window_focus_rotation(
 
     Returned dict (always present, machine-stable shape):
 
-      - `focus_advanced` (list[dict]) — one entry per
-        `focus_advanced` event in the window, in tail order. Each
-        entry: `{"from": <old_title>, "to": <new_title>,
-        "new_index": <int>, "total_foci": <int>}`. The TB-226 event
-        payload carries these fields directly; the helper preserves
-        them so the renderer can emit `(N of M)`-shaped lines
-        without re-reading goal.md.
+      - `focus_advanced` (list[dict]) — always empty post-TB-342;
+        retained for parser stability across the event-type docs-drift
+        gate + downstream consumers that read the key. TB-342 collapsed
+        the multi-focus rotation pointer walk into a single ideation-
+        exhaustion detector, so `_maybe_advance_focus` no longer emits
+        `focus_advanced` events. Historical tail entries from before
+        TB-342 also stop appearing here once the 2000-event tail rolls
+        past the cutover; consumers should treat the empty list as the
+        steady state.
       - `roadmap_complete` (list[dict]) — one entry per
         `roadmap_complete` event in the window, in tail order. Each
         entry: `{"exhausted_count": <int>}` (the foci-list length
-        at exhaustion; mirrors TB-226's event payload). The list is
+        at exhaustion; mirrors the TB-226 event payload). The list is
         usually 0 or 1 entries (the daemon emits at most once per
         exhaustion episode), but tail bounds can carry more across a
         multi-day window where the operator extended + re-exhausted
         the roadmap.
-      - `total` (int) — sum of the two list lengths. Renderers use
-        this to gate the entire sub-block (omit-on-empty rule:
-        `total == 0` → return "").
+      - `total` (int) — count of `roadmap_complete` events. Renderers
+        use this to gate the entire sub-block (omit-on-empty rule:
+        `total == 0` → return ""). Post-TB-342 this equals
+        `len(roadmap_complete)` exactly; pre-TB-342 it also summed any
+        `focus_advanced` entries.
 
     Pure / no I/O beyond reading `cfg.events_file` when `tail` is
     omitted; safe to call from request handlers.
@@ -1149,7 +1153,12 @@ def collect_window_focus_rotation(
     return {
         "focus_advanced": advanced,
         "roadmap_complete": completed,
-        "total": len(advanced) + len(completed),
+        # TB-342: `total` now counts only `roadmap_complete` events.
+        # The renderer post-TB-342 emits only the halt lines (the
+        # collapse removed the `focus_advanced` bullet); summing the
+        # rotation list would re-introduce an empty heading on windows
+        # carrying only stale rotation events from before the cutover.
+        "total": len(completed),
     }
 
 

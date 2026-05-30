@@ -181,14 +181,16 @@ _STATUS_REPORT_CONTRACT = """\
   TB-128 stale-text regression class. When the section is absent the
   loop has been quiet (or the operator hasn't opted in) — omit.
 - TB-244: if the `## Current state` block carries a
-  `## Focus rotation activity` section (axis-4 `focus_advanced` /
-  `roadmap_complete` events the daemon aggregated for the
-  inter-report window), copy that entire section VERBATIM into your
-  Mattermost post — heading and every bullet. Same daemon-owned
-  deterministic-rendering contract as TB-228's automation digest;
-  recomputing or paraphrasing risks the same stale-text regression
-  class. When the section is absent no rotation activity landed in
-  the window — omit.
+  `## Focus rotation activity` section (axis-4 `roadmap_complete`
+  events the daemon aggregated for the inter-report window), copy
+  that entire section VERBATIM into your Mattermost post — heading
+  and every bullet. Same daemon-owned deterministic-rendering
+  contract as TB-228's automation digest; recomputing or
+  paraphrasing risks the same stale-text regression class. When the
+  section is absent no halt activity landed in the window — omit.
+  (TB-342 collapsed the pre-existing multi-focus rotation pointer
+  walk; the daemon no longer emits the `focus_advanced` rotation
+  event, only the halt one.)
 - TB-245: if the `## Current state` block carries a
   `*Validator-judge fail-open window (24h):*` sub-block (axis-1
   `validator_judge_fail` / `validator_judge_timeout` 24h counts the

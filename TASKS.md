@@ -2,13 +2,13 @@
 
 ## Active
 
+- [ ] **TB-342** **Collapse multi-focus rotation to a single ideation-exhaustion halt** `#autopilot` `#focus-advance` `#ideation` `#refactor` `#simplification` `#operator-ux` `@blocked:TB-340` [→ brief](.cc-autopilot/tasks/collapse-multi-focus-rotation-to-a-singl.md)
 
 ## Ready
 
 
 ## Backlog
 
-- [ ] **TB-342** **Collapse multi-focus rotation to a single ideation-exhaustion halt** `#autopilot` `#focus-advance` `#ideation` `#refactor` `#simplification` `#operator-ux` `@blocked:TB-340` [→ brief](.cc-autopilot/tasks/collapse-multi-focus-rotation-to-a-singl.md)
 
 ## Pipeline Pending
 

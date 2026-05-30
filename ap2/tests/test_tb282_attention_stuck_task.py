@@ -510,8 +510,11 @@ def test_attention_raised_in_interesting_types_set():
         "validator_judge_fail"
         in _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES
     )
+    # TB-342: `focus_advanced` retired with the multi-focus rotation
+    # pointer walk; only `roadmap_complete` remains as the axis-4
+    # interesting event.
     assert (
-        "focus_advanced"
+        "roadmap_complete"
         in _STATUS_REPORT_AUTOMATION_INTERESTING_TYPES
     )
 
