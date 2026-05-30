@@ -223,7 +223,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 max_turns=int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS)),
                 setting_sources=["project"],
                 stderr=_stderr_sink,
-                model=cfg.get_core_value("agent_model", default="claude-opus-4-7"),
+                # TB-344: no inline `default=` — the schema
+                # (`CORE_CONFIG_SCHEMA["agent_model"]`) is the single
+                # source of truth for the `claude-opus-4-7` default.
+                model=cfg.get_core_value("agent_model"),
                 extra_args={"effort": cfg.get_core_value("agent_effort", default="xhigh")},
             ),
         ):
@@ -900,7 +903,9 @@ async def _run_control_agent(
                 max_turns=max_turns,
                 setting_sources=["project"],
                 stderr=stderr_sink,
-                model=cfg.get_core_value("agent_model", default="claude-opus-4-7"),
+                # TB-344: schema is the single source of truth for the
+                # agent_model default (see CORE_CONFIG_SCHEMA).
+                model=cfg.get_core_value("agent_model"),
                 extra_args={"effort": resolved_effort},
             ),
         ):

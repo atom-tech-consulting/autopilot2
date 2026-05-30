@@ -596,7 +596,9 @@ async def _judge_prose_bullet(
             permission_mode="bypassPermissions",
             max_turns=int(cfg.get_core_value("verify_judge_max_turns", default=20)),
             setting_sources=["project"],
-            model=cfg.get_core_value("agent_model", default="claude-opus-4-7"),
+            # TB-344: schema is the single source of truth for the
+            # agent_model default (see CORE_CONFIG_SCHEMA).
+            model=cfg.get_core_value("agent_model"),
             extra_args={"effort": effort},
         )
         text = ""

@@ -190,7 +190,17 @@ def collect_rows(cfg: Config, registry: Registry) -> list[ConfigRow]:
             sectioned_env=sectioned_env,
             flat_env=flat_env,
         )
-        value = getattr(cfg, field_name, None)
+        # TB-344: resolve through the SAME runtime path the daemon uses
+        # (`cfg.get_core_value`: env → TOML → schema default) rather than
+        # a bare `getattr` on the loaded Config. The dataclass-attribute
+        # read only worked for the ~11 keys overlaid onto `Config`
+        # (`control_timeout_s`, `verify_cmd`, …); lazily-resolved keys
+        # (`agent_model`, `agent_effort`) have no attribute and showed
+        # `(unset)` even when env / schema default supplied a value. Now
+        # the displayed value matches what a dispatch site receives.
+        # A genuinely-unset key (no env, no TOML, None/absent schema
+        # default) still resolves to `None` → `(unset)` in the renderer.
+        value = cfg.get_core_value(field_name)
         rows.append(
             ConfigRow(
                 path=f"core.{field_name}",

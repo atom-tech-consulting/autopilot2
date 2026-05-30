@@ -235,21 +235,35 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
     "agent_model": ConfigKey(
         name="agent_model",
         type=str,
-        default="",
+        # TB-344: canonical call-site default (`claude-opus-4-7`), not
+        # `""`. The four dispatch sites (daemon task/control, verify
+        # prose judge, janitor) previously hardcoded
+        # `default="claude-opus-4-7"` inline while the schema said `""`
+        # — a drift that made `ap2 config get core.agent_model` display
+        # `""` for a truly-unset key instead of the real default. Per
+        # TB-337's contract the schema is the single source of truth for
+        # defaults, so the value lives here and the call sites drop their
+        # redundant inline `default=`.
+        default="claude-opus-4-7",
         description=(
             "Model name passed to `ClaudeAgentOptions` for task / "
-            "control / verifier / janitor agents. Empty default falls "
-            "through to the SDK's own default. Project convention is "
-            "`claude-opus-4-7` for heavy work; per-agent overrides "
-            "(`AP2_STATUS_REPORT_EFFORT`, etc.) tune effort separately. "
-            "Mirrors the flat env `AP2_AGENT_MODEL`; hot-reloadable "
-            "(read fresh from os.environ at each SDK invocation)."
+            "control / verifier / janitor agents. Defaults to the "
+            "project convention `claude-opus-4-7` for heavy work; "
+            "per-agent overrides (`AP2_STATUS_REPORT_EFFORT`, etc.) "
+            "tune effort separately. Mirrors the flat env "
+            "`AP2_AGENT_MODEL`; hot-reloadable (read fresh from "
+            "os.environ at each SDK invocation)."
         ),
         hot_reloadable=True,
     ),
     "agent_effort": ConfigKey(
         name="agent_effort",
         type=str,
+        # TB-344: intentionally LEFT at `""` (unlike agent_model). There
+        # is no single canonical effort default — each call site falls
+        # through to its own per-job effort (`xhigh` for task dispatch,
+        # `high` for janitor/verify judge), so an empty schema default
+        # correctly signals "no global effort; defer to the call site."
         default="",
         description=(
             "Global reasoning-effort label (low | medium | high | xhigh "

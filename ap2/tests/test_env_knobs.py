@@ -458,45 +458,53 @@ def test_agent_model_empty_string_propagates_through_no_silent_default(
 def test_agent_model_env_read_in_task_agent_call_site(tmp_path, monkeypatch):
     """Source-level pin: the `run_task` SDK call site in
     `ap2/daemon.py` resolves `AP2_AGENT_MODEL` via
-    `cfg.get_core_value("agent_model", default="claude-opus-4-7")`
-    (TB-334 axis-5 core-cluster migration; pre-TB-334 the shape was
-    `os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7")`).
-    Behavioral end-to-end coverage of the task-agent path would
-    require the full `run_task` harness (briefing files, MCP server,
-    state-fence machinery); a source-level grep on the function source
-    catches a regression that drops the cfg-routed read or flips the
-    `claude-opus-4-7` default literal without forcing the heavyweight
-    setup."""
+    `cfg.get_core_value("agent_model")` (TB-334 axis-5 core-cluster
+    migration; pre-TB-334 the shape was
+    `os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7")`). TB-344
+    dropped the inline `default="claude-opus-4-7"` — the schema
+    (`CORE_CONFIG_SCHEMA["agent_model"]`) now supplies that default,
+    so the call site reads `get_core_value("agent_model")` with no
+    explicit default. Behavioral end-to-end coverage of the task-agent
+    path would require the full `run_task` harness (briefing files,
+    MCP server, state-fence machinery); a source-level grep on the
+    function source catches a regression that drops the cfg-routed
+    read or re-introduces a drifting inline default."""
     import inspect
 
     from ap2 import daemon
 
     src = inspect.getsource(daemon.run_task)
-    assert (
-        'cfg.get_core_value("agent_model", default="claude-opus-4-7")' in src
-    ), (
+    assert 'cfg.get_core_value("agent_model")' in src, (
         "regression: `run_task` no longer reads agent_model via "
-        "`cfg.get_core_value(\"agent_model\", default=\"claude-opus-4-7\")` "
-        "(TB-334) or its default literal has drifted from `claude-opus-4-7`"
+        "`cfg.get_core_value(\"agent_model\")` (TB-334/TB-344)"
+    )
+    # TB-344: the inline default must NOT come back — the schema is the
+    # single source of truth for the agent_model default.
+    assert 'get_core_value("agent_model", default=' not in src, (
+        "regression: TB-344 dropped the inline `default=` for "
+        "agent_model; the schema is now the single source of truth"
     )
 
 
 def test_agent_model_env_read_in_verify_judge_call_site():
     """Source-level pin: the `_judge_prose_bullet` SDK call site in
     `ap2/verify.py` resolves `AP2_AGENT_MODEL` via
-    `cfg.get_core_value("agent_model", default="claude-opus-4-7")`
-    (TB-334 axis-5 core-cluster migration). Catches a refactor that
-    forks the judge onto a different model knob without explicit
-    operator opt-in."""
+    `cfg.get_core_value("agent_model")` (TB-334 axis-5 core-cluster
+    migration; TB-344 dropped the inline default in favor of the
+    schema). Catches a refactor that forks the judge onto a different
+    model knob without explicit operator opt-in."""
     import inspect
 
     from ap2 import verify
 
     src = inspect.getsource(verify._judge_prose_bullet)
-    assert (
-        'cfg.get_core_value("agent_model", default="claude-opus-4-7")' in src
-    ), (
-        "regression: `_judge_prose_bullet` no longer reads agent_model via "
-        "`cfg.get_core_value(\"agent_model\", default=\"claude-opus-4-7\")` "
-        "(TB-334) or its default literal has drifted from `claude-opus-4-7`"
+    assert 'cfg.get_core_value("agent_model")' in src, (
+        "regression: `_judge_prose_bullet` no longer reads agent_model "
+        "via `cfg.get_core_value(\"agent_model\")` (TB-334/TB-344)"
+    )
+    # TB-344: the inline default must NOT come back — the schema is the
+    # single source of truth for the agent_model default.
+    assert 'get_core_value("agent_model", default=' not in src, (
+        "regression: TB-344 dropped the inline `default=` for "
+        "agent_model; the schema is now the single source of truth"
     )

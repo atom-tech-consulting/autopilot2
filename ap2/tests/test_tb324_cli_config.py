@@ -40,6 +40,7 @@ from ap2.cli import (
     cmd_config_validate,
 )
 from ap2.config import CONFIG_TOML_FILE, Config
+from ap2.config_introspect import collect_rows
 from ap2.config_loader import aggregate_schemas
 from ap2.registry import default_registry
 from ap2.tests.conftest import _drain, _project
@@ -178,6 +179,86 @@ def test_list_source_attribution_recognizes_file(
     by_path = {r["path"]: r for r in rows}
     assert by_path["components.janitor.disabled"]["source"] == "file"
     assert by_path["components.janitor.disabled"]["value"] is True
+
+
+# ---------------------------------------------------------------------------
+# (1b) TB-344: core-value resolution routes through `cfg.get_core_value`
+#      (the runtime resolver), NOT `getattr(cfg, field)`. A lazily-
+#      resolved key like `agent_model` (no `Config` dataclass attribute)
+#      must show its env-override / schema-default value, never `(unset)`.
+# ---------------------------------------------------------------------------
+
+
+def _core_row(rows, field_name):
+    """Return the `core.<field_name>` ConfigRow from a collect_rows list."""
+    by_path = {r.path: r for r in rows}
+    return by_path[f"core.{field_name}"]
+
+
+def test_collect_rows_resolves_agent_model_env_override(
+    tmp_path, clean_env
+):
+    """TB-344: with `AP2_AGENT_MODEL` set (flat env back-compat),
+    `collect_rows` resolves `core.agent_model` to the env value via
+    `cfg.get_core_value` — the same value a dispatch site receives.
+    Pre-fix `getattr(cfg, "agent_model")` had no attribute and the row
+    rendered `(unset)`."""
+    cfg = _project(tmp_path)
+    clean_env.setenv("AP2_AGENT_MODEL", "claude-opus-4-8[1m]")
+    row = _core_row(collect_rows(cfg, default_registry()), "agent_model")
+    assert row.value == "claude-opus-4-8[1m]", (
+        f"expected env-override value, got {row.value!r}"
+    )
+    assert row.source == "env-override"
+    # Never the pre-fix sentinel.
+    assert row.value not in (None, ""), (
+        "agent_model must never resolve to None/empty when env is set"
+    )
+
+
+def test_collect_rows_resolves_agent_model_schema_default_when_unset(
+    tmp_path, clean_env
+):
+    """TB-344: with sectioned-env / flat-env / TOML all absent,
+    `collect_rows` resolves `core.agent_model` to the canonical schema
+    default `claude-opus-4-7` (TB-337's single-source-of-truth), NOT
+    `None`/`(unset)`/`""`. `clean_env` strips every `AP2_*` knob and
+    `_project` scaffolds a config.toml with all keys commented out, so
+    only the schema default remains."""
+    cfg = _project(tmp_path)
+    row = _core_row(collect_rows(cfg, default_registry()), "agent_model")
+    assert row.value == "claude-opus-4-7", (
+        f"expected schema default `claude-opus-4-7`, got {row.value!r}"
+    )
+    # The whole point of the bug fix: a key with a non-empty default
+    # never displays the `(unset)` sentinel.
+    assert row.value not in (None, "")
+
+
+def test_collect_rows_preserves_unset_for_keyless_default(
+    tmp_path, clean_env
+):
+    """TB-344: the `(unset)` rendering is preserved for a genuinely
+    unresolvable core key — one with no env, no TOML, and no schema
+    default. `auto_diagnose_cooldown_s` is enumerated from
+    `FLAT_TO_SECTIONED` but intentionally NOT in `CORE_CONFIG_SCHEMA`
+    (the briefing's two carved-out detector knobs), so `get_core_value`
+    returns `None`, which the renderer shows as `(unset)`. This pins
+    that the fix routes through `get_core_value` WITHOUT blanket-
+    suppressing the sentinel — exactly the `(unset)`-preservation clause
+    in the TB-344 scope ("a key with no env, no TOML, and an empty/None
+    schema default")."""
+    from ap2.cli_config import _format_value
+
+    cfg = _project(tmp_path)
+    rows = collect_rows(cfg, default_registry())
+    by_path = {r.path: r for r in rows}
+    row = by_path["core.auto_diagnose_cooldown_s"]
+    assert row.value is None, (
+        "a core key with no env/TOML/schema-default must resolve to "
+        f"None (→ `(unset)`), got {row.value!r}"
+    )
+    assert _format_value(row.value) == "(unset)"
 
 
 # ---------------------------------------------------------------------------
