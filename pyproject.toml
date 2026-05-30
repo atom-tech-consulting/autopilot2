@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = { text = "All Rights Reserved" }
 authors = [{ name = "Li Zhang" }]
 dependencies = [
-    "claude-agent-sdk",
+    "claude-agent-sdk>=0.2.87,<0.3",
     "psutil",
     "mistune>=3.0",
     "pyyaml>=6.0",
