@@ -28,6 +28,7 @@ from . import (
     env_reload,
     events,
     ideation,
+    ideation_halt,
     prompts,
     retry,
     rollback,
@@ -1926,22 +1927,12 @@ _most_recent_blocked_complete_for = _auto_unfreeze_manifest.hook_points[
 _shared_parse = _auto_unfreeze_manifest.hook_points["shared_parse"]
 del _auto_unfreeze_manifest
 
-# TB-313 (axis 5): focus_advance was relocated from the flat module
-# `ap2/focus_advance.py` to the subpackage
-# `ap2/components/focus_advance/`. Core must not statically import
-# from `ap2/components/` (TB-311 import-direction gate), so the three
-# module-level aliases resolve via the registry's manifest hook_points
-# at module-load time. Tests that monkey-patch
-# `daemon._maybe_advance_focus` still work — the rebind happens once
-# here, and the test's setattr on the daemon module overrides this
-# attribute for the duration of the test.
-_focus_advance_manifest = default_registry().get("focus_advance")
-_FOCUS_RECENT_TAIL_N = _focus_advance_manifest.hook_points["focus_recent_tail_n"]
-_ideation_empty_against_focus = _focus_advance_manifest.hook_points[
-    "ideation_empty_against_focus"
-]
-_maybe_advance_focus = _focus_advance_manifest.hook_points["maybe_advance_focus"]
-del _focus_advance_manifest
+# TB-345: the focus-advance component was merged into the core module
+# `ap2/ideation_halt.py` (ideation-exhaustion halt is core ideation
+# lifecycle, not an opt-in component). The daemon imports it directly
+# (core→core) and calls `ideation_halt.maybe_halt_on_exhaustion(cfg)`
+# from the PRE_DISPATCH phase below — no registry hook_points
+# indirection, no module-level alias rebind.
 
 
 # TB-315 (axis 5): attention was relocated from the flat module
@@ -2059,7 +2050,8 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # 0.5. PRE_DISPATCH tick-hook phase (TB-310 axis 2). Walks the
     # registry-discovered component manifests and dispatches each
     # hook registered on `Phase.PRE_DISPATCH` in deterministic
-    # name-sorted order. Today's hooks (preserved bit-for-bit):
+    # name-sorted order. Today's sole registered hook (preserved
+    # bit-for-bit):
     #
     #   - `auto_unfreeze` — TB-225 / TB-233 sweep that auto-applies
     #     agent-diagnosed briefing-shape fixes to Frozen tasks. Queues
@@ -2067,32 +2059,39 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     #     they drain at the START of the NEXT tick, by design (audit-
     #     trail symmetry with TB-153 operator-applied edits). No-op
     #     when `AP2_AUTO_UNFREEZE_FIX_SHAPES` is unset.
-    #   - `focus_advance` — TB-226 axis-4 focus-list pointer advance.
-    #     Reads `goal.md` + `.cc-autopilot/focus_pointer.json`;
-    #     advances the in-memory pointer when the
-    #     `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` empty-cycles heuristic
-    #     trips. Emits `focus_advanced` / `roadmap_complete` events.
-    #     Opt-out via `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1`.
     #
-    # Both hooks fire BEFORE cron / pipeline / dispatch / ideation so
-    # their effects (drain-ready unfreeze ops, freshly-advanced focus
-    # pointer) are visible to every later stage on this tick. The
-    # alphabetical sort (`a` < `f`) preserves the pre-TB-310 order
-    # (auto_unfreeze first, then focus_advance) without an explicit
-    # ordering directive — see `Registry.tick_hooks`'s docstring for
-    # the order contract.
-    #
-    # Per-hook error handling lives inside each manifest's wrapper
-    # function (see `ap2/components/<name>/manifest.py`): the
-    # `auto_unfreeze_skipped reason=sweep_error` event for
-    # auto_unfreeze; the `[ap2] _maybe_advance_focus error: ...`
-    # stderr line for focus_advance. The walk has no outer
-    # try/except so the wrappers' observable-error shapes are not
-    # swallowed by a uniform handler.
+    # The hook fires BEFORE cron / pipeline / dispatch / ideation so
+    # its effects (drain-ready unfreeze ops) are visible to every
+    # later stage on this tick. Per-hook error handling lives inside
+    # the manifest's wrapper function
+    # (`ap2/components/auto_unfreeze/manifest.py`): the
+    # `auto_unfreeze_skipped reason=sweep_error` event. The walk has
+    # no outer try/except so the wrapper's observable-error shape is
+    # not swallowed by a uniform handler.
     for hook in default_registry().tick_hooks(Phase.PRE_DISPATCH):
         result = hook(cfg, sdk)
         if asyncio.iscoroutine(result):
             await result
+
+    # 0.6. Ideation-exhaustion halt (TB-345 — merged from the old
+    # `focus_advance` PRE_DISPATCH component hook into core ideation
+    # lifecycle). Counts consecutive empty ideation cycles since the
+    # last `goal_updated` and, at the `AP2_IDEATION_HALT_EMPTY_CYCLES`
+    # threshold, emits `roadmap_complete` once to park the ideation
+    # trigger (or, when `AP2_IDEATION_HALT_DISABLED` is set, surfaces a
+    # decisions-needed bullet for manual halt). Called directly here at
+    # the same point the `focus_advance` hook previously occupied —
+    # after the auto_unfreeze sweep, before cron — so the freshly-set
+    # pointer / `roadmap_complete` event is visible to every later
+    # stage on this tick. Self-handles its own error surface; the bare
+    # try/except mirrors the pre-TB-345 component wrapper's stderr line.
+    try:
+        ideation_halt.maybe_halt_on_exhaustion(cfg)
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"[ap2] maybe_halt_on_exhaustion error: {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
 
     # 0.7. ATTENTION_EMISSION tick-hook phase (TB-310 axis 2). Walks
     # registry hooks registered on `Phase.ATTENTION_EMISSION`. Today's
@@ -2106,8 +2105,8 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     #     immediate-Mattermost-push piggybacks on the same debounce
     #     when `AP2_ATTENTION_IMMEDIATE_PUSH` is set.
     #
-    # The phase fires AFTER focus-advance (step 0.5) and BEFORE cron
-    # (step 1) so a status-report cron firing on this same tick sees
+    # The phase fires AFTER the ideation-halt check (step 0.6) and
+    # BEFORE cron (step 1) so a status-report cron firing on this same tick sees
     # freshly-emitted `attention_raised` events both in its prompt
     # tail AND in the interesting-types skip-gate (the event type is
     # listed in `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a

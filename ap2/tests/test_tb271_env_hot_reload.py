@@ -104,21 +104,24 @@ def test_tick_calls_env_reload_before_other_stages():
     `env_reload.maybe_reload_env(cfg)` BEFORE any of:
       - the operator-queue drain (`tools.drain_operator_queue`)
       - the PRE_DISPATCH tick-hook phase walk (TB-310 axis 2 — covers
-        the pre-TB-310 `_maybe_auto_unfreeze` + `_maybe_advance_focus`
-        direct calls)
+        the pre-TB-310 `_maybe_auto_unfreeze` direct call) plus the
+        TB-345 core `ideation_halt.maybe_halt_on_exhaustion(cfg)` call
+        that runs directly right after the PRE_DISPATCH walk
       - cron / pipeline / dispatch / ideation
 
     Pin the ordering at the source level so a refactor that moves the
     reload below any of these stages (and therefore reads a stale
     knob before the reload fires on the same tick) trips here. Mirrors
-    the TB-226 axis-4 ordering test for `_maybe_advance_focus`.
+    the TB-226 axis-4 ordering test for the pre-TB-345 focus detector.
 
-    TB-310 (axis 2): the pre-existing literal sentinels
-    (`_maybe_auto_unfreeze`, `_maybe_advance_focus`) no longer appear
-    in `_tick`'s body — they're dispatched via
-    `default_registry().tick_hooks(Phase.PRE_DISPATCH)`. The
-    `Phase.PRE_DISPATCH` sentinel covers both pre-TB-310 stages with
-    a single source-level pin.
+    TB-310 (axis 2): the pre-existing `_maybe_auto_unfreeze` literal
+    sentinel no longer appears in `_tick`'s body — it's dispatched via
+    `default_registry().tick_hooks(Phase.PRE_DISPATCH)`. TB-345 merged
+    the residual focus detector into the core `ideation_halt` module,
+    which the daemon now calls directly (not via a registry hook)
+    right after the PRE_DISPATCH walk. The `Phase.PRE_DISPATCH`
+    sentinel covers the auto_unfreeze stage with a single source-level
+    pin.
     """
     import inspect
 
@@ -132,8 +135,8 @@ def test_tick_calls_env_reload_before_other_stages():
     assert drain_pos > 0
     assert pre_dispatch_pos > 0, (
         "TB-310: _tick must walk Phase.PRE_DISPATCH (registry tick "
-        "hooks replace the pre-TB-310 _maybe_auto_unfreeze + "
-        "_maybe_advance_focus direct calls)"
+        "hooks replace the pre-TB-310 _maybe_auto_unfreeze direct "
+        "call; TB-345's ideation_halt runs directly after the walk)"
     )
     assert reload_pos < drain_pos, (
         "env_reload must run before operator-queue drain so a knob bump "
@@ -141,7 +144,7 @@ def test_tick_calls_env_reload_before_other_stages():
     )
     assert reload_pos < pre_dispatch_pos, (
         "env_reload must run before the PRE_DISPATCH hook walk so a "
-        "knob bump is visible to auto_unfreeze / focus_advance on the "
+        "knob bump is visible to auto_unfreeze / ideation_halt on the "
         "same tick"
     )
 

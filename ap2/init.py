@@ -398,8 +398,8 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_CHANNEL_FILE_PATH",                 # reason: TB-312 core sibling channel adapter target; default path is fine for most projects, only set via shell export when explicitly wiring `FileAppendChannelAdapter` to a non-default location
     "AP2_CONTROL_MAX_TURNS",                 # reason: internal default, rarely tuned
     "AP2_EVENT_CONTEXT",                     # reason: internal default, rarely tuned
-    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",        # reason: internal default, rarely tuned
-    "AP2_FOCUS_AUTO_ADVANCE_DISABLED",       # reason: debug/test only
+    "AP2_IDEATION_HALT_EMPTY_CYCLES",        # reason: internal default, rarely tuned
+    "AP2_IDEATION_HALT_DISABLED",            # reason: debug/test only
     "AP2_IDEATION_COOLDOWN_S",               # reason: internal default, rarely tuned
     "AP2_IDEATION_DISABLED",                 # reason: debug/test only
     "AP2_IDEATION_SCRUB_MODEL",              # reason: covered by global AP2_AGENT_MODEL for most projects

@@ -410,6 +410,36 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
         ),
         hot_reloadable=True,
     ),
+    # --- Ideation-halt (TB-345 — merged from the focus_advance component) -
+    "ideation_halt_empty_cycles": ConfigKey(
+        name="ideation_halt_empty_cycles",
+        type=int,
+        default=3,
+        description=(
+            "Number of consecutive empty (0-proposal) ideation cycles "
+            "since the last `goal_updated` before the daemon emits "
+            "`roadmap_complete` and parks the ideation trigger "
+            "(ideation-exhaustion halt). Clamped to [1, 20]. Mirrors "
+            "the flat env `AP2_IDEATION_HALT_EMPTY_CYCLES` (deprecated "
+            "focus-era alias); hot-reloadable."
+        ),
+        hot_reloadable=True,
+    ),
+    "ideation_halt_disabled": ConfigKey(
+        name="ideation_halt_disabled",
+        type=bool,
+        default=False,
+        description=(
+            "Kill switch for the ideation-exhaustion auto-halt (TB-345, "
+            "ex-TB-226). True short-circuits the `roadmap_complete` "
+            "emit even when the empty-cycles heuristic would otherwise "
+            "fire; the daemon surfaces a decisions-needed bullet so the "
+            "operator halts manually. Mirrors the flat env "
+            "`AP2_IDEATION_HALT_DISABLED` (deprecated focus-era "
+            "alias); hot-reloadable."
+        ),
+        hot_reloadable=True,
+    ),
     # --- Project identity -------------------------------------------------
     "project_name": ConfigKey(
         name="project_name",

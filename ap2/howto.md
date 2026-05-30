@@ -189,7 +189,7 @@ what visible progress against the focus looks like — and feed the
 ideation agent's per-cycle assessment so proposals lean toward
 movement on the named signals. They are NOT a gating criterion: focus
 advancement is driven solely by the empty-cycles heuristic
-(`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`; see `### Focus rotation (axis 4)`),
+(`AP2_IDEATION_HALT_EMPTY_CYCLES`; see `### Focus rotation (axis 4)`),
 which fires for foci with AND without a `Progress signals:` block.
 Authors who want to give ideation explicit "what good looks like"
 hints can include the sub-block; authors who'd rather let the focus's
@@ -1264,7 +1264,7 @@ pre-existing multi-focus rotation pointer walk into a single
 exhaustion detector).
 
 - `roadmap_complete` (TB-226; rescoped TB-275 / TB-340 / TB-342) —
-  ideation produced zero proposals for `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+  ideation produced zero proposals for `AP2_IDEATION_HALT_EMPTY_CYCLES`
   (default 3) consecutive cycles. The ideation TRIGGER parks
   (`_maybe_ideate` emits `ideation_skipped reason=roadmap_complete`)
   until the operator edits goal.md via `ap2 update-goal` (the drain
@@ -1975,33 +1975,38 @@ the named line before patching closes the data-race window. A
 mismatch emits `auto_unfreeze_skipped reason=briefing_mismatch` and
 leaves the task Frozen — fail-safe.
 
-**Focus state (TB-226 axis 4; collapsed TB-342).** Two env knobs gate
-the ideation-exhaustion detector. See `### Focus state (axis 4)`
-below for the architecture + the resume verb (`ap2 update-goal`) vs.
-the `ap2 ack roadmap_complete` dismiss verb (TB-340: ack dismisses
-the nag, never resumes ideation; TB-342: editing goal.md is the sole
-resume signal post-collapse).
+**Ideation-exhaustion halt (TB-226 axis 4; collapsed TB-342; merged
+to core TB-345).** Two env knobs gate the ideation-exhaustion halt
+(now core ideation lifecycle in `ap2/ideation_halt.py`). See
+`### Focus state (axis 4)` below for the architecture + the resume
+verb (`ap2 update-goal`) vs. the `ap2 ack roadmap_complete` dismiss
+verb (TB-340: ack dismisses the nag, never resumes ideation; TB-342:
+editing goal.md is the sole resume signal post-collapse).
 
-- `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default `3`, min `1`, max `20`) —
-  sole-signal threshold: the daemon emits `roadmap_complete` (parking
-  the ideation trigger) after this many consecutive ideation cycles
-  produce 0 proposals. TB-283 collapsed the pre-existing two-path
-  advance mechanism (LLM-judge against `Done when:` bullets + empty-
-  cycles heuristic) to the single empty-cycles signal; TB-342
-  collapsed the multi-focus rotation pointer walk so this threshold
-  drives the global halt directly. Invalid (non-int / empty) values
+- `AP2_IDEATION_HALT_EMPTY_CYCLES` (default `3`, min `1`, max `20`) —
+  ideation-exhaustion halt threshold: number of consecutive empty
+  (0-proposal) ideation cycles since the last `goal_updated` before
+  the daemon emits `roadmap_complete` and parks the ideation trigger.
+  TB-283 collapsed the pre-existing two-path advance mechanism
+  (LLM-judge against `Done when:` bullets + empty-cycles heuristic) to
+  the single empty-cycles signal; TB-345 merged the detector into the
+  core `ap2/ideation_halt.py` module. Invalid (non-int / empty) values
   fall back to the default; values outside the clamp range are pinned
-  to the nearest bound (so a typo `0` doesn't disable the halt and
-  `999` doesn't wedge it permanently). The env name is preserved
-  verbatim across TB-342's collapse to bound blast radius — a cosmetic
-  rename to `AP2_IDEATION_EXHAUSTION_*` is a follow-up.
-- `AP2_FOCUS_AUTO_ADVANCE_DISABLED` — kill-switch. Set to `1` /
-  `true` / `yes` / `on` (same convention as `AP2_IDEATION_DISABLED`)
-  to prevent the daemon from auto-halting even when the threshold
-  trips; the daemon surfaces a `## Decisions needed from operator`
-  bullet instead so the operator can halt manually (by editing
-  goal.md). Default unset → auto-halt enabled. Env name preserved
-  verbatim across TB-342.
+  to the nearest bound, i.e. clamped to `[1,20]` (so a typo `0`
+  doesn't disable the halt and `999` doesn't wedge it permanently).
+  Replaces the deprecated alias `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+  (deprecated alias — kept as a back-compat alias for one release,
+  mapping to the same `core.ideation_halt_empty_cycles` path).
+- `AP2_IDEATION_HALT_DISABLED` — kill switch for the
+  ideation-exhaustion auto-halt. Set to `1` / `true` / `yes` / `on`
+  (same convention as `AP2_IDEATION_DISABLED`) to prevent the daemon
+  from auto-emitting `roadmap_complete` even when the threshold trips;
+  the daemon surfaces a `## Decisions needed from operator`
+  (decisions-needed) bullet instead so the operator can halt manually
+  (by editing goal.md). Default unset → false → auto-halt enabled.
+  Replaces the deprecated alias `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+  (deprecated alias — kept as a back-compat alias for one release,
+  mapping to the same `core.ideation_halt_disabled` path).
 
 **Watchdog (auto-diagnose).**
 - `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` (10800 = 3h) — idle duration
@@ -2169,7 +2174,7 @@ cycle; resets to 0 if any proposal fired. `ideation_timeout` /
 the most recent `goal_updated` event — the operator-edits-goal.md
 signal that fires from the `ap2 update-goal` drain handler; pre-edit
 empty cycles don't count against the post-edit runway. When the count
-reaches `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default `3`, clamped to
+reaches `AP2_IDEATION_HALT_EMPTY_CYCLES` (default `3`, clamped to
 `[1, 20]`), the daemon emits `roadmap_complete` and parks the
 ideation trigger.
 
@@ -2201,13 +2206,14 @@ halt emitted is gone — the trigger is `empty_cycles_heuristic`
 across the board now (the empty-cycles heuristic IS the halt).
 
 **Kill-switch.**
-`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` short-circuits the auto-halt
+`AP2_IDEATION_HALT_DISABLED=1` short-circuits the auto-halt
 even when criteria are met. The daemon surfaces a `## Decisions
 needed from operator` bullet so the operator halts manually (by
 editing goal.md). The next tick re-emits the bullet if criteria
 still trip — acceptable noise floor. Use this for full-manual
-governance when the operator wants per-halt review. Env name
-preserved verbatim across TB-342 to bound blast radius.
+governance when the operator wants per-halt review. TB-345 renamed
+this knob from `AP2_FOCUS_AUTO_ADVANCE_DISABLED` (kept as a
+deprecated back-compat alias for one release).
 
 **Operator workflow.**
 The lifecycle is fully covered by existing verbs — no dedicated
@@ -2246,7 +2252,7 @@ The lifecycle is fully covered by existing verbs — no dedicated
   the parked-ideation state still dispatches operator-added
   Backlog tasks; pause stops everything.
 - *Full-manual governance* — set
-  `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` as above. The daemon never
+  `AP2_IDEATION_HALT_DISABLED=1` as above. The daemon never
   halts on its own; the operator halts manually via the decisions-
   needed bullet.
 
@@ -2485,6 +2491,17 @@ start`; everything else propagates on the next tick after a
   Kill switch for the empty-board ideation cron. Truthy value opts
   the project out of automatic backlog refill. Mirrors
   `AP2_IDEATION_DISABLED`.
+- `core.ideation_halt_disabled` — bool, default `false`
+  (hot-reloadable). Kill switch for the ideation-exhaustion auto-halt;
+  when truthy the daemon surfaces a decisions-needed bullet instead of
+  auto-emitting `roadmap_complete`. Mirrors `AP2_IDEATION_HALT_DISABLED`
+  (deprecated alias `AP2_FOCUS_AUTO_ADVANCE_DISABLED`).
+- `core.ideation_halt_empty_cycles` — int, default `3`
+  (hot-reloadable). Number of consecutive empty (0-proposal) ideation
+  cycles since the last `goal_updated` before the daemon emits
+  `roadmap_complete` and parks the ideation trigger; clamped to
+  `[1,20]`. Mirrors `AP2_IDEATION_HALT_EMPTY_CYCLES` (deprecated alias
+  `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`).
 - `core.ideation_max_turns` — int, default `100` (hot-reloadable).
   Max turns per ideation-agent SDK query. Default raised 30 → 100
   in TB-278 after a goal.md rewrite mid-cycle hit `error_max_turns`
@@ -2668,25 +2685,19 @@ re-dispatches without operator-manual `ap2 unfreeze`.
   unfreeze`. Mirrors `AP2_AUTO_UNFREEZE_MAX_PER_TASK`; 0 disables
   the cap.
 
-### `[components.focus_advance]` — ideation-exhaustion detector (TB-226 / collapsed TB-342)
+### Ideation-exhaustion halt — now core (TB-226 / collapsed TB-342 / merged to core TB-345)
 
 Emits `roadmap_complete` to park the ideation trigger when ideation
 has produced enough consecutive empty cycles to suggest exhaustion.
 TB-342 collapsed the pre-existing multi-focus rotation pointer walk
-into this single halt. The component directory name and the env
-knob names are preserved verbatim across the collapse to bound blast
-radius (a cosmetic rename is a follow-up). The operator's resume
-path is editing `goal.md` via `ap2 update-goal`.
-
-- `components.focus_advance.auto_advance_disabled` — bool, default
-  `false` (hot-reloadable). Kill switch for the auto-halt. True
-  short-circuits `_maybe_advance_focus` even when the empty-cycles
-  threshold would otherwise fire; the daemon surfaces a decisions-
-  needed bullet instead. Mirrors `AP2_FOCUS_AUTO_ADVANCE_DISABLED`.
-- `components.focus_advance.empty_cycles` — int, default `3`
-  (hot-reloadable). Number of consecutive empty ideation cycles
-  before the daemon emits `roadmap_complete` (TB-292 / TB-342).
-  Mirrors `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`.
+into this single halt; TB-345 merged the former `focus_advance`
+component into the core `ap2/ideation_halt.py` module
+(`maybe_halt_on_exhaustion`), called directly from the daemon's
+PRE_DISPATCH phase rather than via the registry. The two tunables
+therefore live under `[core.*]` above (`core.ideation_halt_disabled`
+and `core.ideation_halt_empty_cycles`), NOT under a
+`[components.focus_advance.*]` sub-table. The operator's resume path
+is editing `goal.md` via `ap2 update-goal`.
 
 ### `[components.janitor]` — daemon-housekeeping cron (TB-309)
 

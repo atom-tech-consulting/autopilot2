@@ -116,7 +116,7 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     # the next tick without a daemon restart. Mirrors the existing
     # auto-unfreeze-family knobs above and the polarity / hot-reload
     # treatment of `AP2_VALIDATOR_JUDGE_DISABLED` /
-    # `AP2_FOCUS_AUTO_ADVANCE_DISABLED`.
+    # `AP2_IDEATION_HALT_DISABLED`.
     "AP2_AUTO_UNFREEZE_DISABLED",
     # Project-wide verify gate (Config dataclass fields)
     "AP2_VERIFY_CMD",
@@ -133,9 +133,12 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     "AP2_VALIDATOR_JUDGE_DISABLED",
     "AP2_VALIDATOR_JUDGE_MAX_TURNS",
     "AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD",
-    # Focus rotation
-    "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
-    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
+    # Ideation-exhaustion halt (TB-345 — read fresh from os.environ at
+    # tick-time inside `ideation_halt.maybe_halt_on_exhaustion` via
+    # `cfg.get_core_value(...)`, so a hot-reload propagates on the next
+    # tick without a daemon restart).
+    "AP2_IDEATION_HALT_DISABLED",
+    "AP2_IDEATION_HALT_EMPTY_CYCLES",
     # TB-280: project identity prefix for the status-report headline.
     # Operator renames should not require a daemon restart — the next
     # `## Current state` snapshot build picks up the new value via the

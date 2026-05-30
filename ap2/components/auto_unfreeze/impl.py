@@ -91,8 +91,8 @@ def _is_auto_unfreeze_disabled(cfg: Config) -> bool:
     (TB-271) and the `monkeypatch.setenv(...); helper(cfg)` test idiom
     both stay bit-for-bit compatible — call-time env-first precedence
     inside `get_component_value` preserves the pre-migration lazy-read
-    pattern. Same truthy set as `goal.auto_advance_disabled()`'s
-    `AP2_FOCUS_AUTO_ADVANCE_DISABLED` parse and consistent with
+    pattern. Same truthy set as the sibling `AP2_IDEATION_HALT_DISABLED`
+    parse and consistent with
     `Manifest.is_enabled`'s falsy enumeration
     (`"", "0", "false", "no", "off"`) so the registry-level and
     self-gate paths agree on what counts as "set".

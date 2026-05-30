@@ -453,7 +453,7 @@ def test_janitor_judge_max_turns_invalid_value_falls_back_to_default(
 
     The shift is deliberate: an operator typo on a tunable should not
     crash the whole janitor cron run; the migration aligns janitor with
-    every other axis-5 cluster (`_advance_empty_cycles_threshold`,
+    every other axis-5 cluster (`_ideation_halt_empty_cycles_threshold`,
     `_task_stuck_threshold_s`, etc.) which all return the default on
     bad values. This test pins the new contract so a future revert
     surfaces here.

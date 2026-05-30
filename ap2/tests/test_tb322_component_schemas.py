@@ -5,9 +5,11 @@ focus).
 Pins the axis-(3) cleavage of the focus (goal.md L331-340):
 
   1. Every discovered component manifest (the janitor canary from
-     TB-321 + the six TB-322 targets — mattermost, attention,
-     focus_advance, auto_unfreeze, auto_approve, validator_judge)
-     carries a non-empty `config_schema` dict.
+     TB-321 + the remaining TB-322 targets — mattermost, attention,
+     auto_unfreeze, auto_approve, validator_judge) carries a
+     non-empty `config_schema` dict. (TB-345 merged the former
+     focus_advance component into the core `ap2/ideation_halt.py`
+     module, so it is no longer a discoverable component.)
   2. Parity: every `AP2_*` knob each component subpackage reads via
      `os.environ.get` has a matching `config_schema` entry on the
      same component's manifest. The parity walk is the regression
@@ -20,7 +22,7 @@ Pins the axis-(3) cleavage of the focus (goal.md L331-340):
      `hot_reloadable` flag to know when to thread a value through
      the per-tick refresh path; today it documents intent).
   4. `aggregate_schemas(default_registry())` returns the union of
-     all 7 component schemas with no name collisions across
+     all 6 component schemas with no name collisions across
      components — the validator (TB-321) walks this surface, and a
      collision would mean two components are claiming the same
      `[components.foo].bar` key.
@@ -28,11 +30,10 @@ Pins the axis-(3) cleavage of the focus (goal.md L331-340):
 Source-of-truth shape: the per-component knob list is the set of
 `os.environ.get("AP2_*")` call sites the parity walk discovers via
 Grep. The schema declarations may include extra knobs the
-subpackage doesn't read directly today (e.g. focus_advance owns
-`AP2_FOCUS_AUTO_ADVANCE_DISABLED` but reads it via `goal.py`
-helpers); the parity check is one-way (env_read → schema entry),
-so extras are fine. The validator's reject-unknown-key path
-already pins the dual surface.
+subpackage doesn't read directly today (a component may own a knob
+but read it via a core helper); the parity check is one-way
+(env_read → schema entry), so extras are fine. The validator's
+reject-unknown-key path already pins the dual surface.
 """
 from __future__ import annotations
 
@@ -52,7 +53,6 @@ _EXPECTED_COMPONENTS: tuple[str, ...] = (
     "attention",
     "auto_approve",
     "auto_unfreeze",
-    "focus_advance",
     "janitor",
     "mattermost",
     "validator_judge",
@@ -72,7 +72,6 @@ _PARITY_WALK_COMPONENTS: tuple[str, ...] = (
     "attention",
     "auto_approve",
     "auto_unfreeze",
-    "focus_advance",
     "mattermost",
     "validator_judge",
 )
@@ -132,10 +131,6 @@ _ENV_TO_SCHEMA_KEY: dict[str, str] = {
     "AP2_AUTO_APPROVE_COST_APPROACH_PCT": "cost_approach_pct",
     "AP2_ATTENTION_DEBOUNCE_S": "debounce_s",
     "AP2_ATTENTION_IMMEDIATE_PUSH": "immediate_push",
-    # focus_advance (not env-read by the subpackage itself today;
-    # listed for completeness in case axis-5 relocates the reads)
-    "AP2_FOCUS_AUTO_ADVANCE_DISABLED": "auto_advance_disabled",
-    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES": "empty_cycles",
     # auto_unfreeze
     "AP2_AUTO_UNFREEZE_DISABLED": "disabled",
     "AP2_AUTO_UNFREEZE_FIX_SHAPES": "fix_shapes",
@@ -286,8 +281,6 @@ _ENV_OWNER: dict[str, str] = {
     "AP2_AUTO_APPROVE_COST_APPROACH_PCT": "attention",
     "AP2_ATTENTION_DEBOUNCE_S": "attention",
     "AP2_ATTENTION_IMMEDIATE_PUSH": "attention",
-    "AP2_FOCUS_AUTO_ADVANCE_DISABLED": "focus_advance",
-    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES": "focus_advance",
     "AP2_AUTO_UNFREEZE_DISABLED": "auto_unfreeze",
     "AP2_AUTO_UNFREEZE_FIX_SHAPES": "auto_unfreeze",
     "AP2_AUTO_UNFREEZE_DRY_RUN": "auto_unfreeze",
@@ -354,15 +347,17 @@ def test_hot_reloadable_flag_matches_env_reload_set():
 
 
 # ---------------------------------------------------------------------
-# 4. aggregate_schemas: union of all 7 components, no collisions.
+# 4. aggregate_schemas: union of all 6 components, no collisions.
 # ---------------------------------------------------------------------
 
 
 def test_aggregate_schemas_returns_all_seven_component_schemas():
     """`aggregate_schemas(default_registry())` walks every manifest
-    and returns the per-component dict union. Post-TB-322 the union
-    contains all 7 components (the 6 axis-3 targets + the janitor
-    canary from TB-321); pre-TB-322 only janitor was present."""
+    and returns the per-component dict union. Post-TB-345 the union
+    contains 6 components (the remaining axis-3 targets + the janitor
+    canary from TB-321) — the former focus_advance component was
+    merged into the core `ap2/ideation_halt.py` module; pre-TB-322
+    only janitor was present."""
     schemas = aggregate_schemas(default_registry())
     assert set(schemas) == set(_EXPECTED_COMPONENTS), (
         f"TB-322: aggregate_schemas must surface every TB-322 "
@@ -401,12 +396,14 @@ def test_aggregate_schemas_has_no_cross_component_key_collisions():
     # publish the key — the attention component's
     # `_cost_approach_pct(cfg)` reads it via `cfg.get_component_value`
     # so the howto.md `test_every_config_key_documented` gate stays
-    # green): janitor(4) + mattermost(3) + attention(5)
-    # + focus_advance(2) + auto_unfreeze(5) + auto_approve(6)
-    # + validator_judge(4) = 29 distinct (component, key) pairs.
-    assert len(seen) == 29, (
+    # green); post-TB-345 (the focus_advance component and its 2 schema
+    # keys merged into the core `ap2/ideation_halt.py` module):
+    # janitor(4) + mattermost(3) + attention(5) + auto_unfreeze(5)
+    # + auto_approve(6) + validator_judge(4) = 27 distinct
+    # (component, key) pairs.
+    assert len(seen) == 27, (
         f"TB-322: total config-schema entries across all components "
-        f"changed from 29; got {len(seen)}. If the change is "
+        f"changed from 27; got {len(seen)}. If the change is "
         f"intentional, bump this assertion and document the new "
         f"shape in the TB-322 progress entry."
     )

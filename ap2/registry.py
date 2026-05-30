@@ -427,9 +427,9 @@ class Registry:
         regression-pin (`uv run pytest -q
         ap2/tests/test_tb310_tick_hook_protocol.py`) and for
         observable-behavior preservation: today's `daemon._tick` fires
-        `auto_unfreeze` (step 0.5) then `focus_advance` (step 0.6) on
-        PRE_DISPATCH, and the alphabetical sort (`a` < `f`) preserves
-        that order without an explicit ordering directive. Future
+        `auto_unfreeze` (the sole PRE_DISPATCH registry hook post-TB-345)
+        and then calls the core `ideation_halt.maybe_halt_on_exhaustion`
+        directly (step 0.6 — no longer a registry hook). Future
         components that need a non-alphabetical order will declare a
         `depends_on`-style constraint on the manifest (axis (2) leaves
         the topological-sort path as a stub — the `dependencies` field

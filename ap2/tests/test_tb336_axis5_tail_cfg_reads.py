@@ -11,10 +11,11 @@ cover now route through ``cfg.get_core_value`` /
 
   - ``ap2/web.py``::``is_web_disabled`` → ``cfg.get_core_value("web_disabled", …)``
   - ``ap2/web.py``::``daemon_web_port`` → ``cfg.get_core_value("web_port", …)``
-  - ``ap2/goal.py``::``advance_empty_cycles_threshold`` →
-    ``cfg.get_component_value("focus_advance", "empty_cycles", …)``
-  - ``ap2/goal.py``::``auto_advance_disabled`` →
-    ``cfg.get_component_value("focus_advance", "auto_advance_disabled", …)``
+  - (TB-345 removed the former ``ap2/goal.py`` focus_advance helpers
+    ``advance_empty_cycles_threshold`` / ``auto_advance_disabled``;
+    the residual detector + its two knobs moved to the core
+    ``ap2/ideation_halt.py`` module, read via
+    ``cfg.get_core_value("ideation_halt_*", …)``.)
   - ``ap2/doctor.py``::``_verify_gate_state`` →
     ``cfg.get_core_value("verify_cmd", …)`` +
     ``cfg.get_core_value("verify_timeout_s", …)``
@@ -84,7 +85,7 @@ from ap2.config_compat import (
     reset_env_deprecated_emit_for_tests,
 )
 from ap2.init import init_project
-from ap2 import doctor, goal, web
+from ap2 import doctor, web
 
 
 # Repository root, derived from this file's location:
@@ -188,7 +189,9 @@ def test_positive_cfg_helper_read_path_present_in_migrated_files():
     """
     cases = [
         ("ap2/web.py", r"get_core_value\([\"']web_(port|disabled)[\"']"),
-        ("ap2/goal.py", r"get_component_value\([\"']focus_advance[\"']"),
+        # TB-345: the focus_advance cfg-read helpers were deleted from
+        # goal.py when the component merged into the core ideation_halt
+        # module, so goal.py no longer calls get_component_value here.
         ("ap2/doctor.py", r"get_core_value\([\"']verify_(cmd|timeout_s)[\"']"),
         ("ap2/ideation.py", r"get_core_value\([\"']ideation_max_turns[\"']"),
         (
@@ -238,26 +241,6 @@ _FLAT_PARITY_CASES = [
         "AP2_CORE_WEB_PORT",
         "9999",
         lambda c: c.get_core_value("web_port", default=""),
-    ),
-    (
-        "focus_advance.empty_cycles",
-        "components.focus_advance.empty_cycles",
-        "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
-        "AP2_COMPONENTS_FOCUS_ADVANCE_EMPTY_CYCLES",
-        "7",
-        lambda c: c.get_component_value(
-            "focus_advance", "empty_cycles", default="",
-        ),
-    ),
-    (
-        "focus_advance.auto_advance_disabled",
-        "components.focus_advance.auto_advance_disabled",
-        "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
-        "AP2_COMPONENTS_FOCUS_ADVANCE_AUTO_ADVANCE_DISABLED",
-        "1",
-        lambda c: c.get_component_value(
-            "focus_advance", "auto_advance_disabled", default="",
-        ),
     ),
     (
         "verify_cmd",
@@ -432,40 +415,12 @@ def test_web_is_web_disabled_typeerror_on_bad_cfg():
         web.is_web_disabled(cfg="not-a-cfg")  # type: ignore[arg-type]
 
 
-def test_goal_advance_empty_cycles_threshold_cfg_kwarg(
-    cfg, clean_env, emit_reset,
-):
-    """`goal.advance_empty_cycles_threshold(cfg=cfg)` reads via
-    `cfg.get_component_value("focus_advance", "empty_cycles", …)`.
-    """
-    clean_env.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "5")
-    assert goal.advance_empty_cycles_threshold(cfg=cfg) == 5
-
-
-def test_goal_advance_empty_cycles_threshold_back_compat(
-    clean_env, emit_reset,
-):
-    """Pre-cfg call (TB-226 unit-pin shape) still reads via `os.getenv`
-    — the `goal.*` env-only helpers stay test-compatible.
-    """
-    clean_env.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "8")
-    assert goal.advance_empty_cycles_threshold() == 8
-
-
-def test_goal_auto_advance_disabled_cfg_kwarg(cfg, clean_env, emit_reset):
-    """`goal.auto_advance_disabled(cfg=cfg)` reads via the focus_advance
-    component-key helper.
-    """
-    clean_env.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
-    assert goal.auto_advance_disabled(cfg=cfg) is True
-    clean_env.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    assert goal.auto_advance_disabled(cfg=cfg) is False
-
-
-def test_goal_auto_advance_disabled_back_compat(clean_env, emit_reset):
-    """Pre-cfg call still reads via `os.getenv`."""
-    clean_env.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "yes")
-    assert goal.auto_advance_disabled() is True
+# TB-345: the per-call-site pins for `goal.advance_empty_cycles_threshold`
+# / `goal.auto_advance_disabled` were removed here — those goal.py helpers
+# were deleted when the focus_advance component merged into the core
+# `ap2/ideation_halt.py` module. The renamed core helpers
+# (`ideation_halt._ideation_halt_empty_cycles_threshold(cfg)` /
+# `_ideation_halt_disabled(cfg)`) are pinned in `test_ideation_halt.py`.
 
 
 def test_doctor_verify_gate_state_cfg_kwarg(cfg, clean_env, emit_reset):

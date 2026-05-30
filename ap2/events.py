@@ -132,12 +132,13 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     consumers (`automation_status.collect_window_focus_rotation`'s
     `focus_advanced` list, the cron status-report digest) treat the
     event as a no-op going forward.
-  - `roadmap_complete` (TB-226 / collapsed TB-342) — ideation has
-    produced zero proposals for `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
-    consecutive cycles (TB-342 collapsed the pre-existing multi-focus
-    rotation halt into this single detector; the event name is
-    preserved verbatim across the collapse to bound blast radius —
-    cosmetic rename is a follow-up). TB-275: ideation parks on
+  - `roadmap_complete` (TB-226 / collapsed TB-342 / merged-to-core
+    TB-345) — ideation has produced zero proposals for
+    `AP2_IDEATION_HALT_EMPTY_CYCLES` consecutive cycles (TB-342
+    collapsed the pre-existing multi-focus rotation halt into this
+    single detector, TB-345 merged it into the core
+    `ap2/ideation_halt.py` module; the event name is preserved
+    verbatim to bound blast radius). TB-275: ideation parks on
     subsequent ticks (`_maybe_ideate` skips with
     `reason=roadmap_complete`) until the operator edits goal.md via
     `ap2 update-goal` (the drain handler emits `goal_updated` and
@@ -417,7 +418,7 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     failure mode "Ideation reliably proposes goal-aligned next steps
     that substantively advance the goal (not just goal-shaped pro-
     forma compliance)": under the prior single-name exit predicate,
-    the auto-advance threshold (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`,
+    the ideation-halt threshold (`AP2_IDEATION_HALT_EMPTY_CYCLES`,
     default 3) was structurally unreachable because the agent never
     emitted the event the counter was looking for on the 0-proposal
     path.

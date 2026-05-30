@@ -124,7 +124,7 @@ Failure paths (`task_timeout`, `task_error`) try `_infer_result_from_head` first
 | `.cc-autopilot/pipelines/<name>-<pid>.log` | detached pipeline subprocess | none | gitignored |
 | `.cc-autopilot/debug/<ts>-<label>.{prompt,stream,messages}` | daemon (`_prep_debug_dumps`) | none | gitignored |
 | `CLAUDE.md` | operator (Next task ID auto-bumped by daemon at drain time — TB-141 deferred from per-add to once per drain pass) | none | yes |
-| `.cc-autopilot/focus_pointer.json` | daemon (`_maybe_advance_focus`; TB-226) | `fcntl.flock` (`locked_inplace`) | no (gitignored) |
+| `.cc-autopilot/focus_pointer.json` | daemon (`ideation_halt.maybe_halt_on_exhaustion`; TB-226 / TB-345) | `fcntl.flock` (`locked_inplace`) | no (gitignored) |
 
 State-file commits land with subject `state: TB-N → Complete` (per task) or `state: cron <name>` / `state: ideation` (per cron/ideation run). They ride alongside the task agent's source commit so `git log` tracks board evolution next to code evolution.
 
@@ -190,11 +190,12 @@ ap2/
 │                         # CLI presence
 ├── env_reload.py         # .cc-autopilot/env hot-reload (TB-258 — re-reads Config without daemon restart)
 ├── events.py             # append-only JSONL writer, tail(), MEANINGFUL_EVENT_TYPES
-├── focus_advance.py      # _maybe_advance_focus (TB-226 — focus_pointer.json bookkeeping +
-│                         # roadmap_complete emission)
 ├── goal.py               # goal.md parsing + roadmap_exhausted predicate consumed by ideation / dispatch /
 │                         # auto-approve gates
 ├── ideation.py           # _maybe_ideate (empty-board trigger + cooldown + TB-246 roadmap_complete skip)
+├── ideation_halt.py      # maybe_halt_on_exhaustion (TB-345 — CORE ideation-exhaustion halt; merged the
+│                         # former focus_advance component; focus_pointer.json bookkeeping +
+│                         # roadmap_complete emission; called from the daemon's PRE_DISPATCH phase, not the registry)
 ├── init.py               # init_project (gitignores, dirs, board templates) + BRIEFING_TEMPLATE
 ├── insights.py           # maybe_regenerate_index (.cc-autopilot/insights/_index.md)
 ├── janitor.py            # ap2 janitor — repo-hygiene findings (TB-217 family)
@@ -347,7 +348,7 @@ Pre-TB-115's two-task split (launch + auto-created Backlog validation with `(blo
 
 **Stuck-blocker** — `Board._is_blocker_satisfied` checks each `(blocked on: ...)` token. `TB-N` blockers are satisfied when the named task is in Complete; unknown schemes fail-safe (including the retired `pid:N@TS` scheme — any straggler from a pre-TB-115 / pre-TB-117 board sits in Backlog until the operator removes the clause). `diagnose.board_health["unsatisfiable_blocks"]` surfaces the corner case where a Backlog task is blocked on a Frozen task (will never auto-promote).
 
-**Roadmap exhaustion** — `_maybe_advance_focus` (TB-226) advances the in-memory focus-list pointer (`.cc-autopilot/focus_pointer.json`) as each `## Current focus:` heading in goal.md exhausts; when the pointer crosses past the last heading, the daemon emits `roadmap_complete` (once). TB-275: this parks the ideation TRIGGER only (`_maybe_ideate` emits `ideation_skipped reason=roadmap_complete`); task dispatch is NOT affected, so already-queued Backlog tasks (operator-added via `ap2 add`, operator-approved via `ap2 approve`, or previously auto-approved) continue to auto-promote and drain. Operator extends the roadmap via `ap2 update-goal` (adds new `## Current focus:` headings, re-arms ideation) or dismisses the notice via `ap2 ack roadmap_complete`. `ap2 pause` remains the explicit full-stop. The two event types — `focus_advanced` and `roadmap_complete` — provide the audit trail. Operator can re-engage a previously-exhausted focus via `ap2 rewind-focus TITLE [--reason TEXT]` (TB-295), which atomically resets the pointer + emits a synthetic `focus_advanced trigger=operator_rewind` event so the empty-cycles counter cutoff respects the rewind. Direct `.cc-autopilot/focus_pointer.json` edits are NOT supported — they produce no event and leave pre-rewind empty cycles counting against the rewound focus's window.
+**Roadmap exhaustion** — `ideation_halt.maybe_halt_on_exhaustion` (TB-226; merged to the core `ap2/ideation_halt.py` module in TB-345, called directly from the daemon's PRE_DISPATCH phase rather than via the component registry) advances the in-memory focus-list pointer (`.cc-autopilot/focus_pointer.json`) as each `## Current focus:` heading in goal.md exhausts; when the pointer crosses past the last heading, the daemon emits `roadmap_complete` (once). TB-275: this parks the ideation TRIGGER only (`_maybe_ideate` emits `ideation_skipped reason=roadmap_complete`); task dispatch is NOT affected, so already-queued Backlog tasks (operator-added via `ap2 add`, operator-approved via `ap2 approve`, or previously auto-approved) continue to auto-promote and drain. Operator extends the roadmap via `ap2 update-goal` (adds new `## Current focus:` headings, re-arms ideation) or dismisses the notice via `ap2 ack roadmap_complete`. `ap2 pause` remains the explicit full-stop. The two event types — `focus_advanced` and `roadmap_complete` — provide the audit trail. Operator can re-engage a previously-exhausted focus via `ap2 rewind-focus TITLE [--reason TEXT]` (TB-295), which atomically resets the pointer + emits a synthetic `focus_advanced trigger=operator_rewind` event so the empty-cycles counter cutoff respects the rewind. Direct `.cc-autopilot/focus_pointer.json` edits are NOT supported — they produce no event and leave pre-rewind empty cycles counting against the rewound focus's window.
 
 **Malformed task line** — `Board._parse` flags any line that doesn't match `TASK_LINE_RE`; the daemon emits a deduped `board_malformed_line` event in step 3 of `_tick`. Without this, an out-of-band edit (e.g. a `(<sha>)` annotation between `**TB-N**` and `**Title**`) silently strands every task that depends on the affected one.
 

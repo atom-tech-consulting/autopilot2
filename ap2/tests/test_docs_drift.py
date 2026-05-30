@@ -70,6 +70,21 @@ _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     "AP2_CORE_",        # TB-323 — sectioned-env f-string prefix, not an operator knob
     "AP2_DIR",          # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     "AP2_REAL_SDK",     # TB-323 — forward-compat placeholder per goal.md L358, not currently read
+    # TB-345 — DEPRECATED back-compat aliases. The `focus_advance`
+    # component was merged into the core `ap2/ideation_halt.py` module
+    # and these two flat names were renamed to the `AP2_IDEATION_HALT_*`
+    # namespace (the new canonical names ARE template+docs gated). The
+    # old names survive ONLY in `ap2/config_compat.py`'s FLAT_TO_SECTIONED
+    # deprecated-alias map (and tests) for one release; they are
+    # intentionally absent from `init.py`'s ENV_TEMPLATE / exempt set so
+    # a fresh-project scaffold never advertises a deprecated knob. Exempt
+    # them from the template-vs-exempt + howto-mention gates here so the
+    # alias map doesn't force the deprecated name back into the scaffold.
+    # (howto.md still documents them as deprecated aliases for an operator
+    # grepping the old name — that mention is belt-and-suspenders, not
+    # gate-required.) A later task drops the aliases entirely.
+    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
+    "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
 })
 
 

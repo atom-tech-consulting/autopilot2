@@ -54,14 +54,14 @@ would re-introduce the TB-300 unreachable-threshold bug) or revert
 the TB-342 cutoff back to a focus-scoped one.
 
 This module is a pure unit test against
-`ap2.components.focus_advance._ideation_empty_against_focus` — no
+`ap2.ideation_halt._consecutive_empty_ideation_cycles` — no
 fixtures, no disk I/O, just constructed event-tail dicts. Behavioral
 coverage of the same surface against the live daemon harness lives in
 `test_tb226_focus_rotation.py`.
 """
 from __future__ import annotations
 
-from ap2.components.focus_advance import _ideation_empty_against_focus
+from ap2.ideation_halt import _consecutive_empty_ideation_cycles
 
 
 # ===========================================================================
@@ -130,26 +130,26 @@ def _error_cycle() -> list[dict]:
 
 def test_empty_cycle_contributes_one():
     """An empty cycle (entry + complete) bumps the counter by 1."""
-    assert _ideation_empty_against_focus(_empty_cycle()) == 1
+    assert _consecutive_empty_ideation_cycles(_empty_cycle()) == 1
 
 
 def test_productive_cycle_resets_to_zero():
     """A productive cycle (entry + proposal + complete) resets the
     counter to 0."""
-    assert _ideation_empty_against_focus(_productive_cycle()) == 0
+    assert _consecutive_empty_ideation_cycles(_productive_cycle()) == 0
 
 
 def test_timeout_cycle_does_not_count():
     """A timeout cycle leaves the count unchanged. Infrastructure
     failure is not 'ideation chose not to propose' — treating it as
     empty would let transient SDK slowness falsely trip the halt."""
-    assert _ideation_empty_against_focus(_timeout_cycle()) == 0
+    assert _consecutive_empty_ideation_cycles(_timeout_cycle()) == 0
 
 
 def test_error_cycle_does_not_count():
     """Same logic as timeout: an error cycle is infrastructure
     failure, not 'ideation reasoned and found nothing.'"""
-    assert _ideation_empty_against_focus(_error_cycle()) == 0
+    assert _consecutive_empty_ideation_cycles(_error_cycle()) == 0
 
 
 # ===========================================================================
@@ -163,7 +163,7 @@ def test_empty_cycle_via_cycle_summary_contributes_one():
     Pins the TB-300 invariant — the pre-TB-300 single-name predicate
     silently dropped this shape on the floor, leaving the
     auto-halt threshold structurally unreachable."""
-    assert _ideation_empty_against_focus(_empty_cycle_via_summary()) == 1
+    assert _consecutive_empty_ideation_cycles(_empty_cycle_via_summary()) == 1
 
 
 def test_three_empty_cycles_via_cycle_summary_reach_threshold():
@@ -174,14 +174,14 @@ def test_three_empty_cycles_via_cycle_summary_reach_threshold():
         + _empty_cycle_via_summary()
         + _empty_cycle_via_summary()
     )
-    assert _ideation_empty_against_focus(tail) == 3
+    assert _consecutive_empty_ideation_cycles(tail) == 3
 
 
 def test_productive_cycle_via_cycle_summary_resets():
     """A productive cycle that exits via `ideation_cycle_summary` (a
     proposal landed AND the summary name fired — the rare-but-valid
     cross-shape; the counter must still reset to 0)."""
-    assert _ideation_empty_against_focus(_productive_cycle_via_summary()) == 0
+    assert _consecutive_empty_ideation_cycles(_productive_cycle_via_summary()) == 0
 
 
 def test_mixed_complete_then_cycle_summary_empties_count():
@@ -193,7 +193,7 @@ def test_mixed_complete_then_cycle_summary_empties_count():
         + _empty_cycle_via_summary()
         + _empty_cycle_via_summary()
     )
-    assert _ideation_empty_against_focus(tail) == 2
+    assert _consecutive_empty_ideation_cycles(tail) == 2
 
 
 def test_interleaved_exit_marker_names_count_uniformly():
@@ -205,7 +205,7 @@ def test_interleaved_exit_marker_names_count_uniformly():
         + _empty_cycle()
         + _empty_cycle_via_summary()
     )
-    assert _ideation_empty_against_focus(tail) == 4
+    assert _consecutive_empty_ideation_cycles(tail) == 4
 
 
 # ===========================================================================
@@ -216,13 +216,13 @@ def test_interleaved_exit_marker_names_count_uniformly():
 def test_three_consecutive_empty_cycles_count_to_three():
     """Three consecutive empty cycles → count = 3."""
     tail = _empty_cycle() + _empty_cycle() + _empty_cycle()
-    assert _ideation_empty_against_focus(tail) == 3
+    assert _consecutive_empty_ideation_cycles(tail) == 3
 
 
 def test_empty_empty_productive_resets():
     """Two empties followed by a productive cycle → count = 0."""
     tail = _empty_cycle() + _empty_cycle() + _productive_cycle()
-    assert _ideation_empty_against_focus(tail) == 0
+    assert _consecutive_empty_ideation_cycles(tail) == 0
 
 
 def test_productive_then_three_empties_count_to_three():
@@ -233,20 +233,20 @@ def test_productive_then_three_empties_count_to_three():
         + _empty_cycle()
         + _empty_cycle()
     )
-    assert _ideation_empty_against_focus(tail) == 3
+    assert _consecutive_empty_ideation_cycles(tail) == 3
 
 
 def test_timeouts_interleaved_do_not_perturb():
     """A timeout cycle between two empty cycles does not reset and
     does not increment — count remains 2."""
     tail = _empty_cycle() + _timeout_cycle() + _empty_cycle()
-    assert _ideation_empty_against_focus(tail) == 2
+    assert _consecutive_empty_ideation_cycles(tail) == 2
 
 
 def test_errors_interleaved_do_not_perturb():
     """Same shape as the timeout interleave but with an error cycle."""
     tail = _empty_cycle() + _error_cycle() + _empty_cycle()
-    assert _ideation_empty_against_focus(tail) == 2
+    assert _consecutive_empty_ideation_cycles(tail) == 2
 
 
 # ===========================================================================
@@ -256,7 +256,7 @@ def test_errors_interleaved_do_not_perturb():
 
 def test_empty_tail_returns_zero():
     """No events at all → count = 0."""
-    assert _ideation_empty_against_focus([]) == 0
+    assert _consecutive_empty_ideation_cycles([]) == 0
 
 
 def test_ideation_skipped_outside_any_cycle_ignored():
@@ -267,7 +267,7 @@ def test_ideation_skipped_outside_any_cycle_ignored():
         _evt("ideation_skipped", reason="cooldown"),
         _evt("ideation_skipped", reason="roadmap_complete"),
     ] + _empty_cycle()
-    assert _ideation_empty_against_focus(tail) == 1
+    assert _consecutive_empty_ideation_cycles(tail) == 1
 
 
 def test_truncated_cycle_without_entry_marker_ignored():
@@ -279,7 +279,7 @@ def test_truncated_cycle_without_entry_marker_ignored():
         _evt("ideation_complete"),  # orphan — no preceding entry
         _evt("ideation_proposal_recorded", task="TB-X"),  # orphan
     ] + _empty_cycle()
-    assert _ideation_empty_against_focus(tail) == 1
+    assert _consecutive_empty_ideation_cycles(tail) == 1
 
 
 # ===========================================================================
@@ -298,7 +298,7 @@ def test_goal_updated_cutoff_excludes_pre_edit_events():
         + [_evt("goal_updated", reason="extension")]
         + _empty_cycle()  # only this one counts
     )
-    assert _ideation_empty_against_focus(tail) == 1
+    assert _consecutive_empty_ideation_cycles(tail) == 1
 
 
 def test_most_recent_goal_updated_is_the_cutoff():
@@ -313,7 +313,7 @@ def test_most_recent_goal_updated_is_the_cutoff():
         + _empty_cycle()  # only this one counts
         + _empty_cycle()
     )
-    assert _ideation_empty_against_focus(tail) == 2
+    assert _consecutive_empty_ideation_cycles(tail) == 2
 
 
 def test_no_goal_updated_event_walks_whole_tail():
@@ -322,4 +322,4 @@ def test_no_goal_updated_event_walks_whole_tail():
     where goal.md was written by `init_project`, not updated through
     the queue)."""
     tail = _empty_cycle() + _empty_cycle()
-    assert _ideation_empty_against_focus(tail) == 2
+    assert _consecutive_empty_ideation_cycles(tail) == 2

@@ -1,12 +1,11 @@
 """TB-302 regression pin: the roadmap-complete branch of
-`ap2/components/focus_advance/__init__.py:_maybe_advance_focus` must
-NOT append a `Roadmap complete: ...` bullet to
-`.cc-autopilot/ideation_state.md`.
+`ap2/ideation_halt.py:maybe_halt_on_exhaustion` must NOT append a
+`Roadmap complete: ...` bullet to `.cc-autopilot/ideation_state.md`.
 
-TB-313 (axis 5) relocated the module body from the flat path
-`ap2/focus_advance.py` into the subpackage
-`ap2/components/focus_advance/__init__.py`; the source-level pins
-below import via `from ap2.components import focus_advance` so the
+TB-345 merged the `focus_advance` component's residual detector into
+the new core module `ap2/ideation_halt.py`, renaming the entry point
+to the synchronous `maybe_halt_on_exhaustion(cfg)`; the source-level
+pins below import via `from ap2 import ideation_halt` so the
 docstring / source-line / docstring-TB-302 checks track the new
 location.
 
@@ -62,8 +61,8 @@ rotation pass).
 Other callers of `_append_decisions_needed_bullet` STAY
 unchanged — they surface conditions that are NOT redundantly
 signaled elsewhere:
-  - The kill-switch branch in the SAME `_maybe_advance_focus`
-    (`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` set when criteria would
+  - The kill-switch branch in the SAME `maybe_halt_on_exhaustion`
+    (`AP2_IDEATION_HALT_DISABLED=1` set when criteria would
     advance) — operator-killed-but-criteria-met has no equivalent
     focus-line surface; the operator needs the bullet to know to
     `ap2 update-goal` manually.
@@ -72,19 +71,19 @@ signaled elsewhere:
 
 Behavioral pins covered here:
 
-  - When `_maybe_advance_focus` advances past the last focus, the
-    `roadmap_complete` event IS emitted (events.jsonl has the
-    entry).
+  - When `maybe_halt_on_exhaustion` trips the empty-cycles
+    threshold, the `roadmap_complete` event IS emitted (events.jsonl
+    has the entry).
   - `pointer["roadmap_complete_emitted"]` IS set to True.
   - `ideation_state.md` is NOT modified — no
     `Roadmap complete:` bullet appended; if the file exists
     before the call, its bytes are unchanged across the call.
-  - Subsequent ticks (still past-last-focus,
+  - Subsequent ticks (still exhausted,
     `roadmap_complete_emitted=true`) emit NO duplicate
     `roadmap_complete` events and don't modify
     `ideation_state.md`.
   - The kill-switch path
-    (`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` set when criteria
+    (`AP2_IDEATION_HALT_DISABLED=1` set when criteria
     would advance) DOES still emit a
     `## Decisions needed from operator` bullet via
     `_append_decisions_needed_bullet` — that's a different code
@@ -93,19 +92,16 @@ Behavioral pins covered here:
   - Source-level pin: the `_append_decisions_needed_bullet` call
     no longer appears within 5 lines of a
     `roadmap_complete_emitted` reference in
-    `ap2/components/focus_advance/__init__.py` (the Verification
-    bullet's grep surface).
+    `ap2/ideation_halt.py` (the Verification bullet's grep surface).
 """
 from __future__ import annotations
 
-import asyncio
 import re
 from pathlib import Path
 
 import pytest
 
-from ap2 import daemon, events, goal
-from ap2.components import focus_advance
+from ap2 import events, goal, ideation_halt
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -175,12 +171,12 @@ def test_roadmap_complete_emits_event_and_sets_pointer_flag(cfg, monkeypatch):
     removed (TB-302). TB-342: the trigger is now
     `empty_cycles_heuristic` (the rotation `pointer_past_last`
     value retired with the multi-focus pointer walk)."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_empty_cycle(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     tail = events.tail(cfg.events_file, 50)
     rc = [e for e in tail if e.get("type") == "roadmap_complete"]
@@ -196,8 +192,8 @@ def test_roadmap_complete_emits_event_and_sets_pointer_flag(cfg, monkeypatch):
 def test_roadmap_complete_does_not_create_ideation_state(cfg, monkeypatch):
     """When `ideation_state.md` does NOT exist before the detector
     pass, the roadmap-complete branch must NOT create it."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_empty_cycle(cfg)
 
@@ -206,7 +202,7 @@ def test_roadmap_complete_does_not_create_ideation_state(cfg, monkeypatch):
         ideation_state.unlink()
     assert not ideation_state.exists()
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     assert not ideation_state.exists(), (
         "TB-302: the roadmap-complete branch must not create "
@@ -218,8 +214,8 @@ def test_roadmap_complete_does_not_modify_existing_ideation_state(cfg, monkeypat
     """When `ideation_state.md` exists before the detector pass with
     pre-existing content, the roadmap-complete branch must leave its
     bytes unchanged."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_empty_cycle(cfg)
 
@@ -233,7 +229,7 @@ def test_roadmap_complete_does_not_modify_existing_ideation_state(cfg, monkeypat
     ideation_state.write_text(pre_content)
     pre_bytes = ideation_state.read_bytes()
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     post_bytes = ideation_state.read_bytes()
     assert post_bytes == pre_bytes
@@ -246,13 +242,13 @@ def test_subsequent_ticks_dont_re_emit_or_modify_state(cfg, monkeypatch):
     """After the first detection sets
     `roadmap_complete_emitted=true`, subsequent calls to
     `_maybe_advance_focus` short-circuit."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_empty_cycle(cfg)
 
     # First tick: emits the event, sets the flag.
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     ideation_state = _ideation_state_path(cfg)
     snapshot_exists = ideation_state.exists()
@@ -262,7 +258,7 @@ def test_subsequent_ticks_dont_re_emit_or_modify_state(cfg, monkeypatch):
 
     # Subsequent ticks: short-circuit on the flag.
     for _ in range(3):
-        asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+        ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     tail = events.tail(cfg.events_file, 50)
     rc = [e for e in tail if e.get("type") == "roadmap_complete"]
@@ -278,17 +274,17 @@ def test_subsequent_ticks_dont_re_emit_or_modify_state(cfg, monkeypatch):
 
 
 def test_kill_switch_path_still_writes_decisions_needed_bullet(cfg, monkeypatch):
-    """The kill-switch branch (`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1`
+    """The kill-switch branch (`AP2_IDEATION_HALT_DISABLED=1`
     set when criteria would advance) DOES still write a
     `## Decisions needed from operator` bullet via
     `_append_decisions_needed_bullet`. TB-302 scoped the removal
     to the roadmap-complete branch ONLY."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
-    monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
     _emit_empty_cycle(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     pointer = goal.load_pointer(cfg)
     assert pointer["roadmap_complete_emitted"] is False, (
@@ -301,37 +297,29 @@ def test_kill_switch_path_still_writes_decisions_needed_bullet(cfg, monkeypatch)
     )
     text = ideation_state.read_text()
     assert "Decisions needed from operator" in text
-    assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" in text
+    assert "AP2_IDEATION_HALT_DISABLED" in text
 
 
 def test_kill_switch_helper_import_retained():
     """Source-level pin: the `_append_decisions_needed_bullet`
-    import in `ap2/components/focus_advance/__init__.py` is retained
-    because the kill-switch branch below still uses it. Removing the
-    import on the assumption that the only caller was the
-    roadmap-complete branch would break the kill-switch surface.
+    writer in `ap2/ideation_halt.py` is retained because the
+    kill-switch branch below still uses it. Removing it on the
+    assumption that the only caller was the roadmap-complete branch
+    would break the kill-switch surface.
 
-    TB-313 (axis 5) relocated the module body and switched the
-    relative `from .auto_approve import …` to the absolute
-    `from ap2.auto_approve import …` (the relative form would
-    resolve to `ap2.components.focus_advance.auto_approve`, which
-    does not exist). TB-318 (axis 5) then relocated `auto_approve`
-    itself into `ap2/components/auto_approve/`, so the absolute
-    import retargets to `from ap2.components.auto_approve import …`
-    (sibling-component imports inside `ap2/components/` are exempt
-    from the TB-311 import-direction gate). The contract this test
-    pins is "the helper import is retained somewhere in the module,"
-    not the exact syntactic shape of the import statement.
+    TB-345 merged the residual detector into the core module
+    `ap2/ideation_halt.py`. The core module must NOT statically
+    import from `ap2.components` (the TB-311 import-direction gate),
+    so the bullet writer is resolved through the registry hook-point
+    protocol (`default_registry().get("auto_approve").hook_points[...]`)
+    inside a local `_append_decisions_needed_bullet` helper. The
+    contract this test pins is "the helper is retained somewhere in
+    the module," not the exact syntactic shape of the lookup.
     """
-    # TB-343: the body (and this import) moved to the sibling impl.py; the
-    # focus_advance package __init__ is now a re-export-only shim.
-    src = Path(focus_advance.impl.__file__).read_text()
-    assert (
-        "from ap2.components.auto_approve import _append_decisions_needed_bullet"
-        in src
-    ), (
+    src = Path(ideation_halt.__file__).read_text()
+    assert "_append_decisions_needed_bullet" in src, (
         "TB-302: the kill-switch branch still depends on this "
-        "import. If the import is removed, the kill-switch path "
+        "helper. If it is removed, the kill-switch path "
         "raises NameError on the first operator-disabled "
         "advance attempt."
     )
@@ -341,14 +329,12 @@ def test_no_bullet_call_within_roadmap_complete_branch():
     """Source-level pin matching the briefing's Verification grep:
     `_append_decisions_needed_bullet` must NOT appear within 5
     lines after any `roadmap_complete_emitted` reference in
-    `ap2/components/focus_advance/__init__.py` (post-TB-313
-    relocation from the flat module path `ap2/focus_advance.py`).
-    This is the literal shape the briefing's first Verification
-    bullet checks; pinning it here surfaces a regression even
-    when the bullet call moves to a slightly different line
-    number."""
-    # TB-343: the body moved to the sibling impl.py.
-    src_path = Path(focus_advance.impl.__file__)
+    `ap2/ideation_halt.py` (post-TB-345 merge of the residual
+    detector into the core module). This is the literal shape the
+    briefing's first Verification bullet checks; pinning it here
+    surfaces a regression even when the bullet call moves to a
+    slightly different line number."""
+    src_path = Path(ideation_halt.__file__)
     lines = src_path.read_text().splitlines()
     violations = []
     for i, line in enumerate(lines):
@@ -369,13 +355,13 @@ def test_no_bullet_call_within_roadmap_complete_branch():
 
 
 def test_module_docstring_documents_no_bullet_behavior():
-    """The `ap2/components/focus_advance/__init__.py` module
-    docstring must document the TB-302 behavior change (no bullet
-    write on roadmap-complete). A future docs-drift refactor that
-    loses this note would surface cleanly on this test."""
-    # TB-343: the body's module docstring (with the TB-302 note) moved to
-    # the sibling impl.py; the package __init__ now carries a thin shim doc.
-    doc = focus_advance.impl.__doc__ or ""
+    """The `ap2/ideation_halt.py` module docstring must document the
+    TB-302 behavior change (no bullet write on roadmap-complete). A
+    future docs-drift refactor that loses this note would surface
+    cleanly on this test."""
+    # TB-345: the body's module docstring (with the TB-302 note) moved to
+    # the core `ap2/ideation_halt.py` module.
+    doc = ideation_halt.__doc__ or ""
     assert "TB-302" in doc, (
         "module docstring must reference TB-302's no-bullet "
         "behavior change"

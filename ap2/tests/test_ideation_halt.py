@@ -1,77 +1,41 @@
-"""TB-226 / TB-342: behavioral pinning for the axis-4 focus surface.
+"""TB-226 / TB-342 / TB-345: behavioral pinning for the ideation-halt
+surface (formerly the focus_advance component, now the core
+`ap2/ideation_halt.py` module).
 
-Background: goal.md L115-138 carries the design for multi-`## Current
-focus:` headings as an operator-authored priority/intent surface. TB-226
-shipped the parser + the runtime pointer + a rotation pointer walk
-(empty-cycles → focus_advanced → next focus → ... → roadmap_complete).
-TB-342 collapsed the rotation theatre into a single ideation-exhaustion
-detector: the daemon counts consecutive empty ideation cycles since the
-most recent `goal_updated` event and emits `roadmap_complete` once when
-the threshold trips. Multi-focus headings remain expressive prose for
-the operator + ideation agent; the daemon does not sequence them.
+Background: goal.md carries the design for multi-`## Current focus:`
+headings as an operator-authored priority/intent surface. TB-226
+shipped the parser + the runtime pointer + a rotation pointer walk.
+TB-342 collapsed the rotation theatre into a single
+ideation-exhaustion detector: the daemon counts consecutive empty
+ideation cycles since the most recent `goal_updated` event and emits
+`roadmap_complete` once when the threshold trips. TB-345 then merged
+that detector out of the `focus_advance` component into the core
+`ap2/ideation_halt.py` module and renamed the entry point
+(`maybe_halt_on_exhaustion(cfg)`) + the two operator knobs to the
+`AP2_IDEATION_HALT_*` namespace (keeping the old `AP2_FOCUS_*` names as
+deprecated back-compat aliases). Multi-focus headings remain
+expressive prose; the daemon does not sequence them.
 
-Behavioral cases pinned here (post-TB-342):
+Behavioral cases pinned here:
 
-  Parser (unchanged by TB-342):
-    - happy path with zero / one / three `## Current focus:` headings
-    - malformed `Progress signals:` sub-block
-    - embedded code fences ` ``` ... ``` ` don't confuse bullet
-      collection
-    - nested `### Progress signals` sub-heading variant
-    - non-string / empty input returns []
-    - absent `Progress signals:` sub-block parses with
-      `progress_signals_bullets=None`
+  Parser (unchanged): happy path with zero / one / three headings,
+    malformed / empty / nested Progress-signals shapes, code fences.
 
-  Env knobs (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`,
-  `AP2_FOCUS_AUTO_ADVANCE_DISABLED`):
-    - default / override / invalid-value parse for each knob
-    - empty-cycles clamp to [1, 20]
+  Env knobs (`AP2_IDEATION_HALT_EMPTY_CYCLES`,
+  `AP2_IDEATION_HALT_DISABLED`): default / override / invalid-value
+    parse + empty-cycles clamp to [1, 20], all via the core
+    `cfg.get_core_value(...)` resolution path. Plus a back-compat pin
+    that the DEPRECATED `AP2_FOCUS_AUTO_ADVANCE_DISABLED` /
+    `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` aliases still resolve through to
+    `core.ideation_halt_*`.
 
-  Pointer state (TB-342 slimmed schema):
-    - load round-trip after save (only `empty_cycles`,
-      `roadmap_complete_emitted`, `roadmap_complete_ack_idx` remain)
-    - load of missing file returns the default-emit shape
-    - load tolerates malformed JSON without crashing
-    - the pre-TB-342 `active_index` / `active_title` /
-      `exhausted_titles` fields no longer appear in the default
+  Pointer state (slimmed schema), exhaustion detector, halt + ack
+  semantics, dispatch un-gating (TB-275), resume on goal_updated —
+  all unchanged in behavior, only the call site renamed.
 
-  Exhaustion detector (TB-342 collapse — empty-cycles is the sole halt
-  signal, no pointer walk):
-    - threshold trip emits `roadmap_complete` (once) with trigger
-      `empty_cycles_heuristic`, sets `roadmap_complete_emitted=True`,
-      and clears the dismissal marker.
-    - below-threshold count is a no-op
-    - `ideation_proposal_recorded` inside a cycle resets the counter
-    - `goal_updated` is the reset cutoff: pre-edit empty cycles do not
-      count against the post-edit runway
-    - `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` blocks the halt and surfaces
-      a decisions-needed bullet
-
-  Halt + ack (TB-340 semantics, unchanged by TB-342):
-    - `goal.roadmap_exhausted` is the `roadmap_complete_emitted` flag
-      (no events-scan, no ack involvement)
-    - operator_ack with `roadmap_complete` token does NOT clear the
-      gate; the ack only DISMISSES the operator nag (see
-      `test_roadmap_ack_semantics.py`)
-
-  Dispatch under roadmap_complete (TB-275, unchanged by TB-342):
-    - the dispatch-path roadmap-exhaustion halt is REMOVED — a
-      dispatchable Backlog task auto-promotes/dispatches even when
-      `goal.roadmap_exhausted` is True
-    - the ideation-trigger gate in `_maybe_ideate` is unchanged —
-      `roadmap_complete` still parks ideation, just not dispatch
-
-  Resume on goal_updated (TB-342 contract):
-    - `goal.reset_pointer_on_goal_updated(cfg, foci)` clears
-      `empty_cycles`, `roadmap_complete_emitted`, and
-      `roadmap_complete_ack_idx`
-    - The drain-side `update_goal` handler calls this helper after the
-      atomic goal.md write
-
-Mirrors the shape of `test_tb223_auto_approve.py` /
-`test_tb224_token_caps.py` / `test_tb225_auto_unfreeze.py` — direct
-unit pins on parser + env knobs + pointer + detector, plus a
-board-level walk that exercises the TB-275 un-gated dispatch.
+Mirrors the shape of `test_tb225_auto_unfreeze.py` — direct unit pins
+on parser + env knobs + pointer + detector, plus a board-level walk
+that exercises the TB-275 un-gated dispatch.
 """
 from __future__ import annotations
 
@@ -81,7 +45,7 @@ from pathlib import Path
 
 import pytest
 
-from ap2 import daemon, events, goal, tools
+from ap2 import daemon, events, goal, ideation_halt, tools
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -89,15 +53,14 @@ from ap2.init import init_project
 # Direct references to the names the briefing's `## Verification`
 # bullets / coverage-drift gates expect to see in this test file.
 # Loaded at module top so a refactor that removes them surfaces
-# cleanly on import. TB-342 retains the parser + env-knob helpers
-# verbatim (briefing's blast-radius bound — directory and env names
-# are preserved across the collapse).
+# cleanly on import.
 _NAMES_FOR_DRIFT_GATE = (
-    daemon._maybe_advance_focus,
+    ideation_halt.maybe_halt_on_exhaustion,
+    ideation_halt._ideation_halt_empty_cycles_threshold,
+    ideation_halt._ideation_halt_disabled,
+    ideation_halt._consecutive_empty_ideation_cycles,
     goal.parse_focus_list,
     goal.read_focus_list,
-    goal.advance_empty_cycles_threshold,
-    goal.auto_advance_disabled,
     goal.load_pointer,
     goal.save_pointer,
     goal.roadmap_exhausted,
@@ -106,10 +69,12 @@ _NAMES_FOR_DRIFT_GATE = (
 
 
 # Env-knob name substrings the docs-drift / coverage-drift gates scan
-# for (they assert each `AP2_*` env knob appears somewhere under
-# `ap2/tests/`). Keeping them grouped here makes the substring
-# coverage obvious and self-documenting.
+# for. Both the new canonical names AND the deprecated aliases are
+# named here so the back-compat surface stays auditable from tests.
 _ENV_KNOB_SUBSTRINGS = (
+    "AP2_IDEATION_HALT_EMPTY_CYCLES",
+    "AP2_IDEATION_HALT_DISABLED",
+    # Deprecated back-compat aliases (TB-345).
     "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
     "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
 )
@@ -119,9 +84,6 @@ _ENV_KNOB_SUBSTRINGS = (
 # test file (substring match against the test corpus).
 _EVENT_TYPE_SUBSTRINGS = (
     "roadmap_complete",
-    # TB-342: `goal_updated` is the new reset signal for the empty-
-    # cycles counter; named here so the docs-drift gate keeps it
-    # auditable.
     "goal_updated",
 )
 
@@ -185,8 +147,6 @@ def test_parse_focus_list_one_heading():
     assert len(foci) == 1
     assert foci[0].title == "end-to-end automation"
     assert "Body of the active focus." in foci[0].body
-    # TB-285: a `## Current focus:` heading with no `Progress signals:`
-    # sub-block parses cleanly — the block is OPTIONAL.
     assert foci[0].progress_signals_bullets is None
     assert foci[0].has_progress_signals() is False
 
@@ -297,77 +257,110 @@ def test_parse_focus_list_line_range():
 
 
 # ===========================================================================
-# Env-knob unit pins
+# Env-knob unit pins (TB-345 — read via `cfg.get_core_value(...)`)
 # ===========================================================================
 
 
-def test_advance_empty_cycles_default(monkeypatch):
-    """`AP2_FOCUS_ADVANCE_EMPTY_CYCLES` unset / empty → default 3."""
+def test_ideation_halt_empty_cycles_default(cfg, monkeypatch):
+    """`AP2_IDEATION_HALT_EMPTY_CYCLES` unset / empty → schema default 3."""
+    monkeypatch.delenv("AP2_IDEATION_HALT_EMPTY_CYCLES", raising=False)
     monkeypatch.delenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", raising=False)
-    assert goal.advance_empty_cycles_threshold() == 3
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 3
 
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "")
-    assert goal.advance_empty_cycles_threshold() == 3
-
-
-def test_advance_empty_cycles_override(monkeypatch):
-    """Operator can override via env var."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "5")
-    assert goal.advance_empty_cycles_threshold() == 5
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 3
 
 
-def test_advance_empty_cycles_clamps(monkeypatch):
+def test_ideation_halt_empty_cycles_override(cfg, monkeypatch):
+    """Operator can override via the canonical env var."""
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "5")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 5
+
+
+def test_ideation_halt_empty_cycles_clamps(cfg, monkeypatch):
     """Out-of-range values clamp to [1, 20]."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "0")
-    assert goal.advance_empty_cycles_threshold() == 1
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "0")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 1
 
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "-50")
-    assert goal.advance_empty_cycles_threshold() == 1
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "-50")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 1
 
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "999")
-    assert goal.advance_empty_cycles_threshold() == 20
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "999")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 20
 
 
-def test_advance_empty_cycles_invalid_falls_back(monkeypatch):
+def test_ideation_halt_empty_cycles_invalid_falls_back(cfg, monkeypatch):
     """Non-int values fall back to the default."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "garbage")
-    assert goal.advance_empty_cycles_threshold() == 3
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "garbage")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 3
 
 
-def test_auto_advance_disabled_default(monkeypatch):
+def test_ideation_halt_disabled_default(cfg, monkeypatch):
     """Default unset → False (auto-halt enabled)."""
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    assert goal.auto_advance_disabled() is False
+    assert ideation_halt._ideation_halt_disabled(cfg) is False
 
 
-def test_auto_advance_disabled_truthy(monkeypatch):
+def test_ideation_halt_disabled_truthy(cfg, monkeypatch):
     """`1` / `true` / `yes` / `on` all parse as True."""
     for val in ("1", "true", "TRUE", "yes", "Yes", "on", "ON"):
-        monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", val)
-        assert goal.auto_advance_disabled() is True, f"failed for {val!r}"
+        monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", val)
+        assert ideation_halt._ideation_halt_disabled(cfg) is True, f"failed for {val!r}"
 
 
-def test_auto_advance_disabled_falsy(monkeypatch):
+def test_ideation_halt_disabled_falsy(cfg, monkeypatch):
     """`0` / `false` / `no` / empty all parse as False."""
     for val in ("0", "false", "no", "", "off"):
-        monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", val)
-        assert goal.auto_advance_disabled() is False, f"failed for {val!r}"
+        monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", val)
+        assert ideation_halt._ideation_halt_disabled(cfg) is False, f"failed for {val!r}"
+
+
+# --- Deprecated back-compat alias pins (TB-345) ----------------------------
+
+
+def test_deprecated_alias_disables_halt(cfg, monkeypatch):
+    """The DEPRECATED `AP2_FOCUS_AUTO_ADVANCE_DISABLED` alias still
+    disables the halt — it resolves through `FLAT_TO_SECTIONED` to the
+    same `core.ideation_halt_disabled` key the canonical name maps to,
+    so a stale operator env keeps working for one release."""
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
+    assert ideation_halt._ideation_halt_disabled(cfg) is True
+    # And it actually short-circuits the detector (see kill-switch test
+    # below for the end-to-end behavioral pin).
+
+
+def test_deprecated_alias_empty_cycles_threshold(cfg, monkeypatch):
+    """The DEPRECATED `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` alias still
+    resolves through to `core.ideation_halt_empty_cycles`."""
+    monkeypatch.delenv("AP2_IDEATION_HALT_EMPTY_CYCLES", raising=False)
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "7")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 7
+
+
+def test_canonical_wins_over_deprecated_alias(cfg, monkeypatch):
+    """When BOTH the canonical and the deprecated name are set, the
+    canonical name wins (it precedes the alias in `FLAT_TO_SECTIONED`
+    iteration order)."""
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "4")
+    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "9")
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 4
 
 
 # ===========================================================================
-# Pointer state file round-trip (TB-342 slimmed schema)
+# Pointer state file round-trip (slimmed schema)
 # ===========================================================================
 
 
 def test_pointer_default_emit_when_missing(cfg):
-    """No pointer file on disk → default shape (TB-342 slimmed
-    schema)."""
+    """No pointer file on disk → default shape (slimmed schema)."""
     p = goal.load_pointer(cfg)
     assert p["empty_cycles"] == 0
     assert p["roadmap_complete_ack_idx"] is None
     assert p["roadmap_complete_emitted"] is False
     assert p["schema"] == goal.POINTER_SCHEMA_VERSION
-    # TB-342: the rotation pointer fields are gone.
+    # The pre-TB-342 rotation pointer fields are gone.
     assert "active_index" not in p
     assert "active_title" not in p
     assert "exhausted_titles" not in p
@@ -399,11 +392,8 @@ def test_pointer_load_tolerates_malformed_json(cfg):
 
 def test_pointer_load_tolerates_missing_keys(cfg):
     """An old pointer file without newer keys (forward-compat path)
-    gets defaults filled in for the missing fields. TB-342: legacy
-    rotation fields in an old pointer file are silently dropped — the
-    `merged.update({k: v for k, v in data.items() if k in _DEFAULT_POINTER})`
-    filter does not pass through keys that aren't in the new
-    schema."""
+    gets defaults filled in for the missing fields. Legacy rotation
+    fields in an old pointer file are silently dropped."""
     goal.pointer_path(cfg).write_text(
         '{"empty_cycles": 1, "roadmap_complete_emitted": true, '
         '"active_index": 99, "active_title": "stale", '
@@ -414,14 +404,14 @@ def test_pointer_load_tolerates_missing_keys(cfg):
     assert p["roadmap_complete_emitted"] is True
     # Missing keys → defaults.
     assert p["roadmap_complete_ack_idx"] is None
-    # TB-342: legacy rotation fields are filtered out on load.
+    # Legacy rotation fields are filtered out on load.
     assert "active_index" not in p
     assert "active_title" not in p
     assert "exhausted_titles" not in p
 
 
 # ===========================================================================
-# Exhaustion detector — empty-cycles is the sole halt signal post-TB-342.
+# Exhaustion detector — empty-cycles is the sole halt signal.
 # ===========================================================================
 
 
@@ -466,18 +456,16 @@ def _emit_ideation_productive(cfg: Config, *, task: str = "TB-X") -> None:
 def test_empty_cycles_threshold_emits_roadmap_complete(cfg, monkeypatch):
     """Threshold reached → `roadmap_complete` fires once with
     `trigger=empty_cycles_heuristic`, `roadmap_complete_emitted=True`,
-    and `roadmap_exhausted` flips to True. TB-342: the detector emits
-    the halt directly instead of walking a pointer past the last focus
-    first."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    and `roadmap_exhausted` flips to True."""
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta", "gamma")
 
     # Three empty cycles → threshold tripped.
     for _ in range(3):
         _emit_ideation_empty(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     # Event landed exactly once.
     tail = events.tail(cfg.events_file, 50)
@@ -497,7 +485,7 @@ def test_empty_cycles_threshold_emits_roadmap_complete(cfg, monkeypatch):
     assert goal.roadmap_exhausted(cfg) is True
 
     # Re-running the pass should NOT re-emit.
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
     tail = events.tail(cfg.events_file, 50)
     rc = [e for e in tail if e.get("type") == "roadmap_complete"]
     assert len(rc) == 1, "roadmap_complete should not re-emit"
@@ -505,15 +493,15 @@ def test_empty_cycles_threshold_emits_roadmap_complete(cfg, monkeypatch):
 
 def test_empty_cycles_below_threshold_no_halt(cfg, monkeypatch):
     """Below-threshold count does NOT emit `roadmap_complete`."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta")
 
     # Two empty cycles — below the threshold.
     _emit_ideation_empty(cfg)
     _emit_ideation_empty(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     pointer = goal.load_pointer(cfg)
     assert pointer["roadmap_complete_emitted"] is False
@@ -528,8 +516,8 @@ def test_empty_cycles_below_threshold_no_halt(cfg, monkeypatch):
 def test_empty_cycles_resets_on_proposal(cfg, monkeypatch):
     """A productive ideation cycle resets the empty-cycles counter to
     0, even after several prior empty cycles."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta")
 
     for _ in range(5):
@@ -539,7 +527,7 @@ def test_empty_cycles_resets_on_proposal(cfg, monkeypatch):
     # One more empty cycle after the reset; well below threshold now.
     _emit_ideation_empty(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     pointer = goal.load_pointer(cfg)
     assert pointer["roadmap_complete_emitted"] is False
@@ -547,12 +535,12 @@ def test_empty_cycles_resets_on_proposal(cfg, monkeypatch):
 
 
 def test_goal_updated_resets_counter_window(cfg, monkeypatch):
-    """TB-342 cutoff: `_ideation_empty_against_focus` resets at the
+    """The cutoff: `_consecutive_empty_ideation_cycles` resets at the
     most recent `goal_updated` event. Pre-edit empty cycles do not
     count against the post-edit runway, so a goal.md edit followed by
     a single empty cycle leaves the counter at 1 (not 4)."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta")
 
     # Three empty cycles before the operator extends goal.md.
@@ -563,7 +551,7 @@ def test_goal_updated_resets_counter_window(cfg, monkeypatch):
     # One post-edit empty cycle.
     _emit_ideation_empty(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     pointer = goal.load_pointer(cfg)
     # Only the post-`goal_updated` cycle counts.
@@ -576,8 +564,8 @@ def test_progress_signals_focus_halts_via_empty_cycles_only(cfg, monkeypatch):
     """TB-283 + TB-285 pin: a focus that carries `Progress signals:`
     bullets halts via the SAME empty-cycles heuristic — the bullets
     are advisory ideation-prompt context only."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "3")
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_progress_signals(
         cfg, "alpha", ["signal 1", "signal 2"],
     )
@@ -585,7 +573,7 @@ def test_progress_signals_focus_halts_via_empty_cycles_only(cfg, monkeypatch):
     for _ in range(3):
         _emit_ideation_empty(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     pointer = goal.load_pointer(cfg)
     assert pointer["roadmap_complete_emitted"] is True
@@ -603,16 +591,16 @@ def test_progress_signals_focus_halts_via_empty_cycles_only(cfg, monkeypatch):
 # ===========================================================================
 
 
-def test_auto_advance_disabled_short_circuits(cfg, monkeypatch):
-    """`AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` blocks the halt even when
-    the empty-cycles threshold trips. A decisions-needed bullet
-    surfaces so the operator can halt manually (by editing goal.md)."""
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
-    monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
+def test_halt_disabled_short_circuits(cfg, monkeypatch):
+    """`AP2_IDEATION_HALT_DISABLED=1` blocks the halt even when the
+    empty-cycles threshold trips. A decisions-needed bullet surfaces so
+    the operator can halt manually (by editing goal.md)."""
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
     _emit_ideation_empty(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     pointer = goal.load_pointer(cfg)
     assert pointer["roadmap_complete_emitted"] is False, (
@@ -629,11 +617,31 @@ def test_auto_advance_disabled_short_circuits(cfg, monkeypatch):
     assert ideation_state.exists()
     text = ideation_state.read_text()
     assert "Decisions needed from operator" in text
-    assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" in text
+    assert "AP2_IDEATION_HALT_DISABLED" in text
+
+
+def test_deprecated_kill_switch_alias_short_circuits(cfg, monkeypatch):
+    """Back-compat: the DEPRECATED `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+    alias still blocks the halt end-to-end (resolves to
+    `core.ideation_halt_disabled`)."""
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
+    _write_goal_with_foci(cfg, "alpha", "beta")
+    _emit_ideation_empty(cfg)
+
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
+
+    pointer = goal.load_pointer(cfg)
+    assert pointer["roadmap_complete_emitted"] is False, (
+        "deprecated kill-switch alias should have blocked the halt"
+    )
+    tail = events.tail(cfg.events_file, 50)
+    assert not [e for e in tail if e.get("type") == "roadmap_complete"]
 
 
 # ===========================================================================
-# Roadmap-complete halt + ack semantics (TB-340; unchanged by TB-342)
+# Roadmap-complete halt + ack semantics (TB-340)
 # ===========================================================================
 
 
@@ -641,12 +649,12 @@ def test_ack_does_not_clear_roadmap_complete_gate(cfg, monkeypatch):
     """TB-340: an operator ack with the `roadmap_complete` token does
     NOT clear the gate. The gate is `roadmap_complete_emitted`; the
     ack only DISMISSES the operator nag."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_ideation_empty(cfg)
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
     assert goal.roadmap_exhausted(cfg) is True
 
     # Operator acks via the standard ack pipeline. The drain emits an
@@ -666,11 +674,11 @@ def test_ack_without_token_does_not_clear(cfg, monkeypatch):
     gate. (Post-TB-340 NO ack clears the gate — the predicate is the
     pointer flag — so this is the same verdict as the token-bearing
     ack; the test is retained as a regression guard.)"""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_ideation_empty(cfg)
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
     assert goal.roadmap_exhausted(cfg) is True
 
     events.append(
@@ -701,14 +709,14 @@ def test_dispatch_promotes_when_roadmap_exhausted(cfg, monkeypatch):
     """TB-275 regression pin (behavioral): when the halt is active AND
     a dispatchable Backlog task is present, the daemon
     auto-promotes/dispatches it (no halt)."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_ideation_empty(cfg)
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     # Pre-condition: ideation halt active.
     assert goal.roadmap_exhausted(cfg) is True
@@ -734,7 +742,7 @@ def test_dispatch_promotes_when_roadmap_exhausted(cfg, monkeypatch):
 
     monkeypatch.setattr(daemon, "_sweep_pipeline_pending", _noop_async)
     monkeypatch.setattr(daemon, "_maybe_auto_diagnose", lambda cfg: None)
-    monkeypatch.setattr(daemon, "_maybe_advance_focus", _noop_async)
+    monkeypatch.setattr(ideation_halt, "maybe_halt_on_exhaustion", lambda cfg: None)
     from ap2 import ideation as _ideation
     monkeypatch.setattr(_ideation, "_maybe_ideate", _noop_async)
     monkeypatch.setattr(_ideation, "force_ideate", _noop_async)
@@ -838,7 +846,7 @@ def test_no_foci_no_op(cfg):
     """No `## Current focus:` headings in goal.md → detector pass is
     a no-op."""
     (cfg.project_root / "goal.md").write_text(_make_goal_md(""))
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
     pointer = goal.load_pointer(cfg)
     assert pointer["roadmap_complete_emitted"] is False
     assert goal.roadmap_exhausted(cfg) is False
@@ -850,18 +858,14 @@ def test_missing_goal_md_no_op(tmp_path: Path):
     (tmp_path / "goal.md").unlink()
     cfg = Config.load(tmp_path)
     cfg.ensure_dirs()
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
     pointer = goal.load_pointer(cfg)
     assert pointer["roadmap_complete_emitted"] is False
     assert goal.roadmap_exhausted(cfg) is False
 
 
 # ===========================================================================
-# Drift-gate substring anchors — ensure the env knobs / event types /
-# helper names this work introduced all carry a substring reference
-# in this test file. Mirrors the `_NAMES_FOR_DRIFT_GATE` /
-# `_ENV_KNOB_SUBSTRINGS` / `_EVENT_TYPE_SUBSTRINGS` declarations at
-# the top of the module.
+# Drift-gate substring anchors.
 # ===========================================================================
 
 
@@ -875,6 +879,6 @@ def test_drift_gate_anchors_present():
         assert evt in text, f"event type {evt} missing from test file"
     # Spot-check the helper names too.
     assert "parse_focus_list" in text
-    assert "_maybe_advance_focus" in text
+    assert "maybe_halt_on_exhaustion" in text
     assert "roadmap_exhausted" in text
     assert "reset_pointer_on_goal_updated" in text

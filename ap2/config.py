@@ -121,7 +121,7 @@ DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT = 75
 # (waiting for the next status-report cron tick defeats the
 # "proactively surfaced" claim), but `task_stuck` / `task_frozen` /
 # `validator_judge_noisy` cadence is project-dependent. Bool parse
-# mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED` style
+# mirrors the sibling `AP2_IDEATION_HALT_DISABLED` style
 # (`1` / `true` / `yes` / `on` truthy, case-insensitive; anything
 # else false). Read fresh from `os.environ` at push-decision time
 # inside `daemon._maybe_push_attention` and listed in
@@ -533,6 +533,17 @@ class Config:
             return raw
         # 2) Flat env via reverse-FLAT_TO_SECTIONED lookup. Late import
         #    keeps the config.py ↔ config_compat.py boundary tidy.
+        #    TB-345: a single sectioned target may now carry MULTIPLE
+        #    flat aliases (a canonical name plus one or more deprecated
+        #    back-compat aliases — e.g. `core.ideation_halt_disabled`
+        #    is reachable via both `AP2_IDEATION_HALT_DISABLED` and a
+        #    deprecated focus-era alias). Check every
+        #    matching flat name (canonical first by dict order) and
+        #    return the first one actually set in os.environ, so a
+        #    stale operator env that still exports the deprecated name
+        #    resolves at call-time. (Pre-TB-345 every core target had
+        #    exactly one flat alias, so the loop never iterated past
+        #    the first match.)
         from .config_compat import FLAT_TO_SECTIONED
         sectioned_target = f"core.{key}"
         for flat, sectioned in FLAT_TO_SECTIONED.items():
@@ -541,7 +552,6 @@ class Config:
             raw = os.environ.get(flat)
             if raw is not None:
                 return raw
-            break
         # 3) cfg snapshot (TOML overlay).
         if isinstance(self.core_config, dict) and key in self.core_config:
             return self.core_config[key]

@@ -18,7 +18,7 @@ operator-authored prose + priority hints the ideation agent reads in
 full each cycle (its goal-anchor validator accepts any of them). The
 daemon's runtime pointer (`focus_pointer.json`) only tracks the
 empty-cycles counter + the halt-state flag. When ideation produces
-zero proposals for `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive cycles,
+zero proposals for `AP2_IDEATION_HALT_EMPTY_CYCLES` consecutive cycles,
 the daemon emits `roadmap_complete` once and parks the ideation
 trigger (task dispatch is unaffected — TB-275). The operator resumes
 by editing goal.md via `ap2 update-goal` (the operator-queue
@@ -116,8 +116,8 @@ class FocusItem:
         wrote `Progress signals:` with no bullets — likely a draft /
         TODO). The sub-block is OPTIONAL — a focus heading with no
         `Progress signals:` block returns False here and parses with
-        `progress_signals_bullets=None`. The empty-cycles advance
-        heuristic (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`) runs the same way
+        `progress_signals_bullets=None`. The empty-cycles ideation-halt
+        heuristic (`AP2_IDEATION_HALT_EMPTY_CYCLES`) runs the same way
         regardless of presence; the bullets are advisory ideation-
         prompt context only (TB-283 deleted the prior LLM-judge advance
         path).
@@ -202,8 +202,8 @@ def _parse_progress_signals_from_body(body: str) -> list[str] | None:
 
     Optionality is explicit (TB-285 contract): a focus heading with no
     `Progress signals:` sub-block is valid and returns None here. The
-    empty-cycles advance heuristic
-    (`AP2_FOCUS_ADVANCE_EMPTY_CYCLES`) runs the same way for both
+    empty-cycles ideation-halt heuristic
+    (`AP2_IDEATION_HALT_EMPTY_CYCLES`) runs the same way for both
     block-present and block-absent foci; the bullets are advisory
     ideation-prompt context only (TB-283 deleted the prior LLM-judge
     advance path). The legacy `Done when:` heading is NOT accepted
@@ -399,8 +399,11 @@ def save_pointer(cfg, pointer: dict[str, Any]) -> None:
 
 
 # ===========================================================================
-# Env knobs — parse + default + clamp. Mirrors the
-# `_per_task_token_cap` / `_auto_approve_freeze_threshold` style.
+# Ideation-halt clamp constants. The empty-cycles threshold parser +
+# kill-switch reader moved to the core `ap2/ideation_halt.py` module
+# (TB-345, merged from the old `focus_advance` component); these clamp
+# bounds stay here as the single source of truth that
+# `ideation_halt._ideation_halt_empty_cycles_threshold` references.
 # ===========================================================================
 
 ADVANCE_EMPTY_CYCLES_DEFAULT = 3
@@ -408,100 +411,8 @@ ADVANCE_EMPTY_CYCLES_MIN = 1
 ADVANCE_EMPTY_CYCLES_MAX = 20
 
 
-def advance_empty_cycles_threshold(*, cfg: "Config | None" = None) -> int:
-    """Effective threshold for the heuristic-fallback advance.
-
-    `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` (default 3). Clamped to
-    [`ADVANCE_EMPTY_CYCLES_MIN`, `ADVANCE_EMPTY_CYCLES_MAX`] so an
-    operator typo (e.g. `0` or `999999`) doesn't disable the advance
-    path or wedge it permanently. Non-int / empty values fall back to
-    the default.
-
-    TB-336 axis-5: when ``cfg`` is passed, the read routes through
-    ``cfg.get_component_value("focus_advance", "empty_cycles", default="")``
-    which evaluates sectioned env
-    (``f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"`` shape built
-    inside the helper) > flat env via reverse-``FLAT_TO_SECTIONED``
-    lookup > ``cfg.components_config`` snapshot > default at call time.
-    The cfg-less back-compat branch reads ``os.getenv`` so pre-cfg
-    callers (``ap2.tests.test_tb226_focus_rotation``) keep today's
-    behavior bit-for-bit; the cross-package grep gate stays green via
-    the ``os.getenv`` shape the absence-check excludes by construction.
-    """
-    # Late-imported to avoid the `goal.py` ↔ `config.py` boundary cycle.
-    from ap2.config import Config
-    if cfg is not None and not isinstance(cfg, Config):
-        raise TypeError(
-            "advance_empty_cycles_threshold(cfg=...) expects a Config "
-            f"instance; got {type(cfg).__name__}",
-        )
-    if cfg is not None:
-        raw = str(
-            cfg.get_component_value(
-                "focus_advance", "empty_cycles", default="",
-            )
-            or "",
-        ).strip()
-    else:
-        raw = os.getenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "").strip()
-    if not raw:
-        return ADVANCE_EMPTY_CYCLES_DEFAULT
-    try:
-        v = int(raw)
-    except ValueError:
-        return ADVANCE_EMPTY_CYCLES_DEFAULT
-    if v < ADVANCE_EMPTY_CYCLES_MIN:
-        return ADVANCE_EMPTY_CYCLES_MIN
-    if v > ADVANCE_EMPTY_CYCLES_MAX:
-        return ADVANCE_EMPTY_CYCLES_MAX
-    return v
-
-
-def auto_advance_disabled(*, cfg: "Config | None" = None) -> bool:
-    """True iff `AP2_FOCUS_AUTO_ADVANCE_DISABLED` is set to a truthy
-    value (`1` / `true` / `yes` — same convention as
-    `AP2_IDEATION_DISABLED`). Default unset → False (auto-advance
-    enabled).
-
-    The kill-switch: when True, the daemon never auto-advances even
-    if the empty-cycles heuristic threshold tripped. A
-    `focus_advance_blocked` decisions-needed bullet surfaces so the
-    operator can advance manually via `ap2 update-goal` or by
-    flipping the knob.
-
-    TB-336 axis-5: when ``cfg`` is passed, the read routes through
-    ``cfg.get_component_value("focus_advance", "auto_advance_disabled",
-    default="")``. The cfg-less back-compat branch reads ``os.getenv``
-    so pre-cfg callers (``ap2.tests.test_tb226_focus_rotation``) keep
-    today's behavior bit-for-bit; the cross-package grep gate stays
-    green via the ``os.getenv`` shape the absence-check excludes by
-    construction.
-    """
-    # Late-imported to avoid the `goal.py` ↔ `config.py` boundary cycle.
-    from ap2.config import Config
-    if cfg is not None and not isinstance(cfg, Config):
-        raise TypeError(
-            "auto_advance_disabled(cfg=...) expects a Config instance; "
-            f"got {type(cfg).__name__}",
-        )
-    if cfg is not None:
-        resolved = cfg.get_component_value(
-            "focus_advance", "auto_advance_disabled", default="",
-        )
-        # The TOML overlay branch may surface a typed `True` / `False`
-        # (when an operator opted into `[components.focus_advance]
-        # auto_advance_disabled = true`); honor it directly so the
-        # strict-bool path mirrors `_focus_auto_advance_disabled(cfg)`.
-        if isinstance(resolved, bool):
-            return resolved
-        raw = "" if resolved is None else str(resolved)
-    else:
-        raw = os.getenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "")
-    return raw.strip().lower() in ("1", "true", "yes", "on")
-
-
 # ===========================================================================
-# High-level helpers used by daemon._maybe_advance_focus
+# High-level helpers used by ideation_halt.maybe_halt_on_exhaustion
 # ===========================================================================
 
 
@@ -538,9 +449,10 @@ def roadmap_exhausted(cfg, foci: list[FocusItem] | None = None) -> bool:
 
     Pure function of pointer state (TB-342 collapse): returns
     `pointer["roadmap_complete_emitted"]` — the one-shot flag the
-    `_maybe_advance_focus` detector sets when ideation has produced
-    zero proposals for `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive
-    cycles. `total == 0` (no `## Current focus:` headings) → False
+    `ideation_halt.maybe_halt_on_exhaustion` detector sets when
+    ideation has produced zero proposals for
+    `AP2_IDEATION_HALT_EMPTY_CYCLES` consecutive cycles. `total == 0`
+    (no `## Current focus:` headings) → False
     (there's nothing to exhaust). No events-scan, no
     `roadmap_complete_ack_idx` read — the operator ack does NOT
     participate in this gate.
@@ -582,8 +494,9 @@ def roadmap_complete_notice_dismissed(
     is `roadmap_exhausted` alone). The marker is set to the current
     foci count by the `ap2 ack roadmap_complete` drain handler
     (`operator_queue._apply_operator_ack`) and cleared to `None` by
-    `focus_advance._maybe_advance_focus` on each fresh `roadmap_complete`
-    emit, so dismissal is strictly per-episode: a marker left by a prior
+    `ideation_halt.maybe_halt_on_exhaustion` on each fresh
+    `roadmap_complete` emit, so dismissal is strictly per-episode: a
+    marker left by a prior
     extend→re-exhaust episode at the same foci count can NOT suppress a
     fresh episode's nag (the exact 2026-05-29 stale-state bug).
     """

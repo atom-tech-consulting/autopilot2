@@ -11,11 +11,13 @@ daemon._tick's pre-TB-310 direct imports + direct calls into
   (b) The `Phase` enum exposes the four canonical phase names
       (PRE_DISPATCH, POST_DISPATCH, POST_CRON, ATTENTION_EMISSION) —
       proves the phase enumeration is in place.
-  (c) `Registry.discover()` returns the five components named
-      `janitor`, `auto_approve`, `auto_unfreeze`, `attention`,
-      `focus_advance`, each with a tick_hook registered — proves the
-      component-side wiring landed for the four non-janitor stubs
-      alongside the existing TB-309 janitor canary.
+  (c) `Registry.discover()` returns the components named
+      `janitor`, `auto_approve`, `auto_unfreeze`, `attention`, each
+      with a tick_hook registered — proves the component-side wiring
+      landed for the non-janitor stubs alongside the existing TB-309
+      janitor canary. (TB-345 merged the former `focus_advance`
+      component into the core `ap2/ideation_halt.py` module, so it is
+      no longer a discoverable component.)
   (d) `registry.tick_hooks(PRE_DISPATCH)` returns a deterministic
       ordered list — proves the registry-walk dispatch shape is in
       place (the daemon's `_tick` iterates the same list).
@@ -100,17 +102,18 @@ _EXPECTED_COMPONENTS = {
     "auto_approve",
     "auto_unfreeze",
     "attention",
-    "focus_advance",
 }
 
 
 def test_registry_discover_returns_five_components():
     """`Registry.discover()` surfaces janitor (the TB-309 canary) plus
-    the four TB-310 stubs (auto_approve, auto_unfreeze, attention,
-    focus_advance). The set is checked as a superset, not equality, so
-    a future axis-(5) migration adding a new component doesn't flip
-    this test — it only flips if one of the five expected components
-    goes missing.
+    the TB-310 stubs (auto_approve, auto_unfreeze, attention). TB-345
+    merged the former `focus_advance` component's residual detector into
+    the core `ap2/ideation_halt.py` module, so it's no longer a
+    discoverable component. The set is checked as a superset, not
+    equality, so a future axis-(5) migration adding a new component
+    doesn't flip this test — it only flips if one of the expected
+    components goes missing.
     """
     registry = Registry.discover()
     names = {m.name for m in registry.components}
@@ -171,11 +174,13 @@ def test_each_component_has_a_tick_hook_registered():
 
 def test_tick_hooks_pre_dispatch_returns_deterministic_ordered_list():
     """`Registry.tick_hooks(PRE_DISPATCH)` returns the hooks in
-    name-sorted component order: today that means [auto_unfreeze's
-    hook, focus_advance's hook] (since `a` < `f`). The order matters
-    because the pre-TB-310 `_tick` body fired auto_unfreeze (step 0.5)
-    before focus_advance (step 0.6); the registry-walk dispatch must
-    preserve that order bit-for-bit.
+    name-sorted component order. Post-TB-345 the only PRE_DISPATCH
+    registry hook is `auto_unfreeze`'s — the former `focus_advance`
+    component's residual detector was merged into the core
+    `ap2/ideation_halt.py` module, which the daemon calls directly
+    (not via a registry tick-hook) right after the PRE_DISPATCH walk.
+    The order still matters for any future PRE_DISPATCH component; the
+    name-sorted invariant is the spine.
     """
     registry = Registry.discover()
     hooks = registry.tick_hooks(Phase.PRE_DISPATCH)
@@ -188,10 +193,10 @@ def test_tick_hooks_pre_dispatch_returns_deterministic_ordered_list():
         for phase, fn in manifest.tick_hooks:
             name_for_hook[id(fn)] = manifest.name
     ordered_names = [name_for_hook[id(h)] for h in hooks]
-    # Expected: alphabetical by component name — auto_unfreeze before
-    # focus_advance. The list is a *subset* of all PRE_DISPATCH
-    # components (a future axis-(5) migration might register a new
-    # PRE_DISPATCH component); the ordering invariant is the spine.
+    # Expected: alphabetical by component name. The list is a *subset*
+    # of all PRE_DISPATCH components (a future axis-(5) migration might
+    # register a new PRE_DISPATCH component); the ordering invariant is
+    # the spine.
     assert ordered_names == sorted(ordered_names), (
         f"TB-310: PRE_DISPATCH hooks should be returned in name-sorted "
         f"component order; got {ordered_names}"
@@ -200,9 +205,11 @@ def test_tick_hooks_pre_dispatch_returns_deterministic_ordered_list():
         f"TB-310: auto_unfreeze should register a PRE_DISPATCH hook; "
         f"got {ordered_names}"
     )
-    assert "focus_advance" in ordered_names, (
-        f"TB-310: focus_advance should register a PRE_DISPATCH hook; "
-        f"got {ordered_names}"
+    # TB-345: focus_advance is no longer a registry component, so it
+    # MUST NOT appear in the PRE_DISPATCH hook set.
+    assert "focus_advance" not in ordered_names, (
+        f"TB-345: focus_advance was merged into core ideation_halt and "
+        f"must not register a PRE_DISPATCH hook; got {ordered_names}"
     )
     # Determinism: calling twice returns the same list.
     again = Registry.discover().tick_hooks(Phase.PRE_DISPATCH)

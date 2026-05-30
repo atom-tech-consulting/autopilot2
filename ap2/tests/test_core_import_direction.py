@@ -383,7 +383,7 @@ def test_detector_reports_all_violations_not_just_first():
     source = (
         "from ap2.components.janitor import run_janitor\n"  # line 1
         "import ap2.components.attention\n"                 # line 2
-        "from ap2.components.focus_advance import maybe_advance\n"  # line 3
+        "from ap2.components.validator_judge import judge\n"  # line 3
     )
     hits = find_violations(source, "ap2/daemon.py")
     assert len(hits) == 3, hits

@@ -207,8 +207,10 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     """`enumerate_disabled_env_flags(registry)` walks every manifest in
     the registry and emits one entry per env-flag-bearing component.
 
-    Pins (TB-320 expanded — the three newly-flagged components join
-    the original three):
+    Pins (TB-320 expanded — newly-flagged components join the
+    original three; TB-345 merged the former focus_advance component
+    into the core `ap2/ideation_halt.py` module, so its kill switch is
+    no longer a component env flag):
       - `AP2_JANITOR_DISABLED` → `"1"` (kill switch; janitor default-on).
       - `AP2_MM_CHANNELS` → `""` (opt-in; mattermost default-off).
       - `AP2_VALIDATOR_JUDGE_DISABLED` → `"1"` (kill switch;
@@ -217,9 +219,6 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
         TB-320 wiring of TB-223's require-polarity gate).
       - `AP2_AUTO_UNFREEZE_DISABLED` → `"1"` (kill switch;
         auto_unfreeze default-on, TB-320 new knob).
-      - `AP2_FOCUS_AUTO_ADVANCE_DISABLED` → `"1"` (kill switch;
-        focus_advance default-on, TB-320 wiring of TB-226's existing
-        kill switch).
 
     `attention/` keeps `env_flag=None` per operator decision on
     2026-05-28 (its detectors are baseline operator-legible signal)
@@ -233,7 +232,9 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     assert flags.get("AP2_JANITOR_DISABLED") == "1", flags
     assert flags.get("AP2_VALIDATOR_JUDGE_DISABLED") == "1", flags
     assert flags.get("AP2_AUTO_UNFREEZE_DISABLED") == "1", flags
-    assert flags.get("AP2_FOCUS_AUTO_ADVANCE_DISABLED") == "1", flags
+    # TB-345: focus_advance is no longer a component, so its former
+    # kill switch must NOT appear in the disabled-env-flag dict.
+    assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" not in flags, flags
 
     # Opt-in toggles map to empty string (clear from env).
     assert flags.get("AP2_MM_CHANNELS") == "", flags
@@ -300,11 +301,12 @@ def test_disabled_config_excludes_env_flagged_components(disabled_env):
     surfaces only the always-on (`env_flag=None`) manifests; every
     env-flag-bearing component drops out.
 
-    TB-320 expanded the env-flag-bearing set from three to six —
-    `auto_approve`, `auto_unfreeze`, and `focus_advance` joined
+    TB-320 expanded the env-flag-bearing set — `auto_approve`,
+    `auto_unfreeze`, and the former `focus_advance` joined
     `janitor` / `mattermost` / `validator_judge` as toggle-able
-    components. `attention/` remains the only `env_flag=None`
-    always-on manifest.
+    components. TB-345 then merged `focus_advance` into the core
+    `ap2/ideation_halt.py` module, so it is no longer a component.
+    `attention/` remains the only `env_flag=None` always-on manifest.
 
     Pins the manifest's polarity contract end-to-end: the helper, the
     monkeypatch step, and the registry's `_is_enabled` filter must all
@@ -317,9 +319,10 @@ def test_disabled_config_excludes_env_flagged_components(disabled_env):
     assert "janitor" not in enabled, enabled
     assert "mattermost" not in enabled, enabled
     assert "validator_judge" not in enabled, enabled
-    # TB-320: the three newly-flagged components also drop out.
+    # TB-320: the newly-flagged components also drop out.
     assert "auto_approve" not in enabled, enabled
     assert "auto_unfreeze" not in enabled, enabled
+    # TB-345: focus_advance is no longer a component at all.
     assert "focus_advance" not in enabled, enabled
 
     # env_flag=None components keep firing (conservative defaults per
@@ -693,9 +696,10 @@ def test_disabled_env_fixture_restores_default_registry_on_teardown(
     assert "janitor" not in enabled
     assert "mattermost" not in enabled
     assert "validator_judge" not in enabled
-    # TB-320: the three newly-flagged components also disabled.
+    # TB-320: the newly-flagged components also disabled.
     assert "auto_approve" not in enabled
     assert "auto_unfreeze" not in enabled
+    # TB-345: focus_advance is no longer a component at all.
     assert "focus_advance" not in enabled
 
     # The fixture's yield value matches the helper's output.
@@ -704,7 +708,9 @@ def test_disabled_env_fixture_restores_default_registry_on_teardown(
     assert "AP2_VALIDATOR_JUDGE_DISABLED" in disabled_env
     assert "AP2_AUTO_APPROVE" in disabled_env
     assert "AP2_AUTO_UNFREEZE_DISABLED" in disabled_env
-    assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" in disabled_env
+    # TB-345: focus_advance's former kill switch is no longer a
+    # component env flag, so it must NOT appear in the dict.
+    assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" not in disabled_env
 
 
 # ---------------------------------------------------------------------------
@@ -750,30 +756,6 @@ def test_tb320_auto_unfreeze_independent_disable():
     assert manifest.default_enabled is True, manifest
     # Kill switch / suppress-polarity: truthy → disabled.
     assert manifest.is_enabled(env={"AP2_AUTO_UNFREEZE_DISABLED": "1"}) is False
-    # Unset → enabled (round-trip the polarity).
-    assert manifest.is_enabled(env={}) is True
-
-
-def test_tb320_focus_advance_independent_disable():
-    """TB-320: setting `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` flips the
-    `focus_advance` manifest's `is_enabled(env)` to False
-    independently of every other component's env knob.
-
-    Pins the manifest's TB-320 wiring of TB-226's existing kill
-    switch: `env_flag="AP2_FOCUS_AUTO_ADVANCE_DISABLED"`,
-    `default_enabled=True`. The subpackage's internal self-gate
-    (read through `goal.auto_advance_disabled()`) stays canonical;
-    the registry now agrees on the same knob.
-    """
-    registry = Registry.discover()
-    manifest = registry.get("focus_advance")
-    assert manifest.env_flag == "AP2_FOCUS_AUTO_ADVANCE_DISABLED", manifest
-    assert manifest.default_enabled is True, manifest
-    # Kill switch / suppress-polarity: truthy → disabled.
-    assert (
-        manifest.is_enabled(env={"AP2_FOCUS_AUTO_ADVANCE_DISABLED": "1"})
-        is False
-    )
     # Unset → enabled (round-trip the polarity).
     assert manifest.is_enabled(env={}) is True
 

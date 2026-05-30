@@ -133,26 +133,21 @@ FLAT_TO_SECTIONED: dict[str, str] = {
     "AP2_TASK_FROZEN_RECENCY_S": "components.attention.task_frozen_recency_s",
     "AP2_ATTENTION_DEBOUNCE_S": "components.attention.debounce_s",
     "AP2_ATTENTION_IMMEDIATE_PUSH": "components.attention.immediate_push",
-    # --- focus_advance component --------------------------------------------
-    # TB-329: the sectioned target on the left side of `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
-    # was originally `components.focus_advance.disabled` (TB-323
-    # initial map) but TB-322's manifest schema named the key
-    # `auto_advance_disabled` (see
-    # `ap2/components/focus_advance/manifest.py` config_schema) and
-    # `ap2/howto.md` documents `components.focus_advance.auto_advance_disabled`
-    # to the operator. The bare `disabled` form was a latent bug — under
-    # it, a flat `AP2_FOCUS_AUTO_ADVANCE_DISABLED=1` would populate
-    # `cfg.components_config["focus_advance"]["disabled"]` (per the
-    # `apply_env_overrides` write path) but the TB-329 read-site
-    # migration calls `cfg.get_component_value("focus_advance",
-    # "auto_advance_disabled")`, whose reverse-`FLAT_TO_SECTIONED` lookup
-    # would miss the legacy flat env and the cfg-snapshot fallback would
-    # miss the wrongly-keyed write — net effect: the operator's flat env
-    # value would silently disappear once the read site swapped. Align
-    # the back-compat map with the schema + docs so the three surfaces
-    # (TB-322 schema, TB-323 back-compat map, TB-329 read site) agree.
-    "AP2_FOCUS_AUTO_ADVANCE_DISABLED": "components.focus_advance.auto_advance_disabled",
-    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES": "components.focus_advance.empty_cycles",
+    # --- ideation-halt (core ideation lifecycle) ----------------------------
+    # TB-345 merged the old `focus_advance` component into the core
+    # module `ap2/ideation_halt.py` and renamed its two knobs to the
+    # ideation-halt namespace. The canonical flat names map to
+    # the `core.ideation_halt_*` keys declared in
+    # `ap2/core_config_schema.py`.
+    "AP2_IDEATION_HALT_EMPTY_CYCLES": "core.ideation_halt_empty_cycles",
+    "AP2_IDEATION_HALT_DISABLED": "core.ideation_halt_disabled",
+    # DEPRECATED aliases (one-release back-compat per TB-345). The old
+    # `focus_advance`-era flat names map to the SAME new `core.*` paths
+    # so an operator whose `.cc-autopilot/env` still exports the old
+    # names keeps working (and gets a one-shot `env_deprecated` event).
+    # A later task drops these once no sandbox env references them.
+    "AP2_FOCUS_ADVANCE_EMPTY_CYCLES": "core.ideation_halt_empty_cycles",
+    "AP2_FOCUS_AUTO_ADVANCE_DISABLED": "core.ideation_halt_disabled",
     # --- janitor component --------------------------------------------------
     "AP2_JANITOR_DISABLED": "components.janitor.disabled",
     "AP2_JANITOR_JUDGE_EFFORT": "components.janitor.judge_effort",

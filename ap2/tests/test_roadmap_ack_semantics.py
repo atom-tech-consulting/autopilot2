@@ -41,12 +41,11 @@ surfacing-vs-state split on the `ap2 status` / web surfaces).
 """
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
 
-from ap2 import daemon, events, goal, operator_queue
+from ap2 import events, goal, ideation_halt, operator_queue
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -77,7 +76,7 @@ def _write_goal_with_foci(cfg: Config, *titles: str) -> None:
 @pytest.fixture
 def cfg(tmp_path: Path, monkeypatch) -> Config:
     """Project root with the standard ap2 init layout."""
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     init_project(tmp_path)
     cfg = Config.load(tmp_path)
     cfg.ensure_dirs()
@@ -93,10 +92,10 @@ def _exhaust(cfg: Config, *titles: str, monkeypatch=None) -> None:
     gone, so the halt fires from the empty-cycles detector directly."""
     _write_goal_with_foci(cfg, *titles)
     if monkeypatch is not None:
-        monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+        monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
     events.append(cfg.events_file, "ideation_complete", summary="empty")
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
 
 def _ack_roadmap_complete(cfg: Config) -> None:
@@ -165,7 +164,7 @@ def test_fresh_emit_clears_stale_dismissal_marker(cfg, monkeypatch):
     action. TB-340 clears the marker at emit time so each episode
     re-nags exactly once.
     """
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
     pointer = goal.load_pointer(cfg)
     # Stale dismissal from a PRIOR episode at the same foci count (2),
@@ -178,7 +177,7 @@ def test_fresh_emit_clears_stale_dismissal_marker(cfg, monkeypatch):
     events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
     events.append(cfg.events_file, "ideation_complete", summary="empty")
 
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     # The fresh emit cleared the stale marker → the nag is re-armed.
     refreshed = goal.load_pointer(cfg)
@@ -234,7 +233,7 @@ def test_notice_dismissed_lifecycle(cfg, monkeypatch):
     events.append(cfg.events_file, "goal_updated", reason="extension")
     events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
     events.append(cfg.events_file, "ideation_complete", summary="empty")
-    asyncio.run(daemon._maybe_advance_focus(cfg, sdk=None))
+    ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     # Fresh episode → notice NOT dismissed even though episode 1 was.
     assert goal.roadmap_exhausted(cfg) is True

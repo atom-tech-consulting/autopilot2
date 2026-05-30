@@ -459,7 +459,7 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
             # ideation agent, surfaced here as `titles` so machine
             # consumers can render them as a list. `roadmap_complete`
             # is the ideation-halt flag (the detector tripped after
-            # `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` consecutive empty
+            # `AP2_IDEATION_HALT_EMPTY_CYCLES` consecutive empty
             # cycles).
             "active_focus": (
                 None

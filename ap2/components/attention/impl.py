@@ -1073,7 +1073,7 @@ def _is_attention_immediate_push_enabled(cfg: Config) -> bool:
 
     Read fresh from the resolved-config layer (NOT cached on `Config`)
     so a hot-reload of the env file flips the knob on the very next
-    tick. Truthy set mirrors the sibling `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+    tick. Truthy set mirrors the sibling `AP2_IDEATION_HALT_DISABLED`
     style: `1` / `true` / `yes` / `on` (case-insensitive). Anything
     else, including the unset case, is false (conservative default per
     goal.md Non-goals L253-256). The TOML layer's typed `True` / `False`

@@ -11,7 +11,7 @@ is sequential with task execution by construction (``_maybe_ideate`` gates
 on ``Active == 0`` and TB-110's snapshot-window fence prevents concurrent
 state mutation). But the queue path emits ``operator_queue_append
 op=add_backlog``, NOT ``ideation_proposal_recorded`` — and only the latter
-is recognized by ``_ideation_empty_against_focus`` as a proposal-reset
+is recognized by ``_consecutive_empty_ideation_cycles`` as a proposal-reset
 signal. One productive cycle silently ticked the counter as if empty.
 
 The fix fences ideation's toolset to ``IDEATION_TOOLS`` (a strict subset
