@@ -35,6 +35,17 @@ def test_default_cron_intervals_are_sane():
     assert 600 <= jobs["status-report"].interval_s <= 8 * 3600
 
 
+def test_default_cron_ships_real_sdk_smoke_job_at_6h():
+    """TB-350: the shipped template seeds a `real-sdk-smoke` job on a 6h
+    interval. New projects bootstrap it inert (the routine no-ops unless
+    `AP2_REAL_SDK` is set); existing projects activate via the operator
+    CLI after the daemon picks up the `run_cron` routine branch.
+    """
+    jobs = {j.name: j for j in load_jobs(DEFAULT)}
+    assert "real-sdk-smoke" in jobs
+    assert jobs["real-sdk-smoke"].interval_s == 6 * 3600
+
+
 def test_bootstrap_copies_default(tmp_path: Path):
     target = tmp_path / "cron.yaml"
     assert not target.exists()
@@ -49,7 +60,8 @@ def test_bootstrap_copies_default(tmp_path: Path):
 
     # And the file should parse as valid jobs.
     jobs = load_jobs(target)
-    assert {j.name for j in jobs} == {"status-report"}
+    # TB-350 seeds the `real-sdk-smoke` job alongside `status-report`.
+    assert {j.name for j in jobs} == {"status-report", "real-sdk-smoke"}
 
 
 def test_bootstrap_creates_parent_dir(tmp_path: Path):

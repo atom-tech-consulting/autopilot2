@@ -1109,6 +1109,34 @@ set and the full guard chain would have passed; payload `task`,
 `shape`, `file`, `line`, `from`, `to`; the briefing file is NOT
 mutated and no operator-queue ops are appended).
 
+**Real-SDK smoke check (TB-350).** `smoke_check_skipped`,
+`smoke_check_passed`, and `smoke_check_failed` are the three outcome
+events of the 6-hourly `real-sdk-smoke` cron job, dispatched by
+`daemon.run_cron` through the `ap2.smoke_runner.run_smoke_check`
+routine (a deterministic subprocess pass, NOT an LLM agent — control /
+cron agents have no Bash). `smoke_check_skipped` (payload
+`reason="AP2_REAL_SDK unset"`) fires when the inert-by-default gate
+trips — the routine never runs paid live-API calls unless `AP2_REAL_SDK`
+is set to a non-falsey value, so the shipped `cron.default.yaml` job is
+a one-event no-op on installs that haven't opted in. When the flag IS
+set the routine runs `uv run --extra dev pytest -q ap2/tests/smoke/` as
+a subprocess bounded by `AP2_VERIFY_TIMEOUT_S`, emitting
+`smoke_check_passed` (payload `duration_s`) on exit 0 or
+`smoke_check_failed` (payload `reason` ∈ {`nonzero_exit`, `timeout`},
+`exit_code`, `duration_s`, `failure_tail` — the last ~2000 chars of the
+pytest output, which carries the failing `FAILED <nodeid>` lines) on
+non-zero exit / timeout. Failure-only alerting: the routine posts a
+concise Mattermost alert (via the shared `registry.channel_adapters`
+delivery path, channel resolved like the status-report routine —
+`AP2_MM_REPORT_CHANNEL` then `AP2_MM_CHANNELS[0]`) ONLY on
+`smoke_check_failed`; the pass record lives in `events.jsonl` and a 6h
+"smokes OK" post would be noise alongside the 8h status-report digest.
+This restores the live-API SDK-wiring canary (cron_propose /
+pipeline_task_start / report_result / prose-judge / validator-judge
+round-trips) that the per-task verification gate dropped on 2026-05-30
+to stop transient-blip false-fails — out-of-band and deterministic
+instead of on every task.
+
 **Briefing-validator LLM judge (TB-235).** `validator_judge_timeout`
 and `validator_judge_fail` are fail-open audit events from check #7
 in `briefing_validators._validate_briefing_structure` (LLM-driven

@@ -33,3 +33,27 @@ jobs:
       `ap2 status`.)
     max_turns: 10
     created_by: bootstrap
+  - name: real-sdk-smoke
+    interval: 6h
+    prompt: |
+      (TB-350: this prompt body is a stub — the daemon dispatches
+      real-sdk-smoke jobs through `ap2.smoke_runner.run_smoke_check`,
+      which runs `uv run --extra dev pytest -q ap2/tests/smoke/` as a
+      timeout-bounded subprocess and posts a Mattermost alert on failure
+      only. Editing this stub has no effect at runtime — the work is a
+      deterministic shell action (running pytest), not an LLM task, and
+      control / cron agents have no Bash anyway. Kept here for legibility
+      so `ap2 cron list` shows that a real-sdk-smoke job exists, with the
+      operator-tunable `interval` field above.
+      The smoke suite makes LIVE Claude API calls, so the routine is
+      inert-by-default: it emits a single `smoke_check_skipped` event and
+      returns immediately unless `AP2_REAL_SDK` is set to a non-falsey
+      value. This keeps the shipped job a no-op on installs that haven't
+      opted into the paid smokes. On an opted-in install the routine emits
+      `smoke_check_passed` (with duration) or `smoke_check_failed` (with
+      exit code + the captured failure tail), restoring the live-API
+      canary that the per-task verification gate dropped on 2026-05-30 to
+      stop transient-blip false-fails. The run is bounded by
+      `AP2_VERIFY_TIMEOUT_S` so a hung live SDK can't stall the tick.)
+    max_turns: 1
+    created_by: bootstrap

@@ -1012,6 +1012,34 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
         events.append(cfg.events_file, "cron_complete", job=job.name)
         return
 
+    # TB-350: `real-sdk-smoke` jobs run the live-API smoke suite as a
+    # timeout-bounded subprocess via `ap2.smoke_runner.run_smoke_check`.
+    # Like `janitor`, the work is a deterministic shell action (running
+    # pytest), not an LLM task — and control / cron agents have no Bash
+    # anyway — so this dispatches a Python routine rather than building a
+    # control prompt. The routine itself emits the
+    # `smoke_check_skipped` / `smoke_check_passed` / `smoke_check_failed`
+    # outcome events + posts the failure-only Mattermost alert; we bookend
+    # with `cron_start` / `cron_complete` (job=real-sdk-smoke) and advance
+    # `cron_state[real-sdk-smoke].last_run` exactly as the janitor branch
+    # does. `job.prompt` is an ignored stub (same as status-report).
+    if job.name == "real-sdk-smoke":
+        from . import smoke_runner as _smoke_runner_mod
+
+        events.append(cfg.events_file, "cron_start", job=job.name)
+        try:
+            await _smoke_runner_mod.run_smoke_check(cfg)
+        except Exception as e:  # noqa: BLE001
+            events.append(
+                cfg.events_file,
+                "cron_error",
+                job=job.name,
+                error=f"{type(e).__name__}: {e}",
+            )
+        mark_run(cfg.cron_state_file, job.name)
+        events.append(cfg.events_file, "cron_complete", job=job.name)
+        return
+
     prompt = prompts.build_control_prompt(cfg, job.name, job.prompt)
     events.append(cfg.events_file, "cron_start", job=job.name)
     # TB-126: snapshot the state surface before the cron runs so we can
