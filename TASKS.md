@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-344** **Fix `ap2 config get/list` core-value resolution + agent_model default drift** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` [→ brief](.cc-autopilot/tasks/fix-ap2-config-get-list-core-value-resol.md)
 
 ## Pipeline Pending
 
