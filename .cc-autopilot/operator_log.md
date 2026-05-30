@@ -291,3 +291,7 @@ ideation won't re-propose decisions logged here._
 - 2026-05-30T02:34:51Z — applied operator-queued add_backlog → TB-343 (goal-alignment check skipped)
 - 2026-05-30T03:39:28Z — applied operator-queued add_backlog → TB-344 (goal-alignment check skipped)
 - 2026-05-30T04:26:11Z — applied operator-queued add_backlog → TB-345 (goal-alignment check skipped)
+- 2026-05-30T04:36:43Z — applied operator-queued add_backlog → TB-346 (goal-alignment check skipped)
+- 2026-05-30T04:41:22Z — applied operator-queued add_backlog → TB-347 (goal-alignment check skipped)
+- 2026-05-30T05:11:04Z — applied operator-queued add_backlog → TB-348 (goal-alignment check skipped)
+- 2026-05-30T05:11:24Z — applied operator-queued add_backlog → TB-349 (goal-alignment check skipped)
