@@ -1287,3 +1287,9 @@
 - **Summary:** Previously committed in be5d35f (+ comment-cleanup follow-up 25827ac); work fully covers the briefing — verified completeness by auditing the diff against every scope item and re-running the gate: non-smoke suite 2786 passed, real-SDK smoke 6 passed (= 2792, the daemon's recurring verification_failed was the unrelated flaky test_prose_judge_real_sdk.py, which now passes); focus_advance merged into core ap2/ideation_halt.py with cleaned maybe_halt_on_exhaustion(cfg) signature, component deleted (no longer registry-discovered), knobs renamed to AP2_IDEATION_HALT_* with AP2_FOCUS_* deprecated aliases mapping to core.ideation_halt_*, core schema + config_compat + daemon _tick + docs all updated, back-compat + import-direction + disabled-config tests pass.
 - **Files:** ap2/ideation_halt.py, ap2/daemon.py, ap2/components/focus_advance/ (deleted), ap2/core_config_schema.py, ap2/config_compat.py, ap2/config.py, ap2/howto.md, ap2/architecture.md, ap2/init.py, ap2/env_reload.py, ap2/goal.py, ap2/registry.py, ap2/events.py, ap2/tests/test_ideation_halt.py, ap2/tests/test_components_disabled.py, ap2/tests/test_core_import_direction.py, ap2/tests/test_docs_drift.py
 - **Tests:** pass
+
+## [2026-05-30] TB-348: Purge stale hardcoded-3 proposal caps and rotation-era references from the ideation prompt
+- **Commit:** `6d1aaef`
+- **Summary:** Repointed every per-cycle proposal-count reference in ap2/ideation.default.md (Proposals-this-cycle schema, follow-up fallback, failure-remediation budget, Ranking line) at the dynamic `proposal slots this cycle` N, and aligned the rotation-era citations to post-TB-345 reality (ap2/ideation_halt.py::_consecutive_empty_ideation_cycles, AP2_IDEATION_HALT_EMPTY_CYCLES, whole-goal halt framing); full suite 2794 passed.
+- **Files:** ap2/ideation.default.md
+- **Tests:** pass
