@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-352** **Add a --follow live event-monitor mode to ap2 logs (fold in scripts/monitor_events.py)** `#autopilot` `#cli` `#logs` `#operator-ux` `#monitoring` `#refactor` [→ brief](.cc-autopilot/tasks/add-a-follow-live-event-monitor-mode-to.md)
 
 ## Pipeline Pending
 
