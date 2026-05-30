@@ -1311,3 +1311,9 @@
 - **Summary:** Added a 6-hourly real-sdk-smoke cron job dispatched through a new ap2/smoke_runner.py routine (inert unless AP2_REAL_SDK is set; runs the smoke suite as a timeout-bounded subprocess, emits smoke_check_skipped/passed/failed, posts a Mattermost alert on failure only), wired the run_cron dispatch branch + cron.default.yaml job, and added unit/dispatch tests; full suite (2796) passes excluding smoke.
 - **Files:** ap2/smoke_runner.py, ap2/daemon.py, ap2/cron.default.yaml, ap2/howto.md, ap2/tests/test_smoke_runner.py, ap2/tests/test_cron_defaults.py
 - **Tests:** pass
+
+## [2026-05-30] TB-351: Harden real-SDK smokes to skip on transient SDK errors instead of false-failing
+- **Commit:** `f460d43`
+- **Summary:** Added a shared narrow transient-SDK-error classifier (ap2/tests/smoke/_transient.py) with a bounded single-retry helper, wired it into all five real-SDK smokes so a transport/service blip retries once then pytest.skips (clean-but-wrong verdicts still fail; the TB-249 --max-tokens arg-rejection matches no transient signature so the validator smoke still catches it), and pinned the mapping with a non-live unit test that runs in the normal gate; full descoped gate green (2817 passed).
+- **Files:** ap2/tests/smoke/_transient.py, ap2/tests/test_tb351_transient_classifier.py, ap2/tests/smoke/test_prose_judge_real_sdk.py, ap2/tests/smoke/test_validator_judge_real_sdk.py, ap2/tests/smoke/test_cron_propose_real_sdk.py, ap2/tests/smoke/test_pipeline_task_start_real_sdk.py, ap2/tests/smoke/test_report_result_real_sdk.py
+- **Tests:** pass
