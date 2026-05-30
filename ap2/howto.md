@@ -652,7 +652,7 @@ never the operator.
 | `ap2 init` | Idempotent scaffold of `.gitignore` + `.cc-autopilot/tasks/` skeleton in a fresh project. | Run once when bringing a repo under ap2; no-op if the structure already exists. |
 | `ap2 doctor [--user U]` | Sanity-check that the project is ready to boot — skeleton present, sandbox user installed, OAuth token reachable. | Run before `ap2 start` on an unfamiliar machine to diagnose the "daemon won't start" silent-fail modes (TB-79's token-missing path is the most common hit). |
 | `ap2 check [--json]` | Validate on-disk state-file integrity — TASKS.md shape, briefing-link resolution, cron.yaml schema, JSON state parseability, insights front matter (TB-108). | Exits 1 on errors; warnings (stale brief links, missing goal.md) don't fail. Run after any manual edit to a fenced file. |
-| `ap2 logs [-n N] [--json]` | Tail `events.jsonl` with column truncation for human reading. | Faster than `tail \| jq` for the common "what just happened?" question; default trims fields to 120 chars and `--json` gives full payloads. |
+| `ap2 logs [-n N] [--json] [--follow/-f] [--all]` | One-shot tail of `events.jsonl` with column truncation for human reading; `--follow`/`-f` switches to a live tail filtered to the operator-interest allowlist (compact one-line format), `--all` disables that filter, `--json` emits raw kept lines (TB-352, folded in the former `scripts/monitor_events.py`). | Faster than `tail \| jq` for the common "what just happened?" question; default trims fields to 120 chars and `--json` gives full payloads. `--follow` starts at end-of-file (ignores `-n`, like `tail -F -n 0`) so it survives daemon log rotation — reach for it to watch an active arc unfold live. |
 | `ap2 backlog TB-N` | Move a task into Backlog from any section (last-ditch reset without retry-counter exhaustion). | Use when a stuck Active task needs to step back without burning retries; for permanent removal use `ap2 delete` instead. |
 | `ap2 add --briefing-file PATH [-s SECTION] [-t TAGS...] [--no-verify] [--blocked CSV] [--skip-goal-alignment]` | Add a new operator-filed task with a real briefing the per-task verifier can read (TB-135). | `--briefing-file` is required because verification needs a `## Verification` section; pass `-` for stdin. `--skip-goal-alignment` (TB-170) bypasses the TB-161 goal-cite and TB-164 Why-now checks for legitimately-meta work (dep bumps, doc fixes). |
 | `ap2 update TB-N [--title T] [--tags CSV] [--blocked CSV] [--description D] [--clear-tags] [--clear-blocked] [--briefing-file PATH] [--force] [--skip-goal-alignment]` | In-place edit a task's board-line fields and/or its briefing file (TB-153). | Routes through the operator queue so the mutation lands at a tick boundary, never mid-task-run; omitted flag = field unchanged. `--force` lets board-line edits land on Active / Pipeline Pending tasks (briefing edits stay hard-refused). |
@@ -1350,33 +1350,43 @@ where to look:
 `ap2 logs --json -n 30 \| jq` works too if the CLI is on PATH; defaults
 truncate to 120 chars per field, `--json` gives full payloads.
 
-**Live event tail — `scripts/monitor_events.py`.** Self-contained
-operator helper that tails `.cc-autopilot/events.jsonl` and emits one
-compact line per arc-relevant event from a hard-coded allowlist
-(ideation lifecycle, validation + queue, task lifecycle, focus +
-attention + watchdog + daemon). Complements `ap2 logs -n` (the
-one-shot static tail) and `ap2 status` (the periodic snapshot): reach
+**Live event tail — `ap2 logs --follow`.** Live-tails
+`.cc-autopilot/events.jsonl` (project-aware via the global `--project`)
+and emits one compact line per arc-relevant event from a curated
+allowlist (ideation lifecycle, validation + queue, task lifecycle,
+focus + attention + watchdog + daemon). Complements one-shot `ap2 logs
+-n` (the static tail) and `ap2 status` (the periodic snapshot): reach
 for it when you want to watch an active arc unfold live —
 task-dispatch sequences, ideation cycles, focus advances, attention
 conditions — without manually grepping `events.jsonl` or re-running
 `ap2 logs -n` in a loop. Usage:
 
 ```
-# From the project root:
-python3 -u scripts/monitor_events.py
+# From the project root (allowlist-filtered, compact format):
+ap2 logs --follow
 
-# Explicit project path:
-python3 -u scripts/monitor_events.py /path/to/project
+# Explicit project root:
+ap2 --project /path/to/project logs --follow
 
-# Explicit events.jsonl path (e.g. comparing two projects):
-python3 -u scripts/monitor_events.py --events /path/to/events.jsonl
+# Disable the allowlist (stream every event type — debug escape hatch):
+ap2 logs --follow --all
+
+# Raw JSON line per kept event (compose with --all for an unfiltered raw stream):
+ap2 logs --follow --json
 ```
 
 Each kept line has the shape
-`HH:MM:SS | <event_type> | key=val ... | summary=<truncated>`. Edits
-to the `KEEP` set at the top of the script widen or narrow coverage;
-the default is intentionally noisy-filtered for arc tracking, not
-exhaustive event logging (which `ap2 logs` covers).
+`HH:MM:SS | <event_type> | key=val ... | summary=<truncated>`. The
+allowlist + compact formatter + `tail -F` follow loop live in
+`ap2/event_monitor.py` (TB-352 folded in the former loose
+`scripts/monitor_events.py`); the `KEEP` set there widens or narrows
+coverage. The default is intentionally noisy-filtered for arc tracking,
+not exhaustive event logging (one-shot `ap2 logs` covers that).
+
+`scripts/monitor_events.py` is retained as a thin shim that delegates to
+`ap2.event_monitor` so an existing Claude Code `Monitor` watch on
+`python3 -u scripts/monitor_events.py` keeps working unchanged — repoint
+it at `ap2 logs --follow` whenever convenient.
 
 The `ap2 web` command starts a read-only HTTP UI at `127.0.0.1:7820`
 with `/events`, `/tasks`, `/task/<TB-N>`, `/pipelines`, `/insights`,

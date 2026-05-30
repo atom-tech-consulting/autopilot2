@@ -229,9 +229,30 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true", help="machine-readable output")
     s.set_defaults(func=cmd_check)
 
-    s = sub.add_parser("logs", help="show recent events")
+    s = sub.add_parser(
+        "logs",
+        help="show recent events (one-shot dump; `--follow`/`-f` for a "
+             "live operator-interest tail)",
+    )
     s.add_argument("-n", type=int, default=40)
     s.add_argument("--json", action="store_true")
+    # TB-352: fold the former loose `scripts/monitor_events.py` into a
+    # `--follow` mode. `--follow` live-tails events.jsonl filtered to the
+    # operator-interest KEEP allowlist (compact one-line format); `--all`
+    # disables the filter (debug escape hatch); `--json` emits raw kept
+    # lines. `--follow` starts at end-of-file (like `tail -F -n 0`) so it
+    # ignores `-n`. One-shot `logs` (no `--follow`) is unchanged.
+    s.add_argument(
+        "-f", "--follow", action="store_true",
+        help="live-tail events.jsonl filtered to the operator-interest "
+             "allowlist (compact one-line format; --all disables the "
+             "filter, --json emits raw kept lines)",
+    )
+    s.add_argument(
+        "--all", action="store_true",
+        help="with --follow: stream every event type (disable the "
+             "KEEP allowlist)",
+    )
     s.set_defaults(func=cmd_logs)
 
     s = sub.add_parser("backlog", help="move a task to Backlog from any section")

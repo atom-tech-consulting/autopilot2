@@ -78,6 +78,25 @@ def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_logs(cfg: Config, args: argparse.Namespace) -> int:
+    # TB-352: `--follow` / `-f` switches the one-shot dump into a live
+    # tail backed by `ap2.event_monitor` (the folded-in monitor_events
+    # core). Follow mode filters to the operator-interest KEEP allowlist
+    # and prints the compact one-line format by default; `--all` disables
+    # the filter, `--json` emits raw kept lines. The events path comes
+    # straight from `cfg.events_file` (already resolved from the global
+    # `--project`). One-shot `logs` (no `--follow`) below is unchanged —
+    # `-n` / `--json` keep their existing contract; `--follow` ignores
+    # `-n` (it starts at end-of-file, like `tail -F -n 0`). `getattr`
+    # guards keep callers that build a bare `Namespace(n=..., json=...)`
+    # (the TB-158 / TB-180 unit tests) working without the new flags.
+    if getattr(args, "follow", False):
+        from . import event_monitor
+
+        return event_monitor.follow(
+            cfg.events_file,
+            allow_all=getattr(args, "all", False),
+            as_json=args.json,
+        )
     n = args.n
     evts = events.tail(cfg.events_file, n=n)
     if args.json:
