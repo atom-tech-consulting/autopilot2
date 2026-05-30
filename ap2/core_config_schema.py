@@ -11,13 +11,17 @@ docstring both flag the asymmetry. This module closes that gap.
 
 The keys declared here are the non-component cluster — verifier,
 ideation, agent runtime, control / mattermost timeouts, tick
-intervals, web port, project identity. The cut-line mirrors
-`config_compat.FLAT_TO_SECTIONED`'s `core.*` entries (config_compat.py
-L88-115) minus the two detector-sensitivity knobs that are
-intentionally out of scope per the briefing
-(`auto_diagnose_cooldown_s`, `auto_diagnose_idle_threshold_s` —
-operator-tunable but not currently part of the original "21 known
-core keys" round-trip set). TB-339 drained the prior carve-out for
+intervals, web port, project identity, and the idle-watchdog
+detector knobs. The cut-line now covers every `core.*` entry in
+`config_compat.FLAT_TO_SECTIONED` (config_compat.py L88-115). TB-346
+closed the last carve-out: `auto_diagnose_cooldown_s` and
+`auto_diagnose_idle_threshold_s` were previously left out of the
+original "21 known core keys" round-trip set, so `ap2 config get/list`
+showed them with no description/type and no centrally-declared
+default; they are now declared here (defaults sourced from the
+`DEFAULT_AUTO_DIAGNOSE_*` constants in `ap2/config.py`) so the
+introspection surface carries their metadata. TB-339 drained the
+prior carve-out for
 `verify_judge_effort` + `status_report_effort` — both are now
 declared here so the corresponding read sites in `verify.py` and
 `status_report.py` can route through `cfg.get_core_value(...)`
@@ -68,6 +72,8 @@ the schema's default the next time this module is imported.
 from __future__ import annotations
 
 from .config import (
+    DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S,
+    DEFAULT_AUTO_DIAGNOSE_IDLE_THRESHOLD_S,
     DEFAULT_CONTROL_MAX_TURNS,
     DEFAULT_CONTROL_TIMEOUT_S,
     DEFAULT_EVENT_CONTEXT_SIZE,
@@ -437,6 +443,35 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
             "operator halts manually. Mirrors the flat env "
             "`AP2_IDEATION_HALT_DISABLED` (deprecated focus-era "
             "alias); hot-reloadable."
+        ),
+        hot_reloadable=True,
+    ),
+    # --- Idle watchdog / auto-diagnose (TB-346 — closed the carve-out) ----
+    "auto_diagnose_idle_threshold_s": ConfigKey(
+        name="auto_diagnose_idle_threshold_s",
+        type=int,
+        default=DEFAULT_AUTO_DIAGNOSE_IDLE_THRESHOLD_S,
+        description=(
+            "Idle-watchdog trigger threshold in seconds (TB-71). The "
+            "`_maybe_auto_diagnose` pass posts a diagnostic to Mattermost "
+            "once the board has made no forward progress for this long, "
+            "surfacing a wedged daemon the operator would otherwise miss. "
+            "Default 10800 (3h). Mirrors the flat env "
+            "`AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S`; hot-reloadable."
+        ),
+        hot_reloadable=True,
+    ),
+    "auto_diagnose_cooldown_s": ConfigKey(
+        name="auto_diagnose_cooldown_s",
+        type=int,
+        default=DEFAULT_AUTO_DIAGNOSE_COOLDOWN_S,
+        description=(
+            "Idle-watchdog re-fire cooldown in seconds (TB-71). After an "
+            "`auto_diagnose_fired` post, `_maybe_auto_diagnose` suppresses "
+            "further diagnostics for this window so a persistently-idle "
+            "board doesn't spam the channel every tick. Default 21600 "
+            "(6h). Mirrors the flat env `AP2_AUTO_DIAGNOSE_COOLDOWN_S`; "
+            "hot-reloadable."
         ),
         hot_reloadable=True,
     ),

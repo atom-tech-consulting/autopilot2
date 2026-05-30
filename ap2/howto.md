@@ -2469,6 +2469,18 @@ start`; everything else propagates on the next tick after a
   default; project convention is `claude-opus-4-7`. Mirrors
   `AP2_AGENT_MODEL`; read fresh from `os.environ` at each SDK
   invocation so hot-reload propagates immediately.
+- `core.auto_diagnose_cooldown_s` — int, default `21600` (hot-reloadable).
+  Idle-watchdog re-fire cooldown in seconds (TB-71). After an
+  `auto_diagnose_fired` post, `_maybe_auto_diagnose` suppresses further
+  diagnostics for this window so a persistently-idle board doesn't spam
+  the channel every tick. Default 21600 (6h). Mirrors
+  `AP2_AUTO_DIAGNOSE_COOLDOWN_S`.
+- `core.auto_diagnose_idle_threshold_s` — int, default `10800`
+  (hot-reloadable). Idle-watchdog trigger threshold in seconds (TB-71).
+  `_maybe_auto_diagnose` posts a diagnostic to Mattermost once the board
+  has made no forward progress for this long, surfacing a wedged daemon
+  the operator would otherwise miss. Default 10800 (3h). Mirrors
+  `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S`.
 - `core.control_max_turns` — int, default `15` (hot-reloadable). Max
   turns per control-agent (mattermost / cron) SDK query. Tighter
   than `core.task_max_turns` because control agents do focused

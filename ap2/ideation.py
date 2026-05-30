@@ -645,9 +645,13 @@ def _ideation_disabled(cfg: "Config | None" = None) -> bool:
     """True iff `AP2_IDEATION_DISABLED` resolves to a truthy value.
 
     TB-335 (axis-5 core-cluster migration): resolves through
-    ``cfg.get_core_value("ideation_disabled", default=None)`` — the
-    sectioned-env > flat-env > TOML-snapshot > default precedence
-    chain. Truthy parse preserves the historical shape
+    ``cfg.get_core_value("ideation_disabled")`` — the sectioned-env >
+    flat-env > TOML-snapshot > schema-default precedence chain. TB-346
+    dropped the redundant inline ``default=""`` so the resolver's
+    schema-default backstop (``CORE_CONFIG_SCHEMA["ideation_disabled"]``
+    → ``False``) is the single source of truth; behavior is unchanged
+    because the unset path already falsy-collapses to ``""`` below.
+    Truthy parse preserves the historical shape
     ``.strip() in ("1", "true", "yes")`` (case-sensitive — matches
     `_is_auto_approve_enabled` and the pre-TB-335 inline read at the
     `_maybe_ideate` entry point).
@@ -664,7 +668,7 @@ def _ideation_disabled(cfg: "Config | None" = None) -> bool:
         )
     if cfg is not None:
         raw = str(
-            cfg.get_core_value("ideation_disabled", default="") or "",
+            cfg.get_core_value("ideation_disabled") or "",
         )
     else:
         # Legacy fallback (TB-335 back-compat shape — `os.getenv` for

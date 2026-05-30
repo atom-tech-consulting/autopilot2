@@ -161,9 +161,15 @@ def _resolved_model(cfg: "Config | None" = None) -> str:
     """Return the scrub model, honoring ``AP2_IDEATION_SCRUB_MODEL``.
 
     TB-335 (axis-5 core-cluster migration): resolves through
-    ``cfg.get_core_value("ideation_scrub_model", default=None)`` —
-    the sectioned-env > flat-env > TOML-snapshot > default precedence
-    chain ``Config.get_core_value`` defines (TB-334). The helper
+    ``cfg.get_core_value("ideation_scrub_model")`` — the sectioned-env >
+    flat-env > TOML-snapshot > schema-default precedence chain
+    ``Config.get_core_value`` defines (TB-334). TB-346 dropped the
+    redundant inline ``default=""`` so the resolver's schema-default
+    backstop (``CORE_CONFIG_SCHEMA["ideation_scrub_model"]`` →
+    ``DEFAULT_IDEATION_SCRUB_MODEL``) is the single source of truth;
+    behavior is unchanged since that schema default equals this module's
+    ``DEFAULT_SCRUB_MODEL`` and the empty-value fallback below is
+    untouched. The helper
     reads env at call time so a hot-reload via
     ``env_reload.maybe_reload_env`` propagates without rebinding any
     cached state (parity with the pre-TB-335 direct env read).
@@ -187,7 +193,7 @@ def _resolved_model(cfg: "Config | None" = None) -> str:
             f"got {type(cfg).__name__}",
         )
     if cfg is not None:
-        raw = cfg.get_core_value("ideation_scrub_model", default="")
+        raw = cfg.get_core_value("ideation_scrub_model")
         value = str(raw or "").strip()
     else:
         # Legacy fallback (TB-335 back-compat shape — `os.getenv` for

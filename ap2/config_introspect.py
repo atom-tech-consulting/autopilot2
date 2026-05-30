@@ -226,20 +226,33 @@ def _flat_for_sectioned(sectioned_path: str) -> str | None:
 
 
 def _resolve_component_value(
-    cfg: Config, comp_name: str, key_name: str, spec: ConfigKey,
+    cfg: Config, comp_name: str, key_name: str, schema: ConfigKey,
 ) -> Any:
-    """Look up the component key's value on the loaded `cfg`.
+    """Resolve a component key's value through the runtime resolver.
 
-    Falls back to the schema's declared default when the component's
-    sub-table doesn't carry the key (a fresh config.toml without that
-    knob, no env overlay applied). The fallback preserves the
-    declarative-default contract operators rely on for `ap2 config get`
-    on a never-set knob.
+    TB-346: route through ``cfg.get_component_value(comp_name, key_name)``
+    — the same sectioned-env → flat-env → TOML-snapshot precedence the
+    runtime applies on every component read — so `ap2 config get/list`
+    shows the value an actual component call would receive (including a
+    live env override), not a stale schema default. This is the
+    component-branch mirror of TB-344's core-branch fix
+    (`getattr` → ``get_core_value``): pre-fix this reader pulled
+    straight from the cfg snapshot + the declared default and so missed
+    lazily-resolved env overrides — e.g. with
+    ``AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP=100000000`` set, the runtime saw
+    the override but `config get` displayed the schema default ``0``.
+
+    ``get_component_value`` has no schema-default backstop — its step-4
+    fallback is the ``default`` argument, which is ``None`` when omitted
+    (unlike ``get_core_value``, whose TB-337 fallback consults
+    ``CORE_CONFIG_SCHEMA``). So the schema's declared default is threaded
+    as the ``default=`` argument to preserve the never-set →
+    schema-default display operators rely on for `ap2 config get` on an
+    untouched knob.
     """
-    comp = (cfg.components_config or {}).get(comp_name)
-    if isinstance(comp, dict) and key_name in comp:
-        return comp[key_name]
-    return spec.default
+    return cfg.get_component_value(
+        comp_name, key_name, default=schema.default,
+    )
 
 
 # ---------------------------------------------------------------------------

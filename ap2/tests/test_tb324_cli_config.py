@@ -236,29 +236,97 @@ def test_collect_rows_resolves_agent_model_schema_default_when_unset(
 
 
 def test_collect_rows_preserves_unset_for_keyless_default(
-    tmp_path, clean_env
+    tmp_path, clean_env, monkeypatch
 ):
     """TB-344: the `(unset)` rendering is preserved for a genuinely
     unresolvable core key — one with no env, no TOML, and no schema
-    default. `auto_diagnose_cooldown_s` is enumerated from
-    `FLAT_TO_SECTIONED` but intentionally NOT in `CORE_CONFIG_SCHEMA`
-    (the briefing's two carved-out detector knobs), so `get_core_value`
-    returns `None`, which the renderer shows as `(unset)`. This pins
-    that the fix routes through `get_core_value` WITHOUT blanket-
-    suppressing the sentinel — exactly the `(unset)`-preservation clause
-    in the TB-344 scope ("a key with no env, no TOML, and an empty/None
-    schema default")."""
+    default.
+
+    TB-346 note: this test originally used `auto_diagnose_cooldown_s`,
+    which was enumerated from `FLAT_TO_SECTIONED` but intentionally NOT
+    in `CORE_CONFIG_SCHEMA`. TB-346 closed that carve-out (both
+    `auto_diagnose_*` knobs now carry a schema default), so no real core
+    key remains schema-less. We pin the same `(unset)`-preservation
+    behavior with a SYNTHETIC schema-less core key injected into
+    `FLAT_TO_SECTIONED` — `get_core_value` finds no env / TOML / schema
+    default and returns `None`, which the renderer shows as `(unset)`.
+    This still proves the fix routes through `get_core_value` WITHOUT
+    blanket-suppressing the sentinel."""
     from ap2.cli_config import _format_value
+    from ap2 import config_introspect as ci
+
+    # Inject a synthetic core key with no schema entry. `setitem`
+    # auto-reverts after the test; `collect_rows` and `get_core_value`
+    # both read this same shared dict object.
+    monkeypatch.setitem(
+        ci.FLAT_TO_SECTIONED,
+        "AP2_SYNTHETIC_KEYLESS_KNOB",
+        "core.synthetic_keyless_knob",
+    )
 
     cfg = _project(tmp_path)
     rows = collect_rows(cfg, default_registry())
     by_path = {r.path: r for r in rows}
-    row = by_path["core.auto_diagnose_cooldown_s"]
+    row = by_path["core.synthetic_keyless_knob"]
     assert row.value is None, (
         "a core key with no env/TOML/schema-default must resolve to "
         f"None (→ `(unset)`), got {row.value!r}"
     )
     assert _format_value(row.value) == "(unset)"
+
+
+# ---------------------------------------------------------------------------
+# (1c) TB-346: component-value resolution routes through
+#      `cfg.get_component_value` (the runtime resolver), NOT a direct
+#      cfg-snapshot read + schema default. The TB-344 twin: an
+#      env-overridden component key (e.g. the auto-approve token cap)
+#      must show its resolved value, never the schema default.
+# ---------------------------------------------------------------------------
+
+
+def _component_row(rows, path):
+    """Return the `components.<path>` ConfigRow from a collect_rows list."""
+    by_path = {r.path: r for r in rows}
+    return by_path[path]
+
+
+def test_collect_rows_resolves_component_env_override(tmp_path, clean_env):
+    """TB-346: with `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` set (flat env
+    back-compat), `collect_rows` resolves
+    `components.auto_approve.window_token_cap` to the env value via
+    `cfg.get_component_value` — the same value a runtime component read
+    receives. Pre-fix `_resolve_component_value` read the cfg snapshot +
+    schema default and so displayed the default `0`."""
+    cfg = _project(tmp_path)
+    clean_env.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "100000000")
+    rows = collect_rows(cfg, default_registry())
+    row = _component_row(rows, "components.auto_approve.window_token_cap")
+    assert row.value == "100000000", (
+        f"expected env-override value, got {row.value!r}"
+    )
+    assert row.source == "env-override"
+    # Never the pre-fix schema default.
+    assert row.value != 0, (
+        "window_token_cap must never resolve to the schema default `0` "
+        "when the env override is set"
+    )
+
+
+def test_collect_rows_resolves_component_schema_default_when_unset(
+    tmp_path, clean_env
+):
+    """TB-346: with sectioned-env / flat-env / TOML all absent,
+    `collect_rows` still resolves
+    `components.auto_approve.window_token_cap` to the schema default `0`
+    — `get_component_value` has no schema-default backstop, so
+    `_resolve_component_value` threads `default=schema.default` to
+    preserve the never-set → schema-default display."""
+    cfg = _project(tmp_path)
+    rows = collect_rows(cfg, default_registry())
+    row = _component_row(rows, "components.auto_approve.window_token_cap")
+    assert row.value == 0, (
+        f"expected schema default `0` when unset, got {row.value!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
