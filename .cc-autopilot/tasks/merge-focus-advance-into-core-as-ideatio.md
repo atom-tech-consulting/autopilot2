@@ -176,3 +176,10 @@ Work this as a checklist — the Verification section pins completeness.
 - **exit_code:** 1
 - **stderr_tail:** 
 - **Debug dumps:** `prompt: .cc-autopilot/debug/20260530T042637Z-TB-345.prompt.md`, `stream: .cc-autopilot/debug/20260530T042637Z-TB-345.stream.jsonl`, `messages: .cc-autopilot/debug/20260530T042637Z-TB-345.messages.jsonl`
+### 2026-05-30 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run pytest -q ap2/tests/
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260530T051731Z-TB-345.prompt.md`, `stream: .cc-autopilot/debug/20260530T051731Z-TB-345.stream.jsonl`, `messages: .cc-autopilot/debug/20260530T051731Z-TB-345.messages.jsonl`

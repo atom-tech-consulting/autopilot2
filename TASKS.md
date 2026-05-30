@@ -8,11 +8,11 @@
 
 ## Backlog
 
-- [ ] **TB-345** **Merge focus_advance into core as ideation-halt; rename the AP2_FOCUS_ADVANCE knobs to the AP2_IDEATION_HALT namespace** `#autopilot` `#components` `#core` `#refactor` `#ideation-halt` `#rename` `@blocked:TB-342,TB-344` [→ brief](.cc-autopilot/tasks/merge-focus-advance-into-core-as-ideatio.md)
 - [ ] **TB-346** **Config-correctness cleanup: component-value resolution + inline-default consistency + auto_diagnose schema coverage** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/config-correctness-cleanup-component-val.md)
 - [ ] **TB-347** **Raise core task defaults (DEFAULT_TASK_TIMEOUT_S 1200 to 3600, DEFAULT_TASK_MAX_TURNS 200 to 500)** `#autopilot` `#config` `#core` `#defaults` [→ brief](.cc-autopilot/tasks/raise-core-task-defaults-default-task-ti.md)
 - [ ] **TB-348** **Purge stale hardcoded-3 proposal caps and rotation-era references from the ideation prompt** `#autopilot` `#ideation` `#prompt` `#refactor` `#docs-drift` `#cleanup` `#autopilot` `#ideation` `#prompt` `#refactor` `#docs-drift` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/purge-stale-hardcoded-3-proposal-caps-an.md)
 - [ ] **TB-349** **Fix stale focus_advance module and symbol references in source comments after the ideation-halt rename** `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/fix-stale-focus-advance-module-and-symbo.md)
+- [ ] **TB-345** **Merge focus_advance into core as ideation-halt; rename the AP2_FOCUS_ADVANCE knobs to the AP2_IDEATION_HALT namespace** `#autopilot` `#components` `#core` `#refactor` `#ideation-halt` `#rename` `@blocked:TB-342,TB-344` [→ brief](.cc-autopilot/tasks/merge-focus-advance-into-core-as-ideatio.md)
 
 ## Pipeline Pending
 
