@@ -290,3 +290,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-29T23:26:50Z — applied operator-queued delete → TB-341
 - 2026-05-30T02:34:51Z — applied operator-queued add_backlog → TB-343 (goal-alignment check skipped)
 - 2026-05-30T03:39:28Z — applied operator-queued add_backlog → TB-344 (goal-alignment check skipped)
+- 2026-05-30T04:26:11Z — applied operator-queued add_backlog → TB-345 (goal-alignment check skipped)

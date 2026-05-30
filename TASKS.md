@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-345** **Merge focus_advance into core as ideation-halt; rename the AP2_FOCUS_ADVANCE knobs to the AP2_IDEATION_HALT namespace** `#autopilot` `#components` `#core` `#refactor` `#ideation-halt` `#rename` `@blocked:TB-342,TB-344` [→ brief](.cc-autopilot/tasks/merge-focus-advance-into-core-as-ideatio.md)
 
 ## Pipeline Pending
 
