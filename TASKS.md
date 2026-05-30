@@ -10,6 +10,7 @@
 
 - [ ] **TB-349** **Fix stale focus_advance module and symbol references in source comments after the ideation-halt rename** `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/fix-stale-focus-advance-module-and-symbo.md)
 - [ ] **TB-346** **Config-correctness cleanup: component-value resolution + inline-default consistency + auto_diagnose schema coverage** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/config-correctness-cleanup-component-val.md)
+- [ ] **TB-350** **Add a 6-hourly real-SDK smoke cron job dispatched through a dedicated routine** `#autopilot` `#cron` `#real-sdk` `#smoke` `#verification` `#monitoring` [→ brief](.cc-autopilot/tasks/add-a-6-hourly-real-sdk-smoke-cron-job-d.md)
 
 ## Pipeline Pending
 
