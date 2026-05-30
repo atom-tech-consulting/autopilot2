@@ -135,3 +135,10 @@ config_introspect changes and TB-345's same-neighborhood edits →
   override (it equals the default) — that's an operator `.cc-autopilot/env`
   edit, not a code change.
 - Source-attribution label changes — `_attribute_source` is correct.
+## Attempts
+
+### 2026-05-30 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `uv run --extra dev pytest -q ap2/tests/` — full suite passes.
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260530T063101Z-TB-346.prompt.md`, `stream: .cc-autopilot/debug/20260530T063101Z-TB-346.stream.jsonl`, `messages: .cc-autopilot/debug/20260530T063101Z-TB-346.messages.jsonl`

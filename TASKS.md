@@ -8,9 +8,9 @@
 
 ## Backlog
 
-- [ ] **TB-346** **Config-correctness cleanup: component-value resolution + inline-default consistency + auto_diagnose schema coverage** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/config-correctness-cleanup-component-val.md)
 - [ ] **TB-348** **Purge stale hardcoded-3 proposal caps and rotation-era references from the ideation prompt** `#autopilot` `#ideation` `#prompt` `#refactor` `#docs-drift` `#cleanup` `#autopilot` `#ideation` `#prompt` `#refactor` `#docs-drift` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/purge-stale-hardcoded-3-proposal-caps-an.md)
 - [ ] **TB-349** **Fix stale focus_advance module and symbol references in source comments after the ideation-halt rename** `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `#autopilot` `#cleanup` `#docs-drift` `#ideation-halt` `#comments` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/fix-stale-focus-advance-module-and-symbo.md)
+- [ ] **TB-346** **Config-correctness cleanup: component-value resolution + inline-default consistency + auto_diagnose schema coverage** `#autopilot` `#config` `#bug` `#config-introspect` `#core-schema` `#cleanup` `@blocked:TB-345` [→ brief](.cc-autopilot/tasks/config-correctness-cleanup-component-val.md)
 
 ## Pipeline Pending
 
