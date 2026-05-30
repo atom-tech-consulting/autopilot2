@@ -67,10 +67,12 @@ Use this exact schema for the `content` argument:
       - Reasoning: <one sentence on why that status>
 
     If a focus item has no Complete TB-Ns yet, status MUST be
-    `in-progress`. If every reasonable next step has shipped and you
-    can't identify a non-trivial gap, status is
-    `exhausted-needs-operator` — write a one-liner about what the
-    operator should decide next.
+    `in-progress`. `exhausted-needs-operator` is a whole-goal
+    judgment, not a per-focus rotation step (rotation is gone post
+    TB-342): use it only when every reasonable next step across the
+    goal has shipped and you can't identify a non-trivial gap
+    anywhere — write a one-liner about what the operator should
+    decide next.
 
     ## Non-goal risk check
     Quick scan of in-flight + recent work: is anything drifting into
@@ -144,8 +146,8 @@ Use this exact schema for the `content` argument:
     Decisions-needed content stays focused on items that REQUIRE
     narrative judgment ideation is uniquely positioned to surface
     AND for which the operator's engagement actively unblocks the
-    next cycle — focus-rotation decisions, residual-risk
-    acceptances awaiting sign-off, escalations.
+    next cycle — residual-risk acceptances awaiting sign-off,
+    escalations.
 
     (Carried) discipline: a bullet may carry from the prior
     cycle ONLY if you re-articulate the operator action and
@@ -153,8 +155,9 @@ Use this exact schema for the `content` argument:
     text is forbidden.
 
     ## Proposals this cycle
-    List the 3 task TB-Ns you're about to add (or fewer if Backlog
-    already has ≥3 workable items, in which case write
+    List the task TB-Ns you're about to add — at most N, where N is
+    the `proposal slots this cycle` value (or none if Backlog
+    already has ≥N workable items, in which case write
     "Backlog already populated; no proposals this cycle").
 
 Citation rule: every "Progress so far" / "Gaps" bullet MUST cite
@@ -170,21 +173,22 @@ right rendering shape, so use the right name:
 
   - `ideation_complete` — emit when ≥1 proposal landed this cycle.
     The `summary` field describes the proposals (e.g. "TB-298 +
-    TB-299 against focus-2").
+    TB-299").
   - `ideation_cycle_summary` — emit when 0 proposals landed this
     cycle. The `summary` field carries the no-proposal reasoning
-    (e.g. "0 proposals; focus-2 marked exhausted-needs-operator —
-    all 3 Progress signals addressed").
+    (e.g. "0 proposals; goal marked exhausted — all Progress
+    signals addressed").
 
 Both names close the cycle from the empty-cycles counter's
-perspective (`ap2/focus_advance.py::_ideation_empty_against_focus`,
+perspective (`ap2/ideation_halt.py::_consecutive_empty_ideation_cycles`,
 TB-292 cycle-grouped accounting + TB-300 dual-name exit-marker set):
 each cycle exits via exactly ONE of these markers. Don't emit both
-in the same cycle. The `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` auto-advance
-threshold counts consecutive cycles whose exit marker (either name)
-fired with no `ideation_proposal_recorded` in the cycle, so picking
-the right name is what makes the empty-cycles signal legible to the
-daemon.
+in the same cycle. The `AP2_IDEATION_HALT_EMPTY_CYCLES` threshold
+counts consecutive cycles whose exit marker (either name) fired with
+no `ideation_proposal_recorded` in the cycle, and once that many dry
+cycles accrue the daemon emits the ideation halt directly — so
+picking the right name is what makes the empty-cycles signal legible
+to the daemon.
 
 ## Cron proposals from task agents (TB-146)
 Task agents emit `cron_proposed` events via the `cron_propose` MCP
@@ -240,7 +244,8 @@ matching sections in progress.md. For each, ask:
   - What edge case wasn't addressed?
   - What instrumentation does this new feature need?
 Collect follow-up candidates from this scan first. Only fall back to
-greenfield ideas if you're short of 3 candidates afterwards.
+greenfield ideas if you're short of N candidates (the `proposal
+slots this cycle` value) afterwards.
 
 ## Step 1.5: failure review (TB-88 — do this between Complete-scan and ranking)
 Scan up to 5 most-recent failed-or-flagged tasks. Sources:
@@ -326,9 +331,9 @@ When uncertain between edit-briefing and follow-up, default to
 edit-briefing (cheaper to attempt).
 
 Failure-remediation proposals compete with greenfield against the
-same Backlog<3 budget — they're not special-cased. Rank them by
-the same goal-alignment / impact / freshness criteria as any
-other proposal.
+same proposal-slot budget (the `proposal slots this cycle` value,
+N) — they're not special-cased. Rank them by the same
+goal-alignment / impact / freshness criteria as any other proposal.
 
 Do NOT auto-unfreeze the original task. Operator decides via
 `ap2 unfreeze TB-N` after reviewing the fix or replacement.
@@ -340,8 +345,9 @@ Rank candidates by:
   - freshness of the seed (a follow-up to yesterday's task beats one
     to last month's)
 
-Propose the top 3 via board_edit (action: add_backlog) with a
-structured briefing. Do not add duplicates.
+Propose the top N (the `proposal slots this cycle` value) via
+board_edit (action: add_backlog) with a structured briefing. Do not
+add duplicates.
 
 ## Human-review gate (TB-121 — load-bearing)
 Every task you propose MUST be gated behind operator review before it
