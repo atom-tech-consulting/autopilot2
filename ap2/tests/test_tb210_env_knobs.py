@@ -193,8 +193,8 @@ def _drive_judge_finding(tmp_path: Path, sdk: _ScriptedJudgeSDK) -> tuple[str, s
 #
 # Read site: `ap2/daemon.py` line 208 (`run_task` → `_consume()` →
 # `sdk.ClaudeAgentOptions(max_turns=int(os.environ.get(...)))`). Bare
-# `int(...)` with no fallback; default `DEFAULT_TASK_MAX_TURNS` (200 —
-# raised from 50 in TB-278; see `config.py`).
+# `int(...)` with no fallback; default `DEFAULT_TASK_MAX_TURNS` (500 —
+# raised 50 → 200 in TB-278, then 200 → 500 in TB-347; see `config.py`).
 #
 # Driving `run_task` end-to-end requires git init + Board + MCP server +
 # a heavy fixture. Following the same pattern as
@@ -246,14 +246,14 @@ def _eval_task_max_turns_via_helper(tmp_path):
     return int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS))
 
 
-def test_task_max_turns_default_is_two_hundred_when_env_unset(tmp_path, monkeypatch):
+def test_task_max_turns_default_is_five_hundred_when_env_unset(tmp_path, monkeypatch):
     """Happy path: `daemon.run_task` reads AP2_TASK_MAX_TURNS via
     `int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS))`
     (TB-334 migrated shape). With env unset, the call-site expression
-    evaluates to 200 — the `config.DEFAULT_TASK_MAX_TURNS` constant
-    (raised from 50 in TB-278). A bump of the constant trips this test
-    (source-grep flags the expression drift, behavior assert flags the
-    parsed value drift)."""
+    evaluates to 500 — the `config.DEFAULT_TASK_MAX_TURNS` constant
+    (raised 50 → 200 in TB-278, then 200 → 500 in TB-347). A bump of the
+    constant trips this test (source-grep flags the expression drift,
+    behavior assert flags the parsed value drift)."""
     src = inspect.getsource(daemon.run_task)
     assert _TASK_MAX_TURNS_EXPR in src, (
         f"regression: `daemon.run_task` no longer reads AP2_TASK_MAX_TURNS "
@@ -267,9 +267,9 @@ def test_task_max_turns_default_is_two_hundred_when_env_unset(tmp_path, monkeypa
     # Re-evaluate the call-site expression against the scoped env. This
     # is the EXACT code path `run_task`'s `_consume()` runs every call
     # post-TB-334.
-    assert _eval_task_max_turns_via_helper(tmp_path) == 200
-    assert DEFAULT_TASK_MAX_TURNS == 200, (
-        "TB-278: DEFAULT_TASK_MAX_TURNS must be 200; bump this assertion "
+    assert _eval_task_max_turns_via_helper(tmp_path) == 500
+    assert DEFAULT_TASK_MAX_TURNS == 500, (
+        "TB-347: DEFAULT_TASK_MAX_TURNS must be 500; bump this assertion "
         "(and the env template) deliberately if you raise it further"
     )
 

@@ -2537,14 +2537,15 @@ start`; everything else propagates on the next tick after a
   Empty default = fall through to `core.agent_effort` at the call
   site; the per-site hardcoded fallback is `medium`. Mirrors
   `AP2_STATUS_REPORT_EFFORT`.
-- `core.task_max_turns` — int, default `200` (hot-reloadable). Max
-  turns per task-agent SDK query. Default raised from 50 → 200 in
-  TB-278 after TB-122 hit the old wall at 51 turns; bump further
-  (e.g. 500) for heavy-refactor projects. Mirrors
-  `AP2_TASK_MAX_TURNS`.
-- `core.task_timeout_s` — int, default `1200` (hot-reloadable).
-  Per-task SDK query timeout in seconds. Bumped from 5min to 20min
-  in TB-278 after xhigh-effort tasks routinely blew the wall.
+- `core.task_max_turns` — int, default `500` (hot-reloadable). Max
+  turns per task-agent SDK query. Default raised 50 → 200 in TB-278
+  after TB-122 hit the old wall at 51 turns, then 200 → 500 in
+  TB-347 to match the validated operating value; bump further only
+  for unusually heavy projects. Mirrors `AP2_TASK_MAX_TURNS`.
+- `core.task_timeout_s` — int, default `3600` (hot-reloadable).
+  Per-task SDK query timeout in seconds. Bumped 5min → 20min in
+  TB-278 after xhigh-effort tasks routinely blew the wall, then to
+  60min (3600s) in TB-347 to match the validated operating value.
   Mirrors `AP2_TASK_TIMEOUT_S`.
 - `core.tick_interval_s` — int, default `30` (hot-reloadable). Main
   daemon tick interval in seconds. The `_main_tick_loop` fires

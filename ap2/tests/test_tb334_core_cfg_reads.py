@@ -302,7 +302,7 @@ def test_get_core_value_sectioned_env_wins_over_flat_env(
     [
         ("agent_model", "claude-opus-4-7"),
         ("agent_effort", "xhigh"),
-        ("task_max_turns", 200),
+        ("task_max_turns", 500),
         ("control_max_turns", 15),
         ("verify_judge_max_turns", 20),
     ],

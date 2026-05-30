@@ -50,7 +50,7 @@ DEFAULT_TICK_INTERVAL_S = 30
 # the work is just an HTTP poll.
 DEFAULT_MM_TICK_INTERVAL_S = 10
 DEFAULT_EVENT_CONTEXT_SIZE = 50
-DEFAULT_TASK_TIMEOUT_S = 1200  # 20 min per SDK query
+DEFAULT_TASK_TIMEOUT_S = 3600  # 60 min per SDK query
 # TB-278: bumped from 300s (5 min) to 1200s (20 min) — ideation / mattermost /
 # cron agents under `xhigh` effort against a populated progress.md /
 # operator_log.md / ideation_state.md routinely blew the old 5-min wall.
@@ -141,7 +141,7 @@ DEFAULT_ATTENTION_IMMEDIATE_PUSH = False
 # DEFAULT_CONTROL_MAX_TURNS keeps its current value (15) — listed here for
 # consistency so the env-template scaffold can document a single source
 # of truth for every max-turn knob.
-DEFAULT_TASK_MAX_TURNS = 200
+DEFAULT_TASK_MAX_TURNS = 500
 DEFAULT_CONTROL_MAX_TURNS = 15
 DEFAULT_IDEATION_MAX_TURNS = 100
 

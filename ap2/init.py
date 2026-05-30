@@ -286,14 +286,17 @@ ENV_TEMPLATE = f"""\
 # verify duration.
 # AP2_VERIFY_TIMEOUT_S={DEFAULT_VERIFY_TIMEOUT_S}
 
-# Per-task SDK query timeout (s). Bigger refactors blow past the
-# default; this project's own env bumps to 3600 (TB-122 hit
-# `error_max_turns` at 51 turns and the wall-clock cap also bit).
+# Per-task SDK query timeout (s). The shipped default is 3600 (60 min) —
+# raised to the value this project validated over its full history
+# (TB-122 hit `error_max_turns` at 51 turns and the old wall-clock cap
+# also bit on real refactors). Bump further only for unusually heavy
+# projects.
 # AP2_TASK_TIMEOUT_S={DEFAULT_TASK_TIMEOUT_S}
 
-# Max turns per task agent. Default raised from 50 → 200 in TB-278 after
-# TB-122 hit the old wall at 51 turns; bump further (e.g. 500) for
-# heavy-refactor projects.
+# Max turns per task agent. The shipped default is 500 — raised over this
+# project's history (50 → 200 in TB-278 after TB-122 hit the old wall at
+# 51 turns, then 200 → 500 in TB-347 to match the validated operating
+# value). Bump further only for unusually heavy projects.
 # AP2_TASK_MAX_TURNS={DEFAULT_TASK_MAX_TURNS}
 
 # Per-control-agent (mattermost / cron / ideation) SDK query timeout (s).
