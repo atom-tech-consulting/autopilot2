@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-343** **Extract component bodies from __init__.py into impl.py (+ thin re-export)** `#autopilot` `#components` `#refactor` `#oss-prep` `#canary` [→ brief](.cc-autopilot/tasks/extract-component-bodies-from-init-py-in.md)
 
 ## Pipeline Pending
 
