@@ -1359,3 +1359,9 @@
 - **Summary:** Axis-5 per-agent-kind backend selection ([agent_backends] + AP2_AGENT_BACKEND_<KIND> + Config.get_agent_backend + select_adapter) and backend-aware daemon-start auth gate (OAuth for claude kinds, OPENAI_API_KEY for codex kinds); 2907 tests pass.</summary>
 <parameter name="files_changed">ap2/config.py, ap2/config_loader.py, ap2/adapters/select.py, ap2/adapters/__init__.py, ap2/cli_daemon.py, ap2/init.py, ap2/tests/test_agent_backend_selection.py, ap2/tests/test_cli_daemon.py, ap2/tests/test_docs_drift.py, ap2/tests/test_coverage_drift.py
 - **Tests:** pass
+
+## [2026-05-31] TB-359: Adapter-contract parity test suite (both adapters) + gated codex real-SDK smoke (axis 7)
+- **Commit:** `45bfa60`
+- **Summary:** Added backend-parametrized adapter-contract parity suite (test_adapter_parity.py) asserting one shared contract — ABC conformance, per-envelope AgentEvent stream + terminal result, normalized usage, stream-incomplete/error/timeout paths, and identical registered_tool_names() — against both ClaudeCodeAdapter and CodexAdapter via stub handles, plus a codex real-SDK smoke (smoke/test_codex_real_sdk.py) gated by the same AP2_REAL_SDK marker as the Claude smokes and picked up by the 6h real-sdk-smoke cron; also exempted TB-360's spelled-out AP2_AGENT_BACKEND_IDEATION_SCRUB literal in both drift gates to unwedge the shared verify gate (full non-smoke suite now 2916 passed, 0 failed).
+- **Files:** ap2/tests/test_adapter_parity.py, ap2/tests/smoke/test_codex_real_sdk.py, ap2/tests/test_docs_drift.py, ap2/tests/test_coverage_drift.py
+- **Tests:** pass
