@@ -1335,3 +1335,9 @@
 - **Summary:** Relocated the create_sdk_mcp_server assembly behind a new AgentAdapter.build_tool_server tool-registration surface (+ concrete registered_tool_names enumerator); ClaudeCodeAdapter implements it and build_mcp_server now hands its 14-tool set to the adapter — live inventory unchanged, full descoped suite passes (2848).
 - **Files:** ap2/adapters/base.py, ap2/adapters/claude_code.py, ap2/tools.py, ap2/tests/test_agent_adapter.py
 - **Tests:** pass
+
+## [2026-05-31] TB-356: Dynamically step down agent effort on retry when a task hits the thinking-block-400 failure class
+- **Commit:** `50de1db`
+- **Summary:** Added graceful effort step-down (xhigh→high→medium→low, floored) on the thinking-block-400 failure class only: a narrow classifier, per-task downshift level in retry_state.json, an effort_downshift event, the AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED kill switch, and tests; full suite (2868) passes.
+- **Files:** ap2/daemon.py, ap2/retry.py, ap2/core_config_schema.py, ap2/config_compat.py, ap2/env_reload.py, ap2/init.py, ap2/howto.md, ap2/tests/test_tb356_effort_downshift.py
+- **Tests:** pass
