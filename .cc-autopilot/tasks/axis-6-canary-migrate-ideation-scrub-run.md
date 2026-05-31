@@ -69,3 +69,12 @@ identical to today.
   TB once this canary proves the shape.
 - Implementing the per-kind selector (axis 5, TB-358) or the `CodexAdapter`
   (axis 4, TB-357) — both are hard predecessors.
+## Attempts
+
+### 2026-05-31 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260531T222538Z-TB-360.prompt.md`, `stream: .cc-autopilot/debug/20260531T222538Z-TB-360.stream.jsonl`, `messages: .cc-autopilot/debug/20260531T222538Z-TB-360.messages.jsonl`

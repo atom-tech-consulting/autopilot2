@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-358",
   "briefing_path": ".cc-autopilot/tasks/axis-6-canary-migrate-ideation-scrub-run.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": "fc5db75",
+    "decision_actor": "verifier",
+    "decision_kind": "verification_failed",
+    "decision_ts": "2026-05-31T22:38:15Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-31T13:10:02Z",
   "tb_id": "TB-360",
   "why_now": "TB-353-355 landed the interface, TB-357 the codex backend, TB-358\nper-kind selection \u2014 but no production dispatch site routes through the adapter\nyet, so the whole abstraction has zero callers; the canary proves the migration\nshape (preserve-Claude-behavior + per-kind-selectable) before the verifier-judge\n/ validator-judge / run_task / control-agent sites follow."

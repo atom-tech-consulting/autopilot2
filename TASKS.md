@@ -8,9 +8,9 @@
 
 ## Backlog
 
-- [ ] **TB-360** **Axis 6 canary — migrate ideation-scrub (`_run_scrub`) to adapter-routing + per-kind backend selection** `#autopilot` `#agent-adapter` `#codex` `#ideation-scrub` `#migration` `#axis-6` `@blocked:TB-358` — Axis 6 canary: repoint _run_scrub (ap2/ideation_scrub.py) off direct sdk.query through the AgentAdapter seam, selecting the backend for the ideation_scrub kind — preserves Claude behavior bit-for-bit and proves the per-site migration shape. [→ brief](.cc-autopilot/tasks/axis-6-canary-migrate-ideation-scrub-run.md)
 - [ ] **TB-359** **Adapter-contract parity test suite (both adapters) + gated codex real-SDK smoke (axis 7)** `#autopilot` `#agent-adapter` `#codex` `#tests` `#parity` `#smoke` `#axis-7` `@blocked:TB-357` — Axis 7: a backend-parametrized adapter-contract parity suite both ClaudeCodeAdapter and CodexAdapter must satisfy (hermetic stubs), plus a codex real-SDK smoke gated like the Claude smokes and run on the 6h real-sdk-smoke cron. [→ brief](.cc-autopilot/tasks/adapter-contract-parity-test-suite-both.md)
 - [ ] **TB-361** **Fix the TB-356 thinking-block classifier (never matches the real failure) and exempt that class from the auto-approve breaker** `#autopilot` `#bug` `#reliability` `#retry` `#effort` `#thinking-block` `#auto-approve` `@blocked:TB-356` [→ brief](.cc-autopilot/tasks/fix-the-tb-356-thinking-block-classifier.md)
+- [ ] **TB-360** **Axis 6 canary — migrate ideation-scrub (`_run_scrub`) to adapter-routing + per-kind backend selection** `#autopilot` `#agent-adapter` `#codex` `#ideation-scrub` `#migration` `#axis-6` `@blocked:TB-358` — Axis 6 canary: repoint _run_scrub (ap2/ideation_scrub.py) off direct sdk.query through the AgentAdapter seam, selecting the backend for the ideation_scrub kind — preserves Claude behavior bit-for-bit and proves the per-site migration shape. [→ brief](.cc-autopilot/tasks/axis-6-canary-migrate-ideation-scrub-run.md)
 
 ## Pipeline Pending
 
