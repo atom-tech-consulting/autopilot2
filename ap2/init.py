@@ -418,6 +418,8 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_PROJECT_NAME",                      # reason: defaults to project_root.name; operator renames via shell export
     "AP2_TASK_FROZEN_RECENCY_S",             # reason: internal default, rarely tuned
     "AP2_TASK_STUCK_THRESHOLD_S",            # reason: internal default, rarely tuned
+    "AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED", # reason: debug/test only — TB-356 kill switch for the thinking-block-400 effort-downshift; degradation is on by default, operators flip via shell export
+
     "AP2_TICK_S",                            # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_DISABLED",          # reason: debug/test only
     "AP2_VALIDATOR_JUDGE_MAX_TOKENS",        # reason: internal default, rarely tuned

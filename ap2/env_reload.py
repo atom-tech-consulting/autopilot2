@@ -85,6 +85,11 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     # Agent model / effort — read from os.environ each query() call
     "AP2_AGENT_MODEL",
     "AP2_AGENT_EFFORT",
+    # TB-356: kill switch for the thinking-block-400 effort-downshift path.
+    # Read fresh via `cfg.get_core_value` at each task dispatch /
+    # failure-classification, so a toggle takes effect on the next tick
+    # without a daemon restart — same call-time-read shape as AP2_AGENT_EFFORT.
+    "AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED",
     # Ideation
     "AP2_IDEATION_DISABLED",
     "AP2_IDEATION_TRIGGER_TASK_COUNT",

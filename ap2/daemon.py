@@ -228,7 +228,12 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 # (`CORE_CONFIG_SCHEMA["agent_model"]`) is the single
                 # source of truth for the `claude-opus-4-7` default.
                 model=cfg.get_core_value("agent_model"),
-                extra_args={"effort": cfg.get_core_value("agent_effort", default="xhigh")},
+                # TB-356: graceful degradation — resolves the base
+                # `agent_effort` stepped down by this task's per-task
+                # downshift level (bumped only on the thinking-block-
+                # immutability 400 failure class). Level 0 / kill switch set
+                # → base effort unchanged.
+                extra_args={"effort": _resolve_task_effort(cfg, task.id)},
             ),
         ):
             _log_message(msg)
@@ -245,6 +250,10 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     # have stamped.
     early_failure_status: str | None = None
     early_failure_extras: dict[str, str] = {}
+    # TB-356: set True when the deferred `task_error` failure classifies as
+    # the thinking-block-immutability 400. Plumbed into `_handle_failure`
+    # below so ONLY that class bumps the per-task effort-downshift level.
+    early_failure_thinking_block = False
     result_text = ""
     # TB-123: plumb the current task id into a contextvar so MCP tool handlers
     # (specifically `do_cron_propose`) can stamp `proposed_by_task` on the
@@ -313,6 +322,14 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 "error": f"{type(e).__name__}: {e}",
                 "stderr_tail": "\n".join(stderr_lines[-30:]),
             }
+            # TB-356: classify the thinking-block-immutability 400 from the
+            # run's tail (the same `last_messages` the event records) and the
+            # error string. A match steps effort down on the retry; a miss
+            # retries at unchanged effort.
+            early_failure_thinking_block = (
+                _is_thinking_block_corruption(stream_log)
+                or _is_thinking_block_corruption(f"{type(e).__name__}: {e}")
+            )
     finally:
         # TB-123: clear the task-id contextvar regardless of how the SDK
         # query exited (success, timeout, or arbitrary exception).
@@ -399,6 +416,7 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 "messages": str(messages_dump),
             },
             extras=early_failure_extras,
+            thinking_block_corruption=early_failure_thinking_block,
         )
         _emit_task_run_usage(
             cfg, task,
@@ -675,6 +693,110 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# TB-356: graceful-degradation effort step-down for the bundled-CLI
+# thinking-block-immutability 400 failure class.
+#
+# Long, thinking-heavy runs intermittently fail when Claude Code empties a
+# prior thinking block's text (keeping its signature) during a context pass,
+# then replays it — the API rejects the modified block with a 400 whose body
+# names "thinking or redacted_thinking blocks in the latest assistant message
+# cannot be modified". ap2 surfaces this as a generic `task_error`. It is
+# load-correlated: higher effort makes each thinking block larger, so xhigh
+# runs trip it most. There is no upstream fix. The mitigation is fewer/smaller
+# thinking blocks → lower effort — but only for THIS failure class (a blind
+# same-effort retry just re-trips it; other failures need full capability to
+# fix a real problem). So the first attempt runs at full effort and only a
+# match on this exact 400 steps the effort down one tier on the retry.
+# ---------------------------------------------------------------------------
+_EFFORT_LADDER: tuple[str, ...] = ("xhigh", "high", "medium", "low")
+
+
+def _step_down_effort(base: str, level: int) -> str:
+    """Step `base` effort down `level` tiers along the xhigh→high→medium→low
+    ladder, floored at `low`.
+
+    Level 0 (or below) returns `base` unchanged. A `base` not on the ladder
+    (e.g. an operator-set `max` or `""`) is returned unchanged — there's no
+    known safe step-down path for it, so we don't guess.
+    """
+    if level <= 0:
+        return base
+    try:
+        idx = _EFFORT_LADDER.index(base)
+    except ValueError:
+        return base
+    return _EFFORT_LADDER[min(idx + level, len(_EFFORT_LADDER) - 1)]
+
+
+def _thinking_block_drop_disabled(cfg: Config) -> bool:
+    """True iff the TB-356 effort-downshift kill switch is set truthy.
+
+    Routes through `cfg.get_core_value("thinking_block_effort_drop_disabled")`
+    (sectioned env > flat `AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED` > TOML >
+    schema default `False`), evaluated at call time so a hot-reload toggling
+    the knob takes effect on the next dispatch. When True the daemon retries
+    at constant effort (pre-TB-356 behavior). Truthy enumeration mirrors the
+    sibling kill switches: `1` / `true` / `yes` / `on` (case-insensitive);
+    the TOML-typed `True` / `False` is honored directly.
+    """
+    raw = cfg.get_core_value("thinking_block_effort_drop_disabled", default=False)
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _is_thinking_block_corruption(stream_log_or_error) -> bool:
+    """True iff a failed run's tail carries the thinking-block-immutability
+    400 signature.
+
+    Narrow by design: the substring ``cannot be modified`` must co-occur with
+    one of ``thinking`` / ``redacted_thinking`` / ``blocks in the latest
+    assistant message``. This keeps unrelated `task_error`s and real
+    `verification_failed`s from matching — only THIS failure class downshifts
+    effort (a real failure needs full capability to fix, and dropping effort
+    there would hurt). Accepts either the structured `stream_log` (list of
+    message summaries — what the `task_error` event records as
+    `last_messages`) or a bare error string.
+    """
+    if isinstance(stream_log_or_error, str):
+        blob = stream_log_or_error
+    else:
+        try:
+            blob = json.dumps(stream_log_or_error, default=str)
+        except (TypeError, ValueError):
+            blob = str(stream_log_or_error)
+    low = blob.lower()
+    if "cannot be modified" not in low:
+        return False
+    return (
+        "thinking" in low
+        or "redacted_thinking" in low
+        or "blocks in the latest assistant message" in low
+    )
+
+
+def _resolve_task_effort(cfg: Config, task_id: str) -> str:
+    """Effort label for the TASK-agent dispatch, applying the TB-356 per-task
+    downshift when the thinking-block degradation path is active.
+
+    Base is `agent_effort` (default `xhigh`). Each prior thinking-block-
+    corruption failure on this task bumped a per-task downshift level
+    (`retry.downshift_level`); the effort is that base stepped down `level`
+    tiers (xhigh→high→medium→low, floored at low). Level 0 = base. The kill
+    switch `AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED` forces constant base
+    effort. Control / judge agents resolve their effort elsewhere and are out
+    of scope.
+    """
+    base = cfg.get_core_value("agent_effort", default="xhigh")
+    if _thinking_block_drop_disabled(cfg):
+        return base
+    level = retry.downshift_level(cfg.retry_state_file, task_id)
+    return _step_down_effort(base, level)
+
+
 def _handle_failure(
     cfg: Config,
     task,
@@ -683,6 +805,7 @@ def _handle_failure(
     parsed: TaskResult | None = None,
     debug_paths: dict[str, str] | None = None,
     extras: dict[str, str] | None = None,
+    thinking_block_corruption: bool = False,
 ) -> None:
     """Move a failed task to Backlog, or Frozen if it has exhausted retries.
 
@@ -691,8 +814,31 @@ def _handle_failure(
     incomplete/blocked/failed). The next attempt's agent can `Read` the
     briefing and see the full failure narrative + debug-dump paths to
     pick up where the prior attempt left off.
+
+    TB-356: when `thinking_block_corruption=True` (the caller classified the
+    failure as the thinking-block-immutability 400) AND the kill switch is
+    unset, bump this task's per-task effort-downshift level so the next
+    dispatch (`_resolve_task_effort`) steps effort down one tier, and emit an
+    `effort_downshift` observability event. Other failure classes pass the
+    default `False` and retry at unchanged effort.
     """
     attempts = retry.bump_attempt(cfg.retry_state_file, task.id)
+    if thinking_block_corruption and not _thinking_block_drop_disabled(cfg):
+        base = cfg.get_core_value("agent_effort", default="xhigh")
+        new_level = retry.bump_downshift(cfg.retry_state_file, task.id)
+        events.append(
+            cfg.events_file,
+            "effort_downshift",
+            task=task.id,
+            # `from` is a Python keyword — pass the from/to pair via dict
+            # unpacking so the event payload still reads naturally.
+            **{
+                "from": _step_down_effort(base, new_level - 1),
+                "to": _step_down_effort(base, new_level),
+            },
+            reason="thinking_block_corruption",
+            level=new_level,
+        )
     if attempts >= cfg.max_retries:
         do_board_edit(cfg, {"action": "move_to_frozen", "task_id": task.id})
         events.append(

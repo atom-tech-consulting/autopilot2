@@ -280,6 +280,26 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
         ),
         hot_reloadable=True,
     ),
+    "thinking_block_effort_drop_disabled": ConfigKey(
+        name="thinking_block_effort_drop_disabled",
+        type=bool,
+        default=False,
+        description=(
+            "Kill switch for the TB-356 graceful-degradation path that "
+            "steps a task's reasoning effort down one tier "
+            "(xhigh→high→medium→low, floored) on the automatic retry when "
+            "a run fails with the bundled-CLI thinking-block-immutability "
+            "400 (`... thinking or redacted_thinking blocks in the latest "
+            "assistant message cannot be modified`). Truthy value restores "
+            "the pre-TB-356 behavior: constant effort, blind retry. Other "
+            "failure classes (verification_failed, generic task_error) "
+            "never downshift regardless. Mirrors the flat env "
+            "`AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED`; hot-reloadable "
+            "(read fresh via `cfg.get_core_value` at each task dispatch / "
+            "failure-classification)."
+        ),
+        hot_reloadable=True,
+    ),
     "task_max_turns": ConfigKey(
         name="task_max_turns",
         type=int,

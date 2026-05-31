@@ -1029,6 +1029,14 @@ duration).
 post-hoc fenced-file check tripped), `task_rollback` (TB-110
 rollback to pre-task state), `verification_failed` (per-task or
 project-wide), `verification_partial`, `retry_exhausted`,
+`effort_downshift` (TB-356 — a task failed with the bundled-CLI
+thinking-block-immutability 400 and the daemon stepped its reasoning
+effort down one tier for the automatic retry; payload `task`, `from`
+(the just-failed run's effort), `to` (the retry's effort), `level`
+(the new per-task downshift level), `reason=thinking_block_corruption`.
+Gated by `AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED` and emitted only for
+this specific 400 — `verification_failed` / generic `task_error` never
+downshift),
 `cron_error`, `cron_timeout`, `ideation_error`, `ideation_timeout`,
 `mattermost_error`, `mattermost_timeout`, `mm_poll_error`,
 `env_reload_error` (TB-271 — `env_reload.maybe_reload_env` raised at
@@ -1547,6 +1555,18 @@ restart, or set the value via the file before daemon-start).
   sub-job has its own override that falls back here:
   `AP2_STATUS_REPORT_EFFORT`, `AP2_VERIFY_JUDGE_EFFORT`,
   `AP2_JANITOR_JUDGE_EFFORT`.
+- `AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED` (unset → enabled) — kill
+  switch for the TB-356 graceful-degradation path. By default, when a
+  task run fails with the bundled-CLI thinking-block-immutability 400
+  (`... thinking or redacted_thinking blocks in the latest assistant
+  message cannot be modified`, surfaced as a generic `task_error`), the
+  daemon steps THAT task's effort down one tier on the automatic retry
+  (`xhigh`→`high`→`medium`→`low`, floored at `low`) and emits an
+  `effort_downshift` event. The first attempt always runs at full
+  `AP2_AGENT_EFFORT`; only this specific 400 triggers a one-tier drop
+  per occurrence (other failure classes retry at unchanged effort). Set
+  to `1` / `true` / `yes` / `on` to disable — constant effort, blind
+  retry as before.
 - `AP2_VERIFY_JUDGE_MAX_TURNS` (20), `AP2_JANITOR_JUDGE_MAX_TURNS` (12)
   — max turns for the per-bullet prose-judge and the janitor chore-judge.
 
@@ -2597,6 +2617,16 @@ start`; everything else propagates on the next tick after a
   TB-278 after xhigh-effort tasks routinely blew the wall, then to
   60min (3600s) in TB-347 to match the validated operating value.
   Mirrors `AP2_TASK_TIMEOUT_S`.
+- `core.thinking_block_effort_drop_disabled` — bool, default `false`
+  (hot-reloadable). Kill switch for the TB-356 graceful-degradation
+  path: by default a task that fails with the bundled-CLI
+  thinking-block-immutability 400 (`... thinking or redacted_thinking
+  blocks in the latest assistant message cannot be modified`) has its
+  effort stepped down one tier on the automatic retry
+  (`xhigh`→`high`→`medium`→`low`, floored), emitting an
+  `effort_downshift` event. Truthy restores constant-effort blind
+  retry. Other failure classes never downshift. Mirrors
+  `AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED`.
 - `core.tick_interval_s` — int, default `30` (hot-reloadable). Main
   daemon tick interval in seconds. The `_main_tick_loop` fires
   roughly once per `tick_interval_s` to walk cron, pipeline sweep,

@@ -99,6 +99,8 @@ FLAT_TO_SECTIONED: dict[str, str] = {
     # --- Core / agent shape (read fresh from os.environ at SDK call time) ---
     "AP2_AGENT_MODEL": "core.agent_model",
     "AP2_AGENT_EFFORT": "core.agent_effort",
+    # TB-356: kill switch for the thinking-block-400 effort-downshift path.
+    "AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED": "core.thinking_block_effort_drop_disabled",
     "AP2_TASK_MAX_TURNS": "core.task_max_turns",
     "AP2_CONTROL_MAX_TURNS": "core.control_max_turns",
     "AP2_IDEATION_MAX_TURNS": "core.ideation_max_turns",
