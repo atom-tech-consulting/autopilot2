@@ -1353,3 +1353,9 @@
 - **Summary:** Added CodexAdapter (ap2/adapters/codex.py, backend="codex") implementing the AgentAdapter contract against the codex CLI — normalize_options/register_tools/run/build_tool_server, codex thread-event envelopes normalized into the shared summary shape so usage_from_summary + base run_to_result are reused; re-exported from the package and covered by a hermetic 15-test contract suite. All verification commands pass (new suite 15/15, Claude suite 21/21 zero regression, ABC conformance + grep bullets OK).
 - **Files:** ap2/adapters/codex.py, ap2/adapters/__init__.py, ap2/tests/test_codex_adapter.py
 - **Tests:** pass
+
+## [2026-05-31] TB-358: Per-agent-kind backend selection (`[agent_backends]` + `AP2_AGENT_BACKEND_<KIND>`) + backend-aware auth gate (axis 5)
+- **Commit:** `330a2031`
+- **Summary:** Axis-5 per-agent-kind backend selection ([agent_backends] + AP2_AGENT_BACKEND_<KIND> + Config.get_agent_backend + select_adapter) and backend-aware daemon-start auth gate (OAuth for claude kinds, OPENAI_API_KEY for codex kinds); 2907 tests pass.</summary>
+<parameter name="files_changed">ap2/config.py, ap2/config_loader.py, ap2/adapters/select.py, ap2/adapters/__init__.py, ap2/cli_daemon.py, ap2/init.py, ap2/tests/test_agent_backend_selection.py, ap2/tests/test_cli_daemon.py, ap2/tests/test_docs_drift.py, ap2/tests/test_coverage_drift.py
+- **Tests:** pass
