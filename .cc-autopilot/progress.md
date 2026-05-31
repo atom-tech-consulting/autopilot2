@@ -1323,3 +1323,9 @@
 - **Summary:** Added `ap2 logs --follow`/`-f` live event-monitor mode backed by new packaged ap2/event_monitor.py (KEEP allowlist + _format_event + tail -F loop), with --all/--json variants; reduced scripts/monitor_events.py to a delegating shim; one-shot logs unchanged; full suite passes (2833).
 - **Files:** ap2/event_monitor.py, ap2/cli.py, ap2/cli_diagnostic.py, scripts/monitor_events.py, ap2/howto.md, ap2/tests/test_tb352_logs_follow.py
 - **Tests:** pass
+
+## [2026-05-31] TB-353: AgentAdapter ABC + ClaudeCodeAdapter — move today's sdk.query dispatch behind a backend-agnostic interface (axis 1)
+- **Commit:** `ff24b33`
+- **Summary:** Added AgentAdapter ABC (ap2/adapters/base.py) and ClaudeCodeAdapter (ap2/adapters/claude_code.py) wrapping today's claude_agent_sdk.query() path bit-for-bit; re-export __init__, adapter-contract test, ap2.adapters in wheel packages. No production dispatch site repointed (axis 6); full suite green (2845 passed).
+- **Files:** ap2/adapters/__init__.py, ap2/adapters/base.py, ap2/adapters/claude_code.py, ap2/tests/test_agent_adapter.py, pyproject.toml
+- **Tests:** pass

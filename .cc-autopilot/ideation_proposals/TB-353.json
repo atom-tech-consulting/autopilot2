@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/agentadapter-abc-claudecodeadapter-move.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": "ff24b33",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-05-31T09:26:42Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-31T00:18:25Z",
   "tb_id": "TB-353",
   "why_now": "every dispatch site (`run_task`, `_run_control_agent`,\n`_judge_prose_bullet`, `_run_scrub`, the validator-judge / janitor-judge calls)\ninvokes the SDK directly today, and every future feature that assumes the\nClaude stream shape makes the adaptor more expensive to retrofit; landing the\nABC now \u2014 while the SDK coupling is still concentrated \u2014 is the only way to\ngive axes 2-7 a contract to build against."
