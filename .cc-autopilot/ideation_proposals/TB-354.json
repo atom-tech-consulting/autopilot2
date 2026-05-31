@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-353",
+  "briefing_path": ".cc-autopilot/tasks/backend-neutral-agent-options-normalized.md",
+  "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "proposed_at": "2026-05-31T00:18:52Z",
+  "tb_id": "TB-354",
+  "why_now": "today usage / cost parsing is Claude-`ResultMessage`-specific and read\nat multiple consumer sites; without a normalized record, adding the Codex\nbackend (axis 4) forces per-backend branching in every cost guard and status\nsurface \u2014 the exact coupling this focus exists to remove."
+}

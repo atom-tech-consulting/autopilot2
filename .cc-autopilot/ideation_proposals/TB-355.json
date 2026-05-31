@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-353",
+  "briefing_path": ".cc-autopilot/tasks/register-ap2-s-mcp-tools-through-the-age.md",
+  "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "proposed_at": "2026-05-31T00:19:09Z",
+  "tb_id": "TB-355",
+  "why_now": "the custom tools are wired today via `create_sdk_mcp_server` directly\nat the dispatch sites; until tool registration moves behind the adapter, the\nCodex adapter (axis 4) has no way to expose `report_result` and the agent loop\ncannot close on a non-Claude backend."
+}

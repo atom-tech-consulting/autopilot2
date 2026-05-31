@@ -8,6 +8,9 @@
 
 ## Backlog
 
+- [ ] **TB-353** **AgentAdapter ABC + ClaudeCodeAdapter — move today's sdk.query dispatch behind a backend-agnostic interface (axis 1)** `#autopilot` `#agent-adapter` `#codex` `#refactor` `#axis-1` — Axis 1 of the codex-adapter focus: define the AgentAdapter ABC and relocate today's claude_agent_sdk.query path into a ClaudeCodeAdapter with zero behavior change — the prerequisite every other axis builds against. [→ brief](.cc-autopilot/tasks/agentadapter-abc-claudecodeadapter-move.md)
+- [ ] **TB-354** **Backend-neutral agent options + normalized AgentResult/usage — one shape across consumers (axis 2)** `#autopilot` `#agent-adapter` `#codex` `#normalization` `#axis-2` `@blocked:TB-353` — Axis 2 of the codex-adapter focus: land a backend-neutral options struct and a normalized AgentResult/usage record on the AgentAdapter from TB-353 so cost guards, task_run_usage emission, and ap2 status read one shape across backends. [→ brief](.cc-autopilot/tasks/backend-neutral-agent-options-normalized.md)
+- [ ] **TB-355** **Register ap2's MCP tools through the AgentAdapter so both backends see one toolset (axis 3)** `#autopilot` `#agent-adapter` `#codex` `#mcp-tools` `#axis-3` `@blocked:TB-353` — Axis 3 of the codex-adapter focus: move ap2's custom MCP tool registration behind the AgentAdapter from TB-353 so both backends expose the same toolset and a Codex agent can report results. [→ brief](.cc-autopilot/tasks/register-ap2-s-mcp-tools-through-the-age.md)
 
 ## Pipeline Pending
 

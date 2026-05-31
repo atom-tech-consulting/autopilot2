@@ -1,111 +1,90 @@
 # Ideation State
 
-_Last updated: 2026-05-29T20:09:36Z by ideation cron_
+_Last updated: 2026-05-31T00:13Z by ideation cron_
 
 ## Mission alignment
 
-No board change since last cycle (assessment 2026-05-29T18:07:30Z): the
-only events since are TB-339's `task_complete` + `ideation_proposal_
-reconciled` (both 14:22:36Z), which PREDATE that assessment, and
-operator_log carries nothing newer than 14:04:05Z
-(`auto_approve_window_resume`). Board fully drained — 0A/0R/0B/0P/0F
-(Frozen empty). The 4 most-recent Completes all closed the
-structured-config focus: TB-336 (cross-package axis-5 tail, 3cf0173),
-TB-337 (core-section ConfigKey schema, deecdca), TB-338 (12-factor
-cut-line CI gate, 2c629a4), TB-339 (`_PENDING_MIGRATION_KNOBS` drained
-to empty — verify_judge_effort + status_report_effort declared in
-CORE_CONFIG_SCHEMA, 560bebd). Every recent Complete sits inside the
-focus charter; no Non-goal drift. Mission alignment intact.
+The 5 most-recent Completes — TB-352 (`ap2 logs --follow` live event monitor,
+8addc28), TB-351 (real-SDK smokes skip on transient errors, f460d43), TB-350
+(6-hourly real-SDK smoke cron, ff1612c), TB-339 (drained
+`_PENDING_MIGRATION_KNOBS` — structured-config final, 560bebd), TB-338
+(12-factor cut-line CI gate) — serve goal.md's Mission (autonomous loop + the
+structural prerequisites for a future OSS cut). The operator extended the
+roadmap at 2026-05-31T00:06:21Z (operator_log `update_goal`): component-refactor
++ structured-config marked shipped, new focus opened — "codex support through an
+agent adaptor layer". The new focus is the structural successor: a
+backend-pluggable core widens the downstream OSS audience.
 
 ## Current focus assessment
 
-goal.md carries two `## Current focus:` headings; both shipped. The
-focus_advance pointer sits on the structured-config heading (operator
-rewind 2026-05-28T20:33:50Z).
+goal.md now carries ONE active `## Current focus:` (codex support) plus two
+`## Shipped focus:` blocks (component refactor 2026-05-27, structured config
+2026-05-29).
 
-- **Current focus: structured config (env → TOML)**
-  - Progress so far: all six axes shipped; all six Progress signals
-    (goal.md L391-403) met. Axis 1 (schema+parser): TB-321 + TB-337
-    (21-key CORE_CONFIG_SCHEMA closes the deferred core-validation
-    gap). Axis 2 (env-override): TB-323. Axis 3 (per-component
-    schemas): TB-322. Axis 4 (CLI): TB-324. Axis 5 (knob migration):
-    TB-326..TB-336 component + cross-package clusters, TB-334/335
-    core, TB-339 final drain of `_PENDING_MIGRATION_KNOBS` to
-    `frozenset()`. Axis 6 (docs+gate): TB-325, TB-338
-    (`FLAT_TO_SECTIONED ∩ _KNOBS_STAYING_ENV_ONLY = ∅`).
-  - Gaps: none inside the charter. The ≥80% migration signal is
-    exceeded — TB-338's gate mechanically enforces 100% of non-exempt
-    knobs and TB-339 emptied the pending set.
-
-- **Current focus: refactor features into opt-in components**
-  - Progress so far: TB-309→TB-320 shipped (registry, tick-hook
-    protocol, channel-adapter, validator pipeline, all 7 component
-    migrations, disabled-config test TB-317, import-direction gate
-    TB-311, `ap2 status` enumeration TB-319). All Progress signals
-    (goal.md L251-264) met.
-  - Gaps: none; the env→TOML focus was its natural successor and has
-    now also exhausted.
+- **Current focus: codex support through an agent adaptor layer**
+  - Progress so far: none — focus opened 2026-05-31T00:06:21Z; zero Completes
+    cite it; board fully drained (0A/0R/0B/0P/0F). The prior structural foci
+    that make this cheap-now shipped: component refactor (TB-309→TB-320) and
+    structured config (TB-321→TB-339), so the SDK coupling is concentrated and
+    internal seams are cheap to introduce.
+  - Gaps: all seven axes are greenfield. Axis 1 (AgentAdapter ABC +
+    ClaudeCodeAdapter) is the hard prerequisite — nothing to build against until
+    it lands. Axis 2 (options + result/usage normalization) and axis 3 (MCP
+    tool exposure) land against axis-1's interface. Axes 4 (CodexAdapter), 5
+    (per-kind selection + auth gate), 6 (per-kind migrations — ideation-scrub
+    canary first), 7 (parity tests + codex smoke) sequence after.
+  - Status: `in-progress`
+  - Reasoning: focus has no Completes yet, so status MUST be in-progress; this
+    cycle proposes the unblocking front (axes 1-3).
 
 ## Non-goal risk check
 
-None. 0 proposals ⇒ zero new surface to risk-check. The sole candidate
-next-work (OSS distribution) is explicitly operator-owned per Non-goal
-"operator owns goal.md"; ideation does not pre-scope it.
+The adapter focus relocates dispatch behind an interface and adds a selectable
+backend; goal.md L127-131 pins that it does NOT change prompts / tool policy /
+verification semantics, add a third backend, or do per-message routing. The OAuth-only → per-backend-auth constraint reword is
+operator-owned and already in goal.md Constraints.
 
 ## Considered & deferred this cycle
 
-- **OSS-distribution prep / packaging extras**: deferred — operator
-  owns focus rotation (Non-goal "operator owns goal.md"; goal.md
-  L123-126 + L292-296 flag it as a downstream focus needing
-  operator-authored scope before ideation can rank against it).
-- **ap2-meta polish (noise-suppression, nested-knob schema types,
-  config-surface niceties)**: deferred — fails the focus delete-test
-  (no in-charter gap left) and matches the operator's recurring veto
-  cluster. The `## Recent operator rejections` header (TB-231
-  symptom-patching; TB-240 letting agents "fix" verification) plus
-  older log lines (TB-184/185 parallel-surface / not-focus-aligned;
-  TB-172 verifier whack-a-mole) form one consistent pattern: anything
-  whose only value is "make ap2 itself nicer", unconnected to a stated
-  focus gap, gets rejected. Proposing meta-polish now repeats that
-  exact shape.
-- **`#evaluation` grounding task**: not warranted — no greenfield
-  proposal is queued to rank, so there is no gap that grounded data
-  would unblock this cycle.
+- **Axis 4 (CodexAdapter implementation)**: deferred — depends on axes 1-3
+  settling the interface; a briefing now would be speculative (codex CLI prompt
+  assembly / streaming / commit extraction can't cite concrete adapter symbols
+  before axis 1 lands). Propose once TB-353 is concrete.
+- **Axis 5 (per-kind selection + auth gate)**: deferred — the `[agent_backends]`
+  table + backend-aware credential check build on the landed adapter.
+- **Axis 6 migrations (ideation-scrub canary) + axis 7 parity tests**: deferred —
+  migrations need axes 1-2 (and 3 for MCP-bearing sites); proposing before the
+  interface exists risks stale verification bullets. Freshness favors proposing
+  them next cycle against real landed symbols.
+- **ap2-meta polish / config niceties**: not proposed — fails the focus
+  delete-test and matches the operator's recurring veto cluster (TB-231
+  symptom-patch; TB-240/TB-185/TB-184 parallel-surface / not-focus-aligned;
+  TB-172 verifier whack-a-mole). This cycle's proposals are squarely the
+  operator-authored axis charter, not meta-polish.
+- **`#evaluation` grounding task**: not warranted — no greenfield proposal is
+  blocked on missing measured data this cycle. Both insight files
+  (validator-judge-timeout 2026-05-20, test-suite-slowness 2026-05-17) are
+  <30d and bear on prior foci, not the adapter focus.
 
 ## Cycle observations
 
-- With both foci and the focus_advance
-  pointer on the last heading, continued empty cycles are the
-  legitimate input to the `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` counter; the
-  correct ideation action is to surface the rotation decision and exit
-  via `ideation_cycle_summary`, not to manufacture in-charter work the
-  delete-test would reject. (Prior cycle's test-suite-slowness
-  data-hygiene note dropped: not >30d, surfaced mechanically by
-  `_index.md`, and no active test-infra focus makes it inform this
-  cycle's reasoning.)
+- The operator hand-authored TB-340→TB-352 (operator_log "goal-alignment check
+  skipped") while ideation idled on ~14 `roadmap_complete` skips; with a fresh
+  focus + empty board, ideation re-engages and re-derives from scratch against
+  the new charter. The prior ideation_state.md was structured-config-era and is
+  now superseded — this cycle discards rather than diffs it. (One bullet,
+  justified: explains why no prior-state carry-over this cycle.)
 
 ## Decisions needed from operator
 
-- Decision needed: extend the roadmap with the next focus (downstream
-  OSS distribution — goal.md L123-126 / L292-296), OR ack the roadmap
-  as complete? Operator action: run `ap2 update-goal` to add a fresh
-  `## Current focus:` block (or log a `roadmap_complete` ack).
-  Unblock-condition: a new focus charter lets the next cycle re-derive
-  an assessment against real gaps; absent it, every non-forced cycle
-  exits 0-proposal and the empty-cycles counter advances the pointer
-  past the last heading into `roadmap_complete` with no operator-
-  authored successor to land on. (Carried, re-articulated: TB-339 —
-  the last in-flight blocker on this decision — has now been Complete
-  ~6h with NO operator engagement and NO board change across two
-  consecutive full ideation cycles, so this rotation choice is the
-  sole gate between the project and its next arc.)
+- None this cycle. The roadmap-rotation decision the prior cycle surfaced is
+  RESOLVED (operator `update_goal` 2026-05-31T00:06:21Z opened the codex-adapter
+  focus). No `cron_proposed` events pending; Frozen empty; no abandon/unfreeze
+  recommendations.
 
 ## Proposals this cycle
 
-0 proposals. Both current foci are awaiting operator action; all
-Progress signals met; Backlog is empty for the right reason (focus
-complete, awaiting operator rotation). Any structured-config or
-component proposal would fail the focus delete-test; any
-OSS-distribution proposal would violate the operator-owns-goal.md
-Non-goal. Surfacing the focus-rotation decision is the correct action,
-not inventing in-charter work that doesn't exist.
+TB-353 (axis 1: AgentAdapter ABC + ClaudeCodeAdapter — the prerequisite),
+TB-354 (axis 2: backend-neutral options + normalized AgentResult/usage,
+`@blocked:TB-353`), TB-355 (axis 3: MCP tool exposure through the adapter,
+`@blocked:TB-353`). Axes 4-7 deferred to future cycles per Considered & deferred.
