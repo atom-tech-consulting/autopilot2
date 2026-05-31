@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-357",
+  "briefing_path": ".cc-autopilot/tasks/adapter-contract-parity-test-suite-both.md",
+  "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "proposed_at": "2026-05-31T13:08:38Z",
+  "tb_id": "TB-359",
+  "why_now": "TB-357 adds a second backend whose behavior must match the Claude\nreference, but the existing `test_agent_adapter.py` only exercises the Claude\npath \u2014 without a shared parity contract and a gated codex smoke, Codex\nregressions land silently; this closes goal.md's axis-7 delete-test."
+}
