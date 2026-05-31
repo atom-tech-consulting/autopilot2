@@ -75,6 +75,13 @@ _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     # `AP2_AGENT_BACKEND_<KIND>` family, documented (with the valid kinds
     # enumerated) in `init.ENV_TEMPLATE`'s agent-backend block.
     "AP2_AGENT_BACKEND_",
+    # A spelled-out family member: `ap2/ideation_scrub.py` (TB-360,
+    # fc5db75) names the concrete `ideation_scrub` kind's override in a
+    # docstring, so the regex picks up the fully-qualified literal rather
+    # than the f-string-derived bare prefix above. Same family, same
+    # rationale — its operator surface is the generic
+    # `AP2_AGENT_BACKEND_<KIND>` block, not an individually-documented knob.
+    "AP2_AGENT_BACKEND_IDEATION_SCRUB",
     "AP2_DIR",          # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     "AP2_REAL_SDK",     # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     # TB-345 — DEPRECATED back-compat aliases. The `focus_advance`

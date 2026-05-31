@@ -106,6 +106,13 @@ _COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset({
     # `test_agent_backend_selection.py` / `test_cli_daemon.py`; mirrors the
     # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` entry.
     "AP2_AGENT_BACKEND_",
+    # Spelled-out family member: `ap2/ideation_scrub.py` (TB-360, fc5db75)
+    # names the concrete `ideation_scrub` kind's override literally in a
+    # docstring, so the regex captures the fully-qualified name rather than
+    # the f-string prefix above. The `AP2_AGENT_BACKEND_<KIND>` family is
+    # exercised by `test_agent_backend_selection.py`; mirrors the
+    # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` entry.
+    "AP2_AGENT_BACKEND_IDEATION_SCRUB",
     # TB-323: forward-compat placeholders in
     # `config_compat._KNOBS_STAYING_ENV_ONLY` per goal.md L358 — not
     # currently read in source, documented on the env-only side so a
