@@ -75,3 +75,10 @@ mixed map adds the codex credential requirement only for the codex-backed kinds.
   canary is the first consumer).
 - Implementing the `CodexAdapter` itself (axis 4, TB-357 — a hard predecessor).
 - The adapter-contract parity suite + codex smoke (axis 7).
+## Attempts
+
+### 2026-05-31 — error
+(no summary)
+- **error:** Exception: Claude Code returned an error result: success
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260531T180251Z-TB-358.prompt.md`, `stream: .cc-autopilot/debug/20260531T180251Z-TB-358.stream.jsonl`, `messages: .cc-autopilot/debug/20260531T180251Z-TB-358.messages.jsonl`

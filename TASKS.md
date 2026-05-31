@@ -8,9 +8,9 @@
 
 ## Backlog
 
-- [ ] **TB-358** **Per-agent-kind backend selection (`[agent_backends]` + `AP2_AGENT_BACKEND_<KIND>`) + backend-aware auth gate (axis 5)** `#autopilot` `#agent-adapter` `#codex` `#config` `#auth` `#axis-5` `@blocked:TB-357` — Axis 5: add an [agent_backends] per-kind backend map (+ AP2_AGENT_BACKEND_ env overrides, default claude) and a per-kind adapter resolver, and make the daemon-start auth gate backend-aware so codex-backed kinds require OpenAI creds. [→ brief](.cc-autopilot/tasks/per-agent-kind-backend-selection-agent-b.md)
 - [ ] **TB-359** **Adapter-contract parity test suite (both adapters) + gated codex real-SDK smoke (axis 7)** `#autopilot` `#agent-adapter` `#codex` `#tests` `#parity` `#smoke` `#axis-7` `@blocked:TB-357` — Axis 7: a backend-parametrized adapter-contract parity suite both ClaudeCodeAdapter and CodexAdapter must satisfy (hermetic stubs), plus a codex real-SDK smoke gated like the Claude smokes and run on the 6h real-sdk-smoke cron. [→ brief](.cc-autopilot/tasks/adapter-contract-parity-test-suite-both.md)
 - [ ] **TB-360** **Axis 6 canary — migrate ideation-scrub (`_run_scrub`) to adapter-routing + per-kind backend selection** `#autopilot` `#agent-adapter` `#codex` `#ideation-scrub` `#migration` `#axis-6` `@blocked:TB-358` — Axis 6 canary: repoint _run_scrub (ap2/ideation_scrub.py) off direct sdk.query through the AgentAdapter seam, selecting the backend for the ideation_scrub kind — preserves Claude behavior bit-for-bit and proves the per-site migration shape. [→ brief](.cc-autopilot/tasks/axis-6-canary-migrate-ideation-scrub-run.md)
+- [ ] **TB-358** **Per-agent-kind backend selection (`[agent_backends]` + `AP2_AGENT_BACKEND_<KIND>`) + backend-aware auth gate (axis 5)** `#autopilot` `#agent-adapter` `#codex` `#config` `#auth` `#axis-5` `@blocked:TB-357` — Axis 5: add an [agent_backends] per-kind backend map (+ AP2_AGENT_BACKEND_ env overrides, default claude) and a per-kind adapter resolver, and make the daemon-start auth gate backend-aware so codex-backed kinds require OpenAI creds. [→ brief](.cc-autopilot/tasks/per-agent-kind-backend-selection-agent-b.md)
 
 ## Pipeline Pending
 

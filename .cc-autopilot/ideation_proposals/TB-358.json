@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-357",
   "briefing_path": ".cc-autopilot/tasks/per-agent-kind-backend-selection-agent-b.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-05-31T21:26:34Z",
+    "reason": ""
+  },
   "proposed_at": "2026-05-31T13:07:39Z",
   "tb_id": "TB-358",
   "why_now": "TB-357 lands a second backend that nothing can route to \u2014 without\nper-kind selection, switching a kind's backend needs a code edit and codex\nhard-fails the OAuth-only daemon-start gate, so the abstraction can't actually\ndrive an agent kind; this closes goal.md's axis-5 delete-test."
