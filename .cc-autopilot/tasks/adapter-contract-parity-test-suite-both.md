@@ -68,3 +68,10 @@ the 6h cron is where the live round-trip actually runs.
 - Implementing the `CodexAdapter` itself (axis 4, TB-357 — a hard predecessor).
 - Per-kind selection + the auth gate (axis 5).
 - Migrating any production dispatch site to the adapter (axis 6).
+## Attempts
+
+### 2026-05-31 — error
+(no summary)
+- **error:** Exception: Claude Code returned an error result: success
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260531T212634Z-TB-359.prompt.md`, `stream: .cc-autopilot/debug/20260531T212634Z-TB-359.stream.jsonl`, `messages: .cc-autopilot/debug/20260531T212634Z-TB-359.messages.jsonl`
