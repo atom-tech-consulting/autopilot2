@@ -216,6 +216,14 @@ def scrub_exhaustion_language(
     ``daemon._run_control_agent`` so test paths can stub without
     monkey-patching the import.
 
+    TB-360 (axis-6 canary): the dispatch no longer calls ``sdk.query``
+    directly — it routes through the ``AgentAdapter`` resolved for the
+    ``ideation_scrub`` kind (``_resolve_scrub_adapter``). The injected
+    ``sdk`` handle is wrapped by that adapter, so the kwarg-only seam still
+    keeps the unit tests hermetic; under the default all-``claude``
+    ``[agent_backends]`` map the resolved adapter is a ``ClaudeCodeAdapter``
+    and the scrubbed-text result is identical to the pre-migration path.
+
     TB-294: raises typed exceptions on failure so the caller
     (``ideation._maybe_scrub_ideation_state``) can distinguish the
     three failure modes and emit the ``ideation_state_scrub_error``
@@ -254,18 +262,24 @@ def scrub_exhaustion_language(
         return text
     model = _resolved_model(cfg)
     prompt = _build_scrub_prompt(text)
+    # TB-360 (axis-6 canary): resolve the AgentAdapter for the
+    # ``ideation_scrub`` kind (TB-358's per-kind selector) and dispatch
+    # through it instead of calling ``sdk.query`` directly. The resolved
+    # adapter wraps the injected ``sdk`` handle so this stays hermetic on
+    # the test seam and bit-for-bit on Claude under the default map.
+    adapter = _resolve_scrub_adapter(sdk=sdk, cfg=cfg)
     try:
-        scrubbed = _run_scrub(sdk=sdk, prompt=prompt, model=model)
+        scrubbed = _run_scrub(adapter=adapter, prompt=prompt, model=model)
     except TimeoutError as exc:
         # Re-raise as the typed scrub timeout so the caller can
         # discriminate this from a generic SDK error without
         # introspecting the exception hierarchy.
         raise ScrubTimeoutError(str(exc)) from exc
     except ScrubError:
-        # Already a typed scrub error (defensive — no current path
-        # raises one inside ``_run_scrub``, but if a future refactor
-        # does, pass it through unmodified rather than re-wrapping
-        # it as a generic SDK error).
+        # ``_run_scrub`` raises ``ScrubSDKError`` when the adapter reports a
+        # ``status="error"`` result (TB-360); pass any already-typed scrub
+        # error through unmodified rather than re-wrapping it as a generic
+        # SDK error.
         raise
     except Exception as exc:  # noqa: BLE001
         # Any other exception (SDK, network, parse, model
@@ -293,78 +307,123 @@ def _build_scrub_prompt(text: str) -> str:
     return f"{_SCRUB_SYSTEM_PROMPT}\n\n---\n\nINPUT:\n\n{text}"
 
 
-def _run_scrub(*, sdk, prompt: str, model: str) -> str:
-    """Synchronously invoke the SDK and return the final assistant text.
+def _resolve_scrub_adapter(*, sdk, cfg: "Config | None"):
+    """Resolve the ``AgentAdapter`` backing the ``ideation_scrub`` kind.
 
-    Runs the coroutine in a fresh thread with its own event loop so
-    the call composes correctly whether or not the caller already
-    sits inside a running loop (the daemon's tick is async; tests can
-    invoke this from ``asyncio.run(...)`` too). Mirrors the worker-
-    thread pattern in
+    TB-360 (axis-6 canary): the scrub's dispatch site routes through the
+    ``AgentAdapter`` seam instead of calling ``sdk.query`` directly. The
+    backend is chosen per agent kind by TB-358's ``select_adapter`` reading
+    the merged ``[agent_backends]`` config for the ``ideation_scrub`` kind
+    (``AP2_AGENT_BACKEND_IDEATION_SCRUB`` env override >
+    ``[agent_backends]`` table > the all-``claude`` default). With the
+    default map the resolved adapter is a ``ClaudeCodeAdapter`` and the
+    scrub's output is identical to the pre-migration direct ``sdk.query``
+    path; an operator can set ``ideation_scrub=codex`` to route just this
+    kind to the Codex backend while every other kind stays on Claude.
+
+    The resolved adapter wraps the injected ``sdk`` handle so the scrub's
+    unit tests stay hermetic: tests pass a stub ``sdk`` exposing
+    ``ClaudeAgentOptions`` + ``query`` (the same recording-fake seam the
+    pre-migration ``_run_scrub`` consumed); the daemon passes its
+    already-imported ``claude_agent_sdk`` module. Only the Claude backend
+    carries an injectable ``sdk`` handle — for any other backend the handle
+    is ignored (the scrub's tests exercise only the Claude path).
+
+    ``cfg=None`` (the cfg-less / legacy env-only call seam) falls back to a
+    default ``ClaudeCodeAdapter``, matching the all-``claude`` default
+    ``select_adapter`` would resolve with a Config in hand. Late imports
+    keep the adapter packages off ``ideation_scrub``'s import path until
+    dispatch time, mirroring the module's lazy SDK / Config pattern.
+    """
+    from .adapters.claude_code import ClaudeCodeAdapter
+
+    if cfg is not None:
+        from .adapters.select import select_adapter
+
+        adapter = select_adapter("ideation_scrub", cfg)
+    else:
+        adapter = ClaudeCodeAdapter()
+    # The resolved adapter wraps the injected handle (parity with the
+    # pre-migration `_run_scrub(sdk=...)` seam). Only the Claude adapter has
+    # an injectable `_sdk`; a codex-backed kind ignores it.
+    if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+        adapter._sdk = sdk
+    return adapter
+
+
+def _run_scrub(*, adapter, prompt: str, model: str) -> str:
+    """Drive the resolved ``AgentAdapter`` and return the final assistant text.
+
+    TB-360 (axis-6 canary): the scrub no longer constructs
+    ``sdk.ClaudeAgentOptions`` / consumes ``sdk.query`` directly — it
+    dispatches through the ``AgentAdapter`` seam. ``adapter`` is the
+    instance ``_resolve_scrub_adapter`` chose for the ``ideation_scrub``
+    kind (a ``ClaudeCodeAdapter`` under the default all-``claude``
+    ``[agent_backends]`` map, wrapping the injected ``sdk`` handle). The
+    backend-neutral ``AgentOptions`` / ``AgentTools`` carry the same knobs
+    the pre-migration ``ClaudeAgentOptions`` call did:
+
+      * ``model`` — the resolved scrub model.
+      * ``max_turns=_SCRUB_MAX_TURNS`` / ``permission_mode``.
+      * ``timeout_s=_SCRUB_TIMEOUT_S`` — applied by ``run_to_result``'s
+        ``asyncio.wait_for`` drain (replacing the inner ``wait_for`` the
+        pre-migration ``_ask`` coroutine carried); a timeout surfaces as a
+        ``status="timeout"`` result, re-raised here as ``TimeoutError`` so
+        ``scrub_exhaustion_language`` maps it to ``ScrubTimeoutError``.
+      * ``extra={"thinking": {"type": "disabled"}}`` — TB-294's Haiku-4.5
+        extended-thinking disable. Haiku 4.5 auto-engages extended thinking
+        on the per-sentence DELETE/KEEP classification prompt, producing a
+        multi-thousand-character internal reasoning trace that pushes total
+        latency past the 60s ``_SCRUB_TIMEOUT_S`` budget (real-content 8KB
+        input measured at 110s end-to-end). Disabling thinking yields
+        identical output (same sentences removed, same structure preserved)
+        at ~24s wall-clock — ~40% headroom under the existing budget. The
+        Claude adapter's ``normalize_options`` threads ``extra`` straight
+        into ``ClaudeAgentOptions(thinking={"type": "disabled"})`` — the
+        canonical SDK shape (matches the Anthropic API's ``thinking`` config
+        object).
+
+    Runs the async drain in a fresh thread with its own event loop so the
+    call composes correctly whether or not the caller already sits inside a
+    running loop (the daemon's tick is async; tests can invoke this from
+    ``asyncio.run(...)`` too). Mirrors the worker-thread pattern in
     ``validator_judge._judge_dep_coherence_default``.
 
     Raises ``TimeoutError`` when the worker overruns the inner
-    ``asyncio.wait_for`` plus a small grace window — the caller
-    (``scrub_exhaustion_language``) catches everything and falls
-    back to the input unchanged.
+    ``run_to_result`` timeout plus a small grace window, or when the adapter
+    reports a ``status="timeout"`` result; raises ``ScrubSDKError`` on a
+    ``status="error"`` result (the adapter's normalized ``"<Type>: <msg>"``
+    string rides ``AgentResult.error``). The caller
+    (``scrub_exhaustion_language``) maps both onto the typed scrub-error
+    family and falls back to the input unchanged.
     """
+    from .adapters.base import AgentOptions, AgentTools
 
-    async def _ask() -> str:
-        # TB-294: Haiku 4.5 auto-engages extended thinking on the scrub's
-        # per-sentence DELETE/KEEP classification prompt, producing a
-        # multi-thousand-character internal reasoning trace that pushes
-        # total latency past the 60s ``_SCRUB_TIMEOUT_S`` budget (real-
-        # content 8KB input measured at 110s end-to-end). Disabling
-        # thinking yields identical output (same sentences removed,
-        # same structure preserved) at ~24s wall-clock — ~40% headroom
-        # under the existing budget. The classification task is
-        # mechanical pattern-matching against concrete rules in the
-        # system prompt; extended thinking doesn't improve verdict
-        # quality, it just spends tokens + latency on unobservable
-        # internal monologue. ``{"type": "disabled"}`` is the
-        # canonical SDK shape (matches the Anthropic API's
-        # ``thinking`` config object).
-        options = sdk.ClaudeAgentOptions(
-            permission_mode="bypassPermissions",
-            max_turns=_SCRUB_MAX_TURNS,
-            model=model,
-            thinking={"type": "disabled"},
-        )
-        text = ""
-        async for msg in sdk.query(prompt=prompt, options=options):
-            # Mirrors the message-walking shape used by
-            # ``validator_judge._judge_dep_coherence_default`` — text
-            # may arrive as a ``content`` list of parts OR as a
-            # top-level ``result`` field. Keep the LAST non-empty
-            # text encountered (the SDK's final assistant message).
-            content = getattr(msg, "content", None)
-            if isinstance(content, list):
-                for part in content:
-                    t = getattr(part, "text", None)
-                    if isinstance(t, str) and t.strip():
-                        text = t
-            else:
-                t = getattr(msg, "result", None)
-                if isinstance(t, str) and t.strip():
-                    text = t
-        return text
+    options = AgentOptions(
+        permission_mode="bypassPermissions",
+        max_turns=_SCRUB_MAX_TURNS,
+        model=model,
+        timeout_s=_SCRUB_TIMEOUT_S,
+        extra={"thinking": {"type": "disabled"}},
+    )
+    tools = AgentTools()
 
-    result: dict[str, "str | Exception | None"] = {"text": None, "exc": None}
+    result: dict = {"result": None, "exc": None}
 
     def _worker() -> None:
         try:
-            result["text"] = asyncio.run(
-                asyncio.wait_for(_ask(), timeout=_SCRUB_TIMEOUT_S),
+            result["result"] = asyncio.run(
+                adapter.run_to_result(prompt, tools, options),
             )
         except Exception as exc:  # noqa: BLE001
             result["exc"] = exc
 
     worker = threading.Thread(target=_worker, daemon=True)
     worker.start()
-    # Small grace window past the inner timeout so a genuinely-stuck
-    # worker still surfaces as a TimeoutError (the inner wait_for
-    # exception is the steady-state timeout signal; the outer join
-    # is the defense-in-depth backstop).
+    # Small grace window past the inner timeout so a genuinely-stuck worker
+    # still surfaces as a TimeoutError (``run_to_result``'s ``wait_for`` is
+    # the steady-state timeout signal; the outer join is the
+    # defense-in-depth backstop).
     worker.join(timeout=_SCRUB_TIMEOUT_S + 5)
     if worker.is_alive():
         raise TimeoutError(
@@ -372,4 +431,16 @@ def _run_scrub(*, sdk, prompt: str, model: str) -> str:
         )
     if result["exc"] is not None:
         raise result["exc"]
-    return result["text"] or ""
+    agent_result = result["result"]
+    if agent_result is None:  # pragma: no cover - defensive
+        raise ScrubSDKError("scrub adapter returned no result")
+    if agent_result.status == "timeout":
+        raise TimeoutError(
+            agent_result.error
+            or f"scrub adapter exceeded {_SCRUB_TIMEOUT_S:.0f}s"
+        )
+    if agent_result.status == "error":
+        raise ScrubSDKError(
+            agent_result.error or "scrub adapter returned error status"
+        )
+    return agent_result.text or ""

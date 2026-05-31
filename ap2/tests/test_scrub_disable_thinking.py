@@ -184,7 +184,7 @@ def test_scrub_raises_timeout_error_on_inner_timeout(monkeypatch):
     so ``_maybe_scrub_ideation_state`` can emit the
     ``ideation_state_scrub_error reason=timeout`` audit event.
     """
-    def _boom(*, sdk, prompt, model):
+    def _boom(*, adapter, prompt, model):
         raise TimeoutError("scrub worker exceeded 65s")
     monkeypatch.setattr(ideation_scrub, "_run_scrub", _boom)
 
