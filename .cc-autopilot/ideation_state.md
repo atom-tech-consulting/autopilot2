@@ -36,7 +36,6 @@ satisfied their `@blocked:TB-357`); TB-360 still `@blocked:TB-358`; `next_task_i
     BY DESIGN, gated on the canary (TB-360) proving the per-site migration shape. No other
     axis is unseeded. TB-358/359/360 not yet dispatched.
   - Status: `in-progress`
-  - Reasoning: three axes (5, 6-tail, 7) still carry substantive non-trivial work.
 
 ## Non-goal risk check
 
@@ -66,9 +65,7 @@ automation.
 ## Cycle observations
 
 - 2nd consecutive 0-proposal cycle (prior 19:18Z), but a saturation dry-cycle: backlog holds exactly N=2 workable items (TB-358, TB-359) and the only
-  uncovered work (axis-6 tail) is correctly gated on the undispatched canary TB-360. The
-  empty-cycles counter advancing here reflects backlog saturation: the daemon hasn't dispatched the
-  workable wave yet, so the saturation persists.
+  uncovered work (axis-6 tail) is correctly gated on the undispatched canary TB-360.
 
 ## Decisions needed from operator
 
