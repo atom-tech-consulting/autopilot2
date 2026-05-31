@@ -669,12 +669,22 @@ def do_mattermost_thread_read(cfg: Config, args: dict) -> dict:
 # ---------------- SDK wiring ----------------
 
 
-def build_mcp_server(cfg: Config):
+def build_mcp_server(cfg: Config, adapter=None):
     """Build the in-process MCP server exposing the custom tools.
 
     Imported lazily so unit tests don't need the SDK.
+
+    TB-355 (axis 3): the `@tool` definitions below remain ap2's canonical
+    custom tool set, but the `create_sdk_mcp_server(...)` assembly that turns
+    them into the backend-native MCP server now lives behind the
+    `AgentAdapter` (`ClaudeCodeAdapter.build_tool_server`) so both backends
+    expose one toolset. The tool set is handed to the adapter as a unit; the
+    adapter records the registered short-names for
+    `adapter.registered_tool_names()`. `adapter` defaults to a fresh
+    `ClaudeCodeAdapter`; callers (e.g. the axis-3 contract test) may pass their
+    own instance to inspect that enumeration.
     """
-    from claude_agent_sdk import create_sdk_mcp_server, tool
+    from claude_agent_sdk import tool
 
     @tool(
         "board_edit",
@@ -1061,10 +1071,16 @@ def build_mcp_server(cfg: Config):
     except PackageNotFoundError:
         version = "unknown"
 
-    return create_sdk_mcp_server(
-        name="autopilot",
-        version=version,
-        tools=[
+    # TB-355 (axis 3): hand ap2's custom tool set to the AgentAdapter, which
+    # owns the `create_sdk_mcp_server(...)` assembly (relocated into
+    # `ClaudeCodeAdapter.build_tool_server`) so Claude tool exposure flows
+    # through the adapter and a future Codex backend can register the same set.
+    if adapter is None:
+        from .adapters.claude_code import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+    return adapter.build_tool_server(
+        [
             board_edit,
             cron_edit,
             mattermost_reply,
@@ -1080,6 +1096,8 @@ def build_mcp_server(cfg: Config):
             status_report_run,
             pipeline_task_start,
         ],
+        server_name="autopilot",
+        version=version,
     )
 
 

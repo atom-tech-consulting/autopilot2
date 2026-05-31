@@ -37,14 +37,22 @@ Design — `AgentAdapter.run()` is the single seam:
     the daemon's `asyncio.wait_for` wrappers do today.
   - `normalize_options()` is the options-normalization entry (backend-neutral
     options → the backend's native options object's kwargs); `register_tools()`
-    is the MCP-tool registration hook (ap2's tool surface → the backend's
-    native tool config). Both are abstract so each backend owns its mapping.
+    maps a pre-built `AgentTools` (allow/deny policy + MCP-server map) onto the
+    backend's native tool-exposure kwargs. Both are abstract so each backend
+    owns its mapping.
+  - `build_tool_server()` (axis 3) is the tool-registration surface: ap2's
+    custom tool set is handed to the adapter as a unit and the adapter is
+    responsible for exposing it to its backend (the Claude path's
+    `create_sdk_mcp_server(...)` assembly now lives here, not at the dispatch
+    site). `registered_tool_names()` is the backend-agnostic enumeration
+    accessor axis 7's parity test reads to assert both backends register one
+    identical toolset.
 """
 from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -199,6 +207,45 @@ class AgentAdapter(ABC):
         (allow/deny policy + MCP servers) to the kwargs the backend's native
         options object accepts for tool exposure."""
         raise NotImplementedError
+
+    @abstractmethod
+    def build_tool_server(
+        self,
+        tool_set: Sequence[Any],
+        *,
+        server_name: str = "autopilot",
+        version: str = "unknown",
+    ) -> Any:
+        """Tool-registration surface (axis 3): accept ap2's custom tool set
+        and expose it to the backend.
+
+        `tool_set` is ap2's canonical custom-tool inventory — the
+        `report_result` / `cron_propose` / `pipeline_task_start` /
+        `operator_queue_append` / ... tools — handed to the adapter as a unit
+        rather than assembled at each dispatch site. The adapter wraps the set
+        into its backend-native tool-server object (for the Claude backend, a
+        `claude_agent_sdk.create_sdk_mcp_server(...)` server) and returns it so
+        the dispatch site can thread it through `AgentTools.mcp_servers`.
+
+        Implementations MUST record the registered tool short-names so
+        `registered_tool_names()` can enumerate them backend-agnostically —
+        axis 4's `CodexAdapter` implements against this same surface and axis
+        7's parity test asserts both backends register the identical set.
+        """
+        raise NotImplementedError
+
+    def registered_tool_names(self) -> list[str]:
+        """Backend-agnostic enumeration of the tool short-names most recently
+        registered through `build_tool_server()` (e.g. `"report_result"`,
+        `"cron_propose"`, `"pipeline_task_start"`).
+
+        Returns an empty list until `build_tool_server()` has run. This is the
+        accessor axis 7's cross-backend parity test reads to assert the Claude
+        and Codex adapters expose one identical toolset; it is concrete here
+        (reading the short-names each `build_tool_server` stashes on
+        `self._registered_tool_names`) so every backend enumerates uniformly.
+        """
+        return list(getattr(self, "_registered_tool_names", []))
 
     @abstractmethod
     def run(

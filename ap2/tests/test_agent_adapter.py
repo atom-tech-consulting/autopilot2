@@ -162,6 +162,9 @@ def test_claude_adapter_conforms_to_abc():
     assert callable(adapter.normalize_options)
     assert callable(adapter.register_tools)
     assert callable(adapter.run_to_result)
+    # TB-355 (axis 3): the tool-registration / enumeration surface.
+    assert callable(adapter.build_tool_server)
+    assert callable(adapter.registered_tool_names)
 
 
 def test_abc_is_not_instantiable():
@@ -340,3 +343,104 @@ def test_usage_from_summary_reads_result_envelope_fields():
     assert u.num_turns == 9
     assert u.model == "claude-opus-4-7"
     assert u.note == ""
+
+
+# --------------------------------------------------------------------------
+# TB-355 (axis 3): tool-registration / enumeration surface
+#
+# The `create_sdk_mcp_server(...)` assembly for ap2's custom tools now lives
+# behind `ClaudeCodeAdapter.build_tool_server`. These tests pin that the live
+# Claude toolset — handed to the adapter as a unit by `tools.build_mcp_server`
+# — is exposed through the adapter and enumerable via `registered_tool_names`.
+# --------------------------------------------------------------------------
+
+
+# The full ap2 custom toolset's short-names. Kept in sync with the `tools=[…]`
+# list `build_mcp_server` hands to the adapter; a drop/rename trips this test.
+_EXPECTED_AP2_TOOL_SHORT_NAMES = {
+    "board_edit",
+    "cron_edit",
+    "mattermost_reply",
+    "mattermost_thread_read",
+    "log_event",
+    "daemon_control",
+    "ideation_state_write",
+    "git_log_grep",
+    "operator_log_append",
+    "operator_queue_append",
+    "report_result",
+    "cron_propose",
+    "status_report_run",
+    "pipeline_task_start",
+}
+
+
+def _scaffold_cfg(root):
+    """Minimal on-disk project so `build_mcp_server` can build the real
+    toolset (mirrors `test_mcp_inventory._build_server`)."""
+    from pathlib import Path
+
+    from ap2.config import Config
+
+    root = Path(root)
+    (root / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n"
+        "## Complete\n\n## Frozen\n"
+    )
+    cfg = Config.load(root)
+    cfg.ensure_dirs()
+    return cfg
+
+
+def test_registered_tool_names_empty_before_build():
+    """The enumeration accessor starts empty — it reflects the most recent
+    `build_tool_server` call, not a hardcoded list."""
+    adapter = ClaudeCodeAdapter()
+    assert adapter.registered_tool_names() == []
+
+
+def test_claude_adapter_exposes_ap2_tool_short_names(tmp_path):
+    """Axis-3 contract: ap2's custom tool set, handed to the adapter's
+    tool-registration surface, is exposed to the Claude backend and the
+    adapter enumerates exactly the expected short-names.
+
+    Uses the REAL toolset built by `tools.build_mcp_server`, injecting our own
+    `ClaudeCodeAdapter` so we can read its `registered_tool_names()` accessor
+    (the daemon/CLI call `build_mcp_server(cfg)` with the default adapter)."""
+    import ap2.tools as tools
+
+    adapter = ClaudeCodeAdapter()
+    server = tools.build_mcp_server(_scaffold_cfg(tmp_path), adapter=adapter)
+
+    # The adapter returned the backend-native MCP server (the
+    # create_sdk_mcp_server dict the dispatch sites thread through
+    # mcp_servers={"autopilot": …}) — unchanged shape.
+    assert isinstance(server, dict)
+    assert server.get("name") == "autopilot"
+    assert "instance" in server
+
+    # And the adapter enumerates the full ap2 toolset through its surface —
+    # no tool dropped or renamed.
+    assert set(adapter.registered_tool_names()) == _EXPECTED_AP2_TOOL_SHORT_NAMES
+
+
+def test_build_tool_server_records_short_names_from_tool_set():
+    """`build_tool_server` records each tool's `.name` for enumeration,
+    independent of `build_mcp_server` (a direct adapter-surface unit test)."""
+    from claude_agent_sdk import tool
+
+    @tool("alpha", "first", {"x": str})
+    async def alpha(args):  # pragma: no cover - handler never invoked here
+        return {}
+
+    @tool("beta", "second", {"y": str})
+    async def beta(args):  # pragma: no cover - handler never invoked here
+        return {}
+
+    adapter = ClaudeCodeAdapter()
+    server = adapter.build_tool_server([alpha, beta], version="test")
+    assert server.get("name") == "autopilot"
+    assert adapter.registered_tool_names() == ["alpha", "beta"]
+    # Re-registering replaces the recorded set (reflects the latest call).
+    adapter.build_tool_server([alpha], server_name="custom", version="test")
+    assert adapter.registered_tool_names() == ["alpha"]

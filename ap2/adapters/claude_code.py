@@ -32,7 +32,7 @@ production daemon passes its already-imported `claude_agent_sdk` module in.
 """
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from ..message_dump import (
@@ -63,6 +63,9 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def __init__(self, sdk: Any = None) -> None:
         self._sdk = sdk
+        #: Short-names of the tools registered by the last `build_tool_server`
+        #: call; surfaced via the base `registered_tool_names()` accessor.
+        self._registered_tool_names: list[str] = []
 
     def _get_sdk(self) -> Any:
         if self._sdk is None:
@@ -114,6 +117,43 @@ class ClaudeCodeAdapter(AgentAdapter):
         if tools.disallowed is not None:
             kwargs["disallowed_tools"] = tools.disallowed
         return kwargs
+
+    def build_tool_server(
+        self,
+        tool_set: Sequence[Any],
+        *,
+        server_name: str = "autopilot",
+        version: str = "unknown",
+    ) -> Any:
+        """Expose ap2's custom tool set to the Claude backend (axis 3).
+
+        Relocates — bit-for-bit — the `create_sdk_mcp_server(...)` assembly
+        that lived at the dispatch wiring (`ap2.tools.build_mcp_server`) behind
+        the adapter so Claude tool exposure flows through the `AgentAdapter`
+        surface rather than being assembled per dispatch site. Each member of
+        `tool_set` is an `SdkMcpTool` (a `@tool`-decorated handler closure over
+        the daemon's `Config`); they are passed verbatim to
+        `create_sdk_mcp_server` so the live tool inventory is unchanged. The
+        registered short-names (read off each tool's `.name`) are captured for
+        the base `registered_tool_names()` enumeration accessor.
+
+        The `claude_agent_sdk` import is lazy (mirroring the original wiring's
+        `from claude_agent_sdk import create_sdk_mcp_server`) so the module
+        loads without the SDK installed.
+        """
+        from claude_agent_sdk import create_sdk_mcp_server  # type: ignore
+
+        tools_list = list(tool_set)
+        self._registered_tool_names = [
+            name
+            for name in (getattr(t, "name", None) for t in tools_list)
+            if name
+        ]
+        return create_sdk_mcp_server(
+            name=server_name,
+            version=version,
+            tools=tools_list,
+        )
 
     async def run(
         self,
