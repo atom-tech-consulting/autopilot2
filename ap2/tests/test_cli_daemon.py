@@ -64,6 +64,102 @@ def test_cmd_start_refuses_without_token(tmp_path: Path, monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
+# TB-358 (axis 5): backend-aware daemon-start auth gate. `_require_oauth_token`
+# now walks the resolved per-kind backend map and requires exactly the
+# credentials that set implies — OAuth for any claude-backed kind, the
+# OpenAI/codex credential for any codex-backed kind. The pre-axis-5 no-arg
+# calls (the TB-79 tests above) keep their all-claude behavior.
+
+
+def _clear_agent_backend_env(monkeypatch) -> None:
+    """Drop every `AP2_AGENT_BACKEND_<KIND>` override so a test's cfg reads
+    the all-claude default unless it sets an override explicitly."""
+    from ap2.adapters.select import AGENT_KINDS
+
+    for kind in AGENT_KINDS:
+        monkeypatch.delenv(f"AP2_AGENT_BACKEND_{kind.upper()}", raising=False)
+
+
+def test_require_oauth_token_all_claude_requires_only_oauth(
+    tmp_path: Path, monkeypatch,
+):
+    """An all-claude backend map (the default) requires only OAuth — the
+    OpenAI credential being absent does NOT block start. Identical to the
+    pre-axis-5 install."""
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert _require_oauth_token(cfg) == 0
+
+
+def test_require_oauth_token_all_claude_refuses_without_oauth(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """An all-claude map with OAuth missing still refuses — the cfg-passed
+    path preserves the TB-79 requirement, naming the claude-backed kinds."""
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    assert _require_oauth_token(cfg) == 1
+    err = capsys.readouterr().err
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in err
+    # OpenAI cred is not demanded when no kind is codex-backed.
+    assert "OPENAI_API_KEY" not in err
+
+
+def test_require_oauth_token_codex_kind_requires_openai_cred(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    """A codex-mapped kind (`AP2_AGENT_BACKEND_TASK=codex`) requires the
+    OpenAI/codex credential even when OAuth is present (the other kinds are
+    still claude-backed). The error names both the credential and the kind."""
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AP2_AGENT_BACKEND_TASK", "codex")
+
+    rc = _require_oauth_token(cfg)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "OPENAI_API_KEY" in err
+    # The message names the codex-backed kind needing the credential.
+    assert "task" in err
+
+
+def test_require_oauth_token_codex_kind_passes_with_both_creds(
+    tmp_path: Path, monkeypatch,
+):
+    """A mixed map (one codex kind, the rest claude) passes when BOTH the
+    OAuth token and the OpenAI credential are present."""
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-fake")
+    monkeypatch.setenv("AP2_AGENT_BACKEND_TASK", "codex")
+    assert _require_oauth_token(cfg) == 0
+
+
+def test_require_oauth_token_all_codex_does_not_require_oauth(
+    tmp_path: Path, monkeypatch,
+):
+    """Switching EVERY kind to codex drops the OAuth requirement entirely —
+    the OpenAI credential alone suffices. This is the briefing's core
+    guarantee: a codex-backed kind no longer hard-fails the OAuth-only
+    gate."""
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    from ap2.adapters.select import AGENT_KINDS
+
+    for kind in AGENT_KINDS:
+        monkeypatch.setenv(f"AP2_AGENT_BACKEND_{kind.upper()}", "codex")
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-fake")
+    assert _require_oauth_token(cfg) == 0
+
+
+# ---------------------------------------------------------------------------
 # TB-121: `ap2 status` shows the pending-review queue depth so an
 # operator can spot ideation proposals waiting on `ap2 approve` without
 # having to load /tasks?filter=pending-review.

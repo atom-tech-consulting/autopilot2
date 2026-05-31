@@ -326,6 +326,18 @@ ENV_TEMPLATE = f"""\
 # `AP2_JANITOR_JUDGE_EFFORT`) override this for their respective agents.
 # AP2_AGENT_EFFORT=xhigh
 
+# Per-agent-kind backend selection (codex support, axis 5). Each agent
+# kind defaults to the `claude` backend (sdk.query against the bundled
+# Claude Code binary). Opt a kind into the `codex` backend by exporting
+# AP2_AGENT_BACKEND_<KIND>=codex with <KIND> upper-cased — one of: task,
+# ideation, status_report, cron, mattermost, verifier_judge,
+# ideation_scrub, validator_judge, janitor_judge. A codex-backed kind
+# requires the OpenAI credential (OPENAI_API_KEY) at daemon start; an
+# all-default install needs only CLAUDE_CODE_OAUTH_TOKEN as before. The
+# equivalent config.toml surface is the `[agent_backends]` table
+# (e.g. `task = "codex"`).
+# AP2_AGENT_BACKEND_<KIND>=claude
+
 # Comma-separated Mattermost channel IDs the daemon polls for `@bot`
 # mentions. Unset = no Mattermost integration. This is a LIFECYCLE knob
 # (FIXED_KNOBS) — changing it requires `ap2 stop && ap2 start` to

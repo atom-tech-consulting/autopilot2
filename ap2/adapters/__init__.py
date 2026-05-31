@@ -26,8 +26,10 @@ from .base import (
 )
 from .claude_code import ClaudeCodeAdapter
 from .codex import CodexAdapter
+from .select import AGENT_KINDS, select_adapter
 
 __all__ = [
+    "AGENT_KINDS",
     "AgentAdapter",
     "AgentEvent",
     "AgentOptions",
@@ -37,5 +39,6 @@ __all__ = [
     "AgentUsage",
     "ClaudeCodeAdapter",
     "CodexAdapter",
+    "select_adapter",
     "usage_from_summary",
 ]

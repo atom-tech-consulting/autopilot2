@@ -68,6 +68,13 @@ _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     "AP2_JANITOR_JUDGE_MAX_TURNS_DEFAULT",  # TB-330 — private in-source default sentinel, not an operator knob
     "AP2_COMPONENTS_",  # TB-323 — sectioned-env f-string prefix, not an operator knob
     "AP2_CORE_",        # TB-323 — sectioned-env f-string prefix, not an operator knob
+    # TB-358 — per-agent-kind backend selector f-string prefix
+    # (`f"AP2_AGENT_BACKEND_{kind.upper()}"` in `config.get_agent_backend`).
+    # The bare prefix is a synthetic shape the regex picks up, not an
+    # operator knob; the operator surface is the fully-qualified
+    # `AP2_AGENT_BACKEND_<KIND>` family, documented (with the valid kinds
+    # enumerated) in `init.ENV_TEMPLATE`'s agent-backend block.
+    "AP2_AGENT_BACKEND_",
     "AP2_DIR",          # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     "AP2_REAL_SDK",     # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     # TB-345 — DEPRECATED back-compat aliases. The `focus_advance`

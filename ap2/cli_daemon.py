@@ -51,31 +51,94 @@ def _is_running(pid: int | None) -> bool:
         return False
 
 
-def _require_oauth_token() -> int:
-    """Refuse to start the daemon when CLAUDE_CODE_OAUTH_TOKEN isn't in env (TB-79).
+# TB-358 (axis 5): the credential env var a `codex`-backed kind requires.
+# The daemon-start auth gate walks the resolved per-kind backend set and
+# requires exactly the credentials that set implies. `claude` keeps the
+# pre-axis-5 `CLAUDE_CODE_OAUTH_TOKEN` requirement (and its existing
+# remediation hints, pinned by TB-79's tests); a `codex`-backed kind
+# additionally requires this OpenAI/codex credential. An all-claude map
+# therefore behaves identically to today (OAuth required, no OpenAI cred
+# needed) while switching a kind to codex adds the OpenAI requirement only
+# for that kind — it no longer hard-fails the OAuth-only gate.
+_CODEX_CREDENTIAL_ENV = "OPENAI_API_KEY"
 
-    Without the token the SDK control protocol times out on handshake and the
-    daemon idles through `Control request timeout: initialize` events — the
-    failure mode is silent because `claude` exits before printing anything to
-    stderr. Returns 1 + prints remediation; the source-of-truth for env
-    delivery is operator policy (login shell, sudoers env_keep, project env
-    file), so ap2 stays out of guessing.
+
+def _require_oauth_token(cfg: "Config | None" = None) -> int:
+    """Refuse to start the daemon unless every resolved backend's creds are set.
+
+    Backend-aware daemon-start credential gate (TB-79 → TB-358 axis 5).
+    Walks the per-agent-kind backend map (`cfg.get_agent_backend(kind)` over
+    `ap2.adapters.select.AGENT_KINDS`) and requires exactly the credentials
+    the resolved backend set implies:
+
+      - any kind resolving to `claude` → `CLAUDE_CODE_OAUTH_TOKEN`. Without
+        it the SDK control protocol times out on handshake and the daemon
+        idles through `Control request timeout: initialize` events — the
+        failure mode is silent because `claude` exits before printing
+        anything to stderr.
+      - any kind resolving to `codex` → `OPENAI_API_KEY` (the OpenAI/codex
+        credential the codex CLI brings its own auth from).
+
+    Returns 1 + prints remediation naming which kinds need which credential;
+    the source-of-truth for env delivery is operator policy (login shell,
+    sudoers env_keep, project env file), so ap2 stays out of guessing.
+
+    `cfg=None` preserves the pre-axis-5 contract bit-for-bit: it resolves to
+    the all-claude default (a single `claude` backend), so it requires only
+    `CLAUDE_CODE_OAUTH_TOKEN` — the shape TB-79's tests pin.
     """
-    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
-        return 0
-    print(
-        "ap2: refusing to start — CLAUDE_CODE_OAUTH_TOKEN is not in the env.\n"
-        "Without it the SDK control protocol will silently time out at\n"
-        "initialize. Pick one:\n"
-        "  - launch via login shell:  sudo -u <user> -i ap2 start\n"
-        "  - install token first:     ap2 sandbox install-token <user>\n"
-        "                             (then re-launch via -i, or set\n"
-        "                             CLAUDE_CODE_OAUTH_TOKEN explicitly)\n"
-        "  - one-off env pass:        sudo --preserve-env=CLAUDE_CODE_OAUTH_TOKEN \\\n"
-        "                                 -u <user> ap2 start",
-        file=sys.stderr,
+    # Map each agent kind → its resolved backend. With no cfg, fall back to
+    # the all-claude default (the pre-axis-5 single-backend gate).
+    if cfg is None:
+        from .config import DEFAULT_AGENT_BACKEND
+        kind_backends = {"<default>": DEFAULT_AGENT_BACKEND}
+    else:
+        from .adapters.select import AGENT_KINDS
+        kind_backends = {k: cfg.get_agent_backend(k) for k in AGENT_KINDS}
+
+    # An unknown backend id resolves to the Claude adapter (select_adapter's
+    # default), so it requires OAuth — normalize anything that isn't `codex`
+    # to `claude` here so the auth requirement matches the adapter that would
+    # actually run.
+    def _effective(backend: str) -> str:
+        return "codex" if backend == "codex" else "claude"
+
+    needs_claude = sorted(
+        k for k, b in kind_backends.items() if _effective(b) == "claude"
     )
-    return 1
+    needs_codex = sorted(
+        k for k, b in kind_backends.items() if _effective(b) == "codex"
+    )
+
+    rc = 0
+    if needs_claude and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
+        rc = 1
+        print(
+            "ap2: refusing to start — CLAUDE_CODE_OAUTH_TOKEN is not in the env.\n"
+            f"Claude-backed agent kinds need it: {needs_claude}.\n"
+            "Without it the SDK control protocol will silently time out at\n"
+            "initialize. Pick one:\n"
+            "  - launch via login shell:  sudo -u <user> -i ap2 start\n"
+            "  - install token first:     ap2 sandbox install-token <user>\n"
+            "                             (then re-launch via -i, or set\n"
+            "                             CLAUDE_CODE_OAUTH_TOKEN explicitly)\n"
+            "  - one-off env pass:        sudo --preserve-env=CLAUDE_CODE_OAUTH_TOKEN \\\n"
+            "                                 -u <user> ap2 start",
+            file=sys.stderr,
+        )
+    if needs_codex and not os.environ.get(_CODEX_CREDENTIAL_ENV, "").strip():
+        rc = 1
+        print(
+            f"ap2: refusing to start — {_CODEX_CREDENTIAL_ENV} is not in the env.\n"
+            f"Codex-backed agent kinds need it: {needs_codex}.\n"
+            "These kinds resolve to the codex backend via [agent_backends] /\n"
+            "AP2_AGENT_BACKEND_<KIND>, which brings its own OpenAI credentials.\n"
+            "Export the credential in the daemon's env (login shell, sudoers\n"
+            f"env_keep, or .cc-autopilot/env), or repoint the kind(s) back to\n"
+            "claude to drop the requirement.",
+            file=sys.stderr,
+        )
+    return rc
 
 
 def _version_string() -> str:
@@ -106,7 +169,7 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     # stale pid file
     if cfg.pid_file.exists():
         cfg.pid_file.unlink()
-    rc = _require_oauth_token()
+    rc = _require_oauth_token(cfg)
     if rc != 0:
         return rc
     if args.foreground:

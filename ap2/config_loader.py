@@ -390,6 +390,23 @@ def from_toml(toml_path: Path) -> "Config":
         name: dict(knobs) if isinstance(knobs, dict) else knobs
         for name, knobs in components_section.items()
     }
+    # TB-358 (axis 5): stash the `[agent_backends]` per-kind backend map
+    # verbatim on `cfg.agent_backends_config` so `Config.get_agent_backend`
+    # reads the TOML snapshot for a kind whose env override is unset. The
+    # table is a flat `{kind: backend_id}` map (`task = "codex"`), so a
+    # shallow `dict(...)` copy is enough — values are scalar strings, not
+    # nested tables. A missing `[agent_backends]` section yields `{}`, the
+    # all-`claude`-default behavior. Schema validation of this section is
+    # not wired (the auth gate + resolver tolerate an unknown id by
+    # falling back to claude), matching the briefing's selection-only
+    # scope.
+    agent_backends_section = raw.get("agent_backends") or {}
+    if not isinstance(agent_backends_section, dict):
+        raise ConfigSchemaError(
+            f"[agent_backends] must be a TOML table; got "
+            f"{type(agent_backends_section).__name__}"
+        )
+    cfg.agent_backends_config = dict(agent_backends_section)
     # TB-323 (axis 2): apply the env-override layer + flat-name back-
     # compat shim. Sectioned envs (`AP2_<SECTION>_<KEY>`) win over the
     # TOML value; flat envs (`AP2_<FLAT>` listed in

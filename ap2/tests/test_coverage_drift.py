@@ -99,6 +99,13 @@ _COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset({
     # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` (test_docs_drift.py).
     "AP2_COMPONENTS_",
     "AP2_CORE_",
+    # TB-358: per-agent-kind backend selector f-string prefix
+    # (`f"AP2_AGENT_BACKEND_{kind.upper()}"` in `config.get_agent_backend`)
+    # — a synthetic shape, not an operator knob. The fully-qualified
+    # `AP2_AGENT_BACKEND_<KIND>` family IS exercised by
+    # `test_agent_backend_selection.py` / `test_cli_daemon.py`; mirrors the
+    # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` entry.
+    "AP2_AGENT_BACKEND_",
     # TB-323: forward-compat placeholders in
     # `config_compat._KNOBS_STAYING_ENV_ONLY` per goal.md L358 — not
     # currently read in source, documented on the env-only side so a

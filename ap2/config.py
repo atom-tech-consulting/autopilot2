@@ -159,6 +159,20 @@ DEFAULT_IDEATION_MAX_TURNS = 100
 # dataclass because the call-site read is the source of truth.
 DEFAULT_IDEATION_SCRUB_MODEL = "claude-haiku-4-5-20251001"
 
+# TB-358 (axis 5): per-agent-kind backend selection. Every agent kind
+# defaults to the `claude` backend so an all-claude install behaves
+# exactly as it did before the adapter layer existed (OAuth-only auth,
+# `sdk.query` against the bundled Claude Code binary). An operator opts a
+# kind into the `codex` backend via the `[agent_backends]` config table
+# (`task = "codex"`) or the `AP2_AGENT_BACKEND_<KIND>` env override (with
+# `<KIND>` upper-cased — for the `task` kind, set the `_TASK` suffix to
+# `codex`). `Config.get_agent_backend(kind)`
+# resolves the merged value; `ap2.adapters.select.select_adapter` maps it
+# to a concrete adapter instance. The canonical kind list lives in
+# `ap2.adapters.select.AGENT_KINDS` (the auth gate walks it); the default
+# id is pinned here so config + resolver + auth gate share one source.
+DEFAULT_AGENT_BACKEND = "claude"
+
 
 @dataclass
 class Config:
@@ -236,6 +250,16 @@ class Config:
     # at the end of the list for the same dataclass-constructor reason
     # `components_config` is.
     core_config: dict[str, Any] = field(default_factory=dict)
+    # TB-358 (axis 5): the `[agent_backends]` config table from
+    # `.cc-autopilot/config.toml` — a per-agent-kind backend map
+    # (`{"task": "codex", "ideation": "claude", ...}`) stashed verbatim by
+    # `config_loader.from_toml`. Empty dict for the env-path branch
+    # (today's default) so `get_agent_backend` always finds a safe `{}` to
+    # fall through to its env / `DEFAULT_AGENT_BACKEND` precedence. A kind
+    # absent from the map (or absent table entirely) resolves to
+    # `claude`. Default-bearing field at the end of the list for the same
+    # dataclass-constructor reason `core_config` / `components_config` are.
+    agent_backends_config: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, project_root: str | Path | None = None) -> "Config":
@@ -566,6 +590,43 @@ class Config:
             if spec is not None:
                 return spec.default
         return default
+
+    def get_agent_backend(self, kind: str) -> str:
+        """Resolved backend id (``"claude"`` / ``"codex"``) for an agent kind.
+
+        TB-358 (axis 5): the per-agent-kind selection read path. Precedence
+        (high → low), call-time-evaluated so a mid-process env change takes
+        effect on the next read without an explicit cfg reload — the same
+        env-first contract ``get_core_value`` / ``get_component_value``
+        carry:
+
+          1. ``AP2_AGENT_BACKEND_<KIND>`` env override (``kind`` upper-cased
+             onto the suffix — the ``task`` / ``status_report`` kinds read
+             the ``_TASK`` / ``_STATUS_REPORT`` suffixed names).
+             Wins over every other layer so an operator exporting it
+             mid-process sees the next-dispatch propagation. A blank value
+             is treated as unset (falls through), mirroring the
+             whitespace-strip the auth gate / project-name resolution apply.
+          2. ``self.agent_backends_config[kind]`` — the ``[agent_backends]``
+             snapshot populated by ``config_loader.from_toml`` at load time.
+          3. ``DEFAULT_AGENT_BACKEND`` (``"claude"``) — when neither layer
+             carries a value, so an unmapped kind (and an all-default
+             install) resolves to the Claude backend exactly as before the
+             adapter layer existed.
+
+        Returns the raw backend id verbatim — normalization of an unknown id
+        to a concrete adapter is ``select_adapter``'s job (it defaults an
+        unrecognized id to the Claude adapter), keeping this resolver a pure
+        config read.
+        """
+        env_name = f"AP2_AGENT_BACKEND_{kind.upper()}"
+        raw = os.environ.get(env_name)
+        if raw is not None and raw.strip():
+            return raw.strip()
+        snap = (self.agent_backends_config or {}).get(kind)
+        if isinstance(snap, str) and snap.strip():
+            return snap.strip()
+        return DEFAULT_AGENT_BACKEND
 
 
 def load_project_env(project_root: Path) -> dict[str, str]:
