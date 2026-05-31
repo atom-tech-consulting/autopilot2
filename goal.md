@@ -90,7 +90,131 @@ For the structured-config focus specifically:
   key is mentioned in `ap2/howto.md`'s `## Configuration knobs`
   section."
 
-## Current focus: refactor features into opt-in components
+## Current focus: codex support through an agent adaptor layer
+
+Every agent run in ap2 is a `claude_agent_sdk.query()` call against the
+bundled Claude Code binary, across distinct dispatch sites: `run_task`
+(task agents), the shared `_run_control_agent` (ideation, status-report,
+cron, mattermost-handler), `_judge_prose_bullet` (the verifier
+prose-bullet judge), `_run_scrub` (ideation-scrub), and the
+validator-judge / janitor-judge component calls. The SDK imports sit in
+only two files (`daemon.py`, `tools.py`), but its concepts —
+`ClaudeAgentOptions` (model / effort / max_turns / timeout),
+`create_sdk_mcp_server` (ap2's custom tools), the `AssistantMessage` /
+`ResultMessage` stream shape, usage / cost parsing, OAuth-only auth —
+leak across ~10 modules. ap2 is structurally single-backend, which the
+Constraints section pins explicitly.
+
+This focus introduces an **agent adaptor layer**: a backend-agnostic
+`AgentAdapter` interface every dispatch flows through —
+`run(prompt, tools, options)` yields a normalized event stream and an
+`AgentResult(usage, commit, ...)`. Today's Claude path becomes a
+`ClaudeCodeAdapter` that wraps the current `sdk.query` behavior
+bit-for-bit; a new `CodexAdapter` drives OpenAI's `codex` CLI agent
+through the same interface. Crucially, the backend is selected **per
+agent kind**, not per daemon: an `[agent_backends]` config table (with
+`AP2_AGENT_BACKEND_<KIND>` env overrides, every kind defaulting to
+`claude`) lets an operator run, for example, `ideation=claude` while
+`task=codex`. ap2's custom MCP tools register through the adapter so
+either backend exposes the same toolset.
+
+The focus migrates every agent kind through the adapter one at a time:
+each dispatch site becomes a single TB that moves it behind the
+interface, preserving its exact tool policy and behavior on Claude
+before Codex is offered for it. By the time the focus is exhausted,
+every agent kind is adapter-routed and independently backend-selectable.
+
+This focus does NOT add a third backend, and does NOT do per-message or
+in-task backend routing — selection is fixed per kind at dispatch time.
+It does not change any agent's prompt, tool policy, or verification
+semantics; it relocates dispatch behind an interface and adds Codex as a
+selectable alternative.
+
+Why now: the two preceding structural focuses (component refactor,
+structured config) just made internal seams cheap to introduce, and the
+SDK coupling is still concentrated enough to factor cleanly — every
+future feature that assumes the Claude stream shape makes the adaptor
+more expensive to retrofit. Per-kind selection also lets the operator
+route by cost and capability (a cheap backend for scrub / judges, the
+strongest for task or ideation). Landing the abstraction before the
+downstream OSS-distribution focus means OSS ships with a
+backend-pluggable core, which materially widens its audience.
+
+Seven axes form this focus. Each has its own failure mode to detect:
+
+(1) **AgentAdapter interface + ClaudeCodeAdapter** — define the ABC
+(`run`, options normalization, MCP-tool registration, the result/usage
+shape) and move today's `sdk.query` path behind it with zero behavior
+change. Delete-test: if the Claude path isn't behind the interface, the
+Codex adapter has no contract to conform to.
+
+(2) **Options + result/usage normalization** — a backend-neutral options
+struct (model, effort / reasoning, max_turns, timeout) and a normalized
+`AgentResult` / usage record, so the cost guards, the `task_run_usage`
+emission, and `ap2 status` read one shape regardless of backend.
+Delete-test: if not normalized, every consumer of usage / result
+branches per-backend.
+
+(3) **MCP / tool exposure through the adapter** — ap2's custom tools
+(report_result, cron_propose, pipeline_task_start, the prose judge)
+register through the adapter so both backends see the same toolset.
+Delete-test: if tools stay Claude-MCP-specific, a Codex agent can't
+report results and the loop breaks.
+
+(4) **CodexAdapter** — implement the interface against the `codex` CLI:
+prompt assembly, tool wiring, streaming, result / commit extraction, and
+timeout / turn bounding. Delete-test: an abstraction with one
+implementation is no actual Codex support.
+
+(5) **Per-agent-kind selection + auth gate** — the `[agent_backends]`
+map plus `AP2_AGENT_BACKEND_<KIND>` overrides select the adapter for
+each kind; the daemon-start credential check becomes backend-aware,
+requiring creds for each backend the map references (OAuth for
+claude-backed kinds, OpenAI credentials for codex-backed kinds).
+Delete-test: if not shipped, switching a kind's backend needs a code
+edit and codex hard-fails the OAuth-only gate.
+
+(6) **Agent-kind migrations (one TB each)** — convert each dispatch site
+to adapter-routed and per-kind-selectable, sequenced least-entangled
+first: `ideation-scrub` (canary — smallest, one-shot, no MCP tools) then
+the verifier prose-judge, then validator-judge + janitor-judge, then
+`run_task`, then the shared `_run_control_agent` (which unlocks per-kind
+selection for ideation, status-report, cron, and the
+mattermost-handler). Each migration preserves the site's tool policy and
+behavior on Claude. Delete-test: migrate none and the adapter is a shell
+with no caller.
+
+(7) **Parity tests + per-backend smokes** — an adapter-contract test
+suite both adapters satisfy, plus a Codex real-SDK smoke that
+round-trips a tool call (gated like the Claude smokes, run via the 6h
+`real-sdk-smoke` cron). Delete-test: without it, Codex regressions are
+invisible.
+
+The axes are sequenced: (1) is the prerequisite for everything else. (2)
+and (3) land against the interface from (1). (4) implements it for
+Codex. (5) makes the choice operator-facing. (6) is the long tail — one
+TB per dispatch site — and (7) lands incrementally alongside (6).
+
+The delete-test for any proposed work in this focus: does it move a
+dispatch site behind the adapter, or let a second backend actually drive
+an agent kind? Polishing Claude-path internals without exercising the
+abstraction, or adding adapter scaffolding with no migrated caller, is
+not paying focus rent.
+
+Progress signals:
+- `claude_agent_sdk` is imported only inside `ClaudeCodeAdapter`, not
+  across `daemon.py` / `tools.py` / `verify.py` / `ideation_scrub.py`.
+- Every dispatch site (task, control, verifier-judge, ideation-scrub,
+  validator-judge, janitor-judge) runs through the adapter.
+- A mixed configuration (`ideation=claude`, `task=codex`) runs an agent
+  of each kind end-to-end: dispatch then tool calls then report_result
+  then verify.
+- usage / cost / `ap2 status` read one normalized result shape across
+  backends.
+- The adapter-contract test suite passes for both the Claude and Codex
+  adapters.
+
+## Shipped focus: refactor features into opt-in components (shipped 2026-05-27)
 
 The walk-away-automation and operator-legible-reporting foci shipped
 (roadmap_complete halt 2026-05-27 — auto-approve, auto-unfreeze,
@@ -263,7 +387,7 @@ Progress signals:
   whichever channel adapter(s) the operator configured — no
   hardcoded Mattermost dependency in the composition path.
 
-## Current focus: structured config (env → TOML)
+## Shipped focus: structured config (env → TOML) (shipped 2026-05-29)
 
 The just-shipped component refactor (TB-309 → TB-320) closes the
 "every feature is a togglable component" structural axis but leaves
@@ -451,11 +575,16 @@ Progress signals:
 - **Single-process daemon, file-state-only**: shared state lives on disk
   under `.cc-autopilot/`. No database, no message broker. Recovery is
   always "read files, resume."
-- **Anthropic SDK + Claude Code CLI**: agent runs are `sdk.query()`
-  invocations against the bundled Claude Code binary. Token cost is the
-  operational constraint, not API rate limits.
-- **OAuth auth (CLAUDE_CODE_OAUTH_TOKEN)**: not API-key. Features that
-  require API-key (custom betas) are out of reach.
+- **Pluggable agent backend (default Claude Code)**: agent runs dispatch
+  through an `AgentAdapter` layer (the active "codex support" focus); the
+  default and behaviour-reference adapter is `sdk.query()` against the
+  bundled Claude Code binary, with a Codex adapter selectable per agent
+  kind. Token cost is the operational constraint, not API rate limits.
+- **Per-backend auth, OAuth for the Claude adapter**: the Claude adapter
+  uses `CLAUDE_CODE_OAUTH_TOKEN` (not API-key — API-key-only betas are out
+  of reach); a Codex adapter brings its own OpenAI credentials. The
+  daemon-start gate requires creds for each backend the agent-backend map
+  references.
 - **macOS + Linux POSIX shells**: no cross-platform Windows support.
 - **No external mutation by task agents**: fenced files (the board, the
   goal, the daemon's state files) are agent-untouchable. Only the
