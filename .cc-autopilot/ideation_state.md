@@ -1,18 +1,17 @@
 # Ideation State
 
-_Last updated: 2026-05-31T08:33:00Z by ideation cron_
+_Last updated: 2026-05-31T10:52:00Z by ideation cron_
 
 ## Mission alignment
 
 Recent completes still serve the Mission (operator points ap2 at a goal
-and walks away). The 5 most recent Completes considered — TB-352 (`ap2
-logs --follow` live monitor), TB-351 (harden real-SDK smokes to skip on
-transient errors), TB-350 (6h real-SDK smoke cron), TB-349 (fix stale
-focus_advance refs post ideation-halt rename), TB-346 (config-correctness
-cleanup) — are all tail work of the two NOW-SHIPPED foci (component
-refactor, structured-config). The operator pivoted goal.md to a new Current focus at 2026-05-31T00:06Z (codex support via an
-agent adaptor layer) and marked both prior foci shipped; this cycle
-re-derives from scratch against that new focus per post-pivot convention.
+and walks away). The 5 most recent Completes considered — TB-354 (axis 2:
+backend-neutral `AgentOptions` + normalized `AgentUsage`), TB-356
+(graceful effort step-down on the thinking-block-400 failure class),
+TB-355 (axis 3: MCP tools through the adapter via `build_tool_server`),
+TB-353 (axis 1: `AgentAdapter` ABC + `ClaudeCodeAdapter`), TB-352 (`ap2
+logs --follow`) — are all on or adjacent to the current codex-adapter
+focus.
 
 ## Current focus assessment
 
@@ -20,65 +19,79 @@ re-derives from scratch against that new focus per post-pivot convention.
   ABC + ClaudeCodeAdapter / options+result normalization / MCP exposure /
   CodexAdapter / per-kind selection+auth / per-kind migrations / parity
   tests)
-  - Progress so far: focus is fresh (set 00:06Z today); no Completes yet.
-    Backlog already seeds the prerequisite axis and its two dependents —
-    TB-353 (axis 1: AgentAdapter ABC + ClaudeCodeAdapter), TB-354 (axis 2:
-    backend-neutral options + normalized AgentResult/usage, `@blocked:TB-353`),
-    TB-355 (axis 3: MCP tools through the adapter, `@blocked:TB-353`).
-  - Gaps: axes 4-7 unseeded — CodexAdapter (axis 4), per-agent-kind
-    selection + backend-aware auth gate (axis 5), the per-dispatch-site
-    migrations (axis 6, one TB each: ideation-scrub canary → prose-judge →
-    validator/janitor-judge → run_task → _run_control_agent), and
-    parity/smoke tests (axis 7). All four gate on TB-353's interface
-    landing; authoring them now means guessing a contract that does not
-    yet exist.
+  - Progress so far: axes 1-3 SHIPPED this morning. Axis 1 —
+    `AgentAdapter` ABC + `ClaudeCodeAdapter` wrapping `sdk.query`
+    bit-for-bit (TB-353, ff24b33). Axis 2 — canonical `AgentOptions` +
+    normalized `AgentUsage` (event_payload/from_event/combined_tokens),
+    cost guards / `task_run_usage` / `ap2 status` read one shape
+    (TB-354, 20b8cc4). Axis 3 — `build_tool_server` +
+    `registered_tool_names` so tools register through the adapter
+    (TB-355, 6a33b3c). The interface contract axes 4-7 were waiting on
+    (prior cycle, L47-53) now exists in HEAD.
+  - Gaps: axis 4 (CodexAdapter — implement the interface against the
+    `codex` CLI: prompt assembly, tool wiring, streaming, result/commit
+    extraction, timeout/turn bounding) unseeded; axis 5 (`[agent_backends]`
+    map + `AP2_AGENT_BACKEND_<KIND>` overrides + backend-aware
+    daemon-start auth gate) unseeded; axis 6 migrations (one TB per
+    dispatch site, canary = ideation-scrub `_run_scrub`, then
+    verifier-judge, validator/janitor-judge, run_task, _run_control_agent)
+    unstarted; axis 7 (adapter-contract parity suite both adapters
+    satisfy + codex real-SDK smoke) unseeded. With the interface landed,
+    all four are now authorable against a real contract.
   - Status: `in-progress`
 
 ## Non-goal risk check
 
-none. The focus explicitly excludes a third backend and per-message/in-task
-routing; the seeded Backlog tasks (TB-353/354/355) are pure
-relocate-behind-interface + normalization work with no behavior change,
-clear of the multi-tenancy / cross-project / unconditional-automation
-non-goals.
+none. Proposals stay inside the focus: axis 4 adds the second backend
+the focus explicitly scopes (no third backend, no per-message routing);
+axis 5 is per-kind selection (fixed per kind at dispatch, exactly as
+goal.md L127-131 frames it); axis 6 canary preserves Claude behavior
+bit-for-bit (the "removing behavior during extraction" non-goal is
+respected); axis 7 is pure test coverage. No drift toward
+multi-tenancy / cross-project / unconditional-automation.
 
 ## Considered & deferred this cycle
 
-- **Axis-4 CodexAdapter task**: deferred — depends on the AgentAdapter
-  contract from TB-353 (axis 1), which is unstarted. A briefing authored
-  now would pin verification bullets against a guessed interface shape;
-  premature until TB-353 lands.
-- **Axis-5 per-kind selection + auth gate / axis-6 migrations / axis-7
-  parity tests**: deferred — all gate on axis 1 (and 4 for the Codex
-  path) per goal.md's explicit sequencing (L193-196).
-- **Operator-rejection pattern (recurring)**: the operator vetoes
+- **Axis-6 migrations beyond the canary** (verifier prose-judge,
+  validator-judge + janitor-judge, run_task, `_run_control_agent`):
+  deferred. The canary (ideation-scrub) exists precisely to prove the
+  migration shape before the rest follow; proposing site #2 before the
+  canary lands would pile a 4th-level-deep blocked task and pre-commit
+  to a pattern the canary hasn't validated.
+- **TB-356 reliability follow-ups** (extend effort step-down to other
+  failure classes): deferred — off the current codex focus; would fail
+  the goal-anchor gate. Reliability tail, not focus rent.
+- **Operator-rejection pattern (recurring)**: operator vetoes
   retry/patch-symptom remediations (TB-231 prose-judge retry; TB-227
   auto-retry on SDK timeout) and speculative false-positive-risk
   validators (TB-240 file-path-coherence; TB-172 shell-pitfall linter).
-  Verifier reliability comes from better classification, not retries or
-  enumerated linters. No such idea proposed this cycle.
-- **Any greenfield idea**: declined — Backlog already holds 4 seeded
-  items (TB-353/354/355 codex axes + TB-356 reliability) against a 1-slot
-  budget; a 5th would pile onto an unstarted, partly-blocked queue rather
-  than fill a gap.
+  None of this cycle's proposals are retries, symptom-patches, or
+  enumerated-case linters — they are net-new adapter implementation,
+  config surface, migration, and contract tests.
 
 ## Cycle observations
 
-- The prior cycle's ideation_state (06:29Z, after the 00:06Z goal pivot)
-  assessed against stale focus items ("verification trustworthiness",
-  "ideation quality") absent from current goal.md, and mis-labeled
-  TB-353/354/355 as verification/ideation work when the board shows them
-  as codex-adapter axis-1/2/3 tasks. Board is ground truth; this cycle
-  discards that assessment and re-derives. Carry note for next cycle: the
-  prior file's focus structure is void — do not inherit it.
+- Codex focus is moving fast: 3 axes (TB-353/354/355) shipped inside a
+  ~90-minute window this morning. This cycle's job is to seed the next wave against the now-landed
+  interface; pacing favors keeping one immediately-workable root task
+  (axis 4) plus a correctly-@blocked downstream wave.
 
 ## Decisions needed from operator
 
 - None this cycle. No unadopted `cron_proposed` events in the recent
-  events block; review-pending and queue-depth signals are surfaced
+  events block. Review-pending and queue-depth signals are surfaced
   mechanically by `ap2 status` / the cron status-report, not duplicated
   here.
 
 ## Proposals this cycle
 
-Backlog already populated; no proposals this cycle.
+Four proposals seeding axes 4-7 against the landed adapter interface:
+- TB-357 — Axis 4: `CodexAdapter` (unblocked; root of the wave).
+- TB-358 — Axis 5: per-agent-kind backend selection + backend-aware
+  auth gate (`@blocked:TB-357`).
+- TB-359 — Axis 7: adapter-contract parity suite + codex real-SDK smoke
+  (`@blocked:TB-357`).
+- TB-360 — Axis 6 canary: migrate ideation-scrub (`_run_scrub`) to
+  adapter-routing + per-kind selection (`@blocked:TB-358`).
+(1 slot of 5 left unused; remaining axis-6 migrations deferred until the
+canary proves the shape.)
