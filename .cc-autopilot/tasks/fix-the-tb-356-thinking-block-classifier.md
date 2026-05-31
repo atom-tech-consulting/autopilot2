@@ -1,4 +1,4 @@
-# Fix the TB-356 thinking-block classifier (never matches the real failure) and exempt that class from the auto-approve breaker
+# Fix the inert thinking-block recovery path: classifier match, auto-approve breaker exemption, and gated-head queue jam
 
 Tags: #autopilot #bug #reliability #retry #effort #thinking-block #auto-approve
 
@@ -43,9 +43,25 @@ circuit breaker (`task_error` path in
 *handled* (retry-with-downshift), it should NOT pause the window;
 genuine task errors still should.
 
-Fix both so the thinking-block-400 class is detected on the real failure
-shape, downshifts effort on retry, and does not halt the auto-approve
-window.
+**Third defect — a gated Backlog head jams everything behind it.** The
+tick's auto-promote step (`ap2/daemon.py` "3. Next Ready task", ~L2328)
+picks ONE candidate via `board.next_dispatchable("Backlog")` (the
+topmost task whose blockers are all Complete), runs the auto-approve
+gate on it, and on a paused-auto-approved skip sets `backlog = None` and
+ends the tick — it never advances to the next dispatchable candidate. So
+when an ideation-auto-approved task sits at the Backlog head while the
+window is paused, it is skipped every tick and **every task behind it is
+frozen too — including operator/human-authored (`ap2 add`) and
+operator-approved (`ap2 approve`) tasks the pause was explicitly designed
+NOT to gate.** Observed 2026-05-31: this exact task (TB-361, human-
+authored, never auto-approved) could not promote despite a free Active
+slot, because TB-359/TB-360 (auto-approved, paused) sat ahead of it and
+nulled the candidate each tick. The daemon comment at ~L2330 asserts
+operator-added work "must always drain" — this ordering bug defeats that.
+
+Fix all three so the thinking-block-400 class is detected on the real
+failure shape, downshifts effort on retry, does not halt the auto-approve
+window, AND a non-gated task behind a gated one still dispatches.
 
 Why now: the codex-adaptor focus's investigation-heavy tasks keep
 hitting this 400 (TB-354, TB-357→358 cascade); with the safeguard inert,
@@ -82,6 +98,21 @@ reliability, no focus anchor → `--skip-goal-alignment`.
   `_auto_approve_paused` scan) skip events carrying that flag, so a
   thinking-block failure neither pauses nor counts toward the freeze
   threshold. A genuine `task_error` still pauses as today.
+- **Skip past a gated Backlog head instead of halting the tick**
+  (`ap2/daemon.py` auto-promote step, ~L2328). When the selected
+  `next_dispatchable` candidate is skipped by the auto-approve gate
+  (paused-auto-approved, token-cap, or noisy-validator halt), the
+  promoter must advance to the NEXT dispatchable candidate rather than
+  setting `backlog = None` and ending the tick — so a candidate that the
+  gate does NOT halt (operator-added / operator-approved / not-auto-
+  approved) still dispatches from behind a gated one. Preserve the
+  invariants: still at most one promotion per tick; auto-approved tasks
+  stay held while paused (only NON-halted candidates dispatch); bounded
+  iteration over the Backlog (no infinite loop); keep emitting the
+  `auto_approve_skipped` / `auto_approve_paused` observability event for
+  each task the gate holds. Effectively: iterate dispatchable Backlog
+  candidates in order, skip the ones the gate halts, promote the first
+  one it doesn't.
 - **Regression tests** (`ap2/tests/`): the load-bearing one must use the
   REAL recorded shape — build the fixture from an actual thinking-block
   `task_error`'s `last_messages` payload (see
@@ -111,6 +142,14 @@ reliability, no focus anchor → `--skip-goal-alignment`.
 - **Conservative breaker change.** Only this one narrowly-classified
   class is exempted; every other `task_error` still pauses the window,
   so a genuine infrastructure failure is still caught.
+- **Skip-past restores the documented invariant.** The pause was only
+  ever meant to halt the auto-approved layer (daemon.py:2330: operator
+  work "must always drain"). Advancing to the next dispatchable
+  candidate when the head is gated makes the implementation match that
+  intent, without weakening the pause for auto-approved tasks. It is
+  independent of the classifier/breaker fixes (it helps any pause cause,
+  not just thinking-block), but belongs here because it's the third leg
+  of the same "paused window wedges the board" failure.
 
 ## Verification
 
@@ -119,9 +158,12 @@ reliability, no focus anchor → `--skip-goal-alignment`.
 - `ap2/daemon.py` Prose: `_is_thinking_block_corruption` returns True when given a real thinking-block `task_error`'s `last_messages` payload (a list of message-summary dicts whose `text_preview` contains `API Error: 400 … thinking … cannot be modified`) — the exact shape that returns False before this change — and the failure path calls `_handle_failure(..., thinking_block_corruption=True)`, bumping the per-task downshift level and emitting an `effort_downshift` event. Judge confirms via Read.
 - `ap2/components/auto_approve/impl.py` Prose: a `task_error` carrying the thinking-block classification does NOT pause the auto-approve window nor count toward the consecutive-freeze threshold, while a generic `task_error` still pauses it. Judge confirms via Read.
 - New test file asserts `_is_thinking_block_corruption` is True on a fixture built from a real recorded `last_messages` payload (not a hand-simplified string), pinning the production shape.
+- `ap2/daemon.py` Prose: the auto-promote step, when its `next_dispatchable` Backlog candidate is halted by the auto-approve gate (paused-auto-approved / token-cap / noisy), advances to the next dispatchable candidate and promotes the first one the gate does NOT halt, instead of nulling `backlog` and ending the tick — at most one promotion per tick, bounded iteration. Judge confirms via Read.
+- New test: a Backlog ordered `[auto-approved task, operator-added task]` with the auto-approve window paused promotes the operator-added task (the gated auto-approved one stays in Backlog with its skip event), proving a gated head no longer freezes non-gated work behind it.
 
 ## Out of scope
 
 - The upstream bundled-CLI thinking-block bug itself (not patchable from ap2).
 - The effort ladder / base-effort default / `_resolve_task_effort` (correct already).
-- Changing the live daemon's current `AP2_AGENT_EFFORT` or resuming the paused window — deliberately left as-is by the operator so TB-358 remains a live reproduction; this task only fixes the code paths.
+- Changing the live daemon's runtime state (`AP2_AGENT_EFFORT`, acking/resuming the window) — operator-managed out-of-band; this task only fixes the code paths and ships tests.
+- Reordering the Backlog or changing `next_dispatchable`'s ordering rule — the fix is to skip-past gated candidates, not to re-sort the queue.
