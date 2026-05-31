@@ -301,3 +301,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-31T00:06:21Z — applied operator-queued update_goal
 - 2026-05-31T00:06:21Z — operator updated goal.md (add Codex-support-via-agent-adaptor-layer focus (per-agent-kind backend selection, migrate all agent kinds one by one); mark component-refactor + structured-config foci shipped; reword backend-locking constraints)
 - 2026-05-31T04:49:42Z — applied operator-queued add_backlog → TB-356 (goal-alignment check skipped)
+- 2026-05-31T06:03:05Z — applied operator-queued approve → TB-356
