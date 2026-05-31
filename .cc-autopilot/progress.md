@@ -1347,3 +1347,9 @@
 - **Summary:** Axis 2: renamed the options struct to canonical AgentOptions (AgentRunOptions kept as back-compat alias) and added the normalized AgentUsage surface (event_payload/from_event/combined_tokens); migrated the daemon _emit_task_run_usage/_emit_control_run_usage emission plus the cost-guard (auto_approve) and ap2 status (automation_status) token reads to consume the one normalized record — pure read-path relocation, emitted keys/values unchanged; full suite passes (2874).
 - **Files:** ap2/adapters/base.py, ap2/adapters/__init__.py, ap2/adapters/claude_code.py, ap2/daemon.py, ap2/automation_status.py, ap2/components/auto_approve/impl.py, ap2/tests/test_agent_adapter.py
 - **Tests:** pass
+
+## [2026-05-31] TB-357: CodexAdapter — implement the AgentAdapter interface against the `codex` CLI (axis 4)
+- **Commit:** `866423a`
+- **Summary:** Added CodexAdapter (ap2/adapters/codex.py, backend="codex") implementing the AgentAdapter contract against the codex CLI — normalize_options/register_tools/run/build_tool_server, codex thread-event envelopes normalized into the shared summary shape so usage_from_summary + base run_to_result are reused; re-exported from the package and covered by a hermetic 15-test contract suite. All verification commands pass (new suite 15/15, Claude suite 21/21 zero regression, ABC conformance + grep bullets OK).
+- **Files:** ap2/adapters/codex.py, ap2/adapters/__init__.py, ap2/tests/test_codex_adapter.py
+- **Tests:** pass
