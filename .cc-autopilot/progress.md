@@ -1341,3 +1341,9 @@
 - **Summary:** Added graceful effort step-down (xhigh→high→medium→low, floored) on the thinking-block-400 failure class only: a narrow classifier, per-task downshift level in retry_state.json, an effort_downshift event, the AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED kill switch, and tests; full suite (2868) passes.
 - **Files:** ap2/daemon.py, ap2/retry.py, ap2/core_config_schema.py, ap2/config_compat.py, ap2/env_reload.py, ap2/init.py, ap2/howto.md, ap2/tests/test_tb356_effort_downshift.py
 - **Tests:** pass
+
+## [2026-05-31] TB-354: Backend-neutral agent options + normalized AgentResult/usage — one shape across consumers (axis 2)
+- **Commit:** `20b8cc4`
+- **Summary:** Axis 2: renamed the options struct to canonical AgentOptions (AgentRunOptions kept as back-compat alias) and added the normalized AgentUsage surface (event_payload/from_event/combined_tokens); migrated the daemon _emit_task_run_usage/_emit_control_run_usage emission plus the cost-guard (auto_approve) and ap2 status (automation_status) token reads to consume the one normalized record — pure read-path relocation, emitted keys/values unchanged; full suite passes (2874).
+- **Files:** ap2/adapters/base.py, ap2/adapters/__init__.py, ap2/adapters/claude_code.py, ap2/daemon.py, ap2/automation_status.py, ap2/components/auto_approve/impl.py, ap2/tests/test_agent_adapter.py
+- **Tests:** pass

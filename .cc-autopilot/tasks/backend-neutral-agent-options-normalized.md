@@ -64,3 +64,10 @@ surface — the exact coupling this focus exists to remove.
 - Migrating production dispatch sites' call paths to the adapter (axis 6); this
   task only relocates the usage/result READ shape its consumers depend on.
 - Any change to emitted event names, payload keys, or numeric values.
+## Attempts
+
+### 2026-05-31 — error
+(no summary)
+- **error:** Exception: Claude Code returned an error result: success
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260531T092714Z-TB-354.prompt.md`, `stream: .cc-autopilot/debug/20260531T092714Z-TB-354.stream.jsonl`, `messages: .cc-autopilot/debug/20260531T092714Z-TB-354.messages.jsonl`
