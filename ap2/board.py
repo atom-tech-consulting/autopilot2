@@ -359,13 +359,25 @@ class Board:
         """
         return self.next_dispatchable("Ready")
 
-    def next_dispatchable(self, section: str) -> Task | None:
-        """First task in `section` whose blockers are all in Complete."""
+    def iter_dispatchable(self, section: str) -> Iterator[Task]:
+        """All tasks in `section` whose blockers are all satisfied, yielded
+        in board order.
+
+        TB-361: lets the daemon's auto-promote step iterate dispatchable
+        Backlog candidates and SKIP PAST a gated head (one the auto-approve
+        breaker halts) to the first candidate the gate does NOT halt —
+        instead of only ever inspecting `next_dispatchable`'s single head.
+        Same dispatchability rule as `next_dispatchable` (which now delegates
+        to this), so the first yielded task equals `next_dispatchable`.
+        """
         completed = self.completed_ids()
         for t in self.iter_tasks(section):
             if self._is_dispatchable(t, completed):
-                return t
-        return None
+                yield t
+
+    def next_dispatchable(self, section: str) -> Task | None:
+        """First task in `section` whose blockers are all in Complete."""
+        return next(self.iter_dispatchable(section), None)
 
     def max_id(self) -> int:
         best = 0

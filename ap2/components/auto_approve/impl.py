@@ -148,8 +148,19 @@ def _auto_approve_paused(cfg: Config) -> bool:
         if _AUTO_APPROVE_UNFREEZE_TOKEN in note:
             last_unfreeze_idx = i
     relevant = tail[last_unfreeze_idx + 1:]
-    # Collect `task_complete` events in order.
-    completes = [e for e in relevant if e.get("type") == "task_complete"]
+    # Collect `task_complete` events in order. TB-361: a failure carrying
+    # the thinking-block-immutability flag (`thinking_block_corruption=true`)
+    # is a HANDLED retry-with-downshift class, not a regression — it must
+    # NOT count toward the consecutive-failure freeze window (mirrors the
+    # `task_error` breaker exemption in `_auto_approve_check_violations`).
+    # Defensive today (the thinking-block failure path emits `task_error`,
+    # not `task_complete`), but keeps the one-flag exemption coherent if a
+    # future path ever stamps the flag onto a `task_complete`.
+    completes = [
+        e for e in relevant
+        if e.get("type") == "task_complete"
+        and e.get("thinking_block_corruption") is not True
+    ]
     if len(completes) < threshold:
         return False
     window = completes[-threshold:]
@@ -462,6 +473,19 @@ def _auto_approve_check_violations(
             continue
         tid = str(e.get("task") or "").strip()
         if not tid or tid not in auto_ids:
+            continue
+        # TB-361: EXEMPT the thinking-block-immutability 400 class. The
+        # daemon's classifier stamps `thinking_block_corruption=true` on
+        # the `task_error` event for this specific bundled-CLI failure
+        # (`... thinking/redacted_thinking blocks ... cannot be modified`),
+        # which is HANDLED by the automatic retry-with-effort-downshift
+        # (TB-356) — not an infrastructure breakage that warrants pausing
+        # the whole auto-approve window. Skipping it here means a
+        # thinking-block failure neither trips the cost/blast-radius
+        # breaker nor counts toward the freeze threshold; a GENUINE
+        # `task_error` (flag absent / false) still halts as before. Same
+        # one-flag-one-source-of-truth design as the retry downshift.
+        if e.get("thinking_block_corruption") is True:
             continue
         detail = str(e.get("error") or "")[:160]
         return ("task_error", 0, 0, tid, detail)

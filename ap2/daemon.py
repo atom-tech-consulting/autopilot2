@@ -306,6 +306,21 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             )
             parsed_override = inferred  # type: ignore[assignment]
         else:
+            # TB-356: classify the thinking-block-immutability 400 from the
+            # run's tail (the same `last_messages` the event records) and the
+            # error string. A match steps effort down on the retry; a miss
+            # retries at unchanged effort.
+            # TB-361: classify BEFORE emitting `task_error` so the event can
+            # carry a `thinking_block_corruption` flag — the auto-approve
+            # breaker reads that one flag to EXEMPT this handled class from
+            # the `task_error` cost/blast-radius halt (it's a retry-with-
+            # downshift, not an infrastructure failure). One classifier,
+            # one source of truth for both the retry downshift and the
+            # window-pause exemption.
+            early_failure_thinking_block = (
+                _is_thinking_block_corruption(stream_log)
+                or _is_thinking_block_corruption(f"{type(e).__name__}: {e}")
+            )
             events.append(
                 cfg.events_file,
                 "task_error",
@@ -316,20 +331,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                 prompt_dump=str(prompt_dump),
                 stream_dump=str(stream_dump),
                 messages_dump=str(messages_dump),
+                thinking_block_corruption=early_failure_thinking_block,
             )
             early_failure_status = "error"
             early_failure_extras = {
                 "error": f"{type(e).__name__}: {e}",
                 "stderr_tail": "\n".join(stderr_lines[-30:]),
             }
-            # TB-356: classify the thinking-block-immutability 400 from the
-            # run's tail (the same `last_messages` the event records) and the
-            # error string. A match steps effort down on the retry; a miss
-            # retries at unchanged effort.
-            early_failure_thinking_block = (
-                _is_thinking_block_corruption(stream_log)
-                or _is_thinking_block_corruption(f"{type(e).__name__}: {e}")
-            )
     finally:
         # TB-123: clear the task-id contextvar regardless of how the SDK
         # query exited (success, timeout, or arbitrary exception).
@@ -748,6 +756,93 @@ def _thinking_block_drop_disabled(cfg: Config) -> bool:
     return str(raw).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _message_text_fragments(item) -> list[str]:
+    """Pull the human-readable text fragments out of one stream-log element.
+
+    TB-361: the thinking-block-immutability 400 signature lands in a
+    message's *text* (`text_preview` / `result` / a content block's `text`),
+    never in the message's structural metadata. This helper extracts those
+    fragments from BOTH shapes the classifier may be handed:
+
+      - a per-message *summary dict* — the shape `_summarize_message`
+        produces and the `task_error` event records under `last_messages`
+        (`{type, text_preview?, result?, tool_results?, content?, ...}`); and
+      - a *raw SDK message object* — whose `text` / `result` live on
+        attributes (`.content[*].text`, `.result`) that a blind
+        `json.dumps(..., default=str)` would drop, emitting a useless
+        `<AssistantMessage ...>` repr instead.
+
+    Walking the fragments explicitly (rather than relying on the lossy
+    object repr) is the core of TB-361's classifier fix: the same
+    last-messages payload now matches whether it arrives as dicts or as
+    raw objects.
+    """
+    frags: list[str] = []
+    # Summary-dict shape (what `task_error`'s `last_messages` records).
+    if isinstance(item, dict):
+        for key in ("text_preview", "result", "text", "error"):
+            v = item.get(key)
+            if isinstance(v, str):
+                frags.append(v)
+        for tr in item.get("tool_results") or []:
+            if isinstance(tr, dict):
+                p = tr.get("preview")
+                if isinstance(p, str):
+                    frags.append(p)
+        for blk in item.get("content") or []:
+            if isinstance(blk, dict):
+                for key in ("text", "content"):
+                    v = blk.get(key)
+                    if isinstance(v, str):
+                        frags.append(v)
+        return frags
+    # Raw SDK message object shape — pull `.result` + each content block's
+    # `.text` (the same fields `_extract_text` / `_walk_blocks` read).
+    result = getattr(item, "result", None)
+    if isinstance(result, str):
+        frags.append(result)
+    content = getattr(item, "content", None)
+    if isinstance(content, list):
+        for blk in content:
+            t = getattr(blk, "text", None)
+            if isinstance(t, str):
+                frags.append(t)
+    return frags
+
+
+def _failure_text_blob(stream_log_or_error) -> str:
+    """Flatten a failed run's tail into a single searchable lower-priority
+    text blob for `_is_thinking_block_corruption`.
+
+    Robust to BOTH inputs the classifier is fed (TB-361):
+      - a bare error string (the wrapping exception text); and
+      - the structured `stream_log` / `last_messages` — a list of
+        per-message summary dicts OR raw SDK message objects.
+
+    For a list/tuple we pull each element's text fragments via
+    `_message_text_fragments` (the lossless path), THEN append the
+    `json.dumps(..., default=str)` dump as a backstop. The dump can only
+    ADD matchable text (for an unanticipated dict field), never remove the
+    fragment matches — so a raw-object list, whose dump is the useless
+    `<AssistantMessage ...>` repr, still matches via the walked fragments.
+    """
+    if isinstance(stream_log_or_error, str):
+        return stream_log_or_error
+    items = (
+        stream_log_or_error
+        if isinstance(stream_log_or_error, (list, tuple))
+        else [stream_log_or_error]
+    )
+    parts: list[str] = []
+    for item in items:
+        parts.extend(_message_text_fragments(item))
+    try:
+        parts.append(json.dumps(stream_log_or_error, default=str))
+    except (TypeError, ValueError):
+        parts.append(str(stream_log_or_error))
+    return "\n".join(p for p in parts if p)
+
+
 def _is_thinking_block_corruption(stream_log_or_error) -> bool:
     """True iff a failed run's tail carries the thinking-block-immutability
     400 signature.
@@ -757,18 +852,19 @@ def _is_thinking_block_corruption(stream_log_or_error) -> bool:
     assistant message``. This keeps unrelated `task_error`s and real
     `verification_failed`s from matching — only THIS failure class downshifts
     effort (a real failure needs full capability to fix, and dropping effort
-    there would hurt). Accepts either the structured `stream_log` (list of
-    message summaries — what the `task_error` event records as
-    `last_messages`) or a bare error string.
+    there would hurt).
+
+    TB-361: matches against the message-tail *text* (`text_preview` /
+    `result` / content-block `text`) via `_failure_text_blob`, NOT a bare
+    `json.dumps(..., default=str)` object repr. Accepts the structured
+    `stream_log` as either summary dicts (what the `task_error` event
+    records as `last_messages`) OR raw SDK message objects — the prior
+    repr-only path matched the dict shape but silently MISSED the
+    raw-object shape (the signature hid behind `<AssistantMessage ...>`),
+    so the recovery path could go inert depending on what the call site
+    passed.
     """
-    if isinstance(stream_log_or_error, str):
-        blob = stream_log_or_error
-    else:
-        try:
-            blob = json.dumps(stream_log_or_error, default=str)
-        except (TypeError, ValueError):
-            blob = str(stream_log_or_error)
-    low = blob.lower()
+    low = _failure_text_blob(stream_log_or_error).lower()
     if "cannot be modified" not in low:
         return False
     return (
@@ -2155,6 +2251,110 @@ _is_attention_immediate_push_enabled = _attention_manifest.hook_points[
 del _attention_manifest
 
 
+def _auto_promote_gate_halts(cfg: Config, candidate) -> bool:
+    """TB-361: True iff the auto-approve gate chain halts dispatch of
+    `candidate` this tick (emitting the matching observability event as it
+    does today), else False.
+
+    Extracted verbatim (same three checks, same order, same events) from
+    `_tick`'s auto-promote step so the promoter can ITERATE dispatchable
+    Backlog candidates and skip past a gated head to the first candidate the
+    gate does NOT halt — instead of nulling the single `next_dispatchable`
+    head and ending the tick. The old shape froze operator-added (`ap2 add`)
+    and operator-approved (`ap2 approve`) Backlog work queued BEHIND a gated
+    auto-approved task, defeating the daemon-comment invariant that
+    operator-originated work "must always drain".
+
+    Only auto-approved tasks (`_was_auto_approved`) are subject to the gate;
+    a non-auto-approved candidate is NEVER halted here and dispatches
+    normally. Check order is preserved exactly:
+      1. TB-272 validator-judge-noisy safety-floor pause (checked first so
+         the upstream-check failure outranks the post-hoc halts below);
+      2. TB-223 cumulative-regression circuit breaker;
+      3. TB-224 cost + blast-radius caps + `task_error` single-event halt.
+    Each gated candidate emits its `auto_approve_skipped` /
+    `auto_approve_paused` event so the per-task observability the operator
+    playbook keys off is unchanged; the `auto_approve_halted` one-shot stays
+    deduped via `_auto_approve_already_halted` across candidates within a
+    tick (the first emission lands on disk before the next candidate's
+    check reads it). Pure except for the events it appends; no board
+    mutation (the caller promotes after the loop).
+    """
+    if not _was_auto_approved(cfg, candidate.id):
+        return False
+    # 1) TB-272 validator-judge-noisy safety-floor pause.
+    noisy = _validator_judge_noisy_paused(cfg)
+    if noisy is not None:
+        fail_count, timeout_count, threshold = noisy
+        events.append(
+            cfg.events_file,
+            "auto_approve_skipped",
+            task=candidate.id,
+            reason="validator_judge_noisy",
+            fail_count_24h=fail_count,
+            timeout_count_24h=timeout_count,
+            threshold=threshold,
+        )
+        return True
+    # 2) TB-223 cumulative-regression circuit breaker.
+    if _auto_approve_paused(cfg):
+        events.append(
+            cfg.events_file,
+            "auto_approve_paused",
+            task=candidate.id,
+            threshold=_auto_approve_freeze_threshold(cfg),
+            reason=(
+                "consecutive task failures landed in "
+                "retry_exhausted; auto-promote of auto-approved "
+                "tasks halted until operator emits "
+                "`ap2 ack auto_approve_unfreeze`"
+            ),
+        )
+        return True
+    # 3) TB-224 cost + blast-radius guards (+ task_error single-event halt).
+    violation = _auto_approve_check_violations(cfg)
+    if violation is not None:
+        reason, total_used, cap, trigger_task, detail = violation
+        if not _auto_approve_already_halted(cfg):
+            payload: dict = {
+                "task": trigger_task or candidate.id,
+                "reason": reason,
+            }
+            if reason in ("per_task_cap", "window_cap"):
+                payload["used"] = total_used
+                payload["cap"] = cap
+            if reason == "window_cap":
+                payload["window_used"] = total_used
+            if reason == "task_error" and detail:
+                payload["error_excerpt"] = detail
+            events.append(
+                cfg.events_file,
+                "auto_approve_halted",
+                **payload,
+            )
+            if reason == "task_error" and trigger_task:
+                _append_decisions_needed_bullet(
+                    cfg,
+                    (
+                        f"Auto-approved task {trigger_task} hit "
+                        f"`task_error` (infrastructure failure): "
+                        f"{detail[:200] if detail else '(no excerpt)'}. "
+                        f"Inspect via `ap2 logs` and resume "
+                        f"auto-promote via `ap2 ack "
+                        f"auto_approve_window_resume` once the "
+                        f"infrastructure issue is resolved."
+                    ),
+                )
+        events.append(
+            cfg.events_file,
+            "auto_approve_skipped",
+            task=candidate.id,
+            reason=reason,
+        )
+        return True
+    return False
+
+
 async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # 0a. Hot-reload `.cc-autopilot/env` (TB-271). Runs at the VERY TOP
     # of the tick — before operator-queue drain, auto-unfreeze, focus
@@ -2325,7 +2525,6 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             # next_dispatchable skips any Backlog task with unmet `blocked on:`
             # references — backward-compatible: tasks with no declared blockers
             # are always dispatchable.
-            backlog = board.next_dispatchable("Backlog")
             # TB-275: roadmap_complete is an IDEATION-trigger gate
             # only (see `_maybe_ideate` in `ap2/ideation.py` — when
             # `goal.roadmap_exhausted(cfg)` is True, ideation parks
@@ -2346,162 +2545,45 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
             # window-token-cap) lives behind a single entry point —
             # `evaluate_auto_approve_decision(cfg, tags=...)` above —
             # called from `tools.do_board_edit`'s `add_backlog` branch
-            # at proposal time. The helper runs all four gates in
-            # order; only after all four pass does its terminal
-            # branch decide `"strip"` (real auto-approve →
-            # `auto_approved`) vs `"dry_run"`
-            # (`AP2_AUTO_APPROVE_DRY_RUN=1` → `would_auto_approve`,
-            # `@blocked:review` preserved). The dry-run branch sits
-            # AFTER the four gate checks so it never bypasses a
-            # safety gate; the operator observes the
-            # `would_auto_approve` events + the
-            # `would_auto_approve_count_24h` counter
-            # (`collect_auto_approve_state`) for ≥24h, then unsets
-            # the dry-run knob to engage real dispatch. The TB-223
-            # `_was_auto_approved` + TB-224 `_auto_approve_check_violations`
-            # branches immediately below remain a defense-in-depth
-            # check at promote time even though the
-            # `evaluate_auto_approve_decision` helper already
-            # consulted both of them at proposal time — the events
-            # tail can shift between the two phases (a long-running
-            # task may have emitted a `task_run_usage` after the
-            # auto_approved row was added but before the promote
-            # tick).
+            # at proposal time. The TB-223 `_was_auto_approved` + TB-224
+            # `_auto_approve_check_violations` + TB-272 noisy-pause gates
+            # (now all inside `_auto_promote_gate_halts`) remain a
+            # defense-in-depth check at promote time even though
+            # `evaluate_auto_approve_decision` already consulted them at
+            # proposal time — the events tail can shift between the two
+            # phases (a long-running task may have emitted a
+            # `task_run_usage` after the auto_approved row was added but
+            # before the promote tick).
             #
-            # TB-272: axis-1+3 cross-cut safety-floor closure — pause
-            # auto-promote when the TB-235 dep-coherence validator-judge
-            # has been silently fail-open'ing at a noisy rate. Checked
-            # FIRST so the safety-floor failure takes priority over the
-            # TB-223 / TB-224 post-hoc halts that follow: the cumulative-
-            # regression / cost guards only fire AFTER bad work landed,
-            # while the noisy gate names the upstream check that should
-            # have prevented bad work from being queued. Reuses the
-            # existing `ap2 ack auto_approve_unfreeze` resume verb (no
-            # new ack token); operator escape hatch is
-            # `AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED=1`. Mirrors the
-            # `auto_approve_skipped reason=<token>` event shape used by
-            # the TB-224 cost-cap halts so a future "consolidate all
-            # halt events into one parametric type" refactor is obvious.
-            if (
-                backlog is not None
-                and _was_auto_approved(cfg, backlog.id)
-            ):
-                noisy = _validator_judge_noisy_paused(cfg)
-                if noisy is not None:
-                    fail_count, timeout_count, threshold = noisy
-                    events.append(
-                        cfg.events_file,
-                        "auto_approve_skipped",
-                        task=backlog.id,
-                        reason="validator_judge_noisy",
-                        fail_count_24h=fail_count,
-                        timeout_count_24h=timeout_count,
-                        threshold=threshold,
-                    )
-                    backlog = None
-            # TB-223: AP2_AUTO_APPROVE cumulative-regression circuit
-            # breaker — when `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`
-            # consecutive task failures land in `retry_exhausted`, halt
-            # auto-promotion of tasks that ideation auto-approved (the
-            # `auto_approved` audit event identifies them).
-            # Operator-approved tasks (those that went through `ap2
-            # approve` with `ideation_approved`) continue to dispatch
-            # normally — the freeze is targeted at the auto layer.
-            # Unfreeze: operator runs `ap2 ack auto_approve_unfreeze
-            # --reason "..."` to reset the failure counter.
-            if (
-                backlog is not None
-                and _was_auto_approved(cfg, backlog.id)
-                and _auto_approve_paused(cfg)
-            ):
-                events.append(
-                    cfg.events_file,
-                    "auto_approve_paused",
-                    task=backlog.id,
-                    threshold=_auto_approve_freeze_threshold(cfg),
-                    reason=(
-                        "consecutive task failures landed in "
-                        "retry_exhausted; auto-promote of auto-approved "
-                        "tasks halted until operator emits "
-                        "`ap2 ack auto_approve_unfreeze`"
-                    ),
-                )
-                backlog = None
-            # TB-224: cost + blast-radius guards. Three halt conditions
-            # checked against the same auto-promote-paused state,
-            # sharing the ack verb `ap2 ack auto_approve_window_resume`:
-            #   - `per_task_cap`: an auto-approved task's
-            #     `task_run_usage` event reported input+output tokens
-            #     exceeding `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`
-            #     (catches the single-runaway pattern — one task in
-            #     an infinite tool-call loop).
-            #   - `window_cap`: cumulative tokens across all
-            #     auto-approved tasks in the last 24h exceeded
-            #     `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` (catches the
-            #     drift pattern — many small wasteful tasks summing
-            #     to unbounded spend).
-            #   - `task_error`: an `auto_approved` task emitted a
-            #     `task_error` event; one occurrence is enough to
-            #     halt because infrastructure failures aren't noise
-            #     the way `verification_failed` is.
-            # Defaults unset on both knobs → no caps applied (current
-            # behavior preserved for operators who haven't budgeted).
-            # Manual `ap2 approve` continues to dispatch even while
-            # halted — the halt is targeted at the auto-approved
-            # bucket only, mirroring TB-223's freeze-threshold shape.
-            if (
-                backlog is not None
-                and _was_auto_approved(cfg, backlog.id)
-            ):
-                violation = _auto_approve_check_violations(cfg)
-                if violation is not None:
-                    reason, total_used, cap, trigger_task, detail = violation
-                    if not _auto_approve_already_halted(cfg):
-                        payload: dict = {
-                            "task": trigger_task or backlog.id,
-                            "reason": reason,
-                        }
-                        if reason in ("per_task_cap", "window_cap"):
-                            payload["used"] = total_used
-                            payload["cap"] = cap
-                        if reason == "window_cap":
-                            # Briefing-explicit payload shape: name
-                            # the rolling-window total alongside the
-                            # cap so operators don't have to recompute
-                            # from `ap2 logs`.
-                            payload["window_used"] = total_used
-                        if reason == "task_error" and detail:
-                            payload["error_excerpt"] = detail
-                        events.append(
-                            cfg.events_file,
-                            "auto_approve_halted",
-                            **payload,
-                        )
-                        if reason == "task_error" and trigger_task:
-                            # Surface the infrastructure failure as a
-                            # `## Decisions needed from operator`
-                            # bullet so `ap2 status` / `ap2 logs` /
-                            # the web home page render it without
-                            # waiting for the next ideation cron.
-                            _append_decisions_needed_bullet(
-                                cfg,
-                                (
-                                    f"Auto-approved task {trigger_task} hit "
-                                    f"`task_error` (infrastructure failure): "
-                                    f"{detail[:200] if detail else '(no excerpt)'}. "
-                                    f"Inspect via `ap2 logs` and resume "
-                                    f"auto-promote via `ap2 ack "
-                                    f"auto_approve_window_resume` once the "
-                                    f"infrastructure issue is resolved."
-                                ),
-                            )
-                    events.append(
-                        cfg.events_file,
-                        "auto_approve_skipped",
-                        task=backlog.id,
-                        reason=reason,
-                    )
-                    backlog = None
+            # TB-361: SKIP PAST a gated head. The gate chain
+            # (validator-judge-noisy → freeze-threshold →
+            # cost/blast-radius + task_error, in `_auto_promote_gate_halts`)
+            # only HALTS the auto-approved layer; operator-added /
+            # operator-approved / not-auto-approved tasks were always meant
+            # to drain past it (see the TB-275 "must always drain" note
+            # above). The pre-TB-361 shape inspected ONLY the single
+            # `next_dispatchable` head and, when the gate halted it, nulled
+            # the candidate and ended the tick — so a gated auto-approved
+            # head FROZE every non-gated task queued behind it (observed
+            # 2026-05-31: human-authored TB-361 itself couldn't promote with
+            # a free Active slot because gated TB-359/TB-360 sat ahead). The
+            # fix iterates dispatchable Backlog candidates in board order
+            # and promotes the FIRST one the gate does NOT halt. Invariants
+            # preserved: at most ONE promotion per tick (break on first
+            # non-halted); bounded iteration (the dispatchable-Backlog
+            # length); auto-approved tasks stay held while paused (only
+            # NON-halted candidates dispatch); each gated candidate still
+            # emits its `auto_approve_skipped` / `auto_approve_paused`
+            # observability event (inside the helper). `iter_dispatchable`
+            # keeps `next_dispatchable`'s ordering rule and unmet-`blocked
+            # on:` skipping — we only step past the GATED candidates now,
+            # never re-sort the queue.
+            backlog = None
+            for candidate in board.iter_dispatchable("Backlog"):
+                if _auto_promote_gate_halts(cfg, candidate):
+                    continue
+                backlog = candidate
+                break
             if backlog is not None:
                 do_board_edit(cfg, {"action": "move_to_ready", "task_id": backlog.id})
                 events.append(
