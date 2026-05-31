@@ -9,6 +9,8 @@ reaching into the submodules. Axes 2-7 extend this surface (the
 
 Axis 2 renamed the options struct to the canonical `AgentOptions`;
 `AgentRunOptions` stays exported as a back-compat alias for the TB-353 name.
+Axis 4 (TB-357) adds the second backend, `CodexAdapter`, against the same
+interface.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from .base import (
     usage_from_summary,
 )
 from .claude_code import ClaudeCodeAdapter
+from .codex import CodexAdapter
 
 __all__ = [
     "AgentAdapter",
@@ -33,5 +36,6 @@ __all__ = [
     "AgentTools",
     "AgentUsage",
     "ClaudeCodeAdapter",
+    "CodexAdapter",
     "usage_from_summary",
 ]
