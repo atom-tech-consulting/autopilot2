@@ -1241,6 +1241,7 @@ from .message_dump import (
     _truncate,
     _walk_blocks,
 )
+from .adapters.base import usage_from_summary
 
 
 def _append_progress(cfg: Config, task, r: TaskResult) -> None:
@@ -1476,25 +1477,19 @@ def _emit_task_run_usage(
         if "usage" in s or "total_cost_usd" in s:
             last_result = s
             break
+    # Axis 2 (TB-354): build the payload from the one normalized usage record
+    # rather than re-indexing the raw SDK-derived summary dict per field. The
+    # `usage_from_summary` -> `AgentUsage.event_payload()` path reproduces the
+    # exact keys / values (incl. the `stream_incomplete` note on the no-result
+    # path) so the emitted event is byte-for-byte unchanged.
+    usage = usage_from_summary(last_result)
     payload: dict = {
         "task": task.id,
         "run_id": run_id,
         "status": status,
         "duration_s": round(duration_s, 3),
     }
-    if last_result is None:
-        payload["usage"] = {}
-        payload["model_usage"] = {}
-        payload["total_cost_usd"] = 0.0
-        payload["num_turns"] = 0
-        payload["model"] = ""
-        payload["note"] = "stream_incomplete"
-    else:
-        payload["usage"] = last_result.get("usage") or {}
-        payload["model_usage"] = last_result.get("model_usage") or {}
-        payload["total_cost_usd"] = last_result.get("total_cost_usd") or 0.0
-        payload["num_turns"] = last_result.get("num_turns") or 0
-        payload["model"] = last_result.get("model") or ""
+    payload.update(usage.event_payload())
     events.append(cfg.events_file, "task_run_usage", **payload)
 
 
@@ -1537,25 +1532,18 @@ def _emit_control_run_usage(
         if "usage" in s or "total_cost_usd" in s:
             last_result = s
             break
+    # Axis 2 (TB-354): same normalized-record relocation as
+    # `_emit_task_run_usage` — the payload's usage block is built from
+    # `AgentUsage.event_payload()`, leaving the `error` / `stderr_tail`
+    # non-success fields appended after it exactly as before.
+    usage = usage_from_summary(last_result)
     payload: dict = {
         "label": label,
         "run_id": run_id,
         "status": status,
         "duration_s": round(duration_s, 3),
     }
-    if last_result is None:
-        payload["usage"] = {}
-        payload["model_usage"] = {}
-        payload["total_cost_usd"] = 0.0
-        payload["num_turns"] = 0
-        payload["model"] = ""
-        payload["note"] = "stream_incomplete"
-    else:
-        payload["usage"] = last_result.get("usage") or {}
-        payload["model_usage"] = last_result.get("model_usage") or {}
-        payload["total_cost_usd"] = last_result.get("total_cost_usd") or 0.0
-        payload["num_turns"] = last_result.get("num_turns") or 0
-        payload["model"] = last_result.get("model") or ""
+    payload.update(usage.event_payload())
     if error is not None:
         payload["error"] = error
     if stderr_tail:

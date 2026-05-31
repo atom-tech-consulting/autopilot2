@@ -24,7 +24,7 @@ adapter). Axis 1 carries only the fields today's Claude path needs.
 Design — `AgentAdapter.run()` is the single seam:
 
   - A caller hands it a `prompt`, an `AgentTools` (the allow/deny tool policy
-    plus MCP servers), and a normalized `AgentRunOptions` (model, effort,
+    plus MCP servers), and a normalized `AgentOptions` (model, effort,
     max_turns, timeout, cwd, permission mode, setting sources, stderr sink).
   - `run()` is an async generator yielding normalized `AgentEvent`s — one per
     backend stream envelope — and a final terminal event of `type="result"`
@@ -58,20 +58,24 @@ from typing import Any
 
 
 @dataclass
-class AgentRunOptions:
-    """Backend-neutral options for a single agent run (axis 1 subset).
+class AgentOptions:
+    """Backend-neutral options for a single agent run.
 
     Mirrors the knobs the daemon feeds to `ClaudeAgentOptions` today
-    (`model` / `effort` / `max_turns` / `cwd` / `permission_mode` /
-    `setting_sources` / `stderr`), plus a per-run `timeout_s` that the daemon
-    currently applies via `asyncio.wait_for` around the consume loop rather
-    than via the SDK options object. `extra` is a forward-compatible escape
-    hatch for backend-specific kwargs axes 2-4 may need; the Claude adapter
-    threads it straight into `ClaudeAgentOptions(**...)`.
+    (`model` / `effort` (a.k.a. reasoning) / `max_turns` / `cwd` /
+    `permission_mode` / `setting_sources` / `stderr`), plus a per-run
+    `timeout_s` that the daemon currently applies via `asyncio.wait_for`
+    around the consume loop rather than via the SDK options object. `extra`
+    is a forward-compatible escape hatch for backend-specific kwargs axes 2-4
+    may need; the Claude adapter threads it straight into
+    `ClaudeAgentOptions(**...)`.
 
-    Every field is optional so a partial caller (and the axis-1 contract
-    test) can build a minimal options object; axes 2 and 3 harden this struct
-    once real callers are repointed.
+    Every field is optional so a partial caller (and the contract test) can
+    build a minimal options object.
+
+    Axis 2 promotes this struct to the canonical backend-neutral options name
+    (`model` / `effort` / `max_turns` / `timeout`) every consumer imports;
+    `AgentRunOptions` remains as a back-compat alias for the TB-353 name.
     """
 
     model: str | None = None
@@ -83,6 +87,12 @@ class AgentRunOptions:
     setting_sources: list[str] | None = None
     stderr: Callable[[str], None] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+
+#: Back-compat alias for the TB-353 name; axis 2 renamed the struct to the
+#: canonical `AgentOptions` but existing callers / tests importing
+#: `AgentRunOptions` keep resolving to the same dataclass.
+AgentRunOptions = AgentOptions
 
 
 @dataclass
@@ -128,6 +138,63 @@ class AgentUsage:
     num_turns: int = 0
     model: str = ""
     note: str = ""
+
+    def event_payload(self) -> dict:
+        """The usage portion of a `task_run_usage` / `control_run_usage`
+        event payload, in the exact key order the daemon emitted before
+        axis 2 (`usage` / `model_usage` / `total_cost_usd` / `num_turns` /
+        `model`, then `note` only when set).
+
+        Axis 2 routes `daemon._emit_task_run_usage` /
+        `_emit_control_run_usage` through here so the emitted payload is built
+        from the one normalized record rather than re-indexing the raw
+        SDK-derived summary dict per field. `note` (the `stream_incomplete`
+        sentinel) is included only when set — matching the original
+        crash-path-only emission so success-path payloads stay key-identical.
+        """
+        payload: dict = {
+            "usage": self.usage,
+            "model_usage": self.model_usage,
+            "total_cost_usd": self.total_cost_usd,
+            "num_turns": self.num_turns,
+            "model": self.model,
+        }
+        if self.note:
+            payload["note"] = self.note
+        return payload
+
+    @classmethod
+    def from_event(cls, event: dict) -> "AgentUsage":
+        """Reconstruct a normalized usage record from a persisted
+        `task_run_usage` / `control_run_usage` event payload — the inverse of
+        `event_payload`.
+
+        The cost guards (`auto_approve._event_combined_tokens`) and the
+        `ap2 status` usage read route their per-event token reads through this
+        so they consume one normalized shape rather than indexing the raw
+        event dict per field; the same accessor will serve the Codex backend
+        (axis 4) without per-backend branching.
+        """
+        return cls(
+            usage=event.get("usage") or {},
+            model_usage=event.get("model_usage") or {},
+            total_cost_usd=event.get("total_cost_usd") or 0.0,
+            num_turns=event.get("num_turns") or 0,
+            model=event.get("model") or "",
+            note=str(event.get("note") or ""),
+        )
+
+    @property
+    def combined_tokens(self) -> int:
+        """`input_tokens + output_tokens` from the normalized `usage` blob —
+        the cost-guard / auto-approve / `ap2 status` token-sum read. Robust
+        against a missing / non-dict `usage` (returns 0), preserving the
+        pre-axis-2 `_event_combined_tokens` shape bit-for-bit.
+        """
+        u = self.usage if isinstance(self.usage, dict) else {}
+        inp = int(u.get("input_tokens", 0) or 0)
+        outp = int(u.get("output_tokens", 0) or 0)
+        return inp + outp
 
 
 @dataclass
@@ -194,9 +261,9 @@ class AgentAdapter(ABC):
     backend: str = ""
 
     @abstractmethod
-    def normalize_options(self, options: AgentRunOptions) -> dict[str, Any]:
+    def normalize_options(self, options: AgentOptions) -> dict[str, Any]:
         """Options-normalization entry: map a backend-neutral
-        `AgentRunOptions` to the kwargs the backend's native options object
+        `AgentOptions` to the kwargs the backend's native options object
         accepts. Returns a kwargs dict so `register_tools`'s output can be
         merged before the native options object is constructed."""
         raise NotImplementedError
@@ -252,7 +319,7 @@ class AgentAdapter(ABC):
         self,
         prompt: str,
         tools: AgentTools,
-        options: AgentRunOptions,
+        options: AgentOptions,
     ) -> AsyncIterator[AgentEvent]:
         """Dispatch one agent run.
 
@@ -268,7 +335,7 @@ class AgentAdapter(ABC):
         self,
         prompt: str,
         tools: AgentTools,
-        options: AgentRunOptions,
+        options: AgentOptions,
     ) -> AgentResult:
         """Drain `run()` and return the terminal `AgentResult`.
 

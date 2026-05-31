@@ -39,6 +39,7 @@ import time
 from datetime import datetime
 
 from ap2 import events, ideation
+from ap2.adapters.base import AgentUsage
 from ap2.config import Config
 
 
@@ -318,13 +319,13 @@ def _event_combined_tokens(event: dict) -> int:
     event's `usage` blob (TB-165 schema). Robust against missing
     fields or a non-dict `usage` (returns 0 in those cases — matches
     the defensive shape of `events.summarize_usage_event`).
+
+    Axis 2 (TB-354): routed through the normalized `AgentUsage` record so the
+    cost-guard token read consumes one backend-neutral shape rather than
+    indexing the raw event dict directly. `AgentUsage.from_event` /
+    `.combined_tokens` reproduce the prior non-dict-safe arithmetic exactly.
     """
-    usage = event.get("usage")
-    if not isinstance(usage, dict):
-        return 0
-    inp = int(usage.get("input_tokens", 0) or 0)
-    outp = int(usage.get("output_tokens", 0) or 0)
-    return inp + outp
+    return AgentUsage.from_event(event).combined_tokens
 
 
 def _parse_event_ts(ts: object) -> float | None:

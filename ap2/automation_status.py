@@ -31,6 +31,7 @@ import os
 from typing import TYPE_CHECKING
 
 from . import events
+from .adapters.base import AgentUsage
 
 if TYPE_CHECKING:
     from .config import Config
@@ -414,13 +415,13 @@ def _event_combined_tokens(event: dict) -> int:
     """Combined `input_tokens + output_tokens` from a `task_run_usage`
     event's `usage` blob (TB-165 schema). Same shape as
     `daemon._event_combined_tokens`; aliased here so this module can
-    stand alone without importing daemon."""
-    usage = event.get("usage")
-    if not isinstance(usage, dict):
-        return 0
-    inp = int(usage.get("input_tokens", 0) or 0)
-    outp = int(usage.get("output_tokens", 0) or 0)
-    return inp + outp
+    stand alone without importing daemon.
+
+    Axis 2 (TB-354): the `ap2 status` token-sum read consumes the normalized
+    `AgentUsage` record (`from_event` / `.combined_tokens`) — the same
+    backend-neutral shape the cost guard reads — rather than indexing the raw
+    event dict, so neither surface branches on a Claude-SDK-specific type."""
+    return AgentUsage.from_event(event).combined_tokens
 
 
 def _auto_approved_task_ids(tail: list[dict]) -> set[str]:

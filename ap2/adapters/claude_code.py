@@ -43,8 +43,8 @@ from ..message_dump import (
 from .base import (
     AgentAdapter,
     AgentEvent,
+    AgentOptions,
     AgentResult,
-    AgentRunOptions,
     AgentTools,
     usage_from_summary,
 )
@@ -74,8 +74,8 @@ class ClaudeCodeAdapter(AgentAdapter):
             self._sdk = sdk
         return self._sdk
 
-    def normalize_options(self, options: AgentRunOptions) -> dict[str, Any]:
-        """Map a backend-neutral `AgentRunOptions` to `ClaudeAgentOptions`
+    def normalize_options(self, options: AgentOptions) -> dict[str, Any]:
+        """Map a backend-neutral `AgentOptions` to `ClaudeAgentOptions`
         kwargs.
 
         `timeout_s` is intentionally NOT mapped onto `ClaudeAgentOptions`:
@@ -159,7 +159,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         self,
         prompt: str,
         tools: AgentTools,
-        options: AgentRunOptions,
+        options: AgentOptions,
     ) -> AsyncIterator[AgentEvent]:
         """Dispatch the run via `claude_agent_sdk.query()`.
 

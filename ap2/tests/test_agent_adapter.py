@@ -29,6 +29,7 @@ import pytest
 
 from ap2.adapters import (
     AgentAdapter,
+    AgentOptions,
     AgentResult,
     AgentRunOptions,
     AgentTools,
@@ -444,3 +445,128 @@ def test_build_tool_server_records_short_names_from_tool_set():
     # Re-registering replaces the recorded set (reflects the latest call).
     adapter.build_tool_server([alpha], server_name="custom", version="test")
     assert adapter.registered_tool_names() == ["alpha"]
+
+
+# --------------------------------------------------------------------------
+# TB-354 (axis 2): backend-neutral options + normalized usage record
+#
+# Axis 2 promotes the options struct to the canonical `AgentOptions` name and
+# adds the normalized usage surface (`event_payload` / `from_event` /
+# `combined_tokens`) the daemon's `*_run_usage` emission, the cost guards, and
+# the `ap2 status` read consume. These tests pin that one shape round-trips so
+# adding the Codex backend (axis 4) needs no per-backend usage branching.
+# --------------------------------------------------------------------------
+
+
+def test_agent_options_is_canonical_name_with_backcompat_alias():
+    """`AgentOptions` is the canonical backend-neutral options struct; the
+    TB-353 name `AgentRunOptions` stays exported as an alias to the same
+    dataclass so existing callers keep resolving."""
+    assert AgentRunOptions is AgentOptions
+    opts = AgentOptions(model="m", effort="high", max_turns=7, timeout_s=1.5)
+    assert isinstance(opts, AgentRunOptions)
+    assert (opts.model, opts.effort, opts.max_turns, opts.timeout_s) == (
+        "m", "high", 7, 1.5,
+    )
+
+
+def test_claude_adapter_populates_normalized_result_from_result_message():
+    """Axis-2 contract: a stubbed SDK `ResultMessage` round-trips into the
+    normalized `AgentResult` whose `AgentUsage` carries the input/output
+    tokens, cost, turns, and model — independent of the Claude SDK shape."""
+    adapter = ClaudeCodeAdapter(sdk=FakeSDK(_default_envelopes()))
+    result = asyncio.run(
+        adapter.run_to_result("go", _tools(), _options())
+    )
+    assert isinstance(result, AgentResult)
+    assert isinstance(result.usage, AgentUsage)
+    # The normalized record mirrors the values the prior raw-SDK reads
+    # (`_emit_task_run_usage`'s last-ResultMessage walk) produced.
+    assert result.usage.usage == {"input_tokens": 100, "output_tokens": 50}
+    assert result.usage.total_cost_usd == 0.0123
+    assert result.usage.num_turns == 3
+    assert result.usage.model == "claude-opus-4-7"
+
+
+def test_agent_usage_event_payload_matches_emitted_keys():
+    """`AgentUsage.event_payload()` emits exactly the usage block the daemon
+    `task_run_usage` / `control_run_usage` payload carried pre-axis-2 — same
+    keys, same order, `note` only on the stream-incomplete path."""
+    u = AgentUsage(
+        usage={"input_tokens": 5, "output_tokens": 2},
+        model_usage={"m": {"input_tokens": 5}},
+        total_cost_usd=0.01,
+        num_turns=2,
+        model="claude-opus-4-7",
+    )
+    assert list(u.event_payload().keys()) == [
+        "usage", "model_usage", "total_cost_usd", "num_turns", "model",
+    ]
+    assert u.event_payload()["total_cost_usd"] == 0.01
+
+    # The stream-incomplete sentinel appends `note` last (crash-path shape).
+    incomplete = usage_from_summary(None)
+    payload = incomplete.event_payload()
+    assert list(payload.keys())[-1] == "note"
+    assert payload["note"] == "stream_incomplete"
+    assert payload["usage"] == {}
+    assert payload["total_cost_usd"] == 0.0
+    assert payload["num_turns"] == 0
+
+
+def test_agent_usage_from_event_round_trips_event_payload():
+    """`from_event` is the inverse of `event_payload` — the cost-guard /
+    `ap2 status` reads reconstruct the same normalized record the emission
+    wrote."""
+    u = AgentUsage(
+        usage={"input_tokens": 9, "output_tokens": 4},
+        model_usage={"m": {"input_tokens": 9}},
+        total_cost_usd=0.5,
+        num_turns=3,
+        model="claude-opus-4-7",
+    )
+    event = {"type": "task_run_usage", "task": "TB-1", **u.event_payload()}
+    back = AgentUsage.from_event(event)
+    assert back.usage == u.usage
+    assert back.model_usage == u.model_usage
+    assert back.total_cost_usd == u.total_cost_usd
+    assert back.num_turns == u.num_turns
+    assert back.model == u.model
+
+
+def test_agent_usage_combined_tokens_is_defensive():
+    """`combined_tokens` sums input+output and returns 0 for a missing /
+    non-dict `usage` — the exact pre-axis-2 `_event_combined_tokens` shape the
+    cost guards and `ap2 status` token sums depend on."""
+    assert AgentUsage(
+        usage={"input_tokens": 100, "output_tokens": 50}
+    ).combined_tokens == 150
+    # Missing fields -> 0 contributions.
+    assert AgentUsage(usage={"input_tokens": 7}).combined_tokens == 7
+    # Empty / absent usage -> 0.
+    assert AgentUsage().combined_tokens == 0
+    # A non-dict usage payload is tolerated (returns 0, no raise).
+    assert AgentUsage.from_event({"usage": "garbage"}).combined_tokens == 0
+    assert AgentUsage.from_event({}).combined_tokens == 0
+
+
+def test_event_combined_tokens_consumers_route_through_agent_usage():
+    """The cost-guard (`auto_approve`) and `ap2 status` (`automation_status`)
+    token reads delegate to the normalized `AgentUsage` — same result, one
+    shape. Pins that the two historically-duplicated helpers stay in lockstep
+    with the normalized record."""
+    from ap2.automation_status import (
+        _event_combined_tokens as status_tokens,
+    )
+    from ap2.components.auto_approve import (
+        _event_combined_tokens as guard_tokens,
+    )
+
+    event = {"usage": {"input_tokens": 100, "output_tokens": 50}}
+    expected = AgentUsage.from_event(event).combined_tokens
+    assert expected == 150
+    assert guard_tokens(event) == expected
+    assert status_tokens(event) == expected
+    # Defensive parity on a non-dict usage blob.
+    bad = {"usage": None}
+    assert guard_tokens(bad) == status_tokens(bad) == 0
