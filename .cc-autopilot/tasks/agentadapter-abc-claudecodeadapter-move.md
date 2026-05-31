@@ -79,3 +79,10 @@ give axes 2-7 a contract to build against.
 - The `CodexAdapter` (axis 4), per-kind selection / auth gate (axis 5), and the
   codex real-SDK smoke (axis 7).
 - Any change to prompts, tool policy, or verification semantics.
+## Attempts
+
+### 2026-05-31 — error
+(no summary)
+- **error:** Exception: Claude Code returned an error result: success
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260531T002008Z-TB-353.prompt.md`, `stream: .cc-autopilot/debug/20260531T002008Z-TB-353.stream.jsonl`, `messages: .cc-autopilot/debug/20260531T002008Z-TB-353.messages.jsonl`
