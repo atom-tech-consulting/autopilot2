@@ -1329,3 +1329,9 @@
 - **Summary:** Added AgentAdapter ABC (ap2/adapters/base.py) and ClaudeCodeAdapter (ap2/adapters/claude_code.py) wrapping today's claude_agent_sdk.query() path bit-for-bit; re-export __init__, adapter-contract test, ap2.adapters in wheel packages. No production dispatch site repointed (axis 6); full suite green (2845 passed).
 - **Files:** ap2/adapters/__init__.py, ap2/adapters/base.py, ap2/adapters/claude_code.py, ap2/tests/test_agent_adapter.py, pyproject.toml
 - **Tests:** pass
+
+## [2026-05-31] TB-355: Register ap2's MCP tools through the AgentAdapter so both backends see one toolset (axis 3)
+- **Commit:** `6a33b3c`
+- **Summary:** Relocated the create_sdk_mcp_server assembly behind a new AgentAdapter.build_tool_server tool-registration surface (+ concrete registered_tool_names enumerator); ClaudeCodeAdapter implements it and build_mcp_server now hands its 14-tool set to the adapter — live inventory unchanged, full descoped suite passes (2848).
+- **Files:** ap2/adapters/base.py, ap2/adapters/claude_code.py, ap2/tools.py, ap2/tests/test_agent_adapter.py
+- **Tests:** pass
