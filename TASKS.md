@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-368** **Backend-aware daemon-start SDK-availability gate — pure-codex config must not require claude_agent_sdk** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` — main_loop unconditionally calls _import_sdk_or_die()/load_claude_sdk() at startup, so a pure-codex backend map still hard-fails without claude_agent_sdk; make the SDK-availability gate backend-aware to mirror the existing credential gate. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-sdk-availabil.md)
 
 ## Pipeline Pending
 
