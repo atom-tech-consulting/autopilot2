@@ -1425,3 +1425,9 @@
 - **Summary:** Added a symmetric daemon-start codex-handle-availability gate: new patchable load_codex_sdk() seam in ap2/adapters/codex.py (routed through CodexAdapter._get_codex and re-exported from ap2/adapters), plus daemon._require_codex_handle_if_referenced(cfg) wired into main_loop beside the Claude gate — it consults referenced_backends(cfg) and only probes/sys.exit(1)s when codex is referenced and the handle is unimportable, leaving the all-claude default unaffected.
 - **Files:** ap2/adapters/codex.py, ap2/adapters/__init__.py, ap2/daemon.py, ap2/tests/test_tb369_codex_availability_gate.py
 - **Tests:** pass
+
+## [2026-06-01] TB-370: Accept codex ChatGPT-login OAuth (auth.json), not only OPENAI_API_KEY, in the backend-aware auth gate
+- **Commit:** `bca1fef`
+- **Summary:** Widened the backend-aware daemon-start auth gate so a codex-backed kind's credential is satisfied by EITHER OPENAI_API_KEY OR a codex ChatGPT-login session ($CODEX_HOME/auth.json, default ~/.codex/auth.json, auth_mode: chatgpt) via a new presence-only _codex_credentials_present() helper; failure message names both options, all-claude maps unchanged, docstring + howto.md updated; full suite (2949 tests) passes.
+- **Files:** ap2/cli_daemon.py, ap2/adapters/select.py, ap2/howto.md, ap2/tests/test_cli_daemon.py
+- **Tests:** pass
