@@ -1377,3 +1377,9 @@
 - **Summary:** Previously committed in fc5db75 — the axis-6 scrub migration is genuinely complete; the 22:38 project-wide failure was unrelated drift-gate noise (the new AP2_AGENT_BACKEND_IDEATION_SCRUB docstring literal tripped three env-knob-drift tests), since fixed by TB-359 (45bfa60). Audit: _resolve_scrub_adapter keys select_adapter on the "ideation_scrub" kind and _run_scrub drives adapter.run_to_result (sdk.query/ClaudeAgentOptions gone, run_to_result present, injected-sdk seam preserved); targeted scrub+adapter tests pass (49 passed) and the full non-smoke suite is green (2926 passed).
 - **Files:** ap2/ideation_scrub.py, ap2/tests/test_scrub_disable_thinking.py
 - **Tests:** pass
+
+## [2026-06-01] TB-362: Axis-6 migration: route the verifier prose-judge through the AgentAdapter
+- **Commit:** `3678f21`
+- **Summary:** Migrated verify._judge_prose_bullet off direct sdk.query onto select_adapter("verifier_judge", cfg) + adapter.run_to_result, reading the normalized AgentResult.usage for TB-157 cost capture; full unit suite (2926) green.
+- **Files:** ap2/verify.py
+- **Tests:** pass

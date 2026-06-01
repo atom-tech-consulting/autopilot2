@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/axis-6-migration-route-the-verifier-pros.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": "3678f21",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-06-01T02:13:46Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-01T01:50:34Z",
   "tb_id": "TB-362",
   "why_now": "every piece of adapter seam this migration needs already exists in\nHEAD \u2014 `select_adapter(kind, cfg)` (`ap2/adapters/select.py`), the\nbackend-neutral `AgentOptions`, and `AgentAdapter.run_to_result`\n(`ap2/adapters/base.py`) \u2014 so repointing the prose-judge is a small,\nwell-templated read-only-tool dispatch relocation; leaving the verifier on\ndirect `sdk.query` keeps it the lone un-migrated judge while the rest of the\nfocus moves behind the interface, and every future change that assumes the\nClaude stream shape makes this retrofit more expensive."
