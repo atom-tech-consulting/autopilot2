@@ -211,35 +211,82 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                     "log": payload.get("log") or "",
                 })
 
+    # TB-364 (axis-6 migration): resolve the task-agent backend through the
+    # per-kind selector and drive the streaming `AgentAdapter.run(...)` instead
+    # of calling `sdk.query()` directly. `select_adapter` reads the merged
+    # `[agent_backends]` config for the `task` kind (`AP2_AGENT_BACKEND_TASK`
+    # env override > `[agent_backends]` table > the all-`claude` default);
+    # under the default map the resolved adapter is a `ClaudeCodeAdapter`
+    # wrapping the daemon's already-imported `sdk` handle, so options, the
+    # per-message logging, and usage/commit extraction are bit-for-bit the
+    # pre-migration `sdk.query()` path. An operator can set `task=codex` to
+    # route just the task agent to the Codex backend while every other kind
+    # stays on Claude.
+    from .adapters.claude_code import ClaudeCodeAdapter
+    from .adapters.select import select_adapter
+
+    adapter = select_adapter("task", cfg)
+    # Wrap the injected `sdk` handle (the daemon's already-imported
+    # `claude_agent_sdk` module in production; the FakeSDK stub in the
+    # daemon-recovery unit tests) so the Claude path stays hermetic and
+    # bit-for-bit. Only the Claude backend carries an injectable handle — a
+    # codex-backed `task` kind ignores it. `cfg` is always present in
+    # `run_task`, so the cfg-less `ClaudeCodeAdapter()` fallback the scrub
+    # canary (`ideation_scrub._resolve_scrub_adapter`) carries isn't needed.
+    if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+        adapter._sdk = sdk
+
+    # TB-355 (axis 3): the task agent's full MCP toolset is already registered
+    # through the adapter — `mcp_server` was built by
+    # `tools.build_mcp_server(cfg)` → `ClaudeCodeAdapter.build_tool_server(...)`
+    # — so handing it back through `AgentTools.mcp_servers` exposes the same
+    # toolset regardless of backend. `allowed` / `disallowed` carry the
+    # per-site tool policy verbatim.
+    agent_tools = AgentTools(
+        allowed=TASK_AGENT_TOOLS,
+        disallowed=_TASK_DISALLOWED_TOOLS,
+        mcp_servers={"autopilot": mcp_server},
+    )
+    # Backend-neutral options carrying every dispatch knob the pre-migration
+    # `ClaudeAgentOptions(...)` call did. `timeout_s` is intentionally left
+    # unset: the per-run timeout stays on the outer
+    # `asyncio.wait_for(_consume())` below (NOT `options.timeout_s`, which only
+    # `run_to_result` honors), so the streaming `run()`'s
+    # `TimeoutError -> _infer_result_from_head` recovery is preserved verbatim.
+    agent_options = AgentOptions(
+        cwd=str(cfg.project_root),
+        permission_mode="bypassPermissions",
+        max_turns=int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS)),
+        setting_sources=["project"],
+        stderr=_stderr_sink,
+        # TB-344: no inline `default=` — the schema
+        # (`CORE_CONFIG_SCHEMA["agent_model"]`) is the single source of truth
+        # for the `claude-opus-4-7` default.
+        model=cfg.get_core_value("agent_model"),
+        # TB-356: graceful degradation — resolves the base `agent_effort`
+        # stepped down by this task's per-task downshift level (bumped only on
+        # the thinking-block-immutability 400 failure class). Level 0 / kill
+        # switch set → base effort unchanged. The Claude adapter maps this onto
+        # `extra_args={"effort": ...}`.
+        effort=_resolve_task_effort(cfg, task.id),
+    )
+
     async def _consume() -> str:
         text = ""
-        async for msg in sdk.query(
-            prompt=prompt,
-            options=sdk.ClaudeAgentOptions(
-                cwd=str(cfg.project_root),
-                mcp_servers={"autopilot": mcp_server},
-                allowed_tools=TASK_AGENT_TOOLS,
-                disallowed_tools=_TASK_DISALLOWED_TOOLS,
-                permission_mode="bypassPermissions",
-                max_turns=int(cfg.get_core_value("task_max_turns", default=DEFAULT_TASK_MAX_TURNS)),
-                setting_sources=["project"],
-                stderr=_stderr_sink,
-                # TB-344: no inline `default=` — the schema
-                # (`CORE_CONFIG_SCHEMA["agent_model"]`) is the single
-                # source of truth for the `claude-opus-4-7` default.
-                model=cfg.get_core_value("agent_model"),
-                # TB-356: graceful degradation — resolves the base
-                # `agent_effort` stepped down by this task's per-task
-                # downshift level (bumped only on the thinking-block-
-                # immutability 400 failure class). Level 0 / kill switch set
-                # → base effort unchanged.
-                extra_args={"effort": _resolve_task_effort(cfg, task.id)},
-            ),
-        ):
-            _log_message(msg)
-            t = _extract_text(msg)
-            if t:
-                text = t
+        # TB-364: map each normalized `AgentEvent` back onto the pre-migration
+        # per-message handlers. `ev.raw` is the backend-native envelope
+        # `_log_message` walked before (report_result / pipeline_task_start
+        # capture + the stream/messages debug dumps); `ev.text` is the same
+        # `_extract_text(msg)` result that drove the returned final text. The
+        # terminal `type="result"` event carries no raw envelope — usage /
+        # commit are read from `stream_log` + the `report_result` tool args
+        # exactly as before — so it is skipped here.
+        async for ev in adapter.run(prompt, agent_tools, agent_options):
+            if ev.result is not None:
+                continue
+            _log_message(ev.raw)
+            if ev.text:
+                text = ev.text
         return text
 
     # If consume hits a timeout / opaque SDK crash without HEAD salvage we
@@ -1329,7 +1376,6 @@ async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
 # (`run_task` / `_run_control_agent` stream-dump emission) resolve
 # through one name.
 from .message_dump import (
-    _extract_text,
     _extract_tool_result_payload,
     _serialize_message_full,
     _stringify_block_content,
@@ -1337,7 +1383,7 @@ from .message_dump import (
     _truncate,
     _walk_blocks,
 )
-from .adapters.base import usage_from_summary
+from .adapters.base import AgentOptions, AgentTools, usage_from_summary
 
 
 def _append_progress(cfg: Config, task, r: TaskResult) -> None:

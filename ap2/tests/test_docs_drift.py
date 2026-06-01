@@ -90,6 +90,12 @@ _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     # surface is the generic `AP2_AGENT_BACKEND_<KIND>` block.
     "AP2_AGENT_BACKEND_VALIDATOR_JUDGE",
     "AP2_AGENT_BACKEND_JANITOR_JUDGE",
+    # TB-364 — same shape: the run_task axis-6 migration spells the concrete
+    # `task` kind's override literally in `run_task`'s adapter-resolution
+    # comment, so the regex captures the fully-qualified literal. Same family,
+    # same rationale — the operator surface is the generic
+    # `AP2_AGENT_BACKEND_<KIND>` block, not an individually-documented knob.
+    "AP2_AGENT_BACKEND_TASK",
     "AP2_DIR",          # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     "AP2_REAL_SDK",     # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     # TB-345 — DEPRECATED back-compat aliases. The `focus_advance`
