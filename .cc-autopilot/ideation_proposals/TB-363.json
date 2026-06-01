@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-362",
   "briefing_path": ".cc-autopilot/tasks/axis-6-migration-route-the-validator-jud.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": "54e278d",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-06-01T02:44:28Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-01T01:51:53Z",
   "tb_id": "TB-363",
   "why_now": "the adapter seam these two judges need is already in HEAD \u2014\n`select_adapter(kind, cfg)` (`ap2/adapters/select.py`), the backend-neutral\n`AgentOptions`, and `AgentAdapter.run_to_result` (`ap2/adapters/base.py`). Both\nare one-shot judge calls with the same dispatch shape, so grouping them in one\ntask (per goal.md's grouping) avoids two near-identical reviews; leaving them on\ndirect `sdk.query` keeps two of the six dispatch sites un-migrated while the\nfocus moves behind the interface."

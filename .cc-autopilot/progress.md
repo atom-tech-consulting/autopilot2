@@ -1383,3 +1383,9 @@
 - **Summary:** Migrated verify._judge_prose_bullet off direct sdk.query onto select_adapter("verifier_judge", cfg) + adapter.run_to_result, reading the normalized AgentResult.usage for TB-157 cost capture; full unit suite (2926) green.
 - **Files:** ap2/verify.py
 - **Tests:** pass
+
+## [2026-06-01] TB-363: Axis-6 migration: route the validator-judge and janitor-judge through the AgentAdapter
+- **Commit:** `54e278d`
+- **Summary:** Routed validator-judge (_judge_dep_coherence_default) and janitor-judge (_judge_finding) off direct sdk.query onto select_adapter + adapter.run_to_result; preserves Claude behavior bit-for-bit; full unit suite green (2926 passed).
+- **Files:** ap2/components/validator_judge/impl.py, ap2/components/janitor/impl.py, ap2/tests/test_docs_drift.py, ap2/tests/test_coverage_drift.py
+- **Tests:** pass
