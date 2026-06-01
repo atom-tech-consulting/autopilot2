@@ -213,13 +213,13 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
 
     # TB-364 (axis-6 migration): resolve the task-agent backend through the
     # per-kind selector and drive the streaming `AgentAdapter.run(...)` instead
-    # of calling `sdk.query()` directly. `select_adapter` reads the merged
+    # of calling `sdk.query` directly. `select_adapter` reads the merged
     # `[agent_backends]` config for the `task` kind (`AP2_AGENT_BACKEND_TASK`
     # env override > `[agent_backends]` table > the all-`claude` default);
     # under the default map the resolved adapter is a `ClaudeCodeAdapter`
     # wrapping the daemon's already-imported `sdk` handle, so options, the
     # per-message logging, and usage/commit extraction are bit-for-bit the
-    # pre-migration `sdk.query()` path. An operator can set `task=codex` to
+    # pre-migration `sdk.query` dispatch path. An operator can set `task=codex` to
     # route just the task agent to the Codex backend while every other kind
     # stays on Claude.
     from .adapters.claude_code import ClaudeCodeAdapter
@@ -1101,6 +1101,39 @@ def _make_stderr_sink() -> tuple[list[str], "callable"]:
     return buf, sink
 
 
+def _control_kind_from_label(label: str) -> str:
+    """Map a control-agent ``label`` onto its canonical ``AGENT_KINDS``
+    selector key (TB-365 / goal.md axis 6).
+
+    The four control surfaces that share ``_run_control_agent`` each pass a
+    stable ``label`` that already identifies which surface is dispatching:
+
+      - ``"ideation"``           → ``"ideation"``      (``ideation._run_ideation``)
+      - ``"cron-status-report"`` → ``"status_report"`` (``status_report.run_status_report``)
+      - ``"MM-<post-id>"``       → ``"mattermost"``    (``daemon.handle_message``)
+      - ``"cron-<job>"``         → ``"cron"``          (``daemon.run_cron`` LLM crons)
+
+    Returning the canonical kind lets ``select_adapter(kind, cfg)`` resolve
+    each surface's own backend (``AP2_AGENT_BACKEND_<KIND>`` env override >
+    ``[agent_backends]`` table > the all-``claude`` default). The
+    ``cron-status-report`` check precedes the generic ``cron-`` prefix so the
+    status-report surface keeps its own ``status_report`` selector key rather
+    than collapsing into ``cron``. An unrecognized label (e.g. a unit-test
+    stub) falls back to ``"ideation"``; under the default all-``claude`` map
+    every kind resolves to the same ``ClaudeCodeAdapter``, so the fallback is
+    behavior-neutral.
+    """
+    if label == "ideation":
+        return "ideation"
+    if label == "cron-status-report":
+        return "status_report"
+    if label.startswith("MM-"):
+        return "mattermost"
+    if label.startswith("cron-"):
+        return "cron"
+    return "ideation"
+
+
 async def _run_control_agent(
     cfg: Config,
     sdk,
@@ -1132,13 +1165,26 @@ async def _run_control_agent(
     ``<run_id>.stream.jsonl`` + ``<run_id>.messages.jsonl`` (parity with
     ``run_task``), and a ``control_run_usage`` event is emitted on every
     terminal path (success / timeout / error). Pre-TB-166 only the prompt
-    was dumped and the stream was discarded via
-    ``async for _ in sdk.query(...): pass`` — per-message detail and
+    was dumped and the stream was discarded via a bare
+    ``async for _ in ...: pass`` consume loop — per-message detail and
     token cost were unrecoverable for ideation, status-report, and MM.
     The label-specific events (``ideation_timeout`` / ``cron_error`` /
     ``mattermost_error`` / etc.) keep firing from the caller; the new
     event is purely additive so ``events.jsonl`` greps for the existing
     vocabulary stay valid.
+
+    TB-365 (axis-6 migration): dispatch now resolves
+    ``select_adapter(<kind>, cfg)`` for the specific control surface this
+    call is running — ``ideation`` / ``status_report`` / ``cron`` /
+    ``mattermost``, derived from ``label`` via ``_control_kind_from_label``
+    — and drives the streaming ``adapter.run(...)`` instead of a direct
+    ``sdk.query`` consume loop, so each surface is independently
+    backend-selectable (``AP2_AGENT_BACKEND_<KIND>`` > ``[agent_backends]``
+    table > the all-``claude`` default). Under the default map the resolved
+    adapter is a ``ClaudeCodeAdapter`` wrapping the injected ``sdk`` handle,
+    so the tool policy, ``max_turns`` / ``model`` / ``effort`` options, the
+    per-message logging, and the ``control_run_usage`` emission are
+    bit-for-bit the pre-migration path.
     """
     run_t0 = time.monotonic()
     prompt_dump, stream_dump, messages_dump = _prep_debug_dumps(cfg, label)
@@ -1182,24 +1228,63 @@ async def _run_control_agent(
             full = {"seq": idx, **_serialize_message_full(msg)}
             f.write(json.dumps(full, default=str) + "\n")
 
+    # TB-365 (axis-6 migration): resolve THIS control surface's backend
+    # through the per-kind selector and drive the streaming
+    # `AgentAdapter.run(...)` instead of a direct `sdk.query` consume loop.
+    # `_control_kind_from_label` maps the already-threaded `label` onto the
+    # canonical `ideation` / `status_report` / `cron` / `mattermost` selector
+    # key, so `select_adapter` reads each surface's own merged backend id
+    # (`AP2_AGENT_BACKEND_<KIND>` env override > `[agent_backends]` table >
+    # the all-`claude` default). Under the default map the resolved adapter is
+    # a `ClaudeCodeAdapter` wrapping the daemon's already-imported `sdk` handle
+    # (the option/stream stubs in the control-agent unit tests), so options,
+    # the per-message logging, and the `control_run_usage` emission below are
+    # bit-for-bit the pre-migration path.
+    from .adapters.claude_code import ClaudeCodeAdapter
+    from .adapters.select import select_adapter
+
+    adapter = select_adapter(_control_kind_from_label(label), cfg)
+    # Only the Claude backend carries an injectable handle — a codex-backed
+    # kind ignores it. `cfg` is always present at the `_run_control_agent`
+    # call boundary, so the cfg-less `ClaudeCodeAdapter()` fallback the scrub
+    # canary (`ideation_scrub._resolve_scrub_adapter`) carries isn't needed.
+    if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+        adapter._sdk = sdk
+
+    # Backend-neutral tool policy + options carrying every dispatch knob the
+    # pre-migration `ClaudeAgentOptions(...)` call did. `mcp_servers` exposes
+    # ap2's custom MCP toolset; `allowed` carries the per-site tool policy
+    # verbatim (control agents pass no `disallowed_tools`). `timeout_s` is
+    # left unset: the per-run timeout stays on the outer
+    # `asyncio.wait_for(_consume())` below, preserving the
+    # `TimeoutError -> control_run_usage(status="timeout")` path verbatim.
+    agent_tools = AgentTools(
+        allowed=allowed_tools,
+        mcp_servers={"autopilot": mcp_server},
+    )
+    agent_options = AgentOptions(
+        cwd=str(cfg.project_root),
+        permission_mode="bypassPermissions",
+        max_turns=max_turns,
+        setting_sources=["project"],
+        stderr=stderr_sink,
+        # TB-344: schema is the single source of truth for the
+        # agent_model default (see CORE_CONFIG_SCHEMA).
+        model=cfg.get_core_value("agent_model"),
+        effort=resolved_effort,
+    )
+
     async def _consume() -> None:
-        async for msg in sdk.query(
-            prompt=prompt,
-            options=sdk.ClaudeAgentOptions(
-                cwd=str(cfg.project_root),
-                mcp_servers={"autopilot": mcp_server},
-                allowed_tools=allowed_tools,
-                permission_mode="bypassPermissions",
-                max_turns=max_turns,
-                setting_sources=["project"],
-                stderr=stderr_sink,
-                # TB-344: schema is the single source of truth for the
-                # agent_model default (see CORE_CONFIG_SCHEMA).
-                model=cfg.get_core_value("agent_model"),
-                extra_args={"effort": resolved_effort},
-            ),
-        ):
-            _log_message(msg)
+        # TB-365: map each normalized `AgentEvent` back onto the existing
+        # per-message handler. `ev.raw` is the backend-native envelope
+        # `_log_message` walked before (stream/messages debug dumps + the
+        # `control_run_usage` usage walk over `stream_log`). The terminal
+        # `type="result"` event carries no raw envelope — usage is still read
+        # from `stream_log` below — so it is skipped.
+        async for ev in adapter.run(prompt, agent_tools, agent_options):
+            if ev.result is not None:
+                continue
+            _log_message(ev.raw)
 
     timed_out = False
     error: str | None = None
