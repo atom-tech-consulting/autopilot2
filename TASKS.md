@@ -8,6 +8,10 @@
 
 ## Backlog
 
+- [ ] **TB-362** **Axis-6 migration: route the verifier prose-judge through the AgentAdapter** `#autopilot` `#agent-adapter` `#codex` `#verifier` `#axis-6` `#migration` — Axis-6 migration: repoint verify._judge_prose_bullet off direct sdk.query through select_adapter("verifier_judge", cfg) + adapter.run_to_result, preserving Claude behavior. [→ brief](.cc-autopilot/tasks/axis-6-migration-route-the-verifier-pros.md)
+- [ ] **TB-363** **Axis-6 migration: route the validator-judge and janitor-judge through the AgentAdapter** `#autopilot` `#agent-adapter` `#codex` `#validator-judge` `#janitor` `#axis-6` `#migration` `@blocked:TB-362` — Axis-6 migration: repoint the validator-judge (components/validator_judge/impl.py) and janitor-judge (components/janitor/impl.py) SDK calls off direct sdk.query through select_adapter + adapter.run_to_result, preserving Claude behavior. [→ brief](.cc-autopilot/tasks/axis-6-migration-route-the-validator-jud.md)
+- [ ] **TB-364** **Axis-6 migration: route run_task (task agents) through the AgentAdapter** `#autopilot` `#agent-adapter` `#codex` `#run-task` `#axis-6` `#migration` `@blocked:TB-363` — Axis-6 migration: repoint daemon.run_task off direct sdk.query through select_adapter("task", cfg) + the streaming adapter.run, registering the full MCP toolset through the adapter and preserving Claude behavior. [→ brief](.cc-autopilot/tasks/axis-6-migration-route-run-task-task-age.md)
+- [ ] **TB-365** **Axis-6 migration: route the shared _run_control_agent through the AgentAdapter** `#autopilot` `#agent-adapter` `#codex` `#control-agent` `#axis-6` `#migration` `@blocked:TB-364` — Axis-6 migration: repoint daemon._run_control_agent off direct sdk.query through select_adapter(control_kind, cfg) + the streaming adapter.run, unlocking per-kind backend selection for ideation/status_report/cron/mattermost and preserving Claude behavior. [→ brief](.cc-autopilot/tasks/axis-6-migration-route-the-shared-run-co.md)
 
 ## Pipeline Pending
 

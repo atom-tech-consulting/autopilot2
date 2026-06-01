@@ -1,80 +1,98 @@
 # Ideation State
 
-_Last updated: 2026-05-31T21:21:30Z by ideation cron_
+_Last updated: 2026-06-01T01:43:08Z by ideation cron_
 
 ## Mission alignment
 
-Recent completes still serve the Mission (operator declares the goal once; ap2
-dispatches/verifies/recovers unattended). The 5 most recent Completes considered —
-TB-357 (axis 4: `CodexAdapter` against the `codex` CLI, 866423a — the second backend
-that makes the abstraction real), TB-355 (axis 3: ap2 MCP tools registered through the
-adapter via `build_tool_server`, 6a33b3c), TB-354 (axis 2: canonical `AgentOptions` +
-normalized `AgentUsage` read by cost guards / `task_run_usage` / `ap2 status`, 20b8cc4),
-TB-353 (axis 1: `AgentAdapter` ABC + `ClaudeCodeAdapter` wrapping `sdk.query` bit-for-bit,
-ff24b33), TB-356 (graceful effort step-down on the thinking-block-400 failure class,
-50de1db) — all sit on or adjacent to the codex-adapter focus. No mission drift: every
-recent ship moves a dispatch concept behind the adapter or hardens the existing loop.
-Board unchanged vs the 19:18Z cycle: axes 1-4 shipped; TB-358/359 workable (TB-357
-satisfied their `@blocked:TB-357`); TB-360 still `@blocked:TB-358`; `next_task_id`=TB-361.
+Recent completes still serve the Mission (operator declares the goal once;
+ap2 dispatches/verifies/recovers unattended). The 5 most recent Completes
+considered — TB-361 (fixed the TB-356 thinking-block classifier + exempted
+that class from the auto-approve breaker, 9baa2f5), TB-360 (axis-6 CANARY:
+`_run_scrub` repointed through the `AgentAdapter` seam via `select_adapter`,
+fc5db75 — genuinely complete; the 22:38 project-wide pytest fail was
+unrelated drift-gate docstring noise, re-verified `complete` at 23:55),
+TB-359 (axis 7: backend-parametrized adapter-contract parity suite, 45bfa60),
+TB-358 (axis 5: per-kind `[agent_backends]` selection + backend-aware auth
+gate, approved 21:26Z), TB-357 (axis 4: `CodexAdapter`, 866423a). No mission
+drift: every recent ship moves a dispatch concept behind the adapter or
+hardens the loop.
 
 ## Current focus assessment
 
 - **codex support through an agent adaptor layer** (7 axes: AgentAdapter ABC +
-  ClaudeCodeAdapter / options+result normalization / MCP exposure / CodexAdapter /
-  per-kind selection+auth / per-kind migrations / parity tests)
-  - Progress so far: axes 1-4 SHIPPED — axis 1 `AgentAdapter` ABC + `ClaudeCodeAdapter`
-    (TB-353, ff24b33); axis 2 normalized `AgentOptions`/`AgentUsage` consumed by cost
-    guards / `task_run_usage` / `ap2 status` (TB-354, 20b8cc4); axis 3 `build_tool_server`
-    tool registration (TB-355, 6a33b3c); axis 4 `CodexAdapter` (`ap2/adapters/codex.py`)
-    with a hermetic contract suite (TB-357, 866423a). Axes 5 + 7 SEEDED and now workable
-    (TB-357 satisfied their `@blocked:TB-357`): TB-358 (axis 5 per-kind `[agent_backends]`
-    + `AP2_AGENT_BACKEND_<KIND>` + backend-aware auth gate), TB-359 (axis 7
-    adapter-contract parity suite + gated codex real-SDK smoke). Axis-6 canary TB-360
-    (migrate `_run_scrub` to adapter-routing) seeded, still `@blocked:TB-358`.
-  - Gaps: axis-6 long tail beyond the canary — verifier prose-judge, validator-judge +
-    janitor-judge, `run_task`, `_run_control_agent` (goal.md L177-183) — remains unseeded
-    BY DESIGN, gated on the canary (TB-360) proving the per-site migration shape. No other
-    axis is unseeded. TB-358/359/360 not yet dispatched.
+  ClaudeCodeAdapter / options+result normalization / MCP exposure / CodexAdapter
+  / per-kind selection+auth / per-kind migrations / parity tests)
+  - Progress so far: axes 1-5 + 7 SHIPPED — axis 1 ABC + `ClaudeCodeAdapter`
+    (TB-353), axis 2 normalized `AgentOptions`/`AgentResult`/usage (TB-354),
+    axis 3 MCP tool registration through the adapter (TB-355), axis 4
+    `CodexAdapter` (TB-357), axis 5 per-kind `[agent_backends]` selection +
+    backend-aware auth gate (TB-358), axis 7 parity suite + gated codex smoke
+    (TB-359). Axis 6 (per-kind dispatch-site migrations) is now UNDERWAY: the
+    `ideation_scrub` canary (TB-360) shipped, validating the per-site repoint
+    shape — `select_adapter(kind, cfg)` + `adapter.run_to_result(...)`,
+    preserving Claude behavior bit-for-bit. `AGENT_KINDS`
+    (`ap2/adapters/select.py` L44-54) enumerates the 9 selectable kinds; 5 of 9
+    are migrated/native (ideation_scrub via TB-360; the adapter is the native
+    path for none-yet of the live dispatch sites otherwise).
+  - Gaps: 4 dispatch sites remain on direct `sdk.query` per goal.md's axis-6
+    migration order (L177-183): the verifier prose-judge
+    (`verify._judge_prose_bullet`, `sdk.query` at verify.py:611), the
+    validator-judge + janitor-judge component calls
+    (`components/validator_judge/impl.py:796`, `components/janitor/impl.py:796`),
+    `run_task` (daemon.py:216), and the shared `_run_control_agent`
+    (daemon.py:1139, unlocking ideation/status_report/cron/mattermost). Each is
+    its own TB. The `claude_agent_sdk`-imported-only-inside-`ClaudeCodeAdapter`
+    Progress signal (goal.md L205-206) stays open until all four land. The
+    mixed-config end-to-end Progress signal (L211-213) is gated on `run_task` +
+    `_run_control_agent` migrating first.
   - Status: `in-progress`
+  - Reasoning: 4 named dispatch sites remain un-migrated; the canary cleared
+    the validation gate so the tail is now workable.
 
 ## Non-goal risk check
 
-none. The seeded wave stays inside the focus: axis 4 added the one scoped second backend
-(no third backend, no per-message routing — goal.md L127-128); axis 5 is per-kind
-selection fixed at dispatch (L127-131); the axis-6 canary preserves Claude behavior
-bit-for-bit (respects the "removing behavior during extraction" non-goal, L562-566); axis
-7 is pure test coverage. No drift toward multi-tenancy / cross-project / unconditional
+none. The seeded wave stays inside the focus: each task repoints ONE dispatch
+site behind the existing adapter seam, preserving the site's exact tool policy
++ behavior on Claude (respects the "removing behavior during extraction"
+non-goal, goal.md L562-566). No third backend, no per-message routing
+(L127-128). No drift toward multi-tenancy / cross-project / unconditional
 automation.
 
 ## Considered & deferred this cycle
 
-- **Axis-6 migrations beyond the canary** (verifier prose-judge -> validator-judge +
-  janitor-judge -> `run_task` -> `_run_control_agent`): deferred again. Seeding site #2 now
-  stacks a task >=3 levels deep (`@blocked` chain through TB-360 -> TB-358, neither
-  dispatched) on a migration pattern the canary hasn't validated yet. The canary, not any
-  shipped axis, is the gate on the long tail.
-- **Operator-rejection pattern (recurring)**: vetoes cluster on (a) symptom-patch
-  remediations without root-cause diagnosis (TB-231) and (b) speculative enumerated-case
-  validators guarding unobserved failures (TB-240 file-path-coherence, TB-172 shell-pitfall
-  linter). No proposal this cycle, so nothing conflicts; noting the pattern persists so
-  future cycles steer clear of those two shapes.
-- **Stale `test-suite-slowness-2026-05-17.md` insight** (no tldr in the index): a
-  data-quality gap, but unrelated to the codex-adapter focus and the backlog is saturated —
-  not worth a slot this cycle.
+- **Mixed-config end-to-end test** (`ideation=claude`, `task=codex` runs an
+  agent of each kind end-to-end — goal.md Progress signal L211-213): deferred.
+  It genuinely depends on `run_task` (TB-364) AND `_run_control_agent` (TB-365)
+  being adapter-routed first — you can't run `task=codex` end-to-end until
+  `run_task` dispatches through the adapter. Seeding it now would stack it 5+
+  deep on undispatched predecessors; re-propose once TB-364/TB-365 land.
+- **Operator-rejection pattern (recurring)**: vetoes cluster on (a)
+  symptom-patch remediations without root-cause diagnosis (TB-231) and (b)
+  speculative enumerated-case validators guarding unobserved failures (TB-240,
+  TB-172). This cycle's 4 proposals are neither shape — they're the literal
+  remaining design axes from goal.md L177-183, each repointing an existing
+  dispatch site (no new speculative gate, no symptom-patch). Noting the pattern
+  persists so future cycles keep steering clear.
+- **Stale `test-suite-slowness-2026-05-17.md` insight** (no tldr in the index):
+  a data-quality gap (malformed front matter), but unrelated to the codex
+  focus and the operator has historically rejected off-focus utility work
+  (TB-185) — not worth a slot.
 
 ## Cycle observations
 
-- 2nd consecutive 0-proposal cycle (prior 19:18Z), but a saturation dry-cycle: backlog holds exactly N=2 workable items (TB-358, TB-359) and the only
-  uncovered work (axis-6 tail) is correctly gated on the undispatched canary TB-360.
+- Axis 6 is the focus's final stretch: the 4 seeded migrations (TB-362..TB-365) remain, followed by the deferred mixed-config e2e test.
 
 ## Decisions needed from operator
 
-- None this cycle. Frozen is empty (no retry-exhausted escalations); no unadopted
-  `cron_proposed` events in the recent-events block; the TB-358-class thinking-block-400
-  halt the 17:14Z cycle surfaced is operator-resolved (`auto_approve_window_resume` ack
-  17:51Z, operator_log) and is now additionally covered structurally by TB-356's effort
-  step-down on the thinking-block-400 class.
+- None this cycle. Frozen is empty (no retry-exhausted escalations); no
+  unadopted `cron_proposed` events in the recent-events block; TB-360's 22:38
+  project-wide pytest failure self-resolved (re-verified `complete` at 23:55,
+  drift-gate docstring noise, not a code fault) so no remediation is owed.
 
 ## Proposals this cycle
 
-Backlog already populated; no proposals this cycle.
+- TB-362 — axis-6 migration: verifier prose-judge (`verify._judge_prose_bullet`)
+- TB-363 — axis-6 migration: validator-judge + janitor-judge component calls
+- TB-364 — axis-6 migration: `run_task` (task agents)
+- TB-365 — axis-6 migration: shared `_run_control_agent`
+  (ideation/status_report/cron/mattermost)

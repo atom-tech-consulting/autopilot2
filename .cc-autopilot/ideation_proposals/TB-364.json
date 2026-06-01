@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-363",
+  "briefing_path": ".cc-autopilot/tasks/axis-6-migration-route-run-task-task-age.md",
+  "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "proposed_at": "2026-06-01T01:53:27Z",
+  "tb_id": "TB-364",
+  "why_now": "`run_task` is the highest-traffic dispatch site (every task agent\nruns through it) and the prerequisite for the mixed-config end-to-end Progress\nsignal (`task=codex`, goal.md L211-213) \u2014 codex can never drive a task agent\nuntil this site is adapter-routed. The MCP-tool-registration-through-the-adapter\npath already exists in HEAD (axis 3), as do `select_adapter`, `AgentOptions`,\nand the streaming `AgentAdapter.run`, so the repoint is templated rather than\ngreenfield; deferring it leaves the loop's busiest site assuming the Claude\nstream shape, which compounds every cycle."
+}
