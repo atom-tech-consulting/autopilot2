@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-366** **Consolidate residual claude_agent_sdk imports behind ap2/adapters/; pin with an import-direction gate** `#autopilot` `#adapter` `#codex` `#refactor` `#tests` — Relocate the residual claude_agent_sdk imports out of daemon.py and tools.py behind ap2/adapters/ (preserving the injected-sdk test seam) and add a CI-style import-direction gate, closing the focus's "imported only inside ClaudeCodeAdapter" Progress signal. [→ brief](.cc-autopilot/tasks/consolidate-residual-claude-agent-sdk-im.md)
+- [ ] **TB-367** **Mixed-config end-to-end test: ideation=claude, task=codex through the AgentAdapter** `#autopilot` `#adapter` `#codex` `#e2e` `#tests` — Add a hermetic e2e test that runs one claude-backed and one codex-backed agent kind end-to-end through the adapter (dispatch, tool call, report_result, verify), closing the focus's mixed-config Progress signal now that every dispatch site is adapter-routed. [→ brief](.cc-autopilot/tasks/mixed-config-end-to-end-test-ideation-cl.md)
 
 ## Pipeline Pending
 

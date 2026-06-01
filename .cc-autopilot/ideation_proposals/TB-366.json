@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/consolidate-residual-claude-agent-sdk-im.md",
+  "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "proposed_at": "2026-06-01T04:02:31Z",
+  "tb_id": "TB-366",
+  "why_now": "the dispatch migrations preserved the injected-`sdk` seam by keeping\n`import claude_agent_sdk` in `daemon.py`/`tools.py`, so this Progress signal\nis still red and any future module can silently re-introduce a direct SDK\nimport; landing the import-direction gate now locks in the single-backend-\nsurface invariant the Codex adapter depends on before more code accretes\nagainst the Claude stream shape."
+}
