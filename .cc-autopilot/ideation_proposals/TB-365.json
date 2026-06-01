@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-364",
   "briefing_path": ".cc-autopilot/tasks/axis-6-migration-route-the-shared-run-co.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": "cbcc137",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-06-01T03:36:14Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-01T01:54:31Z",
   "tb_id": "TB-365",
   "why_now": "`_run_control_agent` is the last axis-6 dispatch site still on direct\n`sdk.query`, and it fans out to four control kinds that are otherwise hardwired\nto Claude; migrating it is what makes per-kind backend selection real for the\ncontrol surfaces (e.g. a cheap backend for cron/status-report, the strongest\nfor ideation). The seam it needs already exists in HEAD \u2014 `select_adapter`,\n`AgentOptions`, the streaming `AgentAdapter.run` \u2014 so the repoint is templated;\ncompleting it removes the last direct `sdk.query` dispatch from `ap2/daemon.py`\nand is the prerequisite for the mixed-config end-to-end Progress signal\n(goal.md L211-213)."

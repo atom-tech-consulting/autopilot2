@@ -1395,3 +1395,9 @@
 - **Summary:** Migrated daemon.run_task off direct sdk.query() onto select_adapter("task", cfg) + the streaming AgentAdapter.run, registering the full MCP toolset via AgentTools and preserving every dispatch knob/logging/usage path; full unit suite green (2926 passed).
 - **Files:** ap2/daemon.py, ap2/tests/test_docs_drift.py
 - **Tests:** pass
+
+## [2026-06-01] TB-365: Axis-6 migration: route the shared _run_control_agent through the AgentAdapter
+- **Commit:** `cbcc137`
+- **Summary:** Migrated _run_control_agent off direct sdk.query onto select_adapter(<control_kind>, cfg)+adapter.run; per-kind key derived from label via _control_kind_from_label (signature unchanged so stubs keep working); preserves tool policy/max_turns/model/effort/logging/control_run_usage; last direct sdk.query removed from daemon.py; 2926 tests pass.</summary>
+<parameter name="files_changed">ap2/daemon.py
+- **Tests:** pass
