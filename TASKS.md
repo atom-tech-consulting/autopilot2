@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-369** **Backend-aware daemon-start codex-handle-availability gate — mirror TB-368 for the codex backend** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` `@blocked:TB-368` — When the agent-backend map references codex, the daemon-start gate must verify the codex handle (codex_sdk) is importable and fail fast with a clear diagnostic — today only the Claude SDK is probed (TB-368), so a misconfigured codex deployment starts then crashes cryptically at first dispatch. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-codex-handle.md)
 
 ## Pipeline Pending
 

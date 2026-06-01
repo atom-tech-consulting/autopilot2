@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-368",
+  "briefing_path": ".cc-autopilot/tasks/backend-aware-daemon-start-codex-handle.md",
+  "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "proposed_at": "2026-06-01T08:19:18Z",
+  "tb_id": "TB-369",
+  "why_now": "the Claude-side half of the daemon-start availability gate is in HEAD and explicitly left the codex-side symmetric check out of scope; this is the fresh, direct follow-up that closes the last concrete axis-5 edge case \u2014 without it a pure-codex install fails late and cryptically at first dispatch rather than fast at startup, defeating the focus's promise that switching a kind to codex is a config change, not a debugging session."
+}
