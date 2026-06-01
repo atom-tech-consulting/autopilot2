@@ -113,6 +113,15 @@ _COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset({
     # exercised by `test_agent_backend_selection.py`; mirrors the
     # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` entry.
     "AP2_AGENT_BACKEND_IDEATION_SCRUB",
+    # TB-363: same shape — the validator-judge / janitor-judge axis-6
+    # migration names the concrete `validator_judge` / `janitor_judge` kinds'
+    # overrides literally in `_resolve_validator_judge_adapter` /
+    # `_resolve_janitor_judge_adapter` docstrings, so the regex captures the
+    # fully-qualified literals. The `AP2_AGENT_BACKEND_<KIND>` family is
+    # exercised by `test_agent_backend_selection.py`; mirrors the
+    # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` entries.
+    "AP2_AGENT_BACKEND_VALIDATOR_JUDGE",
+    "AP2_AGENT_BACKEND_JANITOR_JUDGE",
     # TB-323: forward-compat placeholders in
     # `config_compat._KNOBS_STAYING_ENV_ONLY` per goal.md L358 — not
     # currently read in source, documented on the env-only side so a

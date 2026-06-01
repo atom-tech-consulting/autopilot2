@@ -721,6 +721,44 @@ def _build_judge_shared_context(cfg: Config) -> str:
     return "\n".join(parts)
 
 
+def _resolve_janitor_judge_adapter(*, sdk=None, cfg: "Config | None" = None):
+    """Resolve the `AgentAdapter` backing the `janitor_judge` kind (TB-363).
+
+    TB-363 (axis-6 migration): `_judge_finding`'s dispatch routes through the
+    `AgentAdapter` seam instead of calling `sdk.query` directly. The backend is
+    chosen per agent kind by TB-358's `select_adapter` reading the merged
+    `[agent_backends]` config for the `janitor_judge` kind
+    (`AP2_AGENT_BACKEND_JANITOR_JUDGE` env override > `[agent_backends]` table >
+    the all-`claude` default). With the default map the resolved adapter is a
+    `ClaudeCodeAdapter` and the verdict is identical to the pre-migration direct
+    `sdk.query` path; an operator can set `janitor_judge=codex` to route just
+    this judge to the Codex backend while every other kind stays on Claude.
+
+    The resolved adapter wraps the injected `sdk` handle so the janitor's unit
+    tests stay hermetic: tests pass a scripted stub `sdk` exposing
+    `ClaudeAgentOptions` + `query` and the Claude adapter dispatches through it;
+    the daemon passes its already-imported `claude_agent_sdk` module. Only the
+    Claude backend carries an injectable `_sdk`; any other backend ignores it.
+
+    The production `_judge_finding` always threads its real `cfg`, so the
+    per-kind selector runs live; `cfg=None` falls back to a default
+    `ClaudeCodeAdapter` for parity with the canary. Absolute imports (not
+    relative dots) keep the adapter references off this module's import path
+    until dispatch time. Mirrors `ideation_scrub._resolve_scrub_adapter`.
+    """
+    from ap2.adapters.claude_code import ClaudeCodeAdapter
+
+    if cfg is not None:
+        from ap2.adapters.select import select_adapter
+
+        adapter = select_adapter("janitor_judge", cfg)
+    else:
+        adapter = ClaudeCodeAdapter()
+    if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+        adapter._sdk = sdk
+    return adapter
+
+
 async def _judge_finding(
     cfg: Config,
     sdk,
@@ -782,36 +820,55 @@ async def _judge_finding(
     t0 = time.monotonic()
     try:
         effort = _judge_effort(cfg)
-        options = sdk.ClaudeAgentOptions(
+        # TB-363 (axis-6 migration): build a backend-neutral AgentOptions /
+        # AgentTools and dispatch through the AgentAdapter resolved for the
+        # `janitor_judge` kind instead of constructing `sdk.ClaudeAgentOptions`
+        # / consuming `sdk.query` directly. Under the default all-`claude`
+        # `[agent_backends]` map the resolved adapter is a `ClaudeCodeAdapter`
+        # wrapping the injected `sdk` handle, so the verdict is bit-for-bit on
+        # Claude and the hermetic janitor unit tests stay deterministic; an
+        # operator can set `janitor_judge=codex` to route just this judge to the
+        # Codex backend. The Claude adapter's `normalize_options` threads
+        # `effort` straight into `extra_args={"effort": ...}` (the pre-migration
+        # shape). TB-157 usage/cost capture now reads the normalized
+        # `AgentResult.usage` (`stop_reason` off the retained terminal
+        # envelope). Mirrors the ideation_scrub (TB-360) / verifier prose-judge
+        # (TB-362) canary shape.
+        from ap2.adapters.base import AgentOptions, AgentTools
+
+        adapter = _resolve_janitor_judge_adapter(sdk=sdk, cfg=cfg)
+        options = AgentOptions(
             cwd=str(cfg.project_root),
-            allowed_tools=list(JUDGE_REPO_READ_TOOLS),
             permission_mode="bypassPermissions",
             max_turns=_judge_max_turns(cfg),
             setting_sources=["project"],
             # TB-344: schema is the single source of truth for the
             # agent_model default (see CORE_CONFIG_SCHEMA).
             model=cfg.get_core_value("agent_model"),
-            extra_args={"effort": effort},
+            effort=effort,
         )
-        async for msg in sdk.query(prompt=prompt, options=options):
-            content = getattr(msg, "content", None)
-            if isinstance(content, list):
-                for part in content:
-                    t = getattr(part, "text", None)
-                    if isinstance(t, str) and t.strip():
-                        text = t.strip()
-            else:
-                t = getattr(msg, "result", None)
-                if isinstance(t, str) and t.strip():
-                    text = t.strip()
-            for k in ("model", "num_turns", "total_cost_usd", "stop_reason"):
-                v = getattr(msg, k, None)
-                if v is not None:
-                    result_meta[k] = v
-            for k in ("usage", "model_usage"):
-                v = getattr(msg, k, None)
-                if isinstance(v, dict) and v:
-                    result_meta[k] = v
+        tools = AgentTools(allowed=list(JUDGE_REPO_READ_TOOLS))
+        result = await adapter.run_to_result(prompt, tools, options)
+        if result.status in ("error", "timeout"):
+            error_note = f"judge error: {result.error or result.status}"
+        else:
+            text = (result.text or "").strip()
+            usage = result.usage
+            if usage.model:
+                result_meta["model"] = usage.model
+            if usage.num_turns:
+                result_meta["num_turns"] = usage.num_turns
+            if usage.total_cost_usd:
+                result_meta["total_cost_usd"] = usage.total_cost_usd
+            if usage.usage:
+                result_meta["usage"] = usage.usage
+            if usage.model_usage:
+                result_meta["model_usage"] = usage.model_usage
+            raw_result = result.raw_result
+            if raw_result is not None:
+                sr = getattr(raw_result, "stop_reason", None)
+                if sr is not None:
+                    result_meta["stop_reason"] = sr
     except Exception as e:  # noqa: BLE001
         error_note = f"judge error: {type(e).__name__}: {e}"
     duration_s = time.monotonic() - t0

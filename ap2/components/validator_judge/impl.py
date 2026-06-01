@@ -415,6 +415,48 @@ def _slice_briefing_for_dep_judge(briefing_text: str) -> str:
     return "".join(section_slice for _, section_slice, _ in sections)
 
 
+def _resolve_validator_judge_adapter(*, sdk=None, cfg: "Config | None" = None):
+    """Resolve the `AgentAdapter` backing the `validator_judge` kind (TB-363).
+
+    TB-363 (axis-6 migration): `_judge_dep_coherence_default`'s dispatch routes
+    through the `AgentAdapter` seam instead of calling `sdk.query` directly. The
+    backend is chosen per agent kind by TB-358's `select_adapter` reading the
+    merged `[agent_backends]` config for the `validator_judge` kind
+    (`AP2_AGENT_BACKEND_VALIDATOR_JUDGE` env override > `[agent_backends]` table
+    > the all-`claude` default). With the default map the resolved adapter is a
+    `ClaudeCodeAdapter` and the judge's verdict is identical to the
+    pre-migration direct `sdk.query` path; an operator can set
+    `validator_judge=codex` to route just this judge to the Codex backend while
+    every other kind stays on Claude.
+
+    The resolved adapter wraps the injected `sdk` handle so the judge's
+    hermetic unit tests stay deterministic: the TB-269 / TB-270 fake-SDK tests
+    install a fake `claude_agent_sdk` module (captured by the
+    `import claude_agent_sdk as sdk` in `_judge_dep_coherence_default`) and the
+    Claude adapter dispatches through it. Only the Claude backend carries an
+    injectable `_sdk`; any other backend ignores it.
+
+    `cfg=None` is the seam `_judge_dep_coherence_default` hits — it carries no
+    `Config`, so it falls back to a default `ClaudeCodeAdapter`, matching the
+    all-`claude` default `select_adapter` would resolve with a Config in hand.
+    Absolute imports (not relative dots) keep the adapter references resolving
+    against the `ap2` package post-TB-316 relocation, and stay off this
+    module's import path until dispatch time. Mirrors
+    `ideation_scrub._resolve_scrub_adapter` (the axis-6 canary).
+    """
+    from ap2.adapters.claude_code import ClaudeCodeAdapter
+
+    if cfg is not None:
+        from ap2.adapters.select import select_adapter
+
+        adapter = select_adapter("validator_judge", cfg)
+    else:
+        adapter = ClaudeCodeAdapter()
+    if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+        adapter._sdk = sdk
+    return adapter
+
+
 def _judge_dep_coherence_default(
     *,
     briefing_text: str,
@@ -468,6 +510,15 @@ def _judge_dep_coherence_default(
         import claude_agent_sdk as sdk
     except Exception:
         return _DepJudgeOutcome(data=None, parse_error=None, dump_path=None)
+
+    # TB-363 (axis-6 migration): resolve the AgentAdapter for the
+    # `validator_judge` kind and dispatch through it (below) instead of
+    # calling `sdk.query` directly. `_judge_dep_coherence_default` carries no
+    # `cfg`, so this hits the `cfg=None` seam → a default `ClaudeCodeAdapter`
+    # (what the all-`claude` map resolves anyway) wrapping the `sdk` handle
+    # imported above, so the hermetic fake-SDK unit tests (TB-269 / TB-270)
+    # stay deterministic and Claude behavior is bit-for-bit unchanged.
+    adapter = _resolve_validator_judge_adapter(sdk=sdk, cfg=None)
 
     # TB-247: tightened final-message contract. Pre-TB-247 the prompt
     # asked for "strict JSON" but did NOT forbid markdown code fences,
@@ -537,24 +588,32 @@ def _judge_dep_coherence_default(
         # 100% non-functional (every call failed, fail-open path
         # swallowed it). Budget is enforced via `max_turns` — SDK-
         # native primitive every other ap2 call site uses.
-        options = sdk.ClaudeAgentOptions(
+        #
+        # TB-363 (axis-6 migration): the judge no longer constructs
+        # `sdk.ClaudeAgentOptions` / consumes `sdk.query` directly — it builds
+        # a backend-neutral `AgentOptions` / `AgentTools` and dispatches through
+        # the `AgentAdapter` resolved for the `validator_judge` kind (`adapter`,
+        # above). Under the default all-`claude` `[agent_backends]` map the
+        # resolved adapter is a `ClaudeCodeAdapter` wrapping the `sdk` handle, so
+        # this stays bit-for-bit on Claude and hermetic under the fake-SDK unit
+        # tests. The outer `asyncio.wait_for(..., timeout=timeout_s)` below still
+        # owns the timeout (so `AgentOptions.timeout_s` is left unset to avoid
+        # double-bounding); a backend fault surfaces as a non-`complete`
+        # `AgentResult.status`, re-raised here so the worker maps it onto the
+        # existing SDK-exception fail-open branch.
+        from ap2.adapters.base import AgentOptions, AgentTools
+
+        options = AgentOptions(
             permission_mode="bypassPermissions",
             max_turns=max_turns,
             model=_VALIDATOR_JUDGE_MODEL,
         )
-        text = ""
-        async for msg in sdk.query(prompt=prompt, options=options):
-            content = getattr(msg, "content", None)
-            if isinstance(content, list):
-                for part in content:
-                    t = getattr(part, "text", None)
-                    if isinstance(t, str) and t.strip():
-                        text = t.strip()
-            else:
-                t = getattr(msg, "result", None)
-                if isinstance(t, str) and t.strip():
-                    text = t.strip()
-        return text
+        result = await adapter.run_to_result(prompt, AgentTools(), options)
+        if result.status != "complete":
+            raise RuntimeError(
+                result.error or f"validator judge adapter {result.status}"
+            )
+        return (result.text or "").strip()
 
     # If we're already inside a running event loop (the daemon's tick
     # is async and calls sync MCP-tool handlers; e2e tests likewise
