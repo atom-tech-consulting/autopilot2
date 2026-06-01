@@ -1401,3 +1401,9 @@
 - **Summary:** Migrated _run_control_agent off direct sdk.query onto select_adapter(<control_kind>, cfg)+adapter.run; per-kind key derived from label via _control_kind_from_label (signature unchanged so stubs keep working); preserves tool policy/max_turns/model/effort/logging/control_run_usage; last direct sdk.query removed from daemon.py; 2926 tests pass.</summary>
 <parameter name="files_changed">ap2/daemon.py
 - **Tests:** pass
+
+## [2026-06-01] TB-366: Consolidate residual claude_agent_sdk imports behind ap2/adapters/; pin with an import-direction gate
+- **Commit:** `f2edcf4`
+- **Summary:** Relocated the residual claude_agent_sdk imports out of daemon.py/tools.py/validator_judge/impl.py behind ap2/adapters/ (new load_claude_sdk() handle + lazy `tool` re-export via PEP 562 __getattr__), preserving the injected-SDK hermetic-test seam bit-for-bit, and added an AST-based import-direction gate (test_sdk_import_boundary.py); full suite green (2933 passed).
+- **Files:** ap2/adapters/__init__.py, ap2/adapters/claude_code.py, ap2/daemon.py, ap2/tools.py, ap2/components/validator_judge/impl.py, ap2/tests/test_sdk_import_boundary.py
+- **Tests:** pass
