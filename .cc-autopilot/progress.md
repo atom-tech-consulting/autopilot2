@@ -1389,3 +1389,9 @@
 - **Summary:** Routed validator-judge (_judge_dep_coherence_default) and janitor-judge (_judge_finding) off direct sdk.query onto select_adapter + adapter.run_to_result; preserves Claude behavior bit-for-bit; full unit suite green (2926 passed).
 - **Files:** ap2/components/validator_judge/impl.py, ap2/components/janitor/impl.py, ap2/tests/test_docs_drift.py, ap2/tests/test_coverage_drift.py
 - **Tests:** pass
+
+## [2026-06-01] TB-364: Axis-6 migration: route run_task (task agents) through the AgentAdapter
+- **Commit:** `18107a9`
+- **Summary:** Migrated daemon.run_task off direct sdk.query() onto select_adapter("task", cfg) + the streaming AgentAdapter.run, registering the full MCP toolset via AgentTools and preserving every dispatch knob/logging/usage path; full unit suite green (2926 passed).
+- **Files:** ap2/daemon.py, ap2/tests/test_docs_drift.py
+- **Tests:** pass
