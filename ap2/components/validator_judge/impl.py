@@ -506,8 +506,18 @@ def _judge_dep_coherence_default(
     """
     import asyncio
 
+    # TB-366: source the (possibly test-injected) SDK module through the
+    # adapter layer (`ap2.adapters.load_claude_sdk`) rather than a bare
+    # `import claude_agent_sdk as sdk` here, so `claude_agent_sdk` is imported
+    # only inside `ap2/adapters/` (the import-direction gate). The injected
+    # fake-SDK seam is preserved: `load_claude_sdk` resolves the import
+    # against `sys.modules`, so the TB-269 / TB-270 hermetic tests that
+    # `monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake)` are still
+    # captured here and wrapped into the default `ClaudeCodeAdapter` below.
+    from ap2.adapters import load_claude_sdk
+
     try:
-        import claude_agent_sdk as sdk
+        sdk = load_claude_sdk()
     except Exception:
         return _DepJudgeOutcome(data=None, parse_error=None, dump_path=None)
 

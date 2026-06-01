@@ -1924,7 +1924,16 @@ async def main_loop(cfg: Config) -> None:
         events.append(cfg.events_file, "cron_bootstrap", path=str(cfg.cron_file))
     _recover_orphans(cfg)
     _import_sdk_or_die()
-    import claude_agent_sdk as sdk  # type: ignore
+    # TB-366: source the raw SDK module handle through the adapter layer
+    # (`ap2.adapters.load_claude_sdk`) rather than a bare
+    # `import claude_agent_sdk as sdk` here, so the only place
+    # `claude_agent_sdk` is imported is `ap2/adapters/`. The handle is still
+    # threaded as the injected-SDK seam — `run_task` / `_run_control_agent`
+    # wrap it in a `ClaudeCodeAdapter` and `status_report.configure` stashes
+    # it — preserved bit-for-bit, just relocated behind the adapter boundary.
+    from .adapters import load_claude_sdk
+
+    sdk = load_claude_sdk()
 
     mcp_server = build_mcp_server(cfg)
     # TB-144: hand the MCP tool surface a reference to the daemon's SDK
@@ -2802,8 +2811,15 @@ from .watchdog import (
 )
 
 def _import_sdk_or_die() -> None:
+    # TB-366: route the SDK-availability gate through the adapter layer
+    # (`ap2.adapters.load_claude_sdk`) instead of a bare
+    # `import claude_agent_sdk` here, so `claude_agent_sdk` is imported only
+    # inside `ap2/adapters/`. Behavior is unchanged: a missing SDK still
+    # prints the install hint and exits 1.
+    from .adapters import load_claude_sdk
+
     try:
-        import claude_agent_sdk  # noqa: F401
+        load_claude_sdk()
     except ImportError:
         print(
             "Error: claude-agent-sdk not installed. "

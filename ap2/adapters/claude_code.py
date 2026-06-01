@@ -50,6 +50,30 @@ from .base import (
 )
 
 
+def load_claude_sdk() -> Any:
+    """Import and return the `claude_agent_sdk` module.
+
+    TB-366: the single relocation point for the residual
+    `import claude_agent_sdk` statements that used to live across non-adapter
+    source (`daemon.py`'s startup availability gate + the `sdk` handle it
+    threads as the injected-test seam, `validator_judge/impl.py`'s hermetic
+    fake-SDK capture). Routing those through this helper keeps
+    `claude_agent_sdk` imported only inside `ap2/adapters/`, which the
+    import-direction gate (`test_sdk_import_boundary.py`) pins.
+
+    The import is resolved at call time against `sys.modules`, so a test that
+    installs a fake `claude_agent_sdk` module (via
+    `monkeypatch.setitem(sys.modules, "claude_agent_sdk", fake)`) still has
+    its fake picked up here — the injected-SDK seam is preserved bit-for-bit,
+    just relocated behind the adapter boundary. The import is lazy (inside the
+    function body) so importing `ap2.adapters` does not require the SDK to be
+    installed.
+    """
+    import claude_agent_sdk as sdk  # type: ignore
+
+    return sdk
+
+
 class ClaudeCodeAdapter(AgentAdapter):
     """`AgentAdapter` implementation driving the bundled Claude Code binary
     via `claude_agent_sdk.query()`.
@@ -69,9 +93,7 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def _get_sdk(self) -> Any:
         if self._sdk is None:
-            import claude_agent_sdk as sdk  # type: ignore
-
-            self._sdk = sdk
+            self._sdk = load_claude_sdk()
         return self._sdk
 
     def normalize_options(self, options: AgentOptions) -> dict[str, Any]:

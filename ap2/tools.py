@@ -684,7 +684,11 @@ def build_mcp_server(cfg: Config, adapter=None):
     `ClaudeCodeAdapter`; callers (e.g. the axis-3 contract test) may pass their
     own instance to inspect that enumeration.
     """
-    from claude_agent_sdk import tool
+    # TB-366: import the `@tool` schema decorator from the adapter layer (a
+    # lazy re-export of `claude_agent_sdk.tool`) rather than from
+    # `claude_agent_sdk` directly, so the SDK is imported only inside
+    # `ap2/adapters/` (the import-direction gate `test_sdk_import_boundary`).
+    from .adapters import tool
 
     @tool(
         "board_edit",
