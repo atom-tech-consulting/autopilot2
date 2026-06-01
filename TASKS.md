@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-369** **Backend-aware daemon-start codex-handle-availability gate — mirror TB-368 for the codex backend** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` `@blocked:TB-368` — When the agent-backend map references codex, the daemon-start gate must verify the codex handle (codex_sdk) is importable and fail fast with a clear diagnostic — today only the Claude SDK is probed (TB-368), so a misconfigured codex deployment starts then crashes cryptically at first dispatch. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-codex-handle.md)
 
 ## Pipeline Pending
 
@@ -254,5 +253,6 @@
 - [x] **TB-366** **Consolidate residual claude_agent_sdk imports behind ap2/adapters/; pin with an import-direction gate** `#autopilot` `#adapter` `#codex` `#refactor` `#tests` — Relocate the residual claude_agent_sdk imports out of daemon.py and tools.py behind ap2/adapters/ (preserving the injected-sdk test seam) and add a CI-style import-direction gate, closing the focus's "imported only inside ClaudeCodeAdapter" Progress signal. [→ brief](.cc-autopilot/tasks/consolidate-residual-claude-agent-sdk-im.md)
 - [x] **TB-367** **Mixed-config end-to-end test: ideation=claude, task=codex through the AgentAdapter** `#autopilot` `#adapter` `#codex` `#e2e` `#tests` — Add a hermetic e2e test that runs one claude-backed and one codex-backed agent kind end-to-end through the adapter (dispatch, tool call, report_result, verify), closing the focus's mixed-config Progress signal now that every dispatch site is adapter-routed. [→ brief](.cc-autopilot/tasks/mixed-config-end-to-end-test-ideation-cl.md)
 - [x] **TB-368** **Backend-aware daemon-start SDK-availability gate — pure-codex config must not require claude_agent_sdk** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` — main_loop unconditionally calls _import_sdk_or_die()/load_claude_sdk() at startup, so a pure-codex backend map still hard-fails without claude_agent_sdk; make the SDK-availability gate backend-aware to mirror the existing credential gate. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-sdk-availabil.md)
+- [x] **TB-369** **Backend-aware daemon-start codex-handle-availability gate — mirror TB-368 for the codex backend** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` `@blocked:TB-368` — When the agent-backend map references codex, the daemon-start gate must verify the codex handle (codex_sdk) is importable and fail fast with a clear diagnostic — today only the Claude SDK is probed (TB-368), so a misconfigured codex deployment starts then crashes cryptically at first dispatch. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-codex-handle.md)
 
 ## Frozen

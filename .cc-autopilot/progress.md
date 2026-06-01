@@ -1419,3 +1419,9 @@
 - **Summary:** Made the daemon-start SDK-availability gate backend-aware via a shared ap2.adapters.referenced_backends helper; pure-codex map skips the Claude SDK import (sdk=None), all-claude default still hard-fails when claude_agent_sdk is missing. New test file plus full suite (2941) pass.
 - **Files:** ap2/daemon.py, ap2/adapters/select.py, ap2/adapters/__init__.py, ap2/tests/test_tb368_backend_aware_sdk_gate.py
 - **Tests:** pass
+
+## [2026-06-01] TB-369: Backend-aware daemon-start codex-handle-availability gate — mirror TB-368 for the codex backend
+- **Commit:** `f8824c3`
+- **Summary:** Added a symmetric daemon-start codex-handle-availability gate: new patchable load_codex_sdk() seam in ap2/adapters/codex.py (routed through CodexAdapter._get_codex and re-exported from ap2/adapters), plus daemon._require_codex_handle_if_referenced(cfg) wired into main_loop beside the Claude gate — it consults referenced_backends(cfg) and only probes/sys.exit(1)s when codex is referenced and the handle is unimportable, leaving the all-claude default unaffected.
+- **Files:** ap2/adapters/codex.py, ap2/adapters/__init__.py, ap2/daemon.py, ap2/tests/test_tb369_codex_availability_gate.py
+- **Tests:** pass
