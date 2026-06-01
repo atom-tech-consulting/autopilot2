@@ -63,6 +63,28 @@ _ADAPTER_BY_BACKEND: dict[str, type[AgentAdapter]] = {
 }
 
 
+def referenced_backends(cfg: "Config") -> set[str]:
+    """Return the set of *effective* backends the per-kind map references.
+
+    Walks `AGENT_KINDS`, resolves each kind via `cfg.get_agent_backend(kind)`,
+    and normalizes any non-`codex` id to `"claude"` — the same default
+    `select_adapter` applies (an unknown backend id degrades to the Claude
+    adapter), and the same normalization the daemon-start credential gate
+    (`cli_daemon._require_oauth_token`'s `_effective` helper) uses. So the
+    all-claude default returns `{"claude"}`, a pure-codex map returns
+    `{"codex"}`, and a mixed map returns `{"claude", "codex"}`.
+
+    Both daemon-start gates consume this so they agree on which backends the
+    map references: the credential gate to demand each backend's creds, and the
+    SDK-availability gate (`daemon.main_loop`, TB-368) to import the Claude SDK
+    only when at least one kind resolves to `claude`.
+    """
+    return {
+        "codex" if cfg.get_agent_backend(k) == "codex" else "claude"
+        for k in AGENT_KINDS
+    }
+
+
 def select_adapter(kind: str, cfg: "Config") -> AgentAdapter:
     """Return the `AgentAdapter` instance backing agent `kind` under `cfg`.
 

@@ -1923,17 +1923,15 @@ async def main_loop(cfg: Config) -> None:
     if bootstrap_cron(cfg.cron_file):
         events.append(cfg.events_file, "cron_bootstrap", path=str(cfg.cron_file))
     _recover_orphans(cfg)
-    _import_sdk_or_die()
-    # TB-366: source the raw SDK module handle through the adapter layer
-    # (`ap2.adapters.load_claude_sdk`) rather than a bare
-    # `import claude_agent_sdk as sdk` here, so the only place
-    # `claude_agent_sdk` is imported is `ap2/adapters/`. The handle is still
-    # threaded as the injected-SDK seam — `run_task` / `_run_control_agent`
-    # wrap it in a `ClaudeCodeAdapter` and `status_report.configure` stashes
-    # it — preserved bit-for-bit, just relocated behind the adapter boundary.
-    from .adapters import load_claude_sdk
-
-    sdk = load_claude_sdk()
+    # TB-368: gate the startup SDK-availability check behind the resolved
+    # per-kind backend set, mirroring the credential gate
+    # (`cli_daemon._require_oauth_token`). The Claude SDK is imported (and its
+    # absence is fatal) only when at least one kind resolves to `claude`; a
+    # pure-codex map skips the import and starts cleanly. `sdk` is `None` in
+    # that case — the Claude dispatch paths are unreachable so the handle is
+    # never used (`run_task` / `_run_control_agent` already guard `sdk is not
+    # None`, and `status_report.configure` tolerates `None`).
+    sdk = _load_claude_sdk_if_referenced(cfg)
 
     mcp_server = build_mcp_server(cfg)
     # TB-144: hand the MCP tool surface a reference to the daemon's SDK
@@ -2827,6 +2825,35 @@ def _import_sdk_or_die() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+def _load_claude_sdk_if_referenced(cfg: Config):
+    """Backend-aware daemon-start SDK-availability gate (TB-368).
+
+    Mirrors the credential gate (`cli_daemon._require_oauth_token`): resolve the
+    per-kind backend map via the shared `ap2.adapters.referenced_backends`
+    helper and only require/import the Claude SDK when at least one kind
+    resolves to `claude`.
+
+    Returns the raw `claude_agent_sdk` module handle (the injected-SDK seam
+    threaded into `status_report.configure` / `run_task` / `_run_control_agent`)
+    when `claude` is referenced, or `None` when no kind resolves to `claude` so
+    a pure-codex install starts without `claude_agent_sdk` installed. When
+    `claude` IS referenced but the SDK is missing, `_import_sdk_or_die` prints
+    the install hint and `sys.exit(1)`s — preserving today's behavior
+    bit-for-bit for the all-claude default.
+    """
+    from .adapters import load_claude_sdk, referenced_backends
+
+    if "claude" not in referenced_backends(cfg):
+        return None
+    _import_sdk_or_die()
+    # TB-366: source the raw SDK module handle through the adapter layer rather
+    # than a bare `import claude_agent_sdk as sdk`, so `claude_agent_sdk` is
+    # imported only inside `ap2/adapters/`. The handle is threaded as the
+    # injected-SDK seam, preserved bit-for-bit, just relocated behind the
+    # adapter boundary.
+    return load_claude_sdk()
 
 
 def run(project_root: str | None = None) -> None:
