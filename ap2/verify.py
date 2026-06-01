@@ -590,47 +590,93 @@ async def _judge_prose_bullet(
         # The judge can take a few tool roundtrips (Grep → Read) before
         # emitting its final verdict, so allow a handful of turns. The
         # tools are read-only and scoped to project_root via cwd.
-        options = sdk.ClaudeAgentOptions(
+        #
+        # TB-362 (axis-6 migration): the judge no longer constructs
+        # `sdk.ClaudeAgentOptions` / consumes the SDK stream directly — it
+        # builds a backend-neutral `AgentOptions` / `AgentTools` and dispatches
+        # through the `AgentAdapter` resolved for the `verifier_judge` kind
+        # (`select_adapter("verifier_judge", cfg)`). Under the default
+        # all-`claude` `[agent_backends]` map the resolved adapter is a
+        # `ClaudeCodeAdapter` wrapping the injected `sdk` handle, so this stays
+        # hermetic on the unit-test seam and bit-for-bit on Claude; an operator
+        # can set `verifier_judge=codex` to route just this judge to the Codex
+        # backend while every other kind stays on Claude. Late-import the
+        # adapters package so `verify.py`'s import path stays light. The shape
+        # mirrors `ideation_scrub._resolve_scrub_adapter` / `_run_scrub` (the
+        # axis-6 canary).
+        from .adapters.base import AgentOptions, AgentTools
+        from .adapters.claude_code import ClaudeCodeAdapter
+
+        if cfg is not None:
+            from .adapters.select import select_adapter
+
+            adapter = select_adapter("verifier_judge", cfg)
+        else:
+            # cfg=None seam (kept for parity with the canary): default to the
+            # Claude adapter the all-`claude` map would resolve anyway, so the
+            # existing hermetic unit tests stay deterministic.
+            adapter = ClaudeCodeAdapter()
+        # The resolved Claude adapter wraps the injected `sdk` handle so the
+        # hermetic prose-judge unit tests stay deterministic (they pass a stub
+        # `sdk` exposing `ClaudeAgentOptions` + `query`); the daemon passes its
+        # already-imported `claude_agent_sdk` module. Only the Claude backend
+        # carries an injectable handle — any other backend ignores it.
+        if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+            adapter._sdk = sdk
+
+        options = AgentOptions(
             cwd=str(project_root),
-            allowed_tools=list(JUDGE_REPO_READ_TOOLS),
             permission_mode="bypassPermissions",
             max_turns=int(cfg.get_core_value("verify_judge_max_turns", default=20)),
             setting_sources=["project"],
             # TB-344: schema is the single source of truth for the
             # agent_model default (see CORE_CONFIG_SCHEMA).
             model=cfg.get_core_value("agent_model"),
-            extra_args={"effort": effort},
+            effort=effort,
         )
-        text = ""
-        # TB-157: capture usage / cost / model / num_turns from the
-        # ResultMessage(s) so the per-judge call can be costed independently
-        # of the daemon's `_log_message` path (which `_judge_prose_bullet`
-        # bypasses).
+        tools = AgentTools(allowed=list(JUDGE_REPO_READ_TOOLS))
+
+        # TB-157: capture usage / cost / model / num_turns for the per-judge
+        # cost accounting (the judge bypasses the daemon's `_log_message`
+        # path). TB-362: these now come off the adapter's normalized
+        # `AgentResult.usage` rather than walking raw `ResultMessage`
+        # envelopes; `stop_reason` (absent from the normalized usage record)
+        # is read off the terminal envelope the adapter retains on
+        # `raw_result`.
         result_meta: dict = {}
         t0 = time.monotonic()
-        async for msg in sdk.query(prompt=prompt, options=options):
-            content = getattr(msg, "content", None)
-            if isinstance(content, list):
-                for part in content:
-                    t = getattr(part, "text", None)
-                    if isinstance(t, str) and t.strip():
-                        text = t.strip()
-            else:
-                t = getattr(msg, "result", None)
-                if isinstance(t, str) and t.strip():
-                    text = t.strip()
-            # ResultMessage carries the usage / cost / model fields. We
-            # accept ANY message that has them so a transport that buries
-            # the totals in a non-standard envelope doesn't lose data.
-            for k in ("model", "num_turns", "total_cost_usd", "stop_reason"):
-                v = getattr(msg, k, None)
-                if v is not None:
-                    result_meta[k] = v
-            for k in ("usage", "model_usage"):
-                v = getattr(msg, k, None)
-                if isinstance(v, dict) and v:
-                    result_meta[k] = v
+        result = await adapter.run_to_result(prompt, tools, options)
         duration_s = time.monotonic() - t0
+
+        # A backend error / timeout surfaces as a non-`complete` status with
+        # the `"<Type>: <msg>"` string on `.error` (`run_to_result` folds in
+        # the `asyncio.wait_for` error handling the direct consume loop used to
+        # get from the surrounding `try`/`except`). Preserve the pre-migration
+        # `unverified` fallback so a judge fault never fails the whole
+        # verification.
+        if result.status in ("error", "timeout"):
+            return CriterionResult(
+                bullet=bullet.text, kind="prose", status="unverified",
+                notes=f"judge error: {result.error or result.status}",
+            )
+
+        text = (result.text or "").strip()
+        usage = result.usage
+        if usage.model:
+            result_meta["model"] = usage.model
+        if usage.num_turns:
+            result_meta["num_turns"] = usage.num_turns
+        if usage.total_cost_usd:
+            result_meta["total_cost_usd"] = usage.total_cost_usd
+        if usage.usage:
+            result_meta["usage"] = usage.usage
+        if usage.model_usage:
+            result_meta["model_usage"] = usage.model_usage
+        raw_result = result.raw_result
+        if raw_result is not None:
+            sr = getattr(raw_result, "stop_reason", None)
+            if sr is not None:
+                result_meta["stop_reason"] = sr
     except Exception as e:  # noqa: BLE001
         return CriterionResult(
             bullet=bullet.text, kind="prose", status="unverified",
