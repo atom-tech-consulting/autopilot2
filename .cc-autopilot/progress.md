@@ -1407,3 +1407,9 @@
 - **Summary:** Relocated the residual claude_agent_sdk imports out of daemon.py/tools.py/validator_judge/impl.py behind ap2/adapters/ (new load_claude_sdk() handle + lazy `tool` re-export via PEP 562 __getattr__), preserving the injected-SDK hermetic-test seam bit-for-bit, and added an AST-based import-direction gate (test_sdk_import_boundary.py); full suite green (2933 passed).
 - **Files:** ap2/adapters/__init__.py, ap2/adapters/claude_code.py, ap2/daemon.py, ap2/tools.py, ap2/components/validator_judge/impl.py, ap2/tests/test_sdk_import_boundary.py
 - **Tests:** pass
+
+## [2026-06-01] TB-367: Mixed-config end-to-end test: ideation=claude, task=codex through the AgentAdapter
+- **Commit:** `e927df5`
+- **Summary:** Added hermetic mixed-config e2e test (ideation=claude via [agent_backends] table, task=codex via AP2_AGENT_BACKEND_TASK env override) driving each kind through the AgentAdapter seam end-to-end and asserting report_result round-trips + verify/cost read one normalized AgentResult/AgentUsage shape across both backends; full suite green (2936 passed).
+- **Files:** ap2/tests/e2e/test_mixed_backend_end_to_end.py
+- **Tests:** pass

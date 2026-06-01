@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/mixed-config-end-to-end-test-ideation-cl.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": "e927df5",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-06-01T04:49:33Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-01T04:03:42Z",
   "tb_id": "TB-367",
   "why_now": "with axis 6's per-kind dispatch-site migrations complete, every\nagent kind dispatches through the adapter for the first time, so a mixed\n(`claude` + `codex`) configuration is end-to-end testable at last; a\ncross-backend integration regression would otherwise stay invisible until a\nlive mixed deployment broke in production."
