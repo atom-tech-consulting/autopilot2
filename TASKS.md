@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-368** **Backend-aware daemon-start SDK-availability gate — pure-codex config must not require claude_agent_sdk** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` — main_loop unconditionally calls _import_sdk_or_die()/load_claude_sdk() at startup, so a pure-codex backend map still hard-fails without claude_agent_sdk; make the SDK-availability gate backend-aware to mirror the existing credential gate. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-sdk-availabil.md)
 
 ## Pipeline Pending
 
@@ -253,5 +252,6 @@
 - [x] **TB-365** **Axis-6 migration: route the shared _run_control_agent through the AgentAdapter** `#autopilot` `#agent-adapter` `#codex` `#control-agent` `#axis-6` `#migration` `@blocked:TB-364` — Axis-6 migration: repoint daemon._run_control_agent off direct sdk.query through select_adapter(control_kind, cfg) + the streaming adapter.run, unlocking per-kind backend selection for ideation/status_report/cron/mattermost and preserving Claude behavior. [→ brief](.cc-autopilot/tasks/axis-6-migration-route-the-shared-run-co.md)
 - [x] **TB-366** **Consolidate residual claude_agent_sdk imports behind ap2/adapters/; pin with an import-direction gate** `#autopilot` `#adapter` `#codex` `#refactor` `#tests` — Relocate the residual claude_agent_sdk imports out of daemon.py and tools.py behind ap2/adapters/ (preserving the injected-sdk test seam) and add a CI-style import-direction gate, closing the focus's "imported only inside ClaudeCodeAdapter" Progress signal. [→ brief](.cc-autopilot/tasks/consolidate-residual-claude-agent-sdk-im.md)
 - [x] **TB-367** **Mixed-config end-to-end test: ideation=claude, task=codex through the AgentAdapter** `#autopilot` `#adapter` `#codex` `#e2e` `#tests` — Add a hermetic e2e test that runs one claude-backed and one codex-backed agent kind end-to-end through the adapter (dispatch, tool call, report_result, verify), closing the focus's mixed-config Progress signal now that every dispatch site is adapter-routed. [→ brief](.cc-autopilot/tasks/mixed-config-end-to-end-test-ideation-cl.md)
+- [x] **TB-368** **Backend-aware daemon-start SDK-availability gate — pure-codex config must not require claude_agent_sdk** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` — main_loop unconditionally calls _import_sdk_or_die()/load_claude_sdk() at startup, so a pure-codex backend map still hard-fails without claude_agent_sdk; make the SDK-availability gate backend-aware to mirror the existing credential gate. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-sdk-availabil.md)
 
 ## Frozen

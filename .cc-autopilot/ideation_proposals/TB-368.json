@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/backend-aware-daemon-start-sdk-availabil.md",
   "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "outcome": {
+    "commit": "e3d1faa",
+    "decision_actor": "daemon",
+    "decision_kind": "completed",
+    "decision_ts": "2026-06-01T06:32:11Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-01T06:12:23Z",
   "tb_id": "TB-368",
   "why_now": "the SDK-import gate is the one remaining unconditional Claude dependency\nat startup now that the dispatch path carries no direct `sdk.query` / `import\nclaude_agent_sdk` \u2014 so a pure-codex install, the extreme the per-kind selection\naxis exists to support, still cannot start the daemon, which is the literal\nfailure mode this task closes."

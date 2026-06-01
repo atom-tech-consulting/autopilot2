@@ -1413,3 +1413,9 @@
 - **Summary:** Added hermetic mixed-config e2e test (ideation=claude via [agent_backends] table, task=codex via AP2_AGENT_BACKEND_TASK env override) driving each kind through the AgentAdapter seam end-to-end and asserting report_result round-trips + verify/cost read one normalized AgentResult/AgentUsage shape across both backends; full suite green (2936 passed).
 - **Files:** ap2/tests/e2e/test_mixed_backend_end_to_end.py
 - **Tests:** pass
+
+## [2026-06-01] TB-368: Backend-aware daemon-start SDK-availability gate — pure-codex config must not require claude_agent_sdk
+- **Commit:** `e3d1faa`
+- **Summary:** Made the daemon-start SDK-availability gate backend-aware via a shared ap2.adapters.referenced_backends helper; pure-codex map skips the Claude SDK import (sdk=None), all-claude default still hard-fails when claude_agent_sdk is missing. New test file plus full suite (2941) pass.
+- **Files:** ap2/daemon.py, ap2/adapters/select.py, ap2/adapters/__init__.py, ap2/tests/test_tb368_backend_aware_sdk_gate.py
+- **Tests:** pass
