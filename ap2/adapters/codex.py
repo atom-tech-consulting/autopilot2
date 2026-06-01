@@ -66,6 +66,27 @@ from .base import (
 )
 
 
+def load_codex_sdk() -> Any:
+    """Import and return the `codex_sdk` module.
+
+    TB-369: the single relocation point for the lazy `import codex_sdk` that
+    `CodexAdapter._get_codex()` used to do inline. Routing both the adapter and
+    the daemon-start codex-availability gate
+    (`daemon._require_codex_handle_if_referenced`) through this one helper means
+    they agree, bit-for-bit, on what "codex is available" means — the exact
+    mirror of `claude_code.load_claude_sdk` for the Claude SDK gate.
+
+    The import is resolved at call time against `sys.modules`, so a test that
+    installs a fake `codex_sdk` module (via `monkeypatch.setitem(sys.modules,
+    "codex_sdk", fake)`) still has its fake picked up here — the injected-handle
+    seam is preserved. The import is lazy (inside the function body) so importing
+    `ap2.adapters` does not require the codex SDK to be installed.
+    """
+    import codex_sdk as codex  # type: ignore
+
+    return codex
+
+
 # --------------------------------------------------------------------------
 # codex stream-envelope normalization
 #
@@ -247,9 +268,11 @@ class CodexAdapter(AgentAdapter):
 
     def _get_codex(self) -> Any:
         if self._codex is None:
-            import codex_sdk as codex  # type: ignore
-
-            self._codex = codex
+            # TB-369: resolve the codex handle through the module-level
+            # `load_codex_sdk` seam (sibling to `claude_code.load_claude_sdk`)
+            # so the adapter and the daemon-start codex-availability gate agree
+            # on what "codex is available" means.
+            self._codex = load_codex_sdk()
         return self._codex
 
     def normalize_options(self, options: AgentOptions) -> dict[str, Any]:

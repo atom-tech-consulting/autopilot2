@@ -25,7 +25,7 @@ from .base import (
     usage_from_summary,
 )
 from .claude_code import ClaudeCodeAdapter, load_claude_sdk
-from .codex import CodexAdapter
+from .codex import CodexAdapter, load_codex_sdk
 from .select import AGENT_KINDS, referenced_backends, select_adapter
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     "ClaudeCodeAdapter",
     "CodexAdapter",
     "load_claude_sdk",
+    "load_codex_sdk",
     "referenced_backends",
     "select_adapter",
     "usage_from_summary",

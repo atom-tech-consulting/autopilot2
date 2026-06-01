@@ -1932,6 +1932,13 @@ async def main_loop(cfg: Config) -> None:
     # never used (`run_task` / `_run_control_agent` already guard `sdk is not
     # None`, and `status_report.configure` tolerates `None`).
     sdk = _load_claude_sdk_if_referenced(cfg)
+    # TB-369: symmetric codex-side availability gate. When the resolved backend
+    # set references codex, verify the codex handle (codex_sdk) is importable so
+    # a misconfigured codex deployment fails fast at startup with an actionable
+    # message instead of crashing cryptically at first dispatch. An all-claude
+    # map skips this probe entirely (zero behavior change for current
+    # operators).
+    _require_codex_handle_if_referenced(cfg)
 
     mcp_server = build_mcp_server(cfg)
     # TB-144: hand the MCP tool surface a reference to the daemon's SDK
@@ -2854,6 +2861,51 @@ def _load_claude_sdk_if_referenced(cfg: Config):
     # injected-SDK seam, preserved bit-for-bit, just relocated behind the
     # adapter boundary.
     return load_claude_sdk()
+
+
+def _require_codex_handle_if_referenced(cfg: Config) -> None:
+    """Backend-aware daemon-start codex-handle-availability gate (TB-369).
+
+    The symmetric mirror of `_load_claude_sdk_if_referenced` for the codex
+    backend. Resolves the per-kind backend map via the same shared
+    `ap2.adapters.referenced_backends` helper the Claude gate and the credential
+    gate (`cli_daemon._require_oauth_token`) agree on, and probes the codex
+    handle ONLY when at least one kind resolves to `codex`.
+
+    `CodexAdapter` lazily imports its handle (`ap2.adapters.load_codex_sdk`, the
+    relocated `import codex_sdk`) only at first dispatch, so without this gate a
+    pure- or mixed-codex map with `OPENAI_API_KEY` set but `codex_sdk` NOT
+    installed passes both existing daemon-start gates, starts cleanly, then
+    hard-fails with a cryptic `ImportError` deep in the first codex run. This
+    gate surfaces that failure fast at startup with an actionable message
+    instead. An all-claude map (today's default) skips the probe entirely — the
+    resolved set does not contain `"codex"` — so current operators see zero
+    behavior change.
+    """
+    from .adapters import load_codex_sdk, referenced_backends
+    from .adapters.select import AGENT_KINDS
+
+    if "codex" not in referenced_backends(cfg):
+        return
+    try:
+        load_codex_sdk()
+    except ImportError:
+        codex_kinds = sorted(
+            k for k in AGENT_KINDS if cfg.get_agent_backend(k) == "codex"
+        )
+        print(
+            "ap2: refusing to start — the codex handle (codex_sdk) is not "
+            "importable.\n"
+            f"Codex-backed agent kinds need it: {codex_kinds}.\n"
+            "These kinds resolve to the codex backend via [agent_backends] /\n"
+            "AP2_AGENT_BACKEND_<KIND>, and CodexAdapter imports `codex_sdk` at\n"
+            "first dispatch — so the daemon would start then crash on the first\n"
+            "codex run. Install the codex handle in the daemon's env (e.g.\n"
+            "`uv pip install codex-sdk`), or repoint the kind(s) back to claude\n"
+            "to drop the requirement.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def run(project_root: str | None = None) -> None:
