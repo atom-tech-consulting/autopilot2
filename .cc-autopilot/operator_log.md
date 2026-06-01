@@ -309,3 +309,4 @@ ideation won't re-propose decisions logged here._
 - 2026-05-31T22:40:54Z — applied operator-queued update → TB-361 (goal-alignment check skipped)
 - 2026-05-31T23:05:32Z — auto_approve_window_resume
 - 2026-05-31T22:40:54Z — applied operator-queued ack
+- 2026-06-01T17:41:07Z — applied operator-queued add_backlog → TB-370

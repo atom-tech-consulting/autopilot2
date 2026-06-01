@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-370** **Accept codex ChatGPT-login OAuth (auth.json), not only OPENAI_API_KEY, in the backend-aware auth gate** `#autopilot` `#agent-adapter` `#codex` `#auth` `#oauth` `#axis-5` `@blocked:TB-358` [→ brief](.cc-autopilot/tasks/accept-codex-chatgpt-login-oauth-auth-js.md)
 
 ## Pipeline Pending
 
