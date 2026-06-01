@@ -33,6 +33,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from ap2._shared import read_pid
 from .board import Board
@@ -51,16 +52,69 @@ def _is_running(pid: int | None) -> bool:
         return False
 
 
-# TB-358 (axis 5): the credential env var a `codex`-backed kind requires.
-# The daemon-start auth gate walks the resolved per-kind backend set and
-# requires exactly the credentials that set implies. `claude` keeps the
-# pre-axis-5 `CLAUDE_CODE_OAUTH_TOKEN` requirement (and its existing
-# remediation hints, pinned by TB-79's tests); a `codex`-backed kind
-# additionally requires this OpenAI/codex credential. An all-claude map
-# therefore behaves identically to today (OAuth required, no OpenAI cred
-# needed) while switching a kind to codex adds the OpenAI requirement only
-# for that kind — it no longer hard-fails the OAuth-only gate.
+# TB-358 (axis 5): the OpenAI API-key env var that satisfies a `codex`-backed
+# kind's credential requirement. The daemon-start auth gate walks the resolved
+# per-kind backend set and requires exactly the credentials that set implies.
+# `claude` keeps the pre-axis-5 `CLAUDE_CODE_OAUTH_TOKEN` requirement (and its
+# existing remediation hints, pinned by TB-79's tests). A `codex`-backed kind's
+# requirement is satisfied by EITHER this env var (TB-358) OR — added by
+# TB-370 — a codex ChatGPT-login OAuth session on disk; see
+# `_codex_credentials_present`. An all-claude map therefore behaves identically
+# to today (OAuth required, no OpenAI cred needed) while switching a kind to
+# codex adds the codex requirement only for that kind — it no longer hard-fails
+# the OAuth-only gate.
 _CODEX_CREDENTIAL_ENV = "OPENAI_API_KEY"
+
+
+def _codex_auth_json_path() -> Path:
+    """Resolve the codex ChatGPT-login session file (`auth.json`) location.
+
+    Honors codex's own `$CODEX_HOME` config-dir override, falling back to the
+    documented default `~/.codex`. The session file is `auth.json` inside that
+    directory. Pure path resolution — no I/O, no existence check.
+    """
+    home = os.environ.get("CODEX_HOME", "").strip() or os.path.expanduser("~/.codex")
+    return Path(home) / "auth.json"
+
+
+def _codex_chatgpt_session_present() -> bool:
+    """True iff a codex ChatGPT-login OAuth session exists on disk (TB-370).
+
+    Presence-only pre-flight, the exact analog of the Claude gate's
+    `CLAUDE_CODE_OAUTH_TOKEN`-present check: read `$CODEX_HOME/auth.json`
+    (default `~/.codex/auth.json`) and confirm it parses as a JSON object
+    with `auth_mode == "chatgpt"`. This is NOT authentication — it does not
+    validate, refresh, or even read the token fields, and never logs token
+    contents; `codex_sdk` refreshes the session (~every 8 days) at runtime.
+    A missing / unreadable / malformed file simply reads as "no session".
+    """
+    path = _codex_auth_json_path()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("auth_mode") == "chatgpt"
+
+
+def _codex_credentials_present() -> bool:
+    """True iff a codex-backed kind's credential requirement is satisfied.
+
+    Two accepted auth modes — parity with how codex itself authenticates, and
+    a deliberate mirror of ap2's plan-based Claude posture (goal.md
+    Constraints: OAuth subscription, not an API key):
+
+      - `OPENAI_API_KEY` is set (metered OpenAI API billing), OR
+      - a codex ChatGPT-login OAuth session is present
+        (`$CODEX_HOME/auth.json` with `auth_mode: chatgpt` — the
+        subscription path, no per-call billing).
+
+    Either satisfies the daemon-start gate. Presence-only; refresh/validation
+    is `codex_sdk`'s job at runtime.
+    """
+    if os.environ.get(_CODEX_CREDENTIAL_ENV, "").strip():
+        return True
+    return _codex_chatgpt_session_present()
 
 
 def _require_oauth_token(cfg: "Config | None" = None) -> int:
@@ -76,8 +130,13 @@ def _require_oauth_token(cfg: "Config | None" = None) -> int:
         idles through `Control request timeout: initialize` events — the
         failure mode is silent because `claude` exits before printing
         anything to stderr.
-      - any kind resolving to `codex` → `OPENAI_API_KEY` (the OpenAI/codex
-        credential the codex CLI brings its own auth from).
+      - any kind resolving to `codex` → a codex credential, satisfied by
+        EITHER `OPENAI_API_KEY` (metered OpenAI API billing) OR a codex
+        ChatGPT-login OAuth session on disk (`$CODEX_HOME/auth.json`, default
+        `~/.codex/auth.json`, with `auth_mode: chatgpt`). The latter mirrors
+        ap2's plan-based Claude posture (OAuth subscription, not an API key);
+        see `_codex_credentials_present`. Presence-only — no network, no
+        token validation; `codex_sdk` refreshes the session at runtime.
 
     Returns 1 + prints remediation naming which kinds need which credential;
     the source-of-truth for env delivery is operator policy (login shell,
@@ -126,15 +185,20 @@ def _require_oauth_token(cfg: "Config | None" = None) -> int:
             "                                 -u <user> ap2 start",
             file=sys.stderr,
         )
-    if needs_codex and not os.environ.get(_CODEX_CREDENTIAL_ENV, "").strip():
+    if needs_codex and not _codex_credentials_present():
         rc = 1
         print(
-            f"ap2: refusing to start — {_CODEX_CREDENTIAL_ENV} is not in the env.\n"
-            f"Codex-backed agent kinds need it: {needs_codex}.\n"
+            "ap2: refusing to start — no codex credential found (neither\n"
+            f"{_CODEX_CREDENTIAL_ENV} nor a codex ChatGPT-login session).\n"
+            f"Codex-backed agent kinds need one: {needs_codex}.\n"
             "These kinds resolve to the codex backend via [agent_backends] /\n"
-            "AP2_AGENT_BACKEND_<KIND>, which brings its own OpenAI credentials.\n"
+            "AP2_AGENT_BACKEND_<KIND>. Provide EITHER:\n"
+            f"  - set {_CODEX_CREDENTIAL_ENV} (metered OpenAI API billing), or\n"
+            "  - run `codex login` to create ~/.codex/auth.json (ChatGPT-login\n"
+            "    subscription, no per-call billing; honors $CODEX_HOME) — the\n"
+            "    plan-based path matching ap2's Claude OAuth posture.\n"
             "Export the credential in the daemon's env (login shell, sudoers\n"
-            f"env_keep, or .cc-autopilot/env), or repoint the kind(s) back to\n"
+            "env_keep, or .cc-autopilot/env), or repoint the kind(s) back to\n"
             "claude to drop the requirement.",
             file=sys.stderr,
         )

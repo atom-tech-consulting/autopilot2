@@ -111,21 +111,110 @@ def test_require_oauth_token_all_claude_refuses_without_oauth(
 def test_require_oauth_token_codex_kind_requires_openai_cred(
     tmp_path: Path, monkeypatch, capsys,
 ):
-    """A codex-mapped kind (`AP2_AGENT_BACKEND_TASK=codex`) requires the
-    OpenAI/codex credential even when OAuth is present (the other kinds are
-    still claude-backed). The error names both the credential and the kind."""
+    """A codex-mapped kind (`AP2_AGENT_BACKEND_TASK=codex`) requires a codex
+    credential even when OAuth is present (the other kinds are still
+    claude-backed). With neither `OPENAI_API_KEY` nor a ChatGPT-login session
+    on disk the gate refuses, naming both options and the kind."""
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # Point CODEX_HOME at an empty dir so no real `~/.codex/auth.json` on the
+    # host satisfies the ChatGPT-login path — this test asserts the no-codex-
+    # credential failure (TB-370).
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-empty"))
+    monkeypatch.setenv("AP2_AGENT_BACKEND_TASK", "codex")
+
+    rc = _require_oauth_token(cfg)
+    assert rc == 1
+    err = capsys.readouterr().err
+    # The message names BOTH accepted codex auth modes (TB-370).
+    assert "OPENAI_API_KEY" in err
+    assert "codex login" in err
+    # The message names the codex-backed kind needing the credential.
+    assert "task" in err
+
+
+def test_require_oauth_token_codex_kind_passes_with_chatgpt_session(
+    tmp_path: Path, monkeypatch,
+):
+    """TB-370: a codex-mapped kind passes the gate with NO `OPENAI_API_KEY`
+    when a codex ChatGPT-login session is present — a readable
+    `$CODEX_HOME/auth.json` with `auth_mode: chatgpt`. This is the
+    subscription path that mirrors ap2's Claude OAuth posture."""
+    import json as _json
+
     _clear_agent_backend_env(monkeypatch)
     cfg = _project(tmp_path)
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("AP2_AGENT_BACKEND_TASK", "codex")
 
-    rc = _require_oauth_token(cfg)
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "OPENAI_API_KEY" in err
-    # The message names the codex-backed kind needing the credential.
-    assert "task" in err
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(
+        _json.dumps({"auth_mode": "chatgpt", "tokens": {"access_token": "x"}})
+    )
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    assert _require_oauth_token(cfg) == 0
+
+
+def test_require_oauth_token_codex_kind_fails_when_both_absent(
+    tmp_path: Path, monkeypatch,
+):
+    """TB-370: with NEITHER `OPENAI_API_KEY` NOR a chatgpt `auth.json`, a
+    codex-backed kind fails the gate. Covers an empty CODEX_HOME (no
+    auth.json) and a non-chatgpt auth.json (e.g. `auth_mode: apikey`),
+    which must NOT count as a ChatGPT-login session."""
+    import json as _json
+
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AP2_AGENT_BACKEND_TASK", "codex")
+
+    # No auth.json at all.
+    empty_home = tmp_path / "codex-empty"
+    empty_home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(empty_home))
+    assert _require_oauth_token(cfg) == 1
+
+    # auth.json present but NOT a chatgpt session — still fails.
+    apikey_home = tmp_path / "codex-apikey"
+    apikey_home.mkdir()
+    (apikey_home / "auth.json").write_text(_json.dumps({"auth_mode": "apikey"}))
+    monkeypatch.setenv("CODEX_HOME", str(apikey_home))
+    assert _require_oauth_token(cfg) == 1
+
+
+def test_require_oauth_token_all_claude_unaffected_by_chatgpt_session(
+    tmp_path: Path, monkeypatch,
+):
+    """TB-370: an all-claude backend map is unaffected by codex auth state —
+    a present chatgpt `auth.json` neither helps nor is consulted (the codex
+    branch never runs), and the gate still keys solely off
+    `CLAUDE_CODE_OAUTH_TOKEN`."""
+    import json as _json
+
+    _clear_agent_backend_env(monkeypatch)
+    cfg = _project(tmp_path)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(_json.dumps({"auth_mode": "chatgpt"}))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    # With OAuth present the all-claude map passes regardless of codex state.
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-fake")
+    assert _require_oauth_token(cfg) == 0
+
+    # With OAuth absent it still fails — the chatgpt session does NOT
+    # substitute for the Claude requirement on an all-claude map.
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    assert _require_oauth_token(cfg) == 1
 
 
 def test_require_oauth_token_codex_kind_passes_with_both_creds(

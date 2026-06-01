@@ -13,8 +13,8 @@ and returns the right adapter *instance* for an agent kind.
 nine dispatch sites the focus migrates one-by-one in axis 6. The
 backend-aware daemon-start auth gate (`cli_daemon._require_oauth_token`)
 walks this tuple to discover which credentials the resolved backend set
-implies (OAuth for any claude-backed kind, OpenAI for any codex-backed
-kind).
+implies (OAuth for any claude-backed kind, and for any codex-backed kind
+either an OpenAI API key OR a codex ChatGPT-login session).
 
 No production dispatch site is repointed through this resolver in axis 5 —
 that is axis 6 (the ideation-scrub canary is the first consumer). This

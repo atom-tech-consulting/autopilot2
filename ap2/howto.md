@@ -2178,8 +2178,33 @@ status-report cron's tick rate):
 - `AP2_WEB_DISABLED` — set to `1`/`true`/`yes`/`on` to skip starting
   the daemon-spawned web UI.
 
-Plus required: `CLAUDE_CODE_OAUTH_TOKEN`. Daemon refuses to start
-without it.
+**Daemon-start auth gate (`_require_oauth_token`, TB-79 → TB-358 →
+TB-370).** Before forking, the daemon walks the resolved per-kind
+backend map and requires exactly the credentials that set implies:
+
+- Any **claude**-backed kind requires `CLAUDE_CODE_OAUTH_TOKEN`
+  (present-only check; the SDK control protocol silently times out at
+  `initialize` without it). An all-claude install — the default —
+  needs only this, exactly as pre-axis-5.
+- Any **codex**-backed kind requires a codex credential, satisfied by
+  **EITHER** of codex's two auth modes:
+  - `OPENAI_API_KEY` — metered OpenAI API billing; or
+  - a **codex ChatGPT-login OAuth session** — created by `codex login`
+    (browser) / `codex login --device-auth` (headless), stored at
+    `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`) with
+    `"auth_mode": "chatgpt"` plus auto-refreshing access+refresh
+    tokens. This is the subscription path — no per-call billing — and
+    matches ap2's own Claude posture (OAuth subscription, not an API
+    key; goal.md Constraints).
+
+The codex check is a **presence-only pre-flight**, the exact analog of
+the Claude side: it reads `auth.json` only to confirm the file exists
+and is `auth_mode: chatgpt`. It does NOT shell out to codex, hit the
+network, validate, or refresh the token (token contents are never
+read or logged) — `codex_sdk` rotates the refresh token (~every 8
+days) at runtime. A codex kind with neither `OPENAI_API_KEY` nor a
+chatgpt `auth.json` fails the gate with a message naming both options
+(set `OPENAI_API_KEY`, or run `codex login`).
 
 ### Focus state (axis 4)
 
