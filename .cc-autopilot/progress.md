@@ -1431,3 +1431,9 @@
 - **Summary:** Widened the backend-aware daemon-start auth gate so a codex-backed kind's credential is satisfied by EITHER OPENAI_API_KEY OR a codex ChatGPT-login session ($CODEX_HOME/auth.json, default ~/.codex/auth.json, auth_mode: chatgpt) via a new presence-only _codex_credentials_present() helper; failure message names both options, all-claude maps unchanged, docstring + howto.md updated; full suite (2949 tests) passes.
 - **Files:** ap2/cli_daemon.py, ap2/adapters/select.py, ap2/howto.md, ap2/tests/test_cli_daemon.py
 - **Tests:** pass
+
+## [2026-06-02] TB-371: Declare the codex backend as an installable optional extra (autopilot2[codex])
+- **Commit:** `4df6fa0`
+- **Summary:** Declared a `codex = ["codex-sdk"]` optional extra in pyproject.toml (base install stays Claude-only), documented the install line + extra-plus-credential requirement in howto.md, named the extra in the daemon-start codex-handle gate diagnostic, and added a hermetic ap2/tests/test_packaging.py; full suite 2957 passed / 1 skipped.
+- **Files:** pyproject.toml, ap2/daemon.py, ap2/howto.md, ap2/tests/test_packaging.py
+- **Tests:** pass
