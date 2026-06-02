@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-371** **Declare the codex backend as an installable optional extra (autopilot2[codex])** `#autopilot` `#agent-adapter` `#codex` `#packaging` `#axis-7` `#oss-prep` `@blocked:TB-369` — Declare codex_sdk (distribution codex-sdk) as a codex optional-dependencies extra in pyproject.toml so a codex-backed kind is installable and runnable live; document the extra in howto and align the daemon-start gate hint, pinned by a hermetic packaging test. [→ brief](.cc-autopilot/tasks/declare-the-codex-backend-as-an-installa.md)
 
 ## Pipeline Pending
 

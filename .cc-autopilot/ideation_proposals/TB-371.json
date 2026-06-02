@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-369",
+  "briefing_path": ".cc-autopilot/tasks/declare-the-codex-backend-as-an-installa.md",
+  "focus_anchor": "current focus codex support through an agent adaptor layer",
+  "proposed_at": "2026-06-02T16:05:08Z",
+  "tb_id": "TB-371",
+  "why_now": "this is the single packaging gap that keeps a fully-coded second\nbackend from ever driving an agent kind live \u2014 without the extra, the axis-7\nreal-SDK smoke and the codex-handle daemon-start gate can never be satisfied, so\nthe focus delete-test (\"a second backend actually drives an agent kind\") stays\nunmet despite all seven axes being coded. The operator surfaced this exact next\nstep on 2026-06-02 (operator_log: \"declare codex_sdk as an optional\ndependency/extra ... to validate CodexAdapter end-to-end against the real\ncodex_sdk API\")."
+}
