@@ -312,3 +312,4 @@ ideation won't re-propose decisions logged here._
 - 2026-06-01T17:41:07Z — applied operator-queued add_backlog → TB-370
 - 2026-06-02T15:55:54Z — Codex backend is code-complete but not yet runnable live: next codex work is to declare codex_sdk as an optional dependency/extra and run the codex real-SDK smoke live in the daemon to validate CodexAdapter end-to-end against the real codex_sdk API.
 - 2026-06-02T15:55:41Z — applied operator-queued ack
+- 2026-06-02T15:58:15Z — applied operator-queued ideate → (forced)
