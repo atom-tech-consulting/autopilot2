@@ -2900,8 +2900,10 @@ def _require_codex_handle_if_referenced(cfg: Config) -> None:
             "These kinds resolve to the codex backend via [agent_backends] /\n"
             "AP2_AGENT_BACKEND_<KIND>, and CodexAdapter imports `codex_sdk` at\n"
             "first dispatch — so the daemon would start then crash on the first\n"
-            "codex run. Install the codex handle in the daemon's env (e.g.\n"
-            "`uv pip install codex-sdk`), or repoint the kind(s) back to claude\n"
+            "codex run. Install the codex handle in the daemon's env via the\n"
+            "supported extra (`pip install 'autopilot2[codex]'`, or\n"
+            "`uv sync --extra codex`), or the bare distribution\n"
+            "(`uv pip install codex-sdk`); or repoint the kind(s) back to claude\n"
             "to drop the requirement.",
             file=sys.stderr,
         )

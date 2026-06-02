@@ -2206,6 +2206,26 @@ days) at runtime. A codex kind with neither `OPENAI_API_KEY` nor a
 chatgpt `auth.json` fails the gate with a message naming both options
 (set `OPENAI_API_KEY`, or run `codex login`).
 
+**Installing the codex backend (the `codex` extra).** Credentials alone
+are not enough — a codex-backed kind needs the `codex_sdk` handle
+installed too, and that ships as an opt-in extra so the default install
+stays Claude-only. The base `pip install autopilot2` / `uv sync`
+resolves only `claude-agent-sdk` (the always-installed backend); to run
+a codex-backed kind you must additionally install the extra:
+
+    pip install 'autopilot2[codex]'
+    # or, in a uv-managed checkout:
+    uv sync --extra codex
+
+The extra pulls the `codex-sdk` distribution that provides the
+`import codex_sdk` handle `CodexAdapter` lazily imports at first
+dispatch (matching the daemon-start gate's `uv pip install codex-sdk`
+remediation hint). A live codex-backed kind therefore needs **both**
+the `codex` extra installed **and** an OpenAI/codex credential (the
+auth gate above — `OPENAI_API_KEY` or a chatgpt `auth.json`). Without
+the extra the codex-handle gate refuses to start; without a credential
+the auth gate does.
+
 ### Focus state (axis 4)
 
 Closes goal.md L115-138's axis 4 design — the operator's intent /
