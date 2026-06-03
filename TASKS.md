@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-372** **Repoint the codex backend to the real OpenAI `openai-codex` SDK and reimplement CodexAdapter against its actual API** `#autopilot` `#agent-adapter` `#codex` `#bug` `#sdk` `#axis-4` `#axis-7` `@blocked:TB-371` [→ brief](.cc-autopilot/tasks/repoint-the-codex-backend-to-the-real-op.md)
 
 ## Pipeline Pending
 
