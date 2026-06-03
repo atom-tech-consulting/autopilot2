@@ -85,7 +85,7 @@ def _codex_chatgpt_session_present() -> bool:
     (default `~/.codex/auth.json`) and confirm it parses as a JSON object
     with `auth_mode == "chatgpt"`. This is NOT authentication — it does not
     validate, refresh, or even read the token fields, and never logs token
-    contents; `codex_sdk` refreshes the session (~every 8 days) at runtime.
+    contents; `openai_codex` refreshes the session (~every 8 days) at runtime.
     A missing / unreadable / malformed file simply reads as "no session".
     """
     path = _codex_auth_json_path()
@@ -110,7 +110,7 @@ def _codex_credentials_present() -> bool:
         subscription path, no per-call billing).
 
     Either satisfies the daemon-start gate. Presence-only; refresh/validation
-    is `codex_sdk`'s job at runtime.
+    is `openai_codex`'s job at runtime.
     """
     if os.environ.get(_CODEX_CREDENTIAL_ENV, "").strip():
         return True
@@ -136,7 +136,7 @@ def _require_oauth_token(cfg: "Config | None" = None) -> int:
         `~/.codex/auth.json`, with `auth_mode: chatgpt`). The latter mirrors
         ap2's plan-based Claude posture (OAuth subscription, not an API key);
         see `_codex_credentials_present`. Presence-only — no network, no
-        token validation; `codex_sdk` refreshes the session at runtime.
+        token validation; `openai_codex` refreshes the session at runtime.
 
     Returns 1 + prints remediation naming which kinds need which credential;
     the source-of-truth for env delivery is operator policy (login shell,

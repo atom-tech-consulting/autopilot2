@@ -3,17 +3,18 @@
 The codex backend is code-complete (AgentAdapter ABC + ClaudeCodeAdapter,
 CodexAdapter, per-kind backend selection, adapter-routed dispatch, the parity
 suite, and the gated real-SDK smoke) but only becomes *installable* once
-`codex_sdk` is declared as an optional dependency. `CodexAdapter` lazily
-`import codex_sdk` (ap2.adapters.load_codex_sdk) at first dispatch, the
-daemon-start codex-handle gate calls it, and the smoke gates on
-`pytest.importorskip("codex_sdk")` — all dead without an install path.
+`openai-codex` (OpenAI's official Codex SDK, import name `openai_codex`) is
+declared as an optional dependency. `CodexAdapter` lazily `import openai_codex`
+(ap2.adapters.load_codex_sdk) at first dispatch, the daemon-start codex-handle
+gate calls it, and the smoke gates on `pytest.importorskip("openai_codex")` —
+all dead without an install path.
 
 These tests parse `pyproject.toml` (no network resolution) and assert:
 
-1. The `codex` optional-dependencies extra exists and references a `codex-sdk`
-   distribution, so the packaging surface can't silently regress.
+1. The `codex` optional-dependencies extra exists and references the
+   `openai-codex` distribution, so the packaging surface can't silently regress.
 2. The base `dependencies` list stays Claude-only — `claude-agent-sdk` is the
-   always-installed backend and `codex-sdk` is NOT pulled by a bare install —
+   always-installed backend and `openai-codex` is NOT pulled by a bare install —
    so `pip install autopilot2` with no extras remains a working Claude install.
 """
 from __future__ import annotations
@@ -33,8 +34,8 @@ def _load_pyproject() -> dict:
 def _requirement_names(reqs: list[str]) -> list[str]:
     """Return the bare distribution name for each PEP 508 requirement string.
 
-    Strips version specifiers / extras / markers so an unpinned `codex-sdk`
-    and a future pinned `codex-sdk>=1.2` both compare equal.
+    Strips version specifiers / extras / markers so an unpinned `openai-codex`
+    and a future pinned `openai-codex>=1.2` both compare equal.
     """
     names: list[str] = []
     for raw in reqs:
@@ -49,29 +50,30 @@ def _requirement_names(reqs: list[str]) -> list[str]:
 
 
 def test_codex_extra_declared():
-    """The `codex` extra exists and references a `codex-sdk` distribution."""
+    """The `codex` extra exists and references the `openai-codex` distribution."""
     data = _load_pyproject()
     extras = data["project"]["optional-dependencies"]
     assert "codex" in extras, (
         "pyproject.toml [project.optional-dependencies] must declare a `codex` "
         "extra so `pip install 'autopilot2[codex]'` / `uv sync --extra codex` "
-        "can install the second backend's `codex_sdk` handle."
+        "can install the second backend's `openai_codex` handle."
     )
     codex_reqs = _requirement_names(extras["codex"])
-    assert "codex-sdk" in codex_reqs, (
-        "the `codex` extra must list a `codex-sdk` requirement (the distribution "
-        f"providing `import codex_sdk`); got {extras['codex']!r}."
+    assert "openai-codex" in codex_reqs, (
+        "the `codex` extra must list an `openai-codex` requirement (OpenAI's "
+        "official Codex SDK, the distribution providing `import openai_codex`); "
+        f"got {extras['codex']!r}."
     )
 
 
 def test_base_install_stays_claude_only():
-    """A bare install resolves claude-agent-sdk but never pulls codex-sdk."""
+    """A bare install resolves claude-agent-sdk but never pulls openai-codex."""
     data = _load_pyproject()
     base = _requirement_names(data["project"]["dependencies"])
     assert "claude-agent-sdk" in base, (
         "claude-agent-sdk must remain a base (always-installed) dependency."
     )
-    assert "codex-sdk" not in base, (
-        "codex-sdk must stay opt-in via the `codex` extra — a bare "
+    assert "openai-codex" not in base, (
+        "openai-codex must stay opt-in via the `codex` extra — a bare "
         "`pip install autopilot2` must remain a working Claude-only install."
     )

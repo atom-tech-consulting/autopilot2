@@ -1933,7 +1933,7 @@ async def main_loop(cfg: Config) -> None:
     # None`, and `status_report.configure` tolerates `None`).
     sdk = _load_claude_sdk_if_referenced(cfg)
     # TB-369: symmetric codex-side availability gate. When the resolved backend
-    # set references codex, verify the codex handle (codex_sdk) is importable so
+    # set references codex, verify the codex handle (openai_codex) is importable so
     # a misconfigured codex deployment fails fast at startup with an actionable
     # message instead of crashing cryptically at first dispatch. An all-claude
     # map skips this probe entirely (zero behavior change for current
@@ -2873,8 +2873,8 @@ def _require_codex_handle_if_referenced(cfg: Config) -> None:
     handle ONLY when at least one kind resolves to `codex`.
 
     `CodexAdapter` lazily imports its handle (`ap2.adapters.load_codex_sdk`, the
-    relocated `import codex_sdk`) only at first dispatch, so without this gate a
-    pure- or mixed-codex map with `OPENAI_API_KEY` set but `codex_sdk` NOT
+    relocated `import openai_codex`) only at first dispatch, so without this gate
+    a pure- or mixed-codex map with `OPENAI_API_KEY` set but `openai_codex` NOT
     installed passes both existing daemon-start gates, starts cleanly, then
     hard-fails with a cryptic `ImportError` deep in the first codex run. This
     gate surfaces that failure fast at startup with an actionable message
@@ -2894,17 +2894,17 @@ def _require_codex_handle_if_referenced(cfg: Config) -> None:
             k for k in AGENT_KINDS if cfg.get_agent_backend(k) == "codex"
         )
         print(
-            "ap2: refusing to start — the codex handle (codex_sdk) is not "
+            "ap2: refusing to start — the codex handle (openai_codex) is not "
             "importable.\n"
             f"Codex-backed agent kinds need it: {codex_kinds}.\n"
             "These kinds resolve to the codex backend via [agent_backends] /\n"
-            "AP2_AGENT_BACKEND_<KIND>, and CodexAdapter imports `codex_sdk` at\n"
-            "first dispatch — so the daemon would start then crash on the first\n"
-            "codex run. Install the codex handle in the daemon's env via the\n"
-            "supported extra (`pip install 'autopilot2[codex]'`, or\n"
+            "AP2_AGENT_BACKEND_<KIND>, and CodexAdapter imports `openai_codex`\n"
+            "at first dispatch — so the daemon would start then crash on the\n"
+            "first codex run. Install the codex handle in the daemon's env via\n"
+            "the supported extra (`pip install 'autopilot2[codex]'`, or\n"
             "`uv sync --extra codex`), or the bare distribution\n"
-            "(`uv pip install codex-sdk`); or repoint the kind(s) back to claude\n"
-            "to drop the requirement.",
+            "(`uv pip install openai-codex`); or repoint the kind(s) back to\n"
+            "claude to drop the requirement.",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -2201,13 +2201,13 @@ The codex check is a **presence-only pre-flight**, the exact analog of
 the Claude side: it reads `auth.json` only to confirm the file exists
 and is `auth_mode: chatgpt`. It does NOT shell out to codex, hit the
 network, validate, or refresh the token (token contents are never
-read or logged) — `codex_sdk` rotates the refresh token (~every 8
+read or logged) — `openai_codex` rotates the refresh token (~every 8
 days) at runtime. A codex kind with neither `OPENAI_API_KEY` nor a
 chatgpt `auth.json` fails the gate with a message naming both options
 (set `OPENAI_API_KEY`, or run `codex login`).
 
 **Installing the codex backend (the `codex` extra).** Credentials alone
-are not enough — a codex-backed kind needs the `codex_sdk` handle
+are not enough — a codex-backed kind needs the `openai_codex` handle
 installed too, and that ships as an opt-in extra so the default install
 stays Claude-only. The base `pip install autopilot2` / `uv sync`
 resolves only `claude-agent-sdk` (the always-installed backend); to run
@@ -2217,9 +2217,10 @@ a codex-backed kind you must additionally install the extra:
     # or, in a uv-managed checkout:
     uv sync --extra codex
 
-The extra pulls the `codex-sdk` distribution that provides the
-`import codex_sdk` handle `CodexAdapter` lazily imports at first
-dispatch (matching the daemon-start gate's `uv pip install codex-sdk`
+The extra pulls the `openai-codex` distribution (OpenAI's official Codex
+SDK, which bundles the Codex CLI binary) that provides the
+`import openai_codex` handle `CodexAdapter` lazily imports at first
+dispatch (matching the daemon-start gate's `uv pip install openai-codex`
 remediation hint). A live codex-backed kind therefore needs **both**
 the `codex` extra installed **and** an OpenAI/codex credential (the
 auth gate above — `OPENAI_API_KEY` or a chatgpt `auth.json`). Without

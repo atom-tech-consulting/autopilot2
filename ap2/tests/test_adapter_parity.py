@@ -66,13 +66,16 @@ from ap2.tests.test_agent_adapter import (
 )
 from ap2.tests.test_codex_adapter import (
     FakeCodex as _FakeCodex,
+    _agent_message as _codex_agent_message,
     _default_envelopes as _codex_default_envelopes,
+    _turn_completed as _codex_turn_completed,
 )
 
 
 # --------------------------------------------------------------------------
-# Slow stub handles for the shared timeout path: each sleeps past the
-# bounded drain so the base `run_to_result`'s `asyncio.wait_for` fires.
+# Slow stub handle for the shared timeout path: sleeps past the bounded drain
+# so the base `run_to_result`'s `asyncio.wait_for` fires. (The codex side uses
+# `FakeCodex(..., stream_delay=...)` to the same effect.)
 # --------------------------------------------------------------------------
 
 
@@ -80,12 +83,6 @@ class _SlowSDK(_FakeSDK):
     async def _stream(self):
         await asyncio.sleep(10)
         yield _ClaudeAssistantMessage([_claude_text_block("never reached")])
-
-
-class _SlowCodex(_FakeCodex):
-    async def _stream(self):
-        await asyncio.sleep(10)
-        yield {"type": "turn.completed", "usage": {}}
 
 
 # --------------------------------------------------------------------------
@@ -187,29 +184,28 @@ _CODEX_CASE = BackendCase(
     make_adapter=_codex_adapter,
     bare_adapter=CodexAdapter,
     default_envelopes=_codex_default_envelopes,
-    incomplete_envelopes=lambda: [
-        {
-            "type": "item.completed",
-            "item": {"type": "agent_message", "text": "partial"},
-        }
-    ],
-    slow_adapter=lambda: CodexAdapter(codex=_SlowCodex([])),
+    incomplete_envelopes=lambda: [_codex_agent_message("partial")],
+    slow_adapter=lambda: CodexAdapter(
+        codex=_FakeCodex([_codex_turn_completed()], stream_delay=10)
+    ),
     expected_text="all done",
     expected_usage={
         "input_tokens": 120,
         "output_tokens": 60,
         "cache_read_input_tokens": 20,
     },
-    expected_total_cost=0.0456,
-    expected_num_turns=4,
-    expected_model="gpt-5-codex",
+    # Codex reports no per-run cost / turn count / model in its stream, so the
+    # normalized record defaults those — the one-shape contract still holds.
+    expected_total_cost=0.0,
+    expected_num_turns=0,
+    expected_model="",
     expected_stream_types=[
-        "thread.started",
-        "turn.started",
-        "item.completed",
-        "item.completed",
-        "item.completed",
-        "turn.completed",
+        "turn/started",
+        "item/completed",
+        "item/completed",
+        "item/completed",
+        "thread/tokenUsage/updated",
+        "turn/completed",
         "result",
     ],
     error_raise_on=2,

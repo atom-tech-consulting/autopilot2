@@ -1,13 +1,14 @@
-"""Real-SDK round-trip for the codex backend's tool-call wiring (TB-359 /
-goal.md axis 7).
+"""Real-SDK round-trip for the codex backend's dispatch path (TB-359 /
+goal.md axis 7; TB-372 repointed it onto OpenAI's real `openai_codex` SDK).
 
-The codex sibling of `test_report_result_real_sdk.py`: it drives the
-`CodexAdapter` (`ap2/adapters/codex.py`) end-to-end against the LIVE `codex`
-backend, round-tripping a single `report_result` tool call through ap2's real
-MCP toolset (exposed via the adapter's `build_tool_server` surface). Validates
-what the hermetic parity suite (`test_adapter_parity.py`) can't: that the codex
-backend actually delivers ap2's MCP tools to a live agent and that a real agent
-calls one.
+The codex sibling of the Claude real-SDK smokes: it drives the `CodexAdapter`
+(`ap2/adapters/codex.py`) end-to-end against the LIVE Codex backend, exercising
+the real `openai_codex` client surface the adapter is built on —
+`AsyncCodex().thread_start(...)` → `thread.turn(prompt)` → `turn.stream()` →
+normalized `AgentResult`. Validates what the hermetic parity suite
+(`test_adapter_parity.py`) can't: that the adapter actually constructs a real
+`Codex`/`AsyncCodex` client, starts a thread + turn, and normalizes the live
+notification stream into ap2's `AgentEvent` / `AgentResult` shape.
 
 OPT-IN — same gate as the Claude real-SDK smokes: this test makes real API
 calls. It only runs when `AP2_REAL_SDK` is set:
@@ -23,19 +24,24 @@ set) — so dropping this file into `ap2/tests/smoke/` wires it onto that cron
 alongside the Claude smokes.
 
 Secondary gate: even with `AP2_REAL_SDK` set, the test skips cleanly when the
-codex SDK handle isn't importable (the `CodexAdapter`'s lazy `import codex_sdk`)
-— a box that opted into the live smokes but has no codex backend installed skips
-rather than errors.
+codex SDK handle isn't importable (the `CodexAdapter`'s lazy `import
+openai_codex`) — a box that opted into the live smokes but has no codex backend
+installed skips rather than errors. (A missing credential surfaces as a
+transient/transport error and is handled by the transient-retry skip.)
 
-The task body is intentionally trivial ("don't do any work, just call the
-tool") to bound cost and isolate the wiring test from agent reasoning, exactly
-as the Claude `report_result` smoke does.
+The task body is intentionally trivial (a one-line text reply, read-only
+sandbox, no tool calls) to bound cost and isolate the dispatch-wiring test from
+agent reasoning — the codex analog of the Claude smokes' trivial bodies.
+
+Delivering ap2's *in-process* MCP tool server to a live Codex agent (so a real
+codex run could call `report_result`) is a separate concern: codex consumes
+external stdio MCP servers via its own config, not ap2's in-process server, and
+that wiring is out of scope for the adapter-dispatch repoint (TB-372). This
+smoke therefore validates the dispatch path, not the MCP-tool round-trip.
 """
 from __future__ import annotations
 
 import os
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -48,116 +54,68 @@ pytestmark = pytest.mark.skipif(
     reason="real-SDK smoke; set AP2_REAL_SDK=1 to run",
 )
 
-
-def _bootstrap_project(root: Path):
-    """Minimal project skeleton needed by Config.load + build_task_prompt
-    (mirrors the Claude smokes' helper)."""
-    from ap2.config import Config
-
-    (root / "TASKS.md").write_text(
-        "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n"
-        "## Complete\n\n## Frozen\n"
-    )
-    (root / "CLAUDE.md").write_text(
-        "# Smoke project\n\n## Autopilot\n\n- Next task ID: TB-2\n"
-    )
-    cfg = Config.load(root)
-    cfg.ensure_dirs()
-    return cfg
+# A marker the trivial prompt asks the agent to echo, so we can assert the live
+# turn produced assistant text that round-tripped through the adapter's stream
+# normalization.
+_MARKER = "AP2_CODEX_SMOKE_OK"
 
 
-def _fake_task():
-    from ap2.board import Task
-
-    return Task(
-        id="TB-1",
-        title="codex report_result smoke",
-        section="Active",
-        description=(
-            "TEST SCENARIO — do not do any work. Do not read or edit any "
-            "files. Do not run any commands. Just call the "
-            "`mcp__autopilot__report_result` tool ONCE with these args:\n"
-            "  status: complete\n"
-            "  commit: \"\"\n"
-            "  summary: \"codex smoke test ok\"\n"
-            "  files_changed: \"\"\n"
-            "  tests_passed: \"true\"\n"
-            "Then end your turn. The daemon needs to confirm the codex "
-            "tool wiring works end-to-end."
-        ),
-    )
-
-
-def test_codex_report_result_round_trip_via_real_sdk():
-    """Real codex backend + real ap2 MCP server, driven through the
-    `CodexAdapter` seam. Asserts a single `report_result` tool call round-trips
-    through the codex stream — the codex analogue of the Claude
-    `report_result` smoke."""
+def test_codex_dispatch_round_trip_via_real_sdk(tmp_path):
+    """Real codex backend, driven through the `CodexAdapter` seam. Asserts a
+    trivial turn round-trips `thread_start` + `turn` + `stream()` to a
+    normalized `complete` `AgentResult` carrying the agent's echoed marker — the
+    codex analog of the Claude real-SDK dispatch smokes."""
     import asyncio
 
-    # Secondary gate: skip cleanly when the codex SDK handle the adapter
-    # imports lazily isn't installed (so AP2_REAL_SDK=1 on a box without the
-    # codex backend skips rather than errors).
-    codex_handle = pytest.importorskip(
-        "codex_sdk",
-        reason="codex SDK not installed; live codex round-trip unavailable",
+    # Secondary gate: skip cleanly when the codex SDK handle the adapter imports
+    # lazily isn't installed (so AP2_REAL_SDK=1 on a box without the codex
+    # backend skips rather than errors).
+    pytest.importorskip(
+        "openai_codex",
+        reason="codex SDK (openai_codex) not installed; live round-trip unavailable",
     )
 
     from ap2.adapters import AgentOptions, AgentTools, CodexAdapter
-    from ap2.prompts import build_task_prompt
-    from ap2.tools import TASK_AGENT_TOOLS, build_mcp_server
 
-    async def go() -> list[dict]:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            cfg = _bootstrap_project(root)
+    async def go():
+        # A fresh CodexAdapter resolves the real `openai_codex` handle lazily on
+        # first dispatch (no injected stub) — so this exercises the production
+        # import + client construction path.
+        adapter = CodexAdapter()
+        tools = AgentTools()
+        options = AgentOptions(
+            cwd=str(tmp_path),
+            effort="low",
+            # Read-only sandbox + auto-approve: a pure text reply needs no
+            # filesystem writes or approvals, keeping the smoke cheap and safe.
+            permission_mode="bypassPermissions",
+            extra={"sandbox": "read-only"},
+            max_turns=2,
+        )
+        prompt = (
+            "Reply with EXACTLY this text and nothing else: "
+            f"{_MARKER}. Do not run any commands or read any files."
+        )
+        return await adapter.run_to_result(prompt, tools, options)
 
-            adapter = CodexAdapter(codex=codex_handle)
-            # ap2's real custom toolset, exposed to the codex backend through
-            # the adapter's `build_tool_server` surface (axis 3) — the same
-            # toolset the Claude adapter registers (axis-7 parity).
-            mcp_server = build_mcp_server(cfg, adapter=adapter)
-            prompt = build_task_prompt(cfg, _fake_task())
-
-            tools = AgentTools(
-                allowed=TASK_AGENT_TOOLS,
-                disallowed=["Bash(git push*)", "Bash(rm -rf *)"],
-                mcp_servers={"autopilot": mcp_server},
-            )
-            options = AgentOptions(
-                cwd=str(root),
-                permission_mode="bypassPermissions",
-                max_turns=5,
-            )
-
-            tool_calls: list[dict] = []
-            async for ev in adapter.run(prompt, tools, options):
-                for tc in ev.summary.get("tool_calls") or []:
-                    tool_calls.append(tc)
-            return tool_calls
-
-    # A transient codex transport/service error is *raised* out of the drain —
-    # retry once, then skip (not error). A genuine wiring regression
-    # (report_result not called) flows to the `assert completes` below and
-    # still fails.
-    tool_calls = call_with_transient_retry(
+    # A transient codex transport/service error (or missing credential) is
+    # raised out of the drain — retry once, then skip (not error). A genuine
+    # dispatch regression flows to the asserts below and still fails.
+    result = call_with_transient_retry(
         lambda: asyncio.run(go()),
-        describe="codex report_result round-trip smoke",
+        describe="codex dispatch round-trip smoke",
     )
 
-    print(f"\n[smoke] {len(tool_calls)} codex tool calls observed:")
-    for tc in tool_calls:
-        print(f"  - {tc.get('name')!r}: {str(tc.get('args_preview'))[:200]}")
-
-    completes = [
-        tc for tc in tool_calls
-        if "report_result" in str(tc.get("name") or "")
-    ]
-    assert completes, (
-        "codex agent did not call report_result through the adapter. "
-        f"Tools used: {[tc.get('name') for tc in tool_calls]}"
+    print(f"\n[smoke] codex result status={result.status!r} text={result.text!r}")
+    assert result.status == "complete", (
+        f"codex dispatch did not complete through the adapter: status="
+        f"{result.status!r} error={result.error!r}"
+    )
+    assert _MARKER in (result.text or ""), (
+        "codex agent reply did not round-trip through the adapter's stream "
+        f"normalization; got text={result.text!r}"
     )
     print(
-        f"[smoke] PASS — codex round-tripped "
-        f"{len(completes)} report_result call(s)"
+        f"[smoke] PASS — codex dispatch round-tripped a turn "
+        f"(combined_tokens={result.usage.combined_tokens})"
     )

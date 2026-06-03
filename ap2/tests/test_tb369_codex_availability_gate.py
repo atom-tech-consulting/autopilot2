@@ -4,8 +4,8 @@ The symmetric mirror of TB-368's Claude-SDK availability gate, for the codex
 backend. `daemon.main_loop` already gates the Claude SDK import behind the
 resolved per-kind backend set (`ap2.adapters.referenced_backends`), but the
 codex side was missing: `CodexAdapter` lazily imports its handle (`import
-codex_sdk`) only at first dispatch, so a pure- or mixed-codex map with
-`OPENAI_API_KEY` set but `codex_sdk` NOT installed passed both existing
+openai_codex`) only at first dispatch, so a pure- or mixed-codex map with
+`OPENAI_API_KEY` set but `openai_codex` NOT installed passed both existing
 daemon-start gates, started cleanly, then hard-failed with a cryptic
 `ImportError` deep in the first codex run.
 
@@ -13,7 +13,7 @@ daemon-start gates, started cleanly, then hard-failed with a cryptic
 resolve the per-kind backend map via the same shared `referenced_backends`
 helper the Claude gate and the credential gate agree on, and probe the codex
 handle (`ap2.adapters.load_codex_sdk` — the single relocated `import
-codex_sdk` point both the adapter and this gate resolve through) ONLY when at
+openai_codex` point both the adapter and this gate resolve through) ONLY when at
 least one kind resolves to `codex`. When codex is referenced but the handle is
 not importable, the gate prints an actionable remediation and `sys.exit(1)`s.
 An all-claude map skips the probe entirely — zero behavior change for current
@@ -41,9 +41,9 @@ def _make_codex_import_fail(monkeypatch) -> None:
     """Force `ap2.adapters.load_codex_sdk` — the single codex-handle-load point
     both the gate and `CodexAdapter._get_codex` resolve through (`from
     .adapters import load_codex_sdk`) — to raise `ImportError`, as if
-    `codex_sdk` were not installed."""
+    `openai_codex` were not installed."""
     def _boom():
-        raise ImportError("No module named 'codex_sdk'")
+        raise ImportError("No module named 'openai_codex'")
 
     monkeypatch.setattr("ap2.adapters.load_codex_sdk", _boom)
 

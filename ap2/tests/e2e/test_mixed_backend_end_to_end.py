@@ -63,7 +63,14 @@ from ap2.tests.test_agent_adapter import (
     _text_block,
     _tool_use_block,
 )
-from ap2.tests.test_codex_adapter import FakeCodex
+from ap2.tests.test_codex_adapter import (
+    FakeCodex,
+    _agent_message as _codex_agent_message,
+    _mcp_tool_call as _codex_mcp_tool_call,
+    _token_usage as _codex_token_usage,
+    _turn_completed as _codex_turn_completed,
+    _turn_started as _codex_turn_started,
+)
 
 
 # --------------------------------------------------------------------------
@@ -122,7 +129,9 @@ def _tools() -> AgentTools:
 # Stub streams: each ends with a `report_result` tool call (the task-agent
 # completion signal, registered on EVERY backend's tool surface per axis 3/7)
 # plus a terminal usage-bearing envelope. The claude stream uses the SDK's
-# `tool_use` block shape; the codex stream uses the `mcp_tool_call` item shape.
+# `tool_use` block shape; the codex stream uses the real `openai_codex`
+# notification shape (an `item/completed` carrying an `mcpToolCall` item, plus a
+# `thread/tokenUsage/updated`).
 # --------------------------------------------------------------------------
 
 
@@ -143,31 +152,11 @@ def _claude_report_envelopes(args: dict) -> list:
 
 def _codex_report_envelopes(args: dict) -> list:
     return [
-        {"type": "thread.started", "thread_id": "t_1"},
-        {"type": "turn.started"},
-        {
-            "type": "item.completed",
-            "item": {"type": "agent_message", "text": "task: implementing"},
-        },
-        {
-            "type": "item.completed",
-            "item": {
-                "type": "mcp_tool_call",
-                "tool": "report_result",
-                "arguments": args,
-            },
-        },
-        {
-            "type": "turn.completed",
-            "usage": {
-                "input_tokens": 120,
-                "cached_input_tokens": 20,
-                "output_tokens": 60,
-            },
-            "total_cost_usd": 0.0456,
-            "num_turns": 4,
-            "model": "gpt-5-codex",
-        },
+        _codex_turn_started(),
+        _codex_agent_message("task: implementing"),
+        _codex_mcp_tool_call("report_result", args),
+        _codex_token_usage(input_tokens=120, output_tokens=60, cached_input_tokens=20),
+        _codex_turn_completed(),
     ]
 
 
@@ -186,7 +175,7 @@ def _report_result_args_from_events(events: list[AgentEvent]) -> dict | None:
 
     Mirrors the daemon's `_log_message` capture for the claude path (a
     `tool_use` block on an `AssistantMessage`'s `.content`) and reads the
-    `mcp_tool_call` item the codex path surfaces — the same args the MCP
+    `mcpToolCall` item the codex path surfaces — the same args the MCP
     `report_result` handler receives.
     """
     for ev in events:
@@ -202,16 +191,16 @@ def _report_result_args_from_events(events: list[AgentEvent]) -> dict | None:
                     inp = getattr(part, "input", None)
                     if isinstance(inp, dict):
                         return dict(inp)
-        # Codex: an `item.completed` envelope carrying an mcp_tool_call item.
-        if isinstance(raw, dict):
-            item = raw.get("item")
-            if (
-                isinstance(item, dict)
-                and item.get("type") == "mcp_tool_call"
-                and item.get("tool")
-                in ("report_result", "mcp__autopilot__report_result")
-            ):
-                a = item.get("arguments")
+        # Codex: an `item/completed` notification carrying an mcpToolCall item
+        # (`Notification(method, payload)` with `payload.item` a `ThreadItem`).
+        payload = getattr(raw, "payload", None)
+        item = getattr(payload, "item", None)
+        if item is not None:
+            item = getattr(item, "root", item)
+            if getattr(item, "type", None) == "mcpToolCall" and getattr(
+                item, "tool", None
+            ) in ("report_result", "mcp__autopilot__report_result"):
+                a = getattr(item, "arguments", None)
                 if isinstance(a, dict):
                     return dict(a)
     return None
@@ -311,9 +300,12 @@ def test_mixed_config_round_trips_tool_call_and_report_result_end_to_end(
     assert type(ideation) is not type(task)
 
     # Same assertions over BOTH backends — the normalized seam is backend-agnostic.
-    for events, expected_commit in (
-        (claude_events, "c1aude7"),
-        (codex_events, "c0dex42"),
+    # `reports_full_meta` marks the claude path, which carries cost / model /
+    # turn count in its stream; codex reports only token usage (the normalized
+    # record degrades the rest gracefully to 0 / "").
+    for events, expected_commit, reports_full_meta in (
+        (claude_events, "c1aude7", True),
+        (codex_events, "c0dex42", False),
     ):
         # report_result round-tripped through the adapter's tool surface and is
         # honored identically by the daemon's tool-args -> TaskResult builder.
@@ -334,11 +326,12 @@ def test_mixed_config_round_trips_tool_call_and_report_result_end_to_end(
 
         usage = result.usage
         assert isinstance(usage, AgentUsage)
+        # The token count is the cross-backend invariant: both backends report
+        # input/output tokens, and the cost guard reads them off one shape.
         assert usage.combined_tokens > 0
-        assert usage.total_cost_usd > 0.0
 
-        # The exact reads verify.py's prose-judge cost capture performs off the
-        # normalized record succeed for both backends.
+        # The reads verify.py's prose-judge cost capture performs off the
+        # normalized record.
         result_meta: dict = {}
         if usage.model:
             result_meta["model"] = usage.model
@@ -348,7 +341,17 @@ def test_mixed_config_round_trips_tool_call_and_report_result_end_to_end(
             result_meta["total_cost_usd"] = usage.total_cost_usd
         if usage.usage:
             result_meta["usage"] = usage.usage
-        assert {"model", "num_turns", "total_cost_usd", "usage"} <= set(result_meta)
+        if reports_full_meta:
+            # Claude carries cost / model / turns — the full capture succeeds.
+            assert usage.total_cost_usd > 0.0
+            assert {"model", "num_turns", "total_cost_usd", "usage"} <= set(
+                result_meta
+            )
+        else:
+            # Codex reports tokens but not cost / model / turns; the capture
+            # degrades gracefully (it fills the keys it can — here, usage).
+            assert usage.total_cost_usd == 0.0
+            assert "usage" in result_meta
 
         # And the cost guard reads the SAME token count off the normalized
         # event payload — one shape, no per-backend branching.

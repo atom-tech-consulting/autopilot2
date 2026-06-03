@@ -17,11 +17,13 @@ dependencies = [
 dev = ["pytest>=9.0"]
 # Opt-in second backend. `claude-agent-sdk` (above) is the always-installed
 # base, so a bare `pip install autopilot2` / `uv sync` stays Claude-only. The
-# codex backend lazily `import codex_sdk` (ap2.adapters.load_codex_sdk) only at
-# first dispatch; this extra is what gives that import an install path. The
-# distribution name matches the daemon-start gate's `uv pip install codex-sdk`
-# remediation hint. Unpinned — no version floor is known yet.
-codex = ["codex-sdk"]
+# codex backend lazily `import openai_codex` (via the ap2.adapters codex loader)
+# only at first dispatch; this extra is what gives that import an install path.
+# `openai-codex` is OpenAI's official Codex SDK (import name `openai_codex`); it
+# bundles the Codex CLI binary and matches the daemon-start gate's
+# `uv pip install openai-codex` remediation hint. Unpinned — no version floor is
+# known yet.
+codex = ["openai-codex"]
 
 [project.scripts]
 ap2 = "ap2.cli:main"
