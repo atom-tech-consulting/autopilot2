@@ -1437,3 +1437,9 @@
 - **Summary:** Declared a `codex = ["codex-sdk"]` optional extra in pyproject.toml (base install stays Claude-only), documented the install line + extra-plus-credential requirement in howto.md, named the extra in the daemon-start codex-handle gate diagnostic, and added a hermetic ap2/tests/test_packaging.py; full suite 2957 passed / 1 skipped.
 - **Files:** pyproject.toml, ap2/daemon.py, ap2/howto.md, ap2/tests/test_packaging.py
 - **Tests:** pass
+
+## [2026-06-03] TB-372: Repoint the codex backend to the real OpenAI `openai-codex` SDK and reimplement CodexAdapter against its actual API
+- **Commit:** `aac3da9`
+- **Summary:** Repointed the codex backend off the wrong package (Cleanlab codex-sdk) and fabricated API (CodexOptions/run_streamed) onto OpenAI's real openai-codex SDK: load_codex_sdk imports openai_codex (sys.modules seam preserved), CodexAdapter.run now drives AsyncCodex().thread_start->thread.turn->turn.stream() normalizing Notifications into AgentEvent/AgentResult, the daemon-start gate + cli/howto comments name openai_codex, and all hermetic tests/parity/e2e/packaging/smoke were rebuilt against the real Codex/thread_start/turn/Notification shape; full suite 2954 passed.
+- **Files:** pyproject.toml, uv.lock, ap2/adapters/codex.py, ap2/daemon.py, ap2/cli_daemon.py, ap2/howto.md, ap2/tests/test_codex_adapter.py, ap2/tests/test_adapter_parity.py, ap2/tests/test_packaging.py, ap2/tests/test_tb369_codex_availability_gate.py, ap2/tests/e2e/test_mixed_backend_end_to_end.py, ap2/tests/smoke/test_codex_real_sdk.py
+- **Tests:** pass

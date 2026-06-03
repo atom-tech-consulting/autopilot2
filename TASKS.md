@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-372** **Repoint the codex backend to the real OpenAI `openai-codex` SDK and reimplement CodexAdapter against its actual API** `#autopilot` `#agent-adapter` `#codex` `#bug` `#sdk` `#axis-4` `#axis-7` `@blocked:TB-371` [→ brief](.cc-autopilot/tasks/repoint-the-codex-backend-to-the-real-op.md)
 
 ## Pipeline Pending
 
@@ -257,5 +256,6 @@
 - [x] **TB-369** **Backend-aware daemon-start codex-handle-availability gate — mirror TB-368 for the codex backend** `#autopilot` `#agent-adapter` `#codex` `#daemon` `#startup-gate` `#axis-5` `@blocked:TB-368` — When the agent-backend map references codex, the daemon-start gate must verify the codex handle (codex_sdk) is importable and fail fast with a clear diagnostic — today only the Claude SDK is probed (TB-368), so a misconfigured codex deployment starts then crashes cryptically at first dispatch. [→ brief](.cc-autopilot/tasks/backend-aware-daemon-start-codex-handle.md)
 - [x] **TB-370** **Accept codex ChatGPT-login OAuth (auth.json), not only OPENAI_API_KEY, in the backend-aware auth gate** `#autopilot` `#agent-adapter` `#codex` `#auth` `#oauth` `#axis-5` `@blocked:TB-358` [→ brief](.cc-autopilot/tasks/accept-codex-chatgpt-login-oauth-auth-js.md)
 - [x] **TB-371** **Declare the codex backend as an installable optional extra (autopilot2[codex])** `#autopilot` `#agent-adapter` `#codex` `#packaging` `#axis-7` `#oss-prep` `@blocked:TB-369` — Declare codex_sdk (distribution codex-sdk) as a codex optional-dependencies extra in pyproject.toml so a codex-backed kind is installable and runnable live; document the extra in howto and align the daemon-start gate hint, pinned by a hermetic packaging test. [→ brief](.cc-autopilot/tasks/declare-the-codex-backend-as-an-installa.md)
+- [x] **TB-372** **Repoint the codex backend to the real OpenAI `openai-codex` SDK and reimplement CodexAdapter against its actual API** `#autopilot` `#agent-adapter` `#codex` `#bug` `#sdk` `#axis-4` `#axis-7` `@blocked:TB-371` [→ brief](.cc-autopilot/tasks/repoint-the-codex-backend-to-the-real-op.md)
 
 ## Frozen
