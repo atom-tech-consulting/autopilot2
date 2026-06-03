@@ -110,8 +110,8 @@ This focus introduces an **agent adaptor layer**: a backend-agnostic
 `run(prompt, tools, options)` yields a normalized event stream and an
 `AgentResult(usage, commit, ...)`. Today's Claude path becomes a
 `ClaudeCodeAdapter` that wraps the current `sdk.query` behavior
-bit-for-bit; a new `CodexAdapter` drives OpenAI's `codex` CLI agent
-through the same interface. Crucially, the backend is selected **per
+bit-for-bit; a new `CodexAdapter` drives OpenAI's Codex agent through
+OpenAI's official `openai-codex` Python SDK behind the same interface. Crucially, the backend is selected **per
 agent kind**, not per daemon: an `[agent_backends]` config table (with
 `AP2_AGENT_BACKEND_<KIND>` env overrides, every kind defaulting to
 `claude`) lets an operator run, for example, `ideation=claude` while
@@ -161,7 +161,7 @@ register through the adapter so both backends see the same toolset.
 Delete-test: if tools stay Claude-MCP-specific, a Codex agent can't
 report results and the loop breaks.
 
-(4) **CodexAdapter** — implement the interface against the `codex` CLI:
+(4) **CodexAdapter** — implement the interface against OpenAI's official `openai-codex` Python SDK (which bundles the codex CLI):
 prompt assembly, tool wiring, streaming, result / commit extraction, and
 timeout / turn bounding. Delete-test: an abstraction with one
 implementation is no actual Codex support.
