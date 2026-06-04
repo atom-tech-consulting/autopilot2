@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-375** **Kill green-by-skipping: fail the real-SDK smoke run when codex variants skip despite AP2_REAL_SDK + a codex credential present** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#ci-honesty` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/kill-green-by-skipping-fail-the-real-sdk.md)
+- [ ] **TB-376** **Judge parity: backend-parametrize the verifier + validator real-SDK smokes over codex and add a janitor-judge smoke** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#judges` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/judge-parity-backend-parametrize-the-ver.md)
 
 ## Pipeline Pending
 
