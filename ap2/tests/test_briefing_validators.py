@@ -687,7 +687,10 @@ def test_tb164_operator_queue_append_docstring_names_requirement():
     requirement so the MM handler / control agent reads it before
     authoring a briefing payload."""
     import inspect
-    src = inspect.getsource(tools.build_mcp_server)
+    # TB-373: the `@tool` definitions (incl. operator_queue_append's
+    # description) moved from `build_mcp_server` into the shared
+    # `build_tool_set` single-source-of-truth helper.
+    src = inspect.getsource(tools.build_tool_set)
     assert "TB-164" in src, "operator_queue_append docstring missing TB-164"
     # Either the marker name or the delete-test phrasing is enough.
     assert "Why now" in src or "delete-test" in src, src
@@ -699,7 +702,8 @@ def test_tb154_operator_queue_append_docstring_carries_canonical_template():
     silently weaken the contract get caught here.
 
     The docstring is the description string passed to `@tool(...)` in
-    `build_mcp_server`; we read it back via the SDK server's tool
+    `build_tool_set` (TB-373 moved the `@tool` definitions there from
+    `build_mcp_server`); we read it back via the SDK server's tool
     registry for a faithful round-trip pin."""
     from ap2.config import Config
     import tempfile
@@ -717,12 +721,12 @@ def test_tb154_operator_queue_append_docstring_carries_canonical_template():
             f.write("## Autopilot\n\n- Next task ID: TB-1\n")
         cfg2 = Config.load(td)
         cfg2.ensure_dirs()
-        # Read the @tool docstring straight off the build_mcp_server
+        # Read the @tool docstring straight off the build_tool_set
         # source — the description string is the second argument to
         # the @tool decorator. We grab it via the registered handler's
         # closure metadata.
         import inspect
-        src = inspect.getsource(tools.build_mcp_server)
+        src = inspect.getsource(tools.build_tool_set)
     # Every canonical section name appears verbatim in the docstring.
     for section in ("## Goal", "## Scope", "## Design",
                     "## Verification", "## Out of scope"):

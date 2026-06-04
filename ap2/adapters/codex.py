@@ -39,9 +39,13 @@ What it preserves from the shared contract:
     set is handed to `build_tool_server` as a unit and the registered
     short-names are recorded for the base `registered_tool_names()`
     enumeration — axis 7's cross-backend parity test reads this to assert both
-    backends register one identical set. (Delivering ap2's *in-process* MCP tool
-    server to a live Codex agent — which consumes external stdio MCP servers via
-    its own config — is a separate concern not wired into this dispatch path.)
+    backends register one identical set. TB-373 (axis 3, Level 1) delivers that
+    tool set to a LIVE codex agent: because the real SDK consumes external stdio
+    MCP servers via its own config (no in-process `mcp_servers` kwarg),
+    `_external_mcp_config` translates the `register_tools` policy into a
+    `mcp_servers` entry that launches the `python -m ap2.mcp_stdio` stdio bridge
+    (`ap2/mcp_stdio.py`, serving the SAME tool set), merged into
+    `thread_start(config=...)`.
   - Stream parsing (`run`): each `openai_codex` turn `Notification` is
     normalized to an `AgentEvent` carrying the same compact/full/text triple the
     Claude path produces, then a terminal `AgentEvent(type="result")` carries
@@ -70,6 +74,7 @@ site.
 from __future__ import annotations
 
 import json as _json
+import sys as _sys
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -207,6 +212,73 @@ def _codex_tool_call(item: Any) -> dict | None:
             ),
         }
     return None
+
+
+def _codex_mcp_result_payload(result: Any) -> dict | None:
+    """Parse a codex `McpToolCallResult` (or stub) into the MCP-tool reply dict
+    an ap2 handler returns via `_ok(...)` — the codex analogue of the daemon's
+    `_extract_tool_result_payload` for a Claude `ToolResultBlock`.
+
+    The real `McpToolCallResult` carries `structured_content` (a dict) and/or
+    `content` (a list of text blocks whose first JSON-decodable text payload is
+    the handler's reply). Prefer `structured_content`; else JSON-decode the
+    first text block. Returns `None` when no dict payload is recoverable.
+    """
+    if result is None:
+        return None
+    structured = _field(result, "structured_content")
+    if isinstance(structured, dict) and structured:
+        return structured
+    content = _field(result, "content")
+    if isinstance(content, list):
+        for blk in content:
+            txt = _field(blk, "text")
+            if isinstance(txt, str) and txt.strip():
+                try:
+                    payload = _json.loads(txt)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(payload, dict):
+                    return payload
+    return None
+
+
+def codex_tool_call_payload(notif: Any) -> dict | None:
+    """Extract a codex `mcpToolCall` item's tool short-name + FULL arguments
+    (and any inline result) from a turn notification, or `None` when the
+    notification carries no `mcpToolCall` `ThreadItem`.
+
+    This is the codex analogue of reading `.name` / `.input` off a Claude
+    `ToolUseBlock`: the daemon's result-capture stream-walk (`daemon.run_task`)
+    calls it to reconstruct a full `report_result` / `pipeline_task_start`
+    payload from a codex `task` agent's stream — the same args the in-process
+    MCP handler would receive. Unlike `_codex_tool_call` (which truncates
+    `arguments` to a 200-char preview for the compact stream summary), this
+    returns the UNTRUNCATED arguments dict; a JSON-string `arguments` (some
+    codex builds serialize the MCP arguments as a string) is parsed back.
+
+    Returns ``{"name", "input", "id", "result"}`` where `result` is the inline
+    MCP tool-result payload dict — codex carries a tool's args AND its result on
+    the one `mcpToolCall` item (real `McpToolCallThreadItem.result`), unlike
+    Claude's split tool_use / tool_result envelopes — or `None`.
+    """
+    item = _codex_item(notif)
+    if item is None or _field(item, "type") != "mcpToolCall":
+        return None
+    args = _field(item, "arguments")
+    if isinstance(args, str):
+        try:
+            args = _json.loads(args)
+        except (ValueError, TypeError):
+            args = {}
+    if not isinstance(args, dict):
+        args = {}
+    return {
+        "name": _field(item, "tool") or "mcpToolCall",
+        "input": args,
+        "id": _field(item, "id") or "",
+        "result": _codex_mcp_result_payload(_field(item, "result")),
+    }
 
 
 def _token_breakdown_to_dict(breakdown: Any) -> dict:
@@ -393,6 +465,9 @@ class CodexAdapter(AgentAdapter):
         #: Short-names of the tools registered by the last `build_tool_server`
         #: call; surfaced via the base `registered_tool_names()` accessor.
         self._registered_tool_names: list[str] = []
+        #: Name of the MCP server the last `build_tool_server` registered (the
+        #: server `run()` delivers to the live codex agent over stdio). TB-373.
+        self._tool_server_name: str = "autopilot"
 
     def _get_codex(self) -> Any:
         if self._codex is None:
@@ -478,6 +553,7 @@ class CodexAdapter(AgentAdapter):
             for name in (getattr(t, "name", None) for t in tools_list)
             if name
         ]
+        self._tool_server_name = server_name
         builder = (
             getattr(self._codex, "create_mcp_server", None)
             if self._codex is not None
@@ -494,6 +570,45 @@ class CodexAdapter(AgentAdapter):
             "version": version,
             "backend": "codex",
             "tools": tools_list,
+        }
+
+    def _external_mcp_config(
+        self, tools: AgentTools, options: AgentOptions
+    ) -> dict[str, Any]:
+        """Translate ap2's tool policy into codex's EXTERNAL stdio MCP-server
+        config (TB-373 / goal.md axis 3).
+
+        The real `openai_codex` SDK has no in-process `mcp_servers` kwarg — codex
+        consumes external stdio MCP servers declared in its session config
+        (`mcp_servers.<name>` → `command` / `args`), launched as a subprocess.
+        ap2 ships exactly that server as ``python -m ap2.mcp_stdio --project
+        <root>`` (`ap2/mcp_stdio.py`), which serves the SAME tool set as the
+        in-process Claude server.
+
+        The wiring flows through the existing tool-policy seam: it reads the
+        `mcp_servers` policy `register_tools(tools)` produces (each key is a
+        server `build_tool_server` registered, e.g. ``autopilot``) and emits, per
+        server, a real codex `mcp_servers` config entry whose launch command runs
+        the stdio bridge for this run's project root (`options.cwd`). The result
+        is a `dict` suitable for codex's `thread_start(config=...)` JSON config
+        (`ThreadStartParams.config`, a real `dict[str, Any]` field on the
+        installed SDK) — no fabricated SDK symbol. Returns ``{}`` when the policy
+        carries no MCP server.
+        """
+        policy = self.register_tools(tools)
+        servers = policy.get("mcp_servers") or {}
+        if not servers:
+            return {}
+        project_root = options.cwd or "."
+        launch_args = ["-m", "ap2.mcp_stdio", "--project", str(project_root)]
+        return {
+            "mcp_servers": {
+                str(name): {
+                    "command": _sys.executable,
+                    "args": list(launch_args),
+                }
+                for name in servers
+            }
         }
 
     def _split_native_kwargs(
@@ -557,15 +672,27 @@ class CodexAdapter(AgentAdapter):
         `run_to_result` turns them into a `status="error"` result, and a
         `timeout_s` exceedance into `status="timeout"`.
 
-        `tools` is the backend-neutral tool policy; ap2's in-process MCP server
-        is delivered to a live Codex agent via codex's own MCP config, not as a
-        `thread_start` / `turn` kwarg (the real SDK exposes no allow/deny/
-        mcp_servers kwarg), so it is not threaded onto the SDK calls here. The
-        `register_tools` / `build_tool_server` methods remain the tool-policy /
-        parity surface.
+        `tools` is the backend-neutral tool policy; ap2's tools are delivered to
+        the live Codex agent via codex's own EXTERNAL stdio MCP config (TB-373) —
+        the real SDK exposes no in-process allow/deny/`mcp_servers` kwarg — so
+        `_external_mcp_config` translates the `register_tools` policy into a
+        `mcp_servers` entry that launches the `python -m ap2.mcp_stdio` bridge and
+        merges it into `thread_start(config=...)`. `register_tools` /
+        `build_tool_server` remain the tool-policy / parity surface.
         """
         codex = self._get_codex()
         thread_kwargs, turn_kwargs = self._split_native_kwargs(codex, options)
+
+        # TB-373: register ap2's tools with the live codex agent by declaring the
+        # stdio bridge as an external MCP server in the thread's session config.
+        mcp_config = self._external_mcp_config(tools, options)
+        if mcp_config:
+            existing = thread_kwargs.get("config")
+            merged: dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+            merged_servers = dict(merged.get("mcp_servers") or {})
+            merged_servers.update(mcp_config["mcp_servers"])
+            merged["mcp_servers"] = merged_servers
+            thread_kwargs["config"] = merged
 
         final_text = ""
         final_status = "complete"

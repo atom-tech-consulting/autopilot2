@@ -669,20 +669,24 @@ def do_mattermost_thread_read(cfg: Config, args: dict) -> dict:
 # ---------------- SDK wiring ----------------
 
 
-def build_mcp_server(cfg: Config, adapter=None):
-    """Build the in-process MCP server exposing the custom tools.
+def build_tool_set(cfg: Config) -> list:
+    """Build ap2's canonical custom tool set (the `@tool`-decorated handler
+    closures) and return it as a plain list.
 
-    Imported lazily so unit tests don't need the SDK.
+    TB-373 (axis 3): this is the SINGLE SOURCE OF TRUTH for ap2's custom tool
+    definitions + their input schemas, shared by BOTH transports:
 
-    TB-355 (axis 3): the `@tool` definitions below remain ap2's canonical
-    custom tool set, but the `create_sdk_mcp_server(...)` assembly that turns
-    them into the backend-native MCP server now lives behind the
-    `AgentAdapter` (`ClaudeCodeAdapter.build_tool_server`) so both backends
-    expose one toolset. The tool set is handed to the adapter as a unit; the
-    adapter records the registered short-names for
-    `adapter.registered_tool_names()`. `adapter` defaults to a fresh
-    `ClaudeCodeAdapter`; callers (e.g. the axis-3 contract test) may pass their
-    own instance to inspect that enumeration.
+      - the in-process Claude path (`build_mcp_server` →
+        `ClaudeCodeAdapter.build_tool_server` → `create_sdk_mcp_server`), and
+      - the external stdio path for a live codex agent (`ap2/mcp_stdio.py`,
+        which serves the SAME tool objects over the `mcp` package's stdio
+        transport because the real `openai_codex` SDK has no in-process
+        `mcp_servers` kwarg).
+
+    Both consumers wrap these IDENTICAL `SdkMcpTool` objects — there is exactly
+    one definition of each tool, its schema, and its handler; nothing is forked
+    or re-declared. Each tool closes over `cfg` so the daemon can wire paths at
+    startup without the agent knowing them.
     """
     # TB-366: import the `@tool` schema decorator from the adapter layer (a
     # lazy re-export of `claude_agent_sdk.tool`) rather than from
@@ -1068,12 +1072,56 @@ def build_mcp_server(cfg: Config, adapter=None):
     async def pipeline_task_start(args):
         return do_pipeline_task_start(cfg, args)
 
+    return [
+        board_edit,
+        cron_edit,
+        mattermost_reply,
+        mattermost_thread_read,
+        log_event,
+        daemon_control,
+        ideation_state_write,
+        git_log_grep,
+        operator_log_append,
+        operator_queue_append,
+        report_result,
+        cron_propose,
+        status_report_run,
+        pipeline_task_start,
+    ]
+
+
+def _mcp_server_version() -> str:
+    """The `claude-automation` package version stamped onto every assembled MCP
+    server (in-process and stdio), or `"unknown"` when not installed."""
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
 
     try:
-        version = _pkg_version("claude-automation")
+        return _pkg_version("claude-automation")
     except PackageNotFoundError:
-        version = "unknown"
+        return "unknown"
+
+
+def build_mcp_server(cfg: Config, adapter=None):
+    """Build the in-process MCP server exposing the custom tools.
+
+    Imported lazily so unit tests don't need the SDK.
+
+    TB-355 (axis 3): the `@tool` definitions (now in `build_tool_set`) remain
+    ap2's canonical custom tool set, but the `create_sdk_mcp_server(...)`
+    assembly that turns them into the backend-native MCP server lives behind the
+    `AgentAdapter` (`ClaudeCodeAdapter.build_tool_server`) so both backends
+    expose one toolset. The tool set is handed to the adapter as a unit; the
+    adapter records the registered short-names for
+    `adapter.registered_tool_names()`. `adapter` defaults to a fresh
+    `ClaudeCodeAdapter`; callers (e.g. the axis-3 contract test) may pass their
+    own instance to inspect that enumeration.
+
+    TB-373: the tool list comes from `build_tool_set(cfg)` — the single source
+    of truth the stdio bridge (`ap2/mcp_stdio.py`) reuses — so the in-process
+    Claude server and the external stdio server for codex advertise the
+    IDENTICAL catalog with no forked definitions.
+    """
+    tool_set = build_tool_set(cfg)
 
     # TB-355 (axis 3): hand ap2's custom tool set to the AgentAdapter, which
     # owns the `create_sdk_mcp_server(...)` assembly (relocated into
@@ -1084,24 +1132,9 @@ def build_mcp_server(cfg: Config, adapter=None):
 
         adapter = ClaudeCodeAdapter()
     return adapter.build_tool_server(
-        [
-            board_edit,
-            cron_edit,
-            mattermost_reply,
-            mattermost_thread_read,
-            log_event,
-            daemon_control,
-            ideation_state_write,
-            git_log_grep,
-            operator_log_append,
-            operator_queue_append,
-            report_result,
-            cron_propose,
-            status_report_run,
-            pipeline_task_start,
-        ],
+        tool_set,
         server_name="autopilot",
-        version=version,
+        version=_mcp_server_version(),
     )
 
 

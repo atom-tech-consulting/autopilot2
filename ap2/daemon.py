@@ -211,6 +211,46 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
                     "log": payload.get("log") or "",
                 })
 
+        # TB-373: codex result capture. A codex-backed `task` agent streams
+        # `openai_codex` notifications — which carry NO Claude `.content`
+        # blocks, so the walk above is a no-op for them. Mirror the Claude
+        # capture against the codex `mcpToolCall` shape: read the tool
+        # short-name + FULL args (and any inline result) off the notification
+        # via the adapter's `codex_tool_call_payload`, and route
+        # `report_result` / `pipeline_task_start` exactly as the Claude stream
+        # does — so a codex agent's `report_result` round-trips into a valid
+        # TaskResult via `_task_result_from_tool_args`. The Claude in-process
+        # path is unchanged (this branch only fires on a codex notification).
+        codex_call = codex_tool_call_payload(msg)
+        if codex_call is not None:
+            cname = str(codex_call.get("name") or "")
+            cinput = codex_call.get("input")
+            if (
+                cname in ("report_result", "mcp__autopilot__report_result")
+                and isinstance(cinput, dict)
+            ):
+                task_complete_args.clear()
+                task_complete_args.update(cinput)
+            elif (
+                cname in (
+                    "pipeline_task_start", "mcp__autopilot__pipeline_task_start",
+                )
+                and isinstance(cinput, dict)
+            ):
+                # Codex carries the tool's args AND its result on the one
+                # `mcpToolCall` item (no split tool_use / tool_result
+                # envelopes), so pair the daemon-side pid/started_at from the
+                # inline result in the same pass.
+                cresult = codex_call.get("result")
+                if isinstance(cresult, dict):
+                    pipeline_starts.append({
+                        "name": str(cinput.get("name") or "").strip(),
+                        "command": str(cinput.get("command") or "").strip(),
+                        "pid": cresult.get("pid"),
+                        "started_at": cresult.get("started_at"),
+                        "log": cresult.get("log") or "",
+                    })
+
     # TB-364 (axis-6 migration): resolve the task-agent backend through the
     # per-kind selector and drive the streaming `AgentAdapter.run(...)` instead
     # of calling `sdk.query` directly. `select_adapter` reads the merged
@@ -1469,6 +1509,7 @@ from .message_dump import (
     _walk_blocks,
 )
 from .adapters.base import AgentOptions, AgentTools, usage_from_summary
+from .adapters.codex import codex_tool_call_payload
 
 
 def _append_progress(cfg: Config, task, r: TaskResult) -> None:
