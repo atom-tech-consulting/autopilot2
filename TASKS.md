@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-374** **Parametrize the tool-round-trip real-SDK smokes onto the AgentAdapter so the same test runs against both backends** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#axis-7` `@blocked:TB-373` [→ brief](.cc-autopilot/tasks/parametrize-the-tool-round-trip-real-sdk.md)
 
 ## Pipeline Pending
 
