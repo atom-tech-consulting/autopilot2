@@ -1473,3 +1473,9 @@
 - **Summary:** Added backend-parametrized real-work task smoke (test_task_real_work_real_sdk.py): agent edits a file, commits, reports the real SHA via select_adapter("task")+streaming run for claude and codex (codex writable workspace-write sandbox); both variants pass live, full suite green (2979 passed).
 - **Files:** ap2/tests/smoke/test_task_real_work_real_sdk.py
 - **Tests:** pass
+
+## [2026-06-04] TB-378: Control-agent parity: live real-SDK smokes for ideation (incl. board_edit), ideation_scrub, status_report, cron, mattermost — both backends
+- **Commit:** `370fbd0`
+- **Summary:** Added backend-parametrized real-SDK smokes for the five control-agent kinds (ideation->board_edit propose, ideation_scrub->scrubbed-output shape, status_report/mattermost->mattermost_reply, cron->log_event), each routing through select_adapter(<kind>,cfg)/the kind's production dispatch under force_backend, asserting a specific tool call or structured result for both claude and codex, plus a shared run_control_to_tool_calls helper in _adapter.py; full non-smoke suite passes (2979) and all new smokes skip cleanly by default.</summary>
+<parameter name="files_changed">ap2/tests/smoke/_adapter.py, ap2/tests/smoke/test_ideation_real_sdk.py, ap2/tests/smoke/test_ideation_scrub_real_sdk.py, ap2/tests/smoke/test_status_report_real_sdk.py, ap2/tests/smoke/test_cron_real_sdk.py, ap2/tests/smoke/test_mattermost_real_sdk.py
+- **Tests:** pass
