@@ -1145,6 +1145,28 @@ round-trips) that the per-task verification gate dropped on 2026-05-30
 to stop transient-blip false-fails — out-of-band and deterministic
 instead of on every task.
 
+**Codex coverage guard (TB-375).** `smoke_check_codex_coverage_missing`
+is a DISTINCT failure event the same `run_smoke_check` routine emits
+(instead of `smoke_check_passed`) when codex was EXPECTED to run but a
+codex-parametrized smoke variant nonetheless skipped — "green-by-skipping",
+the exact signal that hid the phantom-SDK bug for weeks. A session-scoped
+guard in the smoke harness (`ap2/tests/smoke/conftest.py` →
+`ap2/tests/smoke/_codex_guard.py`) defines "codex expected" as the
+conjunction of three presence signals — `AP2_REAL_SDK` set, `openai_codex`
+importable, AND a codex credential present (reusing the daemon-start auth
+gate's `_codex_credentials_present` helper — `OPENAI_API_KEY` or a
+`$CODEX_HOME`/`~/.codex/auth.json` ChatGPT-login session, presence-only,
+no token contents read). Under that condition a single skipped codex
+variant forces a non-zero pytest exit and prints a stdout sentinel;
+`run_smoke_check` greps the sentinel and emits
+`smoke_check_codex_coverage_missing` (payload `reason="codex_expected_but_skipped"`,
+`exit_code`, `duration_s`, `skipped_coverage` naming the skipped variants,
+`failure_tail`) plus the same failure-only Mattermost alert — NEVER a
+pass. When codex is legitimately absent (SDK not installed or no codex
+credential) the guard stays quiet and a Claude-only box still passes; the
+per-test `call_with_transient_retry` skip semantics are unchanged (this
+guard operates at the run level).
+
 **Briefing-validator LLM judge (TB-235).** `validator_judge_timeout`
 and `validator_judge_fail` are fail-open audit events from check #7
 in `briefing_validators._validate_briefing_structure` (LLM-driven

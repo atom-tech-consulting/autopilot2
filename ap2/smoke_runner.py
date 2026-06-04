@@ -31,6 +31,16 @@ Behavior:
   - **Outcome events.** Emit `smoke_check_passed` (with `duration_s`) on
     exit 0, or `smoke_check_failed` (with `exit_code` + `reason` +
     captured `failure_tail`) on non-zero exit / timeout.
+  - **Codex coverage guard (TB-375).** A non-zero exit carrying the smoke
+    harness's `CODEX_SKIP_GUARD_MARKER` is NOT an ordinary failure — it means
+    codex was EXPECTED to run (`AP2_REAL_SDK` set, `openai_codex` importable, a
+    codex credential present) but a codex-parametrized smoke variant skipped, so
+    coverage silently eroded. That case is treated as a smoke FAILURE — it
+    never emits `smoke_check_passed`; it emits a DISTINCT
+    `smoke_check_codex_coverage_missing` alarm event (naming the skipped codex
+    coverage) and posts an alert. When codex is legitimately absent (SDK not
+    installed or no codex credential) the guard stays quiet and a Claude-only
+    box still passes.
   - **Failure-only alerting.** On failure ONLY, post a concise alert to
     Mattermost via the shared channel-adapter delivery path
     (`registry.channel_adapters(cfg)` — the same path the watchdog /
@@ -66,6 +76,34 @@ _FAILURE_TAIL_CHARS = 2000
 _SMOKE_CMD: list[str] = [
     "uv", "run", "--extra", "dev", "pytest", "-q", "ap2/tests/smoke/",
 ]
+
+
+# TB-375: the line the smoke harness's session-scoped codex-coverage guard
+# (`ap2/tests/smoke/conftest.py` → `ap2/tests/smoke/_codex_guard.py`) prints to
+# stdout when codex was EXPECTED to run (`AP2_REAL_SDK` set, `openai_codex`
+# importable, a codex credential present) but a codex-parametrized smoke variant
+# nonetheless reported `skipped` — i.e. codex coverage silently eroded. The
+# guard also forces a non-zero pytest exit, so this marker is how `run_smoke_check`
+# distinguishes "codex coverage went missing" (a distinct alarm) from an ordinary
+# test failure. One source of truth, imported by the guard so the contract can't
+# drift. It is a stdout SENTINEL, not an env knob — deliberately NOT spelled in
+# the `AP2_*` env-knob namespace so the docs/coverage-drift scanners don't read
+# it as an operator knob. Presence-only — the guard never reads or logs any
+# token contents.
+CODEX_SKIP_GUARD_MARKER = "SMOKE-CODEX-COVERAGE-MISSING"
+
+
+def _codex_skip_detail(output: str) -> str:
+    """Return the guard's marker line from `output`, or the bare marker.
+
+    The guard prints a single line beginning with `CODEX_SKIP_GUARD_MARKER`
+    that names the skipped codex variants; surface it verbatim on the alarm
+    event so the operator sees which coverage went missing.
+    """
+    for line in output.splitlines():
+        if CODEX_SKIP_GUARD_MARKER in line:
+            return line.strip()
+    return CODEX_SKIP_GUARD_MARKER
 
 
 def _real_sdk_enabled() -> bool:
@@ -185,6 +223,37 @@ async def run_smoke_check(cfg: Config) -> None:
 
     duration_s = round(time.monotonic() - started, 3)
     combined = (proc.stdout or "") + (proc.stderr or "")
+
+    # TB-375: expected-but-skipped codex coverage is a smoke FAILURE, never a
+    # pass. The session-scoped guard forces a non-zero exit AND prints
+    # `CODEX_SKIP_GUARD_MARKER`; on that marker emit a DISTINCT alarm event that
+    # names the skipped codex coverage (not the generic `smoke_check_failed`),
+    # so "codex was supposed to run and didn't" can't masquerade as green. This
+    # is checked before the `returncode == 0` pass branch on purpose: a
+    # green-by-skipping run could otherwise read as a pass.
+    if CODEX_SKIP_GUARD_MARKER in combined:
+        detail = _codex_skip_detail(combined)
+        tail = combined[-_FAILURE_TAIL_CHARS:]
+        events.append(
+            cfg.events_file,
+            "smoke_check_codex_coverage_missing",
+            reason="codex_expected_but_skipped",
+            exit_code=proc.returncode,
+            duration_s=duration_s,
+            skipped_coverage=detail,
+            failure_tail=tail,
+        )
+        _post_failure_alert(
+            cfg,
+            f"⚠ [{cfg.project_name}] real-SDK smoke check FAILED — codex "
+            f"coverage SKIPPED while codex was expected to run "
+            f"(AP2_REAL_SDK set, `openai_codex` importable, codex credential "
+            f"present). Coverage erosion is NOT a pass.\n\n"
+            f"{detail}\n\n"
+            f"```\n{tail}\n```",
+        )
+        return
+
     if proc.returncode == 0:
         events.append(
             cfg.events_file,
