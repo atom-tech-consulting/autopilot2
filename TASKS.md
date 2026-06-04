@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-373** **Deliver ap2's toolset to a live codex agent over stdio MCP so a codex task agent can call report_result (Level 1)** `#autopilot` `#agent-adapter` `#codex` `#mcp-tools` `#axis-3` `#stdio-mcp` `@blocked:TB-372` [→ brief](.cc-autopilot/tasks/deliver-ap2-s-toolset-to-a-live-codex-ag.md)
 
 ## Pipeline Pending
 

@@ -318,3 +318,4 @@ ideation won't re-propose decisions logged here._
 - 2026-06-03T17:10:13Z — operator updated goal.md
 - 2026-06-04T05:02:46Z — codex real-SDK live smoke PASSED end-to-end (TB-372 validated): prompt round-tripped through CodexAdapter -> openai_codex SDK using the ChatGPT-login auth.json, agent replied AP2_CODEX_SMOKE_OK, status=complete, combined_tokens=13980. The codex backend now genuinely drives an agent kind (focus delete-test met).
 - 2026-06-04T05:02:36Z — applied operator-queued ack
+- 2026-06-04T06:04:48Z — applied operator-queued add_backlog → TB-373
