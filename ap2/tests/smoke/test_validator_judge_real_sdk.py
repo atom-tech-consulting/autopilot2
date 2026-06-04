@@ -1,184 +1,195 @@
-"""TB-249 real-SDK smoke for the LLM dep-coherence validator.
+"""Real-SDK round-trip for the LLM dep-coherence validator judge (TB-249),
+parametrized over BOTH adapter backends (TB-376; backend parity for the judge
+kinds).
 
-What FakeSDK / unit-test stubs can't catch (TB-249's regression
-shape): the Claude Agent SDK rejecting `--max-tokens` as an unknown
-option only manifests against the real SDK. The pre-TB-249 code
-passed `extra_args={"max-tokens": str(max_tokens)}` to
-`ClaudeAgentOptions`; every call exited with `error: unknown option
-'--max-tokens'` and the fail-open posture in
-`_check_dependency_coherence` swallowed it as a
-`validator_judge_fail` event. Unit tests passed because the test
-suite mocked the judge — only a real SDK round-trip exposes the
-regression.
+The validator judge identifies hard predecessors named implicitly in a task
+briefing's prose, gating queue-append-time dependency coherence (validator check
+#7). This smoke pins, now for BOTH the claude AND codex backends, that the judge
+returns the correct verdict:
 
-This smoke fires the validator against a known-good briefing (no
-dep-mismatch claims) with the real Haiku-4.5 judge and asserts:
+  1. Given a briefing that claims NO hard predecessor, the judge returns an
+     EMPTY `hard_predecessors` list (the briefing is coherent → validator passes).
+  2. Given a briefing that explicitly names an uncommitted TB-N as a hard
+     predecessor, the judge IDENTIFIES that TB-N (the briefing is incoherent →
+     validator would gate).
 
-  1. The validator returns `None` (the briefing's prose names no
-     hard predecessor outside its `@blocked:` codespan).
-  2. No `validator_judge_fail` event was emitted (the SDK call
-     completed without an `extra_args` rejection).
-  3. No `validator_judge_timeout` event was emitted (the default
-     15s budget is comfortably above Haiku's typical response time
-     on a small payload).
+TB-376: the judge call is dispatched through the production `AgentAdapter` seam
+resolved for the `validator_judge` kind (`select_adapter("validator_judge", cfg)`
++ `adapter.run_to_result(...)`), parametrized over the `claude` and `codex`
+backends so the SAME verdict assertion runs against whichever backend the kind
+selects. Pointing `validator_judge` at codex
+(`AP2_AGENT_BACKEND_VALIDATOR_JUDGE=codex`, set by `force_backend`) exercises a
+live codex agent producing the dep-coherence verdict. The verdict JSON is parsed
+by the SAME production parser (`validator_judge.impl._parse_dep_judge_response`)
+the validator uses, so the smoke pins the real verdict.
 
-OPT-IN: this test makes real API calls. It only runs when AP2_REAL_SDK
-is set:
+Why a fresh dispatch and not the full `_validate_briefing_structure` path: the
+production validator's `_judge_dep_coherence_default` resolves its adapter with
+`cfg=None` (always claude) AND hardcodes `model="claude-haiku-4-5"`, so it can
+neither honor a forced backend nor run on codex (a codex turn rejects a Claude
+model). Routing the dep-coherence prompt directly through the per-kind seam with
+no Claude-specific model is what lets the SAME smoke run on both backends.
+
+OPT-IN: this test makes real API calls. It only runs when AP2_REAL_SDK is set:
 
     AP2_REAL_SDK=1 uv run pytest ap2/tests/smoke/test_validator_judge_real_sdk.py -v -s
 
-Bounded cost: tiny payload, `max_turns=2`, single-call expectation.
-Per-invocation cost target ≤$0.005 at Haiku rates (per howto.md's
-validator-judge knob doc).
+The codex variant carries a secondary gate (the `openai_codex` `importorskip` in
+`gate_backend`) so `AP2_REAL_SDK=1` on a box without the codex backend skips
+rather than errors. A transport/service fault (non-`complete` adapter result)
+skips after one bounded retry; a confident-but-wrong verdict still fails.
 """
 from __future__ import annotations
 
+import json
 import os
-import uuid
-from pathlib import Path
 
 import pytest
 
-from ._transient import call_with_transient_retry, transient_signature
+from ._adapter import (
+    BACKENDS,
+    agent_result_transient,
+    bootstrap_judge_cfg,
+    force_backend,
+    gate_backend,
+    run_judge_to_result,
+)
+from ._transient import call_with_transient_retry
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("AP2_REAL_SDK"),
     reason="real-SDK smoke; set AP2_REAL_SDK=1 to run",
 )
 
+# A coherent briefing: claims NO external dependency. The judge should return an
+# empty hard_predecessors list (the validator would return None → pass).
+_GOOD_BRIEFING = (
+    "## Goal\n\n"
+    "Add a one-line no-op helper to ap2/tools.py so the validator has a real "
+    "briefing to chew on. This task has no external dependencies — it touches a "
+    "single self-contained file.\n\n"
+    "## Scope\n\n"
+    "(1) Add `def _toy_noop(): return None` to ap2/tools.py.\n"
+)
 
-# Intentionally a small, structurally-valid briefing that claims NO
-# external dependencies. The judge should return an empty
-# hard_predecessors list and the validator should return None.
-_GOOD_BRIEFING = """\
-# Toy task: add a one-line helper to ap2/tools.py
-
-Tags: `#test`
-
-## Goal
-
-Demonstrate the TB-249 smoke. Add a no-op helper function so the
-validator has a real briefing to chew on. Why now: TB-249 fixed the
-extra_args bug; this smoke confirms the SDK no longer rejects the
-call.
-
-## Scope
-
-(1) Add `def _toy_noop(): return None` to ap2/tools.py.
-
-## Design
-
-Trivial smoke target. No design.
-
-## Verification
-
-- `uv run pytest -q ap2/tests/` — full suite green.
-
-## Out of scope
-
-- Anything else.
-"""
+# An incoherent briefing: explicitly names an UNCOMMITTED predecessor (TB-901)
+# whose work this task imports, with no `@blocked:` codespan declaring it. The
+# judge should identify TB-901 as a hard predecessor (the validator would gate).
+_DEP_PREDECESSOR = "TB-901"
+_BAD_BRIEFING = (
+    "## Goal\n\n"
+    "Wire this task's new module to the shared tool registry.\n\n"
+    "## Scope\n\n"
+    f"(1) Import `build_tool_set` from `ap2/_shared.py` — the module that "
+    f"{_DEP_PREDECESSOR} created and committed. This task cannot begin until "
+    f"{_DEP_PREDECESSOR}'s `ap2/_shared.py` is on disk; every Scope item below "
+    f"calls a symbol {_DEP_PREDECESSOR} defines.\n"
+)
 
 
-def test_validator_judge_real_sdk_happy_path(tmp_path, monkeypatch):
-    """Real Claude Haiku-4.5 judge + structurally-valid briefing → no
-    fail/timeout events, validator returns None."""
-    from ap2 import events, tools
+def _validator_prompt(
+    briefing_markdown: str, description: str, blocked_tokens: list[str]
+) -> str:
+    """Compose the dep-coherence prompt in the SAME output-contract shape
+    `validator_judge.impl._judge_dep_coherence_default` uses, so the production
+    parser (`_parse_dep_judge_response`) reads the verdict identically."""
+    system_text = (
+        "You are validating a task briefing for hard-predecessor dependency "
+        "coherence. A hard predecessor is another task whose work must be on "
+        "disk (committed) before this task's agent can do its own work — code "
+        "modules, schema, env knobs, or other artifacts the new task depends "
+        "on. Soft references (historical context, sibling tasks doing parallel "
+        "work, references to docstrings or prior commits for "
+        "reading-comprehension only) are NOT hard predecessors.\n\n"
+        "OUTPUT CONTRACT — your FINAL message must be a JSON object only:\n"
+        '  {"hard_predecessors": ["TB-217"], '
+        '"reasoning": "TB-217 created ap2/_shared.py which this briefing '
+        'imports"}\n'
+        "Rules for the FINAL message:\n"
+        "  - It is a JSON object only. No markdown code fences, no leading "
+        "preamble, no trailing commentary after the closing brace.\n"
+        "  - `hard_predecessors` is a (possibly empty) list of strings, each of "
+        "the form 'TB-N'.\n"
+        "  - `reasoning` is a single short sentence.\n"
+    )
+    payload = {
+        "briefing_markdown": briefing_markdown,
+        "task_description": description,
+        "blocked_codespan_tokens": list(blocked_tokens),
+    }
+    return (
+        f"{system_text}\n\n"
+        f"Input:\n```json\n{json.dumps(payload, indent=2)}\n```"
+    )
 
-    # Reset the deprecation-knob one-shot flag so order-dependent smoke
-    # runs don't surprise us.
-    tools._VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED.clear()
 
-    # Ensure the legacy alias is NOT set; we want the canonical
-    # max_turns path to fire.
-    # TB-254: use monkeypatch so the env-var deletions are reverted on
-    # teardown. The pre-TB-254 code used `os.environ.pop` directly,
-    # which permanently clobbered the env var for the rest of the
-    # session — including the `AP2_VALIDATOR_JUDGE_DISABLED=1` shield
-    # set by `ap2/tests/conftest.py`. Under `AP2_REAL_SDK=1` (CI /
-    # dev) the smoke ran early and re-leaked all subsequent unit
-    # tests to real Haiku-4.5 calls. monkeypatch keeps the
-    # short-lived unsets scoped to this one test.
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+def _hard_predecessors(
+    backend: str, monkeypatch, tmp_path, *, briefing: str, description: str
+) -> list[str]:
+    """Route ONE dep-coherence judge call through
+    `select_adapter("validator_judge", cfg)` for `backend` and return the parsed
+    `hard_predecessors` list (production parser)."""
+    from ap2.adapters import AgentTools, select_adapter
+    from ap2.components.validator_judge.impl import _parse_dep_judge_response
 
-    def _run_once():
-        """One live validator round-trip against a FRESH events file.
+    cfg = bootstrap_judge_cfg(tmp_path)
+    adapter = select_adapter("validator_judge", cfg)
+    assert adapter.backend == backend, adapter.backend
 
-        A fresh file per attempt is load-bearing for TB-351's bounded
-        retry: the validator appends to `events_file`, so reusing one file
-        would carry attempt-1's fail/timeout events into attempt-2's tail
-        and defeat the "still transient after a retry?" check.
-        """
-        ev_file = tmp_path / f"events-{uuid.uuid4().hex}.jsonl"
-        err = tools._validate_briefing_structure(
-            _GOOD_BRIEFING,
-            description="add a no-op helper",
-            blocked_csv="",
-            events_file=ev_file,
-            # dep_judge_fn=None → real SDK path
+    prompt = _validator_prompt(briefing, description, blocked_tokens=[])
+
+    def _run() -> object:
+        return run_judge_to_result(
+            adapter, backend, prompt, AgentTools(), cwd=tmp_path
         )
-        evts = events.tail(ev_file, 50) if ev_file.exists() else []
-        fails = [e for e in evts if e.get("type") == "validator_judge_fail"]
-        timeouts = [
-            e for e in evts if e.get("type") == "validator_judge_timeout"
-        ]
-        return err, fails, timeouts
 
-    def _validator_transient(ret):
-        """Map a validator run to a transient signature (or None).
-
-        The validator fails open: a transient SDK transport/service error
-        surfaces as a `validator_judge_fail` event whose `error` string
-        carries the signature, or a `validator_judge_timeout` event (the
-        judge didn't answer in budget this run — inconclusive for wiring).
-        A genuine wiring regression (e.g. TB-249's `--max-tokens`
-        arg rejection → `error="... unknown option ..."`) matches NO
-        transient signature, so this returns None → the assert below still
-        fires and the smoke fails, exactly as intended.
-        """
-        _err, fails, timeouts = ret
-        for ev in (*fails, *timeouts):
-            sig = transient_signature(ev)
-            if sig is not None:
-                return sig
-        # A timeout event whose message doesn't literally spell "timeout"
-        # is still inconclusive — the live judge overran its budget.
-        if timeouts:
-            return "timeout"
-        return None
-
-    # TB-351: retry once on a transient SDK error, then skip (not fail).
-    err, fails, timeouts = call_with_transient_retry(
-        _run_once,
-        describe="validator dep-coherence smoke",
-        transient_of=_validator_transient,
+    result = call_with_transient_retry(
+        _run,
+        describe=f"validator judge smoke [{backend}]",
+        transient_of=agent_result_transient,
     )
-    print(
-        f"\n[smoke] validator returned err={err!r}; "
-        f"fails={len(fails)}; timeouts={len(timeouts)}"
+    outcome = _parse_dep_judge_response((result.text or "").strip(), events_file=None)
+    assert outcome.data is not None, (
+        f"[{backend}] validator judge response did not parse to a JSON object "
+        f"(parse_error={outcome.parse_error!r}); raw text={result.text!r}"
+    )
+    preds = outcome.data.get("hard_predecessors")
+    return [p for p in (preds or []) if isinstance(p, str)]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_validator_judge_coherent_briefing(backend, monkeypatch, tmp_path):
+    """A briefing claiming no dependency → empty hard_predecessors, on BOTH
+    backends (the pre-TB-376 happy-path assertion, now adapter-routed)."""
+    gate_backend(backend)
+    force_backend(monkeypatch, "validator_judge", backend)
+
+    preds = _hard_predecessors(
+        backend, monkeypatch, tmp_path,
+        briefing=_GOOD_BRIEFING, description="add a no-op helper",
+    )
+    print(f"[smoke:{backend}] coherent-briefing hard_predecessors={preds!r}")
+    assert preds == [], (
+        f"[{backend}] expected NO hard predecessors for a self-contained "
+        f"briefing, got {preds!r}"
     )
 
-    assert fails == [], (
-        f"TB-249 regression — validator_judge_fail event(s) emitted: "
-        f"{fails!r}. The most likely cause is the `extra_args=` "
-        "literal in `_judge_dep_coherence_default` carrying an "
-        "SDK-rejected key (e.g. `max-tokens`). Run "
-        "`grep -n max-tokens ap2/tools.py` to confirm."
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_validator_judge_incoherent_briefing(backend, monkeypatch, tmp_path):
+    """A briefing naming an uncommitted predecessor → that TB-N is identified,
+    on BOTH backends."""
+    gate_backend(backend)
+    force_backend(monkeypatch, "validator_judge", backend)
+
+    preds = _hard_predecessors(
+        backend, monkeypatch, tmp_path,
+        briefing=_BAD_BRIEFING,
+        description="wire the new module to the shared registry",
     )
-    assert timeouts == [], (
-        f"validator_judge_timeout event(s) emitted: {timeouts!r}. "
-        "Either Haiku is slower than 15s on a trivial payload "
-        "(unusual) or the SDK is hung — investigate before treating "
-        "this as a TB-249 regression."
+    print(f"[smoke:{backend}] incoherent-briefing hard_predecessors={preds!r}")
+    upper = {p.strip().upper() for p in preds}
+    assert _DEP_PREDECESSOR in upper, (
+        f"[{backend}] expected the judge to identify {_DEP_PREDECESSOR} as a "
+        f"hard predecessor, got {preds!r}"
     )
-    # The good briefing claims no hard predecessors; the validator
-    # should return None. (If Haiku ever hallucinates a hard
-    # predecessor, the smoke surfaces a non-regression-pinned diagnostic
-    # — we don't fail the test on it, just print it.)
-    if err is not None:
-        print(
-            f"[smoke] NOTE — validator rejected the good briefing: {err!r}. "
-            "Not a TB-249 failure (SDK call succeeded) but worth a "
-            "look at the judge's prompt drift."
-        )

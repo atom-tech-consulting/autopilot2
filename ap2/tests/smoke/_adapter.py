@@ -24,6 +24,13 @@ This module centralizes the bits all three smokes share so they never drift:
     normalized `AgentEvent` stream, mirroring `daemon.run_task._log_message`'s
     capture walk (Claude `.content` `ToolUseBlock`s + the codex `mcpToolCall`
     shape via the adapter's `codex_tool_call_payload`).
+  - `bootstrap_judge_cfg` / `run_judge_to_result` / `agent_result_transient`
+    (TB-376): the judge-smoke trio's shared dispatch + transient-classify
+    helpers. The verifier / validator / janitor judge real-SDK smokes parametrize
+    the SAME verdict-correctness assertion over both backends through these — a
+    judge that dispatches but mis-verdicts is the failure mode that matters, so
+    the smoke routes the prompt through `select_adapter(<judge_kind>, cfg)` and
+    asserts the parsed verdict VALUE, not just that a tool was called.
 """
 from __future__ import annotations
 
@@ -110,3 +117,93 @@ def extract_tool_calls(raw: Any) -> list[dict]:
             }
         )
     return calls
+
+
+# --------------------------------------------------------------------------
+# Judge-smoke helpers (TB-376).
+#
+# The three judge smokes (`test_prose_judge_real_sdk.py`,
+# `test_validator_judge_real_sdk.py`, `test_janitor_judge_real_sdk.py`) prove a
+# different contract than the tool smokes above: not "the agent CALLED a tool",
+# but "the judge returned the CORRECT verdict on whichever backend the kind
+# selects". They reuse `BACKENDS` / `gate_backend` / `force_backend` for the
+# parametrization + codex opt-in gate, plus the three helpers below for the
+# shared dispatch + transient-classify path.
+# --------------------------------------------------------------------------
+
+
+def bootstrap_judge_cfg(root: Any):
+    """Write a minimal `TASKS.md` / `CLAUDE.md` skeleton at `root` and return a
+    loaded `Config`.
+
+    Enough for `Config.load` + `select_adapter(<judge_kind>, cfg)`:
+    `get_agent_backend` reads the `AP2_AGENT_BACKEND_<KIND>` override
+    `force_backend` set (env wins over the `[agent_backends]` table), so the
+    resolved adapter matches the parametrized backend. Mirrors the
+    `_bootstrap_project` skeleton the tool-round-trip smokes use.
+    """
+    from pathlib import Path
+
+    from ap2.config import Config
+
+    root = Path(root)
+    (root / "TASKS.md").write_text(
+        "# Tasks\n\n## Active\n\n## Ready\n\n## Backlog\n\n"
+        "## Complete\n\n## Frozen\n"
+    )
+    (root / "CLAUDE.md").write_text(
+        "# Smoke project\n\n## Autopilot\n\n- Next task ID: TB-2\n"
+    )
+    cfg = Config.load(root)
+    cfg.ensure_dirs()
+    return cfg
+
+
+def run_judge_to_result(adapter, backend: str, prompt: str, tools, *, cwd: Any):
+    """Dispatch a judge `prompt` through `adapter.run_to_result` and return the
+    terminal `AgentResult`.
+
+    Builds a backend-neutral `AgentOptions` that intentionally pins NO model:
+    the production judge paths resolve a Claude model (`agent_model`'s
+    `claude-opus-4-7` default for the verifier / janitor judges, the validator
+    judge's hardcoded `claude-haiku-4-5`), which a live codex turn would reject.
+    Leaving `model=None` lets each backend use its own default (claude's CLI
+    default, codex's native default) — exactly as the tool-round-trip smokes do.
+    The codex variant additionally gets `effort="low"` + a read-only sandbox to
+    bound cost and stay side-effect-free, mirroring `test_report_result_real_sdk`
+    / `test_codex_real_sdk`.
+    """
+    import asyncio
+
+    from ap2.adapters import AgentOptions
+
+    options = AgentOptions(
+        cwd=str(cwd),
+        permission_mode="bypassPermissions",
+        max_turns=4,
+        setting_sources=["project"],
+    )
+    if backend == "codex":
+        options.effort = "low"
+        options.extra = {"sandbox": "read-only"}
+    return asyncio.run(adapter.run_to_result(prompt, tools, options))
+
+
+def agent_result_transient(result: Any):
+    """`transient_of` for `call_with_transient_retry` over a judge `AgentResult`.
+
+    A `complete` adapter result is a real verdict the caller must parse and
+    assert — so a confident-but-WRONG verdict still fails the smoke — and this
+    returns None to let that assertion run. A non-`complete` result (the adapter
+    folded an SDK transport/service error or a per-run timeout into
+    `status="error"` / `"timeout"`) is an inconclusive wiring fault for a
+    verdict-correctness smoke → classified transient so the smoke SKIPS after one
+    bounded retry, mirroring the prose judge's historical `judge error → skip`
+    posture and the codex dispatch smoke's transient handling.
+    """
+    from ._transient import transient_signature
+
+    if getattr(result, "status", None) == "complete":
+        return None
+    err = getattr(result, "error", None) or getattr(result, "status", None)
+    return transient_signature(f"judge error: {err}") or "judge error"
