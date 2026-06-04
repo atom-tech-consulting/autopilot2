@@ -1443,3 +1443,9 @@
 - **Summary:** Repointed the codex backend off the wrong package (Cleanlab codex-sdk) and fabricated API (CodexOptions/run_streamed) onto OpenAI's real openai-codex SDK: load_codex_sdk imports openai_codex (sys.modules seam preserved), CodexAdapter.run now drives AsyncCodex().thread_start->thread.turn->turn.stream() normalizing Notifications into AgentEvent/AgentResult, the daemon-start gate + cli/howto comments name openai_codex, and all hermetic tests/parity/e2e/packaging/smoke were rebuilt against the real Codex/thread_start/turn/Notification shape; full suite 2954 passed.
 - **Files:** pyproject.toml, uv.lock, ap2/adapters/codex.py, ap2/daemon.py, ap2/cli_daemon.py, ap2/howto.md, ap2/tests/test_codex_adapter.py, ap2/tests/test_adapter_parity.py, ap2/tests/test_packaging.py, ap2/tests/test_tb369_codex_availability_gate.py, ap2/tests/e2e/test_mixed_backend_end_to_end.py, ap2/tests/smoke/test_codex_real_sdk.py
 - **Tests:** pass
+
+## [2026-06-04] TB-373: Deliver ap2's toolset to a live codex agent over stdio MCP so a codex task agent can call report_result (Level 1)
+- **Commit:** `5154916`
+- **Summary:** Added an ap2.mcp_stdio bridge serving the shared build_tool_set over stdio MCP, wired CodexAdapter to register it via thread_start(config={mcp_servers}) launching `python -m ap2.mcp_stdio`, and extended the daemon's run_task stream-walk to capture report_result/pipeline args from codex mcpToolCall events into a TaskResult; full hermetic suite green (2962 passed).
+- **Files:** ap2/tools.py, ap2/mcp_stdio.py, ap2/adapters/codex.py, ap2/daemon.py, ap2/tests/test_tb373_codex_stdio_bridge.py, ap2/tests/test_briefing_validators.py
+- **Tests:** pass

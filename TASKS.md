@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-373** **Deliver ap2's toolset to a live codex agent over stdio MCP so a codex task agent can call report_result (Level 1)** `#autopilot` `#agent-adapter` `#codex` `#mcp-tools` `#axis-3` `#stdio-mcp` `@blocked:TB-372` [→ brief](.cc-autopilot/tasks/deliver-ap2-s-toolset-to-a-live-codex-ag.md)
 
 ## Pipeline Pending
 
@@ -258,5 +257,6 @@
 - [x] **TB-370** **Accept codex ChatGPT-login OAuth (auth.json), not only OPENAI_API_KEY, in the backend-aware auth gate** `#autopilot` `#agent-adapter` `#codex` `#auth` `#oauth` `#axis-5` `@blocked:TB-358` [→ brief](.cc-autopilot/tasks/accept-codex-chatgpt-login-oauth-auth-js.md)
 - [x] **TB-371** **Declare the codex backend as an installable optional extra (autopilot2[codex])** `#autopilot` `#agent-adapter` `#codex` `#packaging` `#axis-7` `#oss-prep` `@blocked:TB-369` — Declare codex_sdk (distribution codex-sdk) as a codex optional-dependencies extra in pyproject.toml so a codex-backed kind is installable and runnable live; document the extra in howto and align the daemon-start gate hint, pinned by a hermetic packaging test. [→ brief](.cc-autopilot/tasks/declare-the-codex-backend-as-an-installa.md)
 - [x] **TB-372** **Repoint the codex backend to the real OpenAI `openai-codex` SDK and reimplement CodexAdapter against its actual API** `#autopilot` `#agent-adapter` `#codex` `#bug` `#sdk` `#axis-4` `#axis-7` `@blocked:TB-371` [→ brief](.cc-autopilot/tasks/repoint-the-codex-backend-to-the-real-op.md)
+- [x] **TB-373** **Deliver ap2's toolset to a live codex agent over stdio MCP so a codex task agent can call report_result (Level 1)** `#autopilot` `#agent-adapter` `#codex` `#mcp-tools` `#axis-3` `#stdio-mcp` `@blocked:TB-372` [→ brief](.cc-autopilot/tasks/deliver-ap2-s-toolset-to-a-live-codex-ag.md)
 
 ## Frozen
