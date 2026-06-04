@@ -1449,3 +1449,9 @@
 - **Summary:** Added an ap2.mcp_stdio bridge serving the shared build_tool_set over stdio MCP, wired CodexAdapter to register it via thread_start(config={mcp_servers}) launching `python -m ap2.mcp_stdio`, and extended the daemon's run_task stream-walk to capture report_result/pipeline args from codex mcpToolCall events into a TaskResult; full hermetic suite green (2962 passed).
 - **Files:** ap2/tools.py, ap2/mcp_stdio.py, ap2/adapters/codex.py, ap2/daemon.py, ap2/tests/test_tb373_codex_stdio_bridge.py, ap2/tests/test_briefing_validators.py
 - **Tests:** pass
+
+## [2026-06-04] TB-374: Parametrize the tool-round-trip real-SDK smokes onto the AgentAdapter so the same test runs against both backends
+- **Commit:** `a6e2d9e`
+- **Summary:** Refactored the report_result/cron_propose/pipeline_task_start real-SDK smokes off the hardcoded claude_agent_sdk dispatch onto select_adapter + adapter.run and parametrized each over the claude and codex backends (new _adapter.py shared helper); full non-smoke suite 2962 passed and, with AP2_REAL_SDK=1 set in this env, both backends' live tool round-trips passed for all three smokes.
+- **Files:** ap2/tests/smoke/_adapter.py, ap2/tests/smoke/test_report_result_real_sdk.py, ap2/tests/smoke/test_cron_propose_real_sdk.py, ap2/tests/smoke/test_pipeline_task_start_real_sdk.py
+- **Tests:** pass
