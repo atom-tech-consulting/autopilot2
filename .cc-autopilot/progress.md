@@ -1467,3 +1467,9 @@
 - **Summary:** Backend-parametrized the verifier- and validator-judge real-SDK smokes over claude+codex (routed through select_adapter(judge_kind, cfg) + force_backend, reusing production parsers) and added a janitor-judge smoke; verified live - all 19 real-SDK smokes pass on both backends (codex-coverage guard satisfied) and the full non-smoke suite is 2979 passed.
 - **Files:** ap2/tests/smoke/_adapter.py, ap2/tests/smoke/test_prose_judge_real_sdk.py, ap2/tests/smoke/test_validator_judge_real_sdk.py, ap2/tests/smoke/test_janitor_judge_real_sdk.py
 - **Tests:** pass
+
+## [2026-06-04] TB-377: Real-work task parity: a smoke where the agent edits a file, runs a command, commits, and reports a real commit SHA — both backends
+- **Commit:** `25d29f0`
+- **Summary:** Added backend-parametrized real-work task smoke (test_task_real_work_real_sdk.py): agent edits a file, commits, reports the real SHA via select_adapter("task")+streaming run for claude and codex (codex writable workspace-write sandbox); both variants pass live, full suite green (2979 passed).
+- **Files:** ap2/tests/smoke/test_task_real_work_real_sdk.py
+- **Tests:** pass
