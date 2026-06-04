@@ -1455,3 +1455,9 @@
 - **Summary:** Refactored the report_result/cron_propose/pipeline_task_start real-SDK smokes off the hardcoded claude_agent_sdk dispatch onto select_adapter + adapter.run and parametrized each over the claude and codex backends (new _adapter.py shared helper); full non-smoke suite 2962 passed and, with AP2_REAL_SDK=1 set in this env, both backends' live tool round-trips passed for all three smokes.
 - **Files:** ap2/tests/smoke/_adapter.py, ap2/tests/smoke/test_report_result_real_sdk.py, ap2/tests/smoke/test_cron_propose_real_sdk.py, ap2/tests/smoke/test_pipeline_task_start_real_sdk.py
 - **Tests:** pass
+
+## [2026-06-04] TB-375: Kill green-by-skipping: fail the real-SDK smoke run when codex variants skip despite AP2_REAL_SDK + a codex credential present
+- **Commit:** `3165386`
+- **Summary:** Added a session-scoped codex-coverage guard that fails the real-SDK smoke run (and emits a distinct smoke_check_codex_coverage_missing alarm via run_smoke_check) when codex was expected to run (AP2_REAL_SDK + openai_codex + a codex credential present, reusing _codex_credentials_present) but a codex variant skipped, staying quiet when codex is legitimately absent; full suite (2979 tests) passes.
+- **Files:** ap2/smoke_runner.py, ap2/tests/smoke/conftest.py, ap2/tests/smoke/_codex_guard.py, ap2/tests/test_tb375_codex_skip_guard.py, ap2/howto.md
+- **Tests:** pass

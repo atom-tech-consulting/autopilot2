@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-375** **Kill green-by-skipping: fail the real-SDK smoke run when codex variants skip despite AP2_REAL_SDK + a codex credential present** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#ci-honesty` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/kill-green-by-skipping-fail-the-real-sdk.md)
 - [ ] **TB-376** **Judge parity: backend-parametrize the verifier + validator real-SDK smokes over codex and add a janitor-judge smoke** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#judges` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/judge-parity-backend-parametrize-the-ver.md)
 
 ## Pipeline Pending
@@ -261,5 +260,6 @@
 - [x] **TB-372** **Repoint the codex backend to the real OpenAI `openai-codex` SDK and reimplement CodexAdapter against its actual API** `#autopilot` `#agent-adapter` `#codex` `#bug` `#sdk` `#axis-4` `#axis-7` `@blocked:TB-371` [→ brief](.cc-autopilot/tasks/repoint-the-codex-backend-to-the-real-op.md)
 - [x] **TB-373** **Deliver ap2's toolset to a live codex agent over stdio MCP so a codex task agent can call report_result (Level 1)** `#autopilot` `#agent-adapter` `#codex` `#mcp-tools` `#axis-3` `#stdio-mcp` `@blocked:TB-372` [→ brief](.cc-autopilot/tasks/deliver-ap2-s-toolset-to-a-live-codex-ag.md)
 - [x] **TB-374** **Parametrize the tool-round-trip real-SDK smokes onto the AgentAdapter so the same test runs against both backends** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#axis-7` `@blocked:TB-373` [→ brief](.cc-autopilot/tasks/parametrize-the-tool-round-trip-real-sdk.md)
+- [x] **TB-375** **Kill green-by-skipping: fail the real-SDK smoke run when codex variants skip despite AP2_REAL_SDK + a codex credential present** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#ci-honesty` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/kill-green-by-skipping-fail-the-real-sdk.md)
 
 ## Frozen
