@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-376** **Judge parity: backend-parametrize the verifier + validator real-SDK smokes over codex and add a janitor-judge smoke** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#judges` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/judge-parity-backend-parametrize-the-ver.md)
 - [ ] **TB-377** **Real-work task parity: a smoke where the agent edits a file, runs a command, commits, and reports a real commit SHA — both backends** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#real-work` `#commit` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/real-work-task-parity-a-smoke-where-the.md)
 - [ ] **TB-378** **Control-agent parity: live real-SDK smokes for ideation (incl. board_edit), ideation_scrub, status_report, cron, mattermost — both backends** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#control-agents` `#axis-7` `@blocked:TB-373,TB-374` [→ brief](.cc-autopilot/tasks/control-agent-parity-live-real-sdk-smoke.md)
 
@@ -263,5 +262,6 @@
 - [x] **TB-373** **Deliver ap2's toolset to a live codex agent over stdio MCP so a codex task agent can call report_result (Level 1)** `#autopilot` `#agent-adapter` `#codex` `#mcp-tools` `#axis-3` `#stdio-mcp` `@blocked:TB-372` [→ brief](.cc-autopilot/tasks/deliver-ap2-s-toolset-to-a-live-codex-ag.md)
 - [x] **TB-374** **Parametrize the tool-round-trip real-SDK smokes onto the AgentAdapter so the same test runs against both backends** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#axis-7` `@blocked:TB-373` [→ brief](.cc-autopilot/tasks/parametrize-the-tool-round-trip-real-sdk.md)
 - [x] **TB-375** **Kill green-by-skipping: fail the real-SDK smoke run when codex variants skip despite AP2_REAL_SDK + a codex credential present** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#ci-honesty` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/kill-green-by-skipping-fail-the-real-sdk.md)
+- [x] **TB-376** **Judge parity: backend-parametrize the verifier + validator real-SDK smokes over codex and add a janitor-judge smoke** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#judges` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/judge-parity-backend-parametrize-the-ver.md)
 
 ## Frozen

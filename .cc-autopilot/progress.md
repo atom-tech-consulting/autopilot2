@@ -1461,3 +1461,9 @@
 - **Summary:** Added a session-scoped codex-coverage guard that fails the real-SDK smoke run (and emits a distinct smoke_check_codex_coverage_missing alarm via run_smoke_check) when codex was expected to run (AP2_REAL_SDK + openai_codex + a codex credential present, reusing _codex_credentials_present) but a codex variant skipped, staying quiet when codex is legitimately absent; full suite (2979 tests) passes.
 - **Files:** ap2/smoke_runner.py, ap2/tests/smoke/conftest.py, ap2/tests/smoke/_codex_guard.py, ap2/tests/test_tb375_codex_skip_guard.py, ap2/howto.md
 - **Tests:** pass
+
+## [2026-06-04] TB-376: Judge parity: backend-parametrize the verifier + validator real-SDK smokes over codex and add a janitor-judge smoke
+- **Commit:** `95174c2`
+- **Summary:** Backend-parametrized the verifier- and validator-judge real-SDK smokes over claude+codex (routed through select_adapter(judge_kind, cfg) + force_backend, reusing production parsers) and added a janitor-judge smoke; verified live - all 19 real-SDK smokes pass on both backends (codex-coverage guard satisfied) and the full non-smoke suite is 2979 passed.
+- **Files:** ap2/tests/smoke/_adapter.py, ap2/tests/smoke/test_prose_judge_real_sdk.py, ap2/tests/smoke/test_validator_judge_real_sdk.py, ap2/tests/smoke/test_janitor_judge_real_sdk.py
+- **Tests:** pass
