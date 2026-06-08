@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/extract-the-prose-judge-into-a-verifier.md",
+  "focus_anchor": "current focus extract the remaining core subsystems into components",
+  "proposed_at": "2026-06-08T21:01:49Z",
+  "tb_id": "TB-382",
+  "why_now": "goal.md's axis-(5) delete-test says \"if the prose-judge stays inside\nthe verify runner, the LLM verification layer can't be disabled independently of\nthe gating shell-bullet path\" \u2014 this is the one axis with no tick-phase\ndependency, so it can land in parallel with axis 1."
+}

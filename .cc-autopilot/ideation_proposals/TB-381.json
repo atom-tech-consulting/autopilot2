@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/pipeline-component-extended-tick-phase-v.md",
+  "focus_anchor": "current focus extract the remaining core subsystems into components",
+  "proposed_at": "2026-06-08T21:00:52Z",
+  "tb_id": "TB-381",
+  "why_now": "goal.md's axis-(1) delete-test says \"if the new tick-stage shape isn't\npinned in one converted subsystem, every later extraction re-invents it\" \u2014\npipeline is the most isolated subsystem, so converting it first de-risks axes 2\nand 4 before they touch higher-blast-radius code."
+}

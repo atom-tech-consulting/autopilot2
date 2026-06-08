@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-381",
+  "briefing_path": ".cc-autopilot/tasks/cron-component-job-handler-registry-axis.md",
+  "focus_anchor": "current focus extract the remaining core subsystems into components",
+  "proposed_at": "2026-06-08T21:03:12Z",
+  "tb_id": "TB-384",
+  "why_now": "goal.md's axis-(2) delete-test says \"if the `job.name` switch survives,\nthe coupling just moves into a new folder\" \u2014 replacing it with a job-handler\nregistry is what actually decouples the scheduler from job semantics, and the\nnew tick phases from TB-381 are the seam it dispatches against."
+}
