@@ -8,16 +8,20 @@ what success looks like" once (in the target project's `goal.md`); ap2
 plans, dispatches, verifies, and reports across many task cycles until
 the target project achieves it.
 
-Architecturally, ap2 is structured as a small **core** (dispatch-verify-
-report loop, briefing validators, audit trail, CLI surface, status-report
-digest composition) plus a set of **components** (auto-approve,
-auto-unfreeze, attention detectors, multi-focus + focus auto-advance,
-validator-judge LLM dep-coherence, Mattermost channel adapter, janitor,
-...) that each opt into the loop via a shared registry. Every component
-can be turned on or off independently via env flag; the component model
-makes features composable without code surgery and is the structural
-prerequisite for future distribution shapes (including a public OSS
-cut).
+Architecturally, ap2 is structured as a small **core** (the dispatch-
+verify-report loop, the deterministic baseline runners — shell-bullet
+verification, briefing-structure validation, status-report composition —
+the audit trail, and the CLI surface) plus a set of **components** that
+each plug into the core loop via a shared registry. A component is a
+*loop-level participant*: it registers on a tick phase or a coarse loop
+surface (auto-approve, auto-unfreeze, attention, focus auto-advance,
+janitor, cron, ideation, communication, ...). Things invoked only as an
+internal sub-step of a core runner — the LLM judges over verification and
+briefing-validation — are NOT components; they are swappable adapters the
+runner calls. Every component can be turned on or off independently via
+env flag; the model makes features composable without code surgery and is
+the structural prerequisite for future distribution shapes (including a
+public OSS cut).
 
 Concretely: an operator should be able to point ap2 at a project, set
 the goal, and walk away — returning to find the project measurably
@@ -49,14 +53,17 @@ For ap2's own infrastructure, the practical "done enough" thresholds are:
 
 For the component model specifically:
 
-- Every existing module that wraps an autonomous behavior
-  (auto-approve, auto-unfreeze, attention, focus-advance, janitor,
-  validator-judge, Mattermost channel) lives under
-  `ap2/components/<name>/` and is loaded via the component registry,
-  not via direct import from `ap2/daemon.py` or other core modules.
+- Every loop-level autonomous behavior (auto-approve, auto-unfreeze,
+  attention, focus-advance, janitor, cron, ideation, communication)
+  lives under `ap2/components/<name>/` and is loaded via the component
+  registry, not via direct import from `ap2/daemon.py` or other core
+  modules. The LLM judges (verification prose-judge, briefing
+  dep-coherence) are NOT components — they are `select_adapter` layers
+  the core runners call, disable-able via config.
 - A CI gate fails the build if any core module directly imports
-  from `ap2/components/<name>/`. All cross-references flow through
-  the registry's hook protocol.
+  from `ap2/components/<name>/`. All cross-references flow through the
+  registry's single generic accessor — no per-kind registration
+  methods, and no core→component `hook_points[...]` symbol lookups.
 - Every component can be independently disabled via its env flag; the
   full test suite passes in the default configuration AND in an
   "every component disabled" configuration. (Component-specific tests
@@ -90,127 +97,143 @@ For the structured-config focus specifically:
   key is mentioned in `ap2/howto.md`'s `## Configuration knobs`
   section."
 
-## Current focus: extract the remaining core subsystems into components
+## Current focus: get the component boundary right — loop-level participants only
 
-The component refactor (shipped 2026-05-27) extracted the *opt-in autonomous
-behaviors* — auto-approve, auto-unfreeze, attention, focus-advance, janitor,
-validator-judge, mattermost. But the **core still carries cohesive,
-tick-resident subsystems** wired directly into `daemon._tick`: the cron
-dispatch loop and ideation (the `_maybe_ideate` gate + roadmap-exhaustion
-halt). Each has the full component shape — a tick stage or hook, an owned
-`AP2_*` knob cluster, its own events — yet lives in core, so `daemon.py` is
-still a ~3,000-line monolith.
+The 2026-05-27 refactor extracted the opt-in autonomous behaviors behind
+the registry. The follow-on work exposed that the *component boundary
+itself* was drawn loosely. Three problems: genuine loop subsystems (cron,
+ideation) were still welded into `daemon._tick`; other things were modeled
+as components that aren't loop participants at all (the LLM judges, invoked
+deep inside core runners); and the registry grew a bespoke registration
+method per extension kind (`channel_adapters()`, `briefing_validators()`,
+`cron_job_handlers()`) plus blocks where core reaches *backwards* into
+component internals via `hook_points[...]` symbol lookups.
 
-This focus extracts those tick subsystems (cron, ideation) into
-`ap2/components/<name>/` behind the registry, shrinking core toward a minimal
-kernel. It is purely structural — no behavior change, env-knob names
-preserved exactly (same contract as the 2026-05-27 refactor). It does NOT
-change dispatch/verify semantics, ideation logic, or any agent's behavior; it
-relocates subsystems behind the registry. One axis is not an extraction but a
-prerequisite *decoupling*: the auto-approve strip must move out of `board_edit`
-into the `auto_approve` component before ideation can cleanly leave core.
+This focus draws one clean boundary and makes the registry contract
+uniform. It is structural — no behavior change, env-knob names preserved.
 
-Two things are deliberately **kept in core**, not extracted:
-- **The pipeline subsystem** (`pipeline_task_start` + the Pipeline-Pending
-  sweep). Its tool is offered directly to the *task agent* (core), and the
-  board sections and post-agent task disposition it drives are core concerns,
-  so it is not cleanly separable — extracting it would leave the coupling in
-  core anyway.
-- **Verification (shell-bullet path) and status-report composition** stay
-  baseline core (verification is gating; reporting is baseline); only the
-  optional LLM prose-judge is split out (axis 4).
+**The boundary: a component is a top-level participant in the core loop**
+— it registers on a tick phase or a coarse loop-level surface. Anything
+invoked only as an internal sub-step of a core operation (an LLM judge
+inside a verify/validation runner) is NOT a component; it's a swappable
+adapter the runner calls. So the work runs *both* directions: extract
+genuine loop subsystems *in*, and demote mis-modeled leaves *out*.
 
-(A public OSS distribution — packaging extras, a defaults-enabled policy, a
-quickstart — is a separate downstream focus that this extraction unblocks but
-does not itself deliver.)
+Two things stay in core, unchanged: the **pipeline subsystem** (its tool
+is a task-agent/core tool; it drives core board sections + post-agent
+disposition) and the **deterministic baseline runners** — shell-bullet
+verification, briefing-structure validation, and status-report
+composition (verification/validation are gating; reporting is baseline).
 
-Why now: codex support just shipped, so the backend layer is pluggable and the
-core is otherwise stable — the cheapest moment to factor the last tick
-subsystems before more features compound the coupling. A minimal
-componentized core is the prerequisite for any future distribution shape: you
-can't ship "ap2 + pick your components" while ideation / cron are welded into
-the daemon.
+Why now: cron just landed as the canary (axis 1), proving the tick-phase
++ two-layer job-handler shape; the core is otherwise stable post-codex.
+This is the cheapest moment to finish the boundary before more features
+compound the coupling — and a clean, minimal kernel with a uniform
+registry is the prerequisite for any OSS distribution shape.
 
 Axes (each has its failure mode):
 
-(1) **Cron component (scheduler + job-handler registry) + extended tick-phase
-vocabulary** — the first tick-stage extraction, and the one that establishes
-the new registry phases (e.g. `CRON_DISPATCH`, `IDEATION`) the later
-extractions reuse. Relocate the cron *scheduler* (the `cron.yaml` /
-`cron_state.json` interval engine, the `cron_*` lifecycle events, and the
-`cron_propose` / `cron_edit` surface) into `ap2/components/cron/` behind a
-cron-dispatch tick hook, and replace `run_cron`'s hardcoded `if job.name == …`
-switch with a registered job-handler protocol: components and core contribute
-named handlers, and the scheduler dispatches to them while knowing nothing of
-what a job does. The shared `_run_control_agent` primitive stays in core (the
-generic LLM-cron handler calls back into it); the status-report job stays a
-**core-registered** handler (its composition is baseline core — see axis 4),
-not a separate component. Delete-test: if the `job.name` switch survives — or
-the phase vocabulary isn't pinned by this first extraction — every later
-extraction re-invents it.
+(1) **Cron component — LANDED (the canary).** The cron scheduler now runs
+as a `Phase.CRON_DISPATCH` tick-hook component (`ap2/components/cron/`);
+the `if job.name == …` switch is replaced by job handlers contributed
+through the registry and keyed *cron-locally* — the `janitor` handler is
+the janitor component's; status-report/smoke/LLM-cron are core-registered.
+This pinned the new tick-phase vocabulary (`CRON_DISPATCH`, reserved
+`IDEATION`) and the two-layer pattern (scheduler ≠ jobs) the rest of the
+focus reuses. Residual: its bespoke `cron_job_handlers()` registry method
+folds into the generic accessor in axis 5.
 
-(2) **Decouple auto-approve from `board_edit` into a loop pass** — today the
-auto-approve strip is evaluated *inside* `board_edit`'s `add_backlog` branch
-(approval policy embedded in a mutation tool, evaluated mid-agent-run), and
-the tags policy (`should_auto_approve` and friends) squats in `ideation.py`
-and is reached from core — the cross-boundary knot that blocks axis 3. Make
-`board_edit` policy-free (proposals are always born `@blocked:review`) and
-move the gate chain + tags policy into the `auto_approve` component as a
-discrete loop pass that runs after ideation and before dispatch, stripping
-`@blocked:review` from Backlog tasks that clear the gates (the daemon
-auto-running `ap2 approve`). Delete-test: if the strip stays in `board_edit`,
-ideation can't be extracted without core→component import violations.
+(2) **Communication component (inbound + outbound) wrapping the channel
+adapters.** Today the channel surface is split across a bespoke
+`registry.channel_adapters()` (outbound) and a one-off
+`hook_points["inbound_poll"]` (inbound), with `mattermost` as a top-level
+component. Introduce a single `communication` component that owns both
+directions as tick-phase work and holds its channel adapters (mattermost,
+future slack/email) in an *internal* registry — invisible to core. There
+may be multiple channels; that multiplicity is the component's concern,
+not the kernel's. Outbound becomes event-driven (the component delivers
+undelivered notification events on its tick pass; the synchronous
+`_deliver` call goes away). `mattermost` demotes to a channel adapter
+under it; `AP2_MM_CHANNELS` becomes channel-level config. Delete-test: if
+core still walks `channel_adapters()` or `inbound_poll`, channel
+multiplicity has leaked into the kernel.
 
-(3) **Ideation component** — extract `ap2/ideation.py` (the `_maybe_ideate`
+(3) **Decouple auto-approve from `board_edit` into a loop pass; remove the
+dead `POST_DISPATCH` phase.** Today the auto-approve strip is evaluated
+*inside* `board_edit`'s `add_backlog` branch (approval policy embedded in a
+mutation tool, mid-agent-run), and the tags policy (`should_auto_approve`)
+squats in `ideation.py` and is reached from core — the cross-boundary knot
+that blocks axis 4. Make `board_edit` policy-free (proposals always born
+`@blocked:review`) and move the gate chain + tags policy into the
+`auto_approve` component as a discrete `PRE_DISPATCH` loop pass that runs
+after ideation and before dispatch, stripping `@blocked:review` from
+Backlog tasks that clear the gates. While here, delete the `POST_DISPATCH`
+phase — its only registrant is auto_approve's no-op placeholder, and
+auto-approve's real pass runs at `PRE_DISPATCH`. Delete-test: if the strip
+stays in `board_edit`, ideation can't be extracted without core→component
+import violations; if `POST_DISPATCH` survives, a dead phase is still
+walked every tick.
+
+(4) **Ideation component.** Extract `ap2/ideation.py` (the `_maybe_ideate`
 trigger gate, the roadmap-exhaustion halt, proposal records, scrub
-coordination) behind an ideation tick hook + the halt hook; owns the
-`AP2_IDEATION_*` knob cluster, all `ideation_*` events, and
-`AP2_IDEATION_DISABLED` as its `env_flag`. Sequenced after axis 1 establishes
-the tick-stage shape and axis 2 unties the auto-approve coupling (largest
-blast radius). Delete-test: if ideation stays in core, the kernel still
-hard-depends on the proposal engine.
+coordination) behind the reserved `Phase.IDEATION` tick hook + the halt
+hook; owns the `AP2_IDEATION_*` knob cluster, all `ideation_*` events, and
+`AP2_IDEATION_DISABLED` as its `env_flag`. Sequenced after axis 3 unties
+the auto-approve coupling (largest blast radius). Delete-test: if ideation
+stays in core, the kernel still hard-depends on the proposal engine.
 
-(4) **Extract the prose-judge into a `verifier_judge` component** — the
-per-task verify runner (`verify.py:verify_task`) parses the Verification
-section, runs shell bullets, and dispatches prose bullets to an LLM judge
-(`_judge_prose_bullet`). Verification is gating, so the runner + the
-deterministic shell-bullet path + aggregation stay in **core**; only the
-optional LLM prose-judge moves into a `verifier_judge` component the runner
-calls via the registry — mirroring the existing `validator_judge` component
-(today `verifier_judge` is an agent kind welded into `verify.py`, not a
-component). A deployment can then verify with shell bullets alone, prose-judge
-disabled. Status-report composition is likewise baseline and stays a core
-rendering library (scheduling is cron, delivery is the channel component) — it
-is NOT extracted. Delete-test: if the prose-judge stays inside the verify
-runner, the LLM verification layer can't be disabled independently of the
-gating shell-bullet path.
+(5) **Judges are adapters, not components; one generic registry verb.**
+Two moves sharing a thesis — stop modeling sub-step leaves as components,
+and stop growing a bespoke registration method per extension kind:
+  - **Both LLM judges become adapter layers, not components.**
+    `verifier_judge` stays the `select_adapter("verifier_judge")` kind it
+    already is (revert any extraction of it into a component).
+    `validator_judge` demotes from a component to a
+    `select_adapter("validator_judge")` layer the core briefing-validation
+    runner calls — dissolving `ap2/components/validator_judge/`, deleting
+    `registry.briefing_validators()` (it has no other contributor) and the
+    component's `hook_points` symbol-exposure block. Both runners keep a
+    config off-switch (shell-only / structural-only);
+    `AP2_VALIDATOR_JUDGE_DISABLED` survives as a plain knob.
+  - **One generic `contributions(point)` registry accessor subsuming
+    `Phase`.** Collapse the bespoke `channel_adapters()` /
+    `cron_job_handlers()` methods into a single typed-extension-point
+    accessor (fan-out only; keying stays consumer-local — the registry
+    never does keyed dispatch). Delete the core→component `hook_points[...]`
+    symbol-pull blocks (auto_approve, attention, validator_judge) — those
+    are wrong-direction imports, not extension points.
+  Delete-test: if a judge is still a component, or the registry still
+  carries a per-kind registration method or a symbol-pull block, the
+  boundary/contract isn't clean.
 
-Sequencing: (1) is the first extraction and pins the tick-phase shape. (4) is
-independent (it mirrors the existing `validator_judge` component, no new tick
-phase needed). (2) decouples auto-approve and unblocks (3); ideation (3) lands
-last (largest blast radius).
+Sequencing: cron (1) landed. (5) judge-demotion + registry-verb is largely
+independent and can go early (it removes the most clutter). (2)
+communication is independent. (3) decouples auto-approve and removes
+`POST_DISPATCH`, unblocking (4); ideation (4) lands last (largest blast
+radius).
 
-The delete-test for any work in this focus: does it move a core subsystem
-behind the registry (preserving observable behavior), untangle a cross-
-boundary coupling that blocks such a move, split an optional LLM layer out of
-a baseline-core path, or extend the registry to express a new subsystem shape?
-Polishing a subsystem's internals while it stays welded to `daemon._tick` is
-not paying focus rent.
+The delete-test for any work in this focus: does it move a genuine loop
+subsystem behind the registry, demote a non-loop leaf out of
+component-hood, make the registry contract uniform (one accessor, no
+symbol-pull), or wrap internal multiplicity inside its owning component?
+Polishing internals while the boundary stays wrong is not paying focus
+rent.
 
 Progress signals:
-- `daemon.py` no longer contains the cron loop or the ideation gate inline;
-  each is an `ap2/components/<name>/` subpackage walked via the registry.
-- `board_edit` carries no auto-approve policy; the strip runs as an
-  `auto_approve` component loop pass.
-- The prose-judge runs as a `verifier_judge` component (mirroring
-  `validator_judge`); the verify runner + shell-bullet path stay in core.
-- The pipeline subsystem and status-report composition remain in core (by
-  design — not regressions).
-- The import-direction CI gate (core never imports `ap2/components/`) still
-  passes with the new components.
-- The full suite passes with every component disabled, and a task
-  dispatches → verifies (shell bullets) → reports in that minimal-kernel
-  config.
+- `daemon.py` carries no cron loop or ideation gate inline; each is a
+  registry-walked `ap2/components/<name>/` subpackage.
+- A single `communication` component owns inbound + outbound; core never
+  references channels; `channel_adapters()` and `inbound_poll` are gone.
+- `board_edit` carries no auto-approve policy; the `POST_DISPATCH` phase is
+  removed.
+- Neither LLM judge is a component; both are `select_adapter` layers over
+  core runners; `registry.briefing_validators()` is gone.
+- The registry exposes one generic `contributions(point)` accessor; no
+  per-kind registration methods; no `hook_points[...]` symbol-pull blocks
+  in core.
+- The import-direction CI gate still passes; the full suite passes with
+  every component disabled, and a task dispatches → verifies (shell) →
+  reports in that minimal-kernel config.
 
 ## Shipped focus
 
@@ -234,8 +257,9 @@ backend, per-backend auth); the entries below are provenance.
   autonomous behavior (auto-approve, auto-unfreeze, attention, focus-advance,
   janitor, validator-judge, mattermost) lives under `ap2/components/<name>/`
   behind the registry; core never imports components (CI import-direction
-  gate); each is env-togglable. The current focus extends this to the
-  remaining core subsystems.
+  gate); each is env-togglable. The current focus refines this boundary —
+  finishing the genuine loop subsystems (cron, ideation, communication) and
+  demoting the LLM judges back out to adapters.
 
 ## Non-goals
 
@@ -250,12 +274,12 @@ backend, per-backend auth); the entries below are provenance.
   auto-rewrite goal.md.
 - **Multi-tenancy / shared sandbox**: one operator, one sandbox user,
   one daemon. Multi-tenant isolation is not on the path.
-- **Real-time collaboration**: chat channels (when the relevant
-  channel-adapter component is enabled) are the human-loop surface,
-  but the loop is async — operator nudges, daemon ticks, agent
-  commits. Synchronous chat-driven editing (operator types, agent
-  responds in real-time) is out of scope; the chat surface is for
-  control, ack, approvals, and status — not pair-programming.
+- **Real-time collaboration**: chat channels (when the communication
+  component is enabled) are the human-loop surface, but the loop is async
+  — operator nudges, daemon ticks, agent commits. Synchronous chat-driven
+  editing (operator types, agent responds in real-time) is out of scope;
+  the chat surface is for control, ack, approvals, and status — not
+  pair-programming.
 - **Cross-project orchestration**: each project has its own ap2 daemon
   + state. ap2 doesn't aggregate across projects or propose work in one
   project based on activity in another.
