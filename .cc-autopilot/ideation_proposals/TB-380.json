@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/env-staleness-warn-don-t-warn-when-the-c.md",
+  "focus_anchor": null,
+  "proposed_at": "2026-06-08T20:47:44Z",
+  "tb_id": "TB-380",
+  "why_now": "this WARN just misled an operator into thinking a restart was\nrequired to enable ideation when a hot-reload would (and did) suffice on the\nnext tick; a status warning that cries \"restart\" on hot-reloadable edits\ntrains operators to over-restart (and to kill running tasks). Meta-infra\nobservability fix, no focus anchor \u2192 `--skip-goal-alignment`."
+}

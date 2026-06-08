@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-380** **Env-staleness WARN: don't warn when the changed knobs are hot-reloadable, and fix the mislabeled "daemon start" timestamp** `#autopilot` `#bug` `#status` `#observability` `#env-reload` `#ux` `@blocked:review` [→ brief](.cc-autopilot/tasks/env-staleness-warn-don-t-warn-when-the-c.md)
 
 ## Pipeline Pending
 
