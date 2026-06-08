@@ -242,7 +242,13 @@ def test_status_text_emits_warn_line_when_env_stale(
     out = capsys.readouterr().out
     assert "WARN:" in out, out
     assert ".cc-autopilot/env modified" in out, out
-    assert "after daemon start at" in out, out
+    # TB-380: the timestamp is the env-LOAD event the comparison runs
+    # against, not the daemon's process-start time — the misleading
+    # "after daemon start at" label is gone. (This fixture pins only the
+    # mtime baseline — no per-knob hash stash — so the WARN falls through
+    # the conservative "can't classify → restart-required" path.)
+    assert "after the daemon loaded it at" in out, out
+    assert "daemon start at" not in out, out
     assert "ap2 stop && ap2 start" in out, out
 
 

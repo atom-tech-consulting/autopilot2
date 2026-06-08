@@ -956,13 +956,54 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     # need to look it up — same one-liner-with-fix shape as TB-258's
     # `audit:` line. Omitted entirely when not stale (default-off
     # byte-identical to pre-TB-260 output on a healthy daemon).
+    # TB-380: the restart WARN must mean "a restart is actually required."
+    # Classify the knobs that changed since the daemon loaded the env file
+    # against `env_reload.HOT_RELOADABLE_KNOBS`: hot-reloadable edits apply
+    # on the next tick's env_reload, so warning "restart" for them is a
+    # false alarm that would needlessly kill an in-flight task. Only a
+    # FIXED (or unrecognized → conservatively-fixed) changed knob requires
+    # a restart, and we name it so the operator knows exactly why. When the
+    # daemon predates the per-knob hash stash (`loaded_values_available`
+    # False), we can't classify → keep the conservative restart WARN. The
+    # timestamp is phrased as the env-LOAD event the comparison actually
+    # runs against ("loaded it at"), never the daemon's process-start
+    # label — the baseline is `env_file_mtime_at_start` (the mtime captured
+    # when the daemon loaded the file), not the daemon's start time.
     if env_staleness["env_stale"]:
-        print(
-            f"WARN:     .cc-autopilot/env modified at "
-            f"{env_staleness['env_file_mtime']} (after daemon start at "
-            f"{env_staleness['env_file_mtime_at_start']}) — "
-            f"restart with `ap2 stop && ap2 start` to apply changes"
-        )
+        from .env_reload import HOT_RELOADABLE_KNOBS
+
+        env_changes = automation_status.collect_env_changed_knobs(cfg)
+        changed = env_changes["changed_knobs"]
+        fixed_changed = [
+            k for k in changed if k not in HOT_RELOADABLE_KNOBS
+        ]
+        if env_changes["loaded_values_available"] and not fixed_changed:
+            # Every changed knob (if any) is hot-reloadable → no restart
+            # needed. Emit a low-key note (NOT a WARN) when something
+            # actually changed so the operator sees the edit was noticed;
+            # stay silent on a bare touch / comment edit (mtime bumped but
+            # no knob values differ).
+            if changed:
+                print(
+                    "env:      .cc-autopilot/env modified at "
+                    f"{env_staleness['env_file_mtime']}, after the daemon "
+                    f"loaded it at "
+                    f"{env_staleness['env_file_mtime_at_start']} — "
+                    f"hot-reloadable knob(s) {', '.join(changed)} apply on "
+                    "the next tick"
+                )
+        else:
+            cause = (
+                f" ({', '.join(fixed_changed)} require(s) a restart)"
+                if fixed_changed else ""
+            )
+            print(
+                "WARN:     .cc-autopilot/env modified at "
+                f"{env_staleness['env_file_mtime']}, after the daemon "
+                f"loaded it at {env_staleness['env_file_mtime_at_start']}"
+                f"{cause} — restart with `ap2 stop && ap2 start` to apply "
+                "changes"
+            )
     # TB-298: surface the count + a capped per-bullet preview of currently
     # active attention conditions in the operator-attention cluster (after
     # `audit:` / env stale, before the `auto-approve:` block). CLI-pull

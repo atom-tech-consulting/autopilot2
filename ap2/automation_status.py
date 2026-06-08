@@ -1410,8 +1410,9 @@ def collect_env_staleness(cfg: "Config") -> dict:
         the daemon captured at last `daemon_start`, or `None` when the
         daemon hasn't captured (fresh project, daemon never started)
         OR when the env file didn't exist at start time. Renderers use
-        this to compose the "modified at X (after daemon start at Y)"
-        explanatory phrase.
+        this to compose the "modified at X, after the daemon loaded it at
+        Y" explanatory phrase (TB-380: phrased as the env-LOAD event the
+        comparison runs against, never the daemon's process-start time).
 
     Stale-condition: `env_stale` is True iff BOTH mtimes parse to a
     float AND `current > at_start`. Equal mtimes (same file unchanged)
@@ -1458,6 +1459,63 @@ def collect_env_staleness(cfg: "Config") -> dict:
         "env_file_mtime": _iso_from_mtime(current_mtime),
         "env_file_mtime_at_start": _iso_from_mtime(at_start_mtime),
     }
+
+
+def collect_env_changed_knobs(cfg: "Config") -> dict:
+    """Diff the current `.cc-autopilot/env` against the daemon's at-start
+    per-knob hash baseline so the stale-env WARN can tell hot-reloadable
+    edits from restart-requiring ones (TB-380).
+
+    The daemon stashes `env_file_knob_hashes_at_start` (a
+    `{KEY: sha256hex(value)}` map) in `daemon_state.json` at start via
+    `daemon_state._capture_env_mtime_at_start`. This pure read-layer
+    helper re-parses the live env file, re-hashes it, and reports which
+    KEYs differ (added / removed / value-changed) from that baseline. The
+    caller (`ap2 status`) classifies each changed KEY against
+    `env_reload.HOT_RELOADABLE_KNOBS` to decide whether a restart is
+    actually required.
+
+    Returned dict (always present, machine-stable shape):
+
+      - `changed_knobs` (list[str]) — sorted KEYs whose value differs from
+        the daemon-loaded baseline. Empty when nothing differs (a bare
+        touch / comment edit) OR when no baseline is available.
+      - `loaded_values_available` (bool) — whether the daemon stashed a
+        per-knob hash baseline. False on a pre-TB-380 daemon or a capture
+        failure; the WARN path treats an empty changed set under a False
+        flag conservatively (can't classify → restart-required), which
+        preserves the pre-TB-380 always-warn-on-mtime-bump behavior for
+        daemons that never wrote the baseline.
+
+    Pure / no I/O beyond two small reads (`daemon_state.json` + the env
+    file); safe to call from the CLI without taking any lock.
+    """
+    from .daemon_state import _hash_env_file_knobs
+
+    state_file = cfg.daemon_state_file
+    baseline: dict[str, str] | None = None
+    if state_file.exists():
+        try:
+            data = _json.loads(state_file.read_text())
+            if isinstance(data, dict):
+                raw = data.get("env_file_knob_hashes_at_start")
+                if isinstance(raw, dict):
+                    baseline = {str(k): str(v) for k, v in raw.items()}
+        except (ValueError, OSError):
+            baseline = None
+
+    if baseline is None:
+        # Pre-TB-380 daemon (no hash stash) or capture failure — the
+        # caller can't classify the change, so it falls back to the
+        # conservative "restart-required" posture.
+        return {"changed_knobs": [], "loaded_values_available": False}
+
+    current = _hash_env_file_knobs(cfg.env_file) or {}
+    changed = sorted(
+        k for k in set(baseline) | set(current)
+        if baseline.get(k) != current.get(k)
+    )
+    return {"changed_knobs": changed, "loaded_values_available": True}
 
 
 def find_previous_status_report_idx(tail: list[dict]) -> int:

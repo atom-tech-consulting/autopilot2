@@ -749,7 +749,7 @@ def render_env_staleness_section(state: dict) -> list[str]:
     Shape (when rendered):
 
         *Daemon env file stale (restart required):*
-        - .cc-autopilot/env modified at <iso-ts> (after daemon start at <iso-ts>) — run `ap2 stop && ap2 start` to apply changes
+        - .cc-autopilot/env modified at <iso-ts>, after the daemon loaded it at <iso-ts> — run `ap2 stop && ap2 start` to apply changes
 
     Omit-on-empty: returns `[]` when `state["env_stale"]` is False
     (default-off byte-identical regression pin — pre-TB-260 digests
@@ -763,9 +763,9 @@ def render_env_staleness_section(state: dict) -> list[str]:
         return []
     return [
         _ENV_STALENESS_HEADING,
-        f"- .cc-autopilot/env modified at {state['env_file_mtime']} "
-        f"(after daemon start at {state['env_file_mtime_at_start']}) — "
-        f"run `ap2 stop && ap2 start` to apply changes",
+        f"- .cc-autopilot/env modified at {state['env_file_mtime']}, "
+        f"after the daemon loaded it at {state['env_file_mtime_at_start']} "
+        f"— run `ap2 stop && ap2 start` to apply changes",
     ]
 
 

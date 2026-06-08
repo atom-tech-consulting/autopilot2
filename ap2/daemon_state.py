@@ -20,6 +20,7 @@ continue to resolve unchanged.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import os
 
@@ -82,12 +83,47 @@ def _capture_env_mtime_at_start(cfg: Config) -> None:
         mtime = None
     state = _load_daemon_state(cfg)
     state["env_file_mtime_at_start"] = mtime
+    # TB-380: also stash a per-knob hash of the env file's contents at
+    # start so a separate-process `ap2 status` can diff the *current*
+    # file against what the daemon LOADED and classify each changed knob
+    # as hot-reloadable (applies next tick, no restart) vs fixed (restart
+    # required). Without this baseline the stale-env WARN can only compare
+    # mtimes and so false-alarms "restart" on hot-reloadable edits. `null`
+    # when the env file is absent at start (parity with the mtime stash's
+    # null shape — the read side treats a missing baseline conservatively).
+    state["env_file_knob_hashes_at_start"] = _hash_env_file_knobs(
+        cfg.env_file,
+    )
     try:
         _save_daemon_state(cfg, state)
     except OSError:
         # Best-effort — the daemon still starts; surfaces stay silent
         # for this lifetime.
         pass
+
+
+def _hash_env_file_knobs(env_file) -> dict[str, str] | None:
+    """Return `{KEY: sha256hex(value)}` for every `KEY=VALUE` line in the
+    env file, or `None` when the file is absent (TB-380).
+
+    Stashed at daemon start (alongside `env_file_mtime_at_start`) so the
+    `ap2 status` WARN path can diff the live env file against the values
+    the daemon loaded and classify each changed knob via
+    `env_reload.HOT_RELOADABLE_KNOBS`. Hashes — NOT raw values — so a knob
+    carrying a secret never lands in `daemon_state.json`. Reuses
+    `env_reload._parse_env_file` (lazy-imported to avoid the
+    daemon_state ↔ env_reload module-import cycle) so the baseline and the
+    status-side re-parse share byte-identical `KEY=VALUE` line semantics.
+    """
+    if not env_file.exists():
+        return None
+    from .env_reload import _parse_env_file
+
+    parsed = _parse_env_file(env_file)
+    return {
+        key: hashlib.sha256(val.encode("utf-8")).hexdigest()
+        for key, val in parsed.items()
+    }
 
 
 def _load_daemon_state(cfg: Config) -> dict:
