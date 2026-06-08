@@ -1485,3 +1485,9 @@
 - **Summary:** ap2 status now reads the daemon's per-tick effective-config snapshot (.cc-autopilot/effective_config.json) for the component/knob lines so it reports the daemon's live config, falling back to a clearly-labelled local re-resolution (and a JSON effective_config_source flag) when no daemon is running; full suite passes (2986).
 - **Files:** ap2/cli_daemon.py, ap2/config.py, ap2/daemon.py, ap2/daemon_state.py, ap2/howto.md, ap2/init.py, ap2/tests/test_tb379_effective_config_snapshot.py, ap2/tests/test_doctor_verify_timeout.py, ap2/tests/test_tb269_validator_judge_timeout_calibration.py, .cc-autopilot/.gitignore
 - **Tests:** pass
+
+## [2026-06-08] TB-380: Env-staleness WARN: don't warn when the changed knobs are hot-reloadable, and fix the mislabeled "daemon start" timestamp
+- **Commit:** `e6cd569`
+- **Summary:** ap2 status now classifies env-file changes against env_reload.HOT_RELOADABLE_KNOBS (via a new per-knob hash baseline stashed at daemon start), suppressing the restart WARN when all changed knobs are hot-reloadable and naming the offending fixed knob when one requires a restart; the timestamp wording is corrected from "after daemon start at" to "after the daemon loaded it at" in both the status WARN and the cron digest; full suite 2996 passed.
+- **Files:** ap2/daemon_state.py, ap2/automation_status.py, ap2/cli_daemon.py, ap2/status_report.py, ap2/tests/test_tb260_env_mtime_stale_surface.py, ap2/tests/test_tb380_env_staleness_warn_classification.py
+- **Tests:** pass
