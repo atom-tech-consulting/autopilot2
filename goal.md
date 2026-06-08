@@ -108,9 +108,12 @@ registry, shrinking core toward a minimal dispatch-verify-report kernel. It is
 purely structural — no behavior change, env-knob names preserved exactly (same
 contract as the 2026-05-27 refactor). It does NOT change dispatch/verify
 semantics, ideation logic, or any agent's behavior; it relocates subsystems
-behind the registry. (A public OSS distribution — packaging extras, a
-defaults-enabled policy, a quickstart — is a separate downstream focus that
-this extraction unblocks but does not itself deliver.)
+behind the registry. One axis is not an extraction but a prerequisite
+*decoupling*: the auto-approve strip currently lives inside the `board_edit`
+tool and must move into the `auto_approve` component as a loop pass before
+ideation can cleanly leave core. (A public OSS distribution — packaging
+extras, a defaults-enabled policy, a quickstart — is a separate downstream
+focus that this extraction unblocks but does not itself deliver.)
 
 Why now: codex support just shipped, so the backend layer is pluggable and the
 core is otherwise stable — the cheapest moment to factor the last tick
@@ -137,20 +140,33 @@ lifecycle events, and the `cron_propose` / `cron_edit` surface) into
 switch with a registered job-handler protocol: components and core contribute
 named handlers, and the scheduler dispatches to them while knowing nothing of
 what a job does. The shared `_run_control_agent` primitive stays in core (the
-generic LLM-cron handler calls back into it). Couples with axis 4: cron's
+generic LLM-cron handler calls back into it). Couples with axis 5: cron's
 status-report handler tightens to the status-report component once that lands.
 Delete-test: if the `job.name` switch survives, the coupling just moves into a
 new folder.
 
-(3) **Ideation component** — extract `ap2/ideation.py` (the `_maybe_ideate`
+(3) **Decouple auto-approve from `board_edit` into a loop pass** — today the
+auto-approve strip is evaluated *inside* `board_edit`'s `add_backlog` branch
+(approval policy embedded in a mutation tool, evaluated mid-agent-run), and
+the tags policy (`should_auto_approve` and friends) squats in `ideation.py`
+and is reached from core — the cross-boundary knot that blocks axis 4. Make
+`board_edit` policy-free (proposals are always born `@blocked:review`) and
+move the gate chain + tags policy into the `auto_approve` component as a
+discrete loop pass that runs after ideation and before dispatch, stripping
+`@blocked:review` from Backlog tasks that clear the gates (the daemon
+auto-running `ap2 approve`). Delete-test: if the strip stays in `board_edit`,
+ideation can't be extracted without core→component import violations.
+
+(4) **Ideation component** — extract `ap2/ideation.py` (the `_maybe_ideate`
 trigger gate, the roadmap-exhaustion halt, proposal records, scrub
 coordination) behind an ideation tick hook + the halt hook; owns the
 `AP2_IDEATION_*` knob cluster, all `ideation_*` events, and
 `AP2_IDEATION_DISABLED` as its `env_flag`. Sequenced after axis 1 proves the
-shape (largest blast radius). Delete-test: if ideation stays in core, the
-kernel still hard-depends on the proposal engine.
+shape and axis 3 unties the auto-approve coupling (largest blast radius).
+Delete-test: if ideation stays in core, the kernel still hard-depends on the
+proposal engine.
 
-(4) **Status-report generator + verify-runner** — extract the status-report
+(5) **Status-report generator + verify-runner** — extract the status-report
 *generator* (triggered by the cron component) into
 `ap2/components/status_report/`, and extract the per-task **verify runner**
 (the `AP2_VERIFY_CMD` execution + prose-judge dispatch + `verification_*`
@@ -159,19 +175,22 @@ events) so it sits alongside its already-componentized judges
 a baseline value, but its generator and the verify runner staying in core
 means the judge/runner split is half-done and a headless cut can't drop them.
 
-Sequencing: (1) is the prerequisite. (2) and (4) are independent extractions
-against the axis-1 shape (sequence by blast radius: pipeline → cron →
-status-report/verify), with ideation (3) last.
+Sequencing: (1) is the prerequisite for the tick-stage shape. (2) and (5) are
+independent extractions against it. (3) decouples auto-approve and unblocks
+(4); ideation (4) lands last (largest blast radius).
 
 The delete-test for any work in this focus: does it move a core subsystem
-behind the registry (preserving observable behavior), or extend the registry
-to express a new subsystem shape? Polishing a subsystem's internals while it
-stays welded to `daemon._tick` is not paying focus rent.
+behind the registry (preserving observable behavior), untangle a cross-
+boundary coupling that blocks such a move, or extend the registry to express a
+new subsystem shape? Polishing a subsystem's internals while it stays welded
+to `daemon._tick` is not paying focus rent.
 
 Progress signals:
 - `daemon.py` no longer contains the cron loop, pipeline sweep, or ideation
   gate inline; each is an `ap2/components/<name>/` subpackage walked via the
   registry.
+- `board_edit` carries no auto-approve policy; the strip runs as an
+  `auto_approve` component loop pass.
 - The import-direction CI gate (core never imports `ap2/components/`) still
   passes with the new components.
 - The full suite passes with every component disabled, and a task
