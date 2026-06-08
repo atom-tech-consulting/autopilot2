@@ -79,10 +79,16 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # file consumers.
 _MIGRATED_FILES: tuple[str, ...] = (
     "ap2/daemon.py",
-    "ap2/verify.py",
     "ap2/status_report.py",
     # TB-343: the janitor body (with its get_core_value calls) moved to impl.py.
     "ap2/components/janitor/impl.py",
+    # TB-382: the prose-judge body (with its TB-334 verify-judge get_core_value
+    # calls — agent_model / agent_effort / verify_judge_effort /
+    # verify_judge_max_turns) moved out of `ap2/verify.py` into the
+    # verifier_judge component. `verify.py` itself no longer reads any
+    # agent-runtime core knob (it resolves the judge via the registry), so the
+    # core-cluster read-path pin now tracks the component impl.
+    "ap2/components/verifier_judge/impl.py",
 )
 
 

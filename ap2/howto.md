@@ -1604,6 +1604,14 @@ restart, or set the value via the file before daemon-start).
 **Verification.**
 - `AP2_VERIFY_CMD` — project-wide regression gate (e.g.
   `uv run pytest -q`). Unset = no project-wide gate.
+- `AP2_VERIFY_JUDGE_DISABLED` — hard off-switch for the `verifier_judge`
+  component (the per-task verifier's optional LLM prose-bullet judge,
+  TB-382). When set to a truthy value (`1` / `true` / `yes`), the
+  registry drops the component, `verify.py::verify_task` skips the SDK
+  judge, and prose bullets record as `unverified` (soft, non-gating)
+  while the deterministic shell bullets still gate — so a deployment can
+  verify with shell bullets alone. Prose judging is on by default;
+  mirrors `AP2_VALIDATOR_JUDGE_DISABLED`'s suppress-style polarity.
 - `AP2_VERIFY_TIMEOUT_S` (600) — timeout for the project-wide gate.
   `ap2 doctor` warns when set below observed-typical successful verify
   duration (TB-252; reads `verify_passed` events for the last 7 days

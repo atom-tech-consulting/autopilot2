@@ -439,6 +439,7 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_VALIDATOR_JUDGE_MAX_TURNS",         # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD",   # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_TIMEOUT_S",         # reason: internal default, rarely tuned
+    "AP2_VERIFY_JUDGE_DISABLED",             # reason: debug/test only — TB-382 kill switch for the verifier_judge component (the optional LLM prose-bullet judge); prose judging is on by default, operators disable via shell export to verify with shell bullets alone
     "AP2_VERIFY_JUDGE_MAX_TURNS",            # reason: internal default, rarely tuned
     "AP2_WEBHOOK_URL",                       # reason: TB-312 integration secret for the `WebhookChannelAdapter`; set via shell export alongside the project-specific webhook destination (Slack incoming webhook, Discord, etc.)
 })

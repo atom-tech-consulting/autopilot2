@@ -138,6 +138,12 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     "AP2_VALIDATOR_JUDGE_DISABLED",
     "AP2_VALIDATOR_JUDGE_MAX_TURNS",
     "AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD",
+    # TB-382: kill switch for the verifier_judge component (the optional LLM
+    # prose-bullet judge). Read live via `Manifest.is_enabled` (os.environ)
+    # on each `Registry.verifier_judge(cfg)` walk in `verify_task`, so a
+    # toggle takes effect on the next verification without a daemon restart —
+    # same hot-reload treatment as `AP2_VALIDATOR_JUDGE_DISABLED`.
+    "AP2_VERIFY_JUDGE_DISABLED",
     # Ideation-exhaustion halt (TB-345 — read fresh from os.environ at
     # tick-time inside `ideation_halt.maybe_halt_on_exhaustion` via
     # `cfg.get_core_value(...)`, so a hot-reload propagates on the next

@@ -450,6 +450,36 @@ class Registry:
             out.append(validator)
         return out
 
+    def verifier_judge(self, cfg=None) -> Optional[Callable]:
+        """The prose-bullet judge hook from the enabled `verifier_judge`
+        component, or `None` when the component is disabled (TB-382 axis 5).
+
+        Walks `enabled_components(cfg)` in name-sorted order and returns the
+        first `hook_points["prose_judge"]` callable found. Mirrors the
+        structural shape of `briefing_validators(cfg)` / `channel_adapters(cfg)`
+        — name-sorted walk over enabled manifests, skip entries that don't
+        carry the named hook point — but returns a single optional callable
+        because there is logically one prose judge.
+
+        `None` is a legitimate return: when the `verifier_judge` component is
+        dropped by its `AP2_VERIFY_JUDGE_DISABLED` env_flag (or no enabled
+        component registers a `prose_judge` hook), the core verify runner
+        (`verify.py::verify_task`) treats prose bullets via its existing
+        non-judged `unverified` path while the deterministic shell-bullet
+        path still gates. This is the cleavage that lets a deployment verify
+        with shell bullets alone, prose-judge disabled.
+
+        `cfg` is accepted for forward compatibility (the hook may want
+        per-cfg knobs) but is unused for resolution today — the component's
+        enabled state reads from `os.environ` via `Manifest.is_enabled` so a
+        hot-reloaded env (TB-271) applies on the next call.
+        """
+        for manifest in self.enabled_components(cfg):
+            judge = manifest.hook_points.get("prose_judge")
+            if judge is not None:
+                return judge
+        return None
+
     def tick_hooks(self, phase: Phase) -> list[TickHook]:
         """Ordered list of tick hooks registered on `phase` (TB-310 axis 2).
 
