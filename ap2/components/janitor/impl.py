@@ -996,3 +996,44 @@ def recent_finding_counts_by_verdict(
             verdict = VERDICT_AMBIGUOUS
         out[verdict] += 1
     return out
+
+
+async def run_janitor_cron(cfg: Config, sdk, mcp_server, job) -> None:
+    """`janitor` cron job handler (TB-381 — the janitor component's handler).
+
+    Was `daemon.run_cron`'s `if job.name == "janitor"` branch; now
+    contributed by this component via the manifest's
+    `hook_points["cron_job_handlers"]` and dispatched by the cron
+    scheduler (`ap2/components/cron/`). Self-contained, matching the
+    job-handler contract: it bookends with `cron_start` / `cron_complete`
+    (so post-mortems trace the run through the same event vocabulary as
+    every other cron job), advances `cron_state[janitor].last_run`, and
+    catches a `run_janitor` raise into a `cron_error` event with the
+    `<type>: <msg>` `error` field.
+
+    The actual work-callable is resolved at call-time via
+    `registry.hook("tick_hook", component="janitor")` rather than a
+    captured `run_janitor` reference, preserving the pre-TB-381 lookup
+    shape (and the test seam that monkeypatches the manifest's
+    `hook_points["tick_hook"]` to a stub). `job.prompt` is ignored — the
+    work is hard-coded.
+    """
+    from ap2.cron import mark_run
+    from ap2.registry import default_registry
+
+    janitor_tick_hook = default_registry().hook(
+        "tick_hook", component="janitor",
+    )
+
+    events.append(cfg.events_file, "cron_start", job=job.name)
+    try:
+        await janitor_tick_hook(cfg, sdk)
+    except Exception as e:  # noqa: BLE001
+        events.append(
+            cfg.events_file,
+            "cron_error",
+            job=job.name,
+            error=f"{type(e).__name__}: {e}",
+        )
+    mark_run(cfg.cron_state_file, job.name)
+    events.append(cfg.events_file, "cron_complete", job=job.name)

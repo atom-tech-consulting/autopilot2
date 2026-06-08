@@ -75,7 +75,7 @@ from __future__ import annotations
 from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest, Phase
 
-from . import recent_finding_counts_by_verdict, run_janitor
+from . import recent_finding_counts_by_verdict, run_janitor, run_janitor_cron
 
 
 MANIFEST = Manifest(
@@ -83,10 +83,18 @@ MANIFEST = Manifest(
     env_flag="AP2_JANITOR_DISABLED",
     default_enabled=True,
     hook_points={
-        # axis (2) — the daemon's `run_cron` dispatches the `janitor`
-        # cron job by looking this hook up and `await`-ing it. Signature:
+        # axis (2) — the cron scheduler dispatches the `janitor` cron job
+        # by looking this hook up and `await`-ing it. Signature:
         # `async def tick_hook(cfg, sdk) -> JanitorReport`.
         "tick_hook": run_janitor,
+        # TB-381 axis 1 — the janitor component's contribution to the cron
+        # job-handler registry. The cron scheduler
+        # (`ap2/components/cron/`) aggregates this with the core handlers
+        # and dispatches the `janitor` cron job to `run_janitor_cron`
+        # (the self-contained handler that was `run_cron`'s `job.name ==
+        # "janitor"` branch). Signature:
+        # `async def run_janitor_cron(cfg, sdk, mcp_server, job) -> None`.
+        "cron_job_handlers": {"janitor": run_janitor_cron},
         # janitor-specific data accessor for the CLI `ap2 status` and
         # status-report digest composition. Signature:
         # `def status_findings_counts(cfg, *, window_s=None) -> dict[str, int]`.

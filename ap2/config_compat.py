@@ -204,6 +204,16 @@ FLAT_TO_SECTIONED: dict[str, str] = {
 #     an env-only knob keeps it out of the TOML migration's hot-reload
 #     story and avoids the "operator edits config.toml; daemon doesn't
 #     pick up the channel change" footgun.
+#   - Component kill switch with no structured-config schema:
+#     `AP2_CRON_DISABLED` (TB-381) is the cron scheduler component's
+#     on/off lever. Unlike the `janitor` / `auto_unfreeze` kill switches
+#     (which graduated to `[components.<name>] disabled` because those
+#     components carry a `config_schema`), the cron component is minimal
+#     and declares no schema — the knob is consulted purely via
+#     `Manifest.is_enabled()`'s `env_flag` mechanism, never read via a
+#     component-body `os.environ.get` or mapped to a sectioned TOML key.
+#     It stays env-only until a future TB introduces a `[components.cron]`
+#     schema (at which point it would move to `FLAT_TO_SECTIONED`).
 #   - Future placeholders (`AP2_DIR`, `AP2_REAL_SDK`) named in goal.md
 #     L358 are listed for forward-compatibility — neither is currently
 #     read in source, but the goal.md cut-line documents them as
@@ -223,6 +233,10 @@ _KNOBS_STAYING_ENV_ONLY: frozenset[str] = frozenset({
     # Deployment-environment path (sandbox-specific channel-file
     # destination, TB-312).
     "AP2_CHANNEL_FILE_PATH",
+    # Cron scheduler component kill switch (TB-381) — minimal component
+    # with no `config_schema`; consulted via `Manifest.is_enabled()`,
+    # not a sectioned TOML key. Stays env-only.
+    "AP2_CRON_DISABLED",
     # Forward-compatibility placeholders per goal.md L358 (sandbox user
     # identity + SDK-mode escape hatch). Not currently read in source;
     # listed here so a future addition stays env-only by default.

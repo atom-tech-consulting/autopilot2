@@ -376,7 +376,10 @@ def _stub_tick_quiet(monkeypatch) -> None:
     from ap2 import ideation as _ideation
     monkeypatch.setattr(_ideation, "_maybe_ideate", _noop_async)
     monkeypatch.setattr(_ideation, "force_ideate", _noop_async)
-    monkeypatch.setattr(daemon, "load_jobs", lambda path: [])
+    # TB-381: the cron stage is now the `Phase.CRON_DISPATCH` walk into the
+    # cron scheduler component; neutralize it by stubbing the component's
+    # `load_jobs` (string target avoids importing the impl module here).
+    monkeypatch.setattr("ap2.components.cron.impl.load_jobs", lambda path: [])
 
     async def _noop_run_task(cfg, sdk, mcp_server, task):  # noqa: ARG001
         return None

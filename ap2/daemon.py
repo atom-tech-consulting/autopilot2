@@ -39,14 +39,16 @@ from . import (
 from .registry import Phase, default_registry
 from .board import Board, board_file_lock
 from .config import Config, DEFAULT_TASK_MAX_TURNS
-from .cron import (
-    CronJob,
-    bootstrap as bootstrap_cron,
-    due_jobs,
-    load_jobs,
-    load_state,
-    mark_run,
-)
+# TB-381 (axis 1): the cron *scheduler* (due-check loop + per-job
+# handler dispatch + `cron_*` events) moved into the registry tick-hook
+# component `ap2/components/cron/`; `daemon._tick` walks
+# `registry.tick_hooks(Phase.CRON_DISPATCH)` instead of running the loop
+# inline. Core keeps only `bootstrap` here (used by `main_loop` to seed a
+# first-run `cron.yaml`) — the interval-engine primitives
+# (`load_jobs`/`load_state`/`due_jobs`/`mark_run`/`CronJob`) stay in the
+# core `ap2/cron.py` library and are now imported by the component +
+# `ap2.cron_handlers` rather than by the daemon's cron stage.
+from .cron import bootstrap as bootstrap_cron
 # TB-312: `check_new_messages` and the Mattermost HTTP client moved to
 # `ap2/components/mattermost/` (axis-(5) bundled with axis-(3)
 # channel-adapter abstraction). Core looks them up via the registry
@@ -55,7 +57,6 @@ from .cron import (
 # for the lookup site that replaces the pre-TB-312 direct import.
 from .result import TaskResult
 from .tools import (
-    CONTROL_AGENT_TOOLS,
     MM_HANDLER_TOOLS,
     TASK_AGENT_FENCED_PATHS,
     TASK_AGENT_TOOLS,
@@ -1373,126 +1374,22 @@ _STATUS_REPORT_BORING_TYPES = _status_report_mod._STATUS_REPORT_BORING_TYPES
 _status_report_should_skip = _status_report_mod._status_report_should_skip
 
 
-async def run_cron(cfg: Config, sdk, mcp_server, job: CronJob) -> None:
-    # TB-144: status-report jobs delegate to the shared routine in
-    # `ap2.status_report` so the cron path and the chat-trigger MCP tool
-    # (`mcp__autopilot__status_report_run`) share one prompt, one
-    # skip-gate (TB-128), and one event vocabulary. The cron path passes
-    # `trigger="cron"` so `cron_state[status-report].last_run` advances
-    # (the chat path explicitly does NOT advance it — operator-triggered
-    # reports must not silence the next scheduled cron). `job.prompt` is
-    # ignored for this job: the routine uses `STATUS_REPORT_PROMPT`
-    # verbatim so an operator's stale `cron.yaml` doesn't drift from the
-    # canonical contract.
-    if job.name == "status-report":
-        await _status_report_mod.run_status_report(
-            cfg, sdk, mcp_server,
-            trigger="cron",
-            max_turns=job.max_turns,
-        )
-        return
-
-    # TB-177 + TB-178: `janitor` jobs run a deterministic git-state
-    # detection pass (subprocess + `git status --porcelain` parsing),
-    # then layer an LLM judge over the candidate findings to classify
-    # each as real_strand / operator_draft / ambiguous. The judge step
-    # makes async SDK calls but stays out of `_run_control_agent`'s
-    # control-prompt plumbing — janitor's prompt is purpose-built per
-    # finding (see `janitor._judge_finding`). We still bookend with
-    # `cron_start`/`cron_complete` so post-mortems can trace the run
-    # through the same event vocabulary as every other cron job.
-    # `job.prompt` is intentionally ignored — the work is hard-coded.
-    if job.name == "janitor":
-        # TB-309: janitor became a registry-discovered component. The
-        # registry's manifest pins `tick_hook` to `run_janitor`; the
-        # call site here no longer imports the module directly.
-        from .registry import default_registry
-
-        janitor_tick_hook = default_registry().hook(
-            "tick_hook", component="janitor",
-        )
-
-        events.append(cfg.events_file, "cron_start", job=job.name)
-        try:
-            await janitor_tick_hook(cfg, sdk)
-        except Exception as e:  # noqa: BLE001
-            events.append(
-                cfg.events_file,
-                "cron_error",
-                job=job.name,
-                error=f"{type(e).__name__}: {e}",
-            )
-        mark_run(cfg.cron_state_file, job.name)
-        events.append(cfg.events_file, "cron_complete", job=job.name)
-        return
-
-    # TB-350: `real-sdk-smoke` jobs run the live-API smoke suite as a
-    # timeout-bounded subprocess via `ap2.smoke_runner.run_smoke_check`.
-    # Like `janitor`, the work is a deterministic shell action (running
-    # pytest), not an LLM task — and control / cron agents have no Bash
-    # anyway — so this dispatches a Python routine rather than building a
-    # control prompt. The routine itself emits the
-    # `smoke_check_skipped` / `smoke_check_passed` / `smoke_check_failed`
-    # outcome events + posts the failure-only Mattermost alert; we bookend
-    # with `cron_start` / `cron_complete` (job=real-sdk-smoke) and advance
-    # `cron_state[real-sdk-smoke].last_run` exactly as the janitor branch
-    # does. `job.prompt` is an ignored stub (same as status-report).
-    if job.name == "real-sdk-smoke":
-        from . import smoke_runner as _smoke_runner_mod
-
-        events.append(cfg.events_file, "cron_start", job=job.name)
-        try:
-            await _smoke_runner_mod.run_smoke_check(cfg)
-        except Exception as e:  # noqa: BLE001
-            events.append(
-                cfg.events_file,
-                "cron_error",
-                job=job.name,
-                error=f"{type(e).__name__}: {e}",
-            )
-        mark_run(cfg.cron_state_file, job.name)
-        events.append(cfg.events_file, "cron_complete", job=job.name)
-        return
-
-    prompt = prompts.build_control_prompt(cfg, job.name, job.prompt)
-    events.append(cfg.events_file, "cron_start", job=job.name)
-    # TB-126: snapshot the state surface before the cron runs so we can
-    # commit ONLY paths the cron actually mutated. Without this, a leftover
-    # dirty briefing from a prior op rides along with the next cron commit.
-    pre_snapshot = _snapshot_state_paths(cfg)
-    timed_out, error, stderr_tail, prompt_dump = await _run_control_agent(
-        cfg,
-        sdk,
-        mcp_server,
-        label=f"cron-{job.name}",
-        prompt=prompt,
-        allowed_tools=job.allowed_tools or CONTROL_AGENT_TOOLS,
-        max_turns=job.max_turns,
-    )
-    if timed_out:
-        events.append(
-            cfg.events_file,
-            "cron_timeout",
-            job=job.name,
-            timeout_s=cfg.control_timeout_s,
-            stderr_tail=stderr_tail,
-            prompt_dump=str(prompt_dump),
-        )
-    elif error is not None:
-        events.append(
-            cfg.events_file,
-            "cron_error",
-            job=job.name,
-            error=error,
-            stderr_tail=stderr_tail,
-            prompt_dump=str(prompt_dump),
-        )
-    mark_run(cfg.cron_state_file, job.name)
-    events.append(cfg.events_file, "cron_complete", job=job.name)
-    # No-op for crons that didn't touch the board (e.g. status-report).
-    touched = _changed_state_paths(pre_snapshot, _snapshot_state_paths(cfg))
-    if touched:
-        _commit_state_files(cfg, f"state: cron {job.name}", paths=touched)
+# TB-381 (axis 1): `run_cron` — the cron per-job dispatcher with its
+# hardcoded per-job-name switch (status-report / janitor / real-sdk-smoke
+# / generic-else) — was relocated into the cron scheduler component
+# (`ap2/components/cron/impl.py::run_cron`) and rebuilt as a registry
+# job-handler dispatch:
+#   - the status-report and generic LLM-cron handlers stay in core
+#     (`ap2/cron_handlers.py`; the generic one calls back into the core
+#     `_run_control_agent` primitive below),
+#   - the real-sdk-smoke handler runs the core smoke routine,
+#   - the janitor handler is the janitor component's (contributed via
+#     its manifest's `hook_points["cron_job_handlers"]`).
+# The scheduler resolves a due job's name to a handler and dispatches,
+# knowing nothing of what the job does. Core no longer statically imports
+# the component; `_tick` walks `registry.tick_hooks(Phase.CRON_DISPATCH)`
+# (step 1 below). Tests that drove `daemon.run_cron` now import it from
+# `ap2.components.cron`.
 
 
 # TB-263: per-envelope SDK message serialization helpers (TB-85 / TB-157)
@@ -2702,12 +2599,29 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
         if asyncio.iscoroutine(result):
             await result
 
-    # 1. Cron (MM polling moved to _mm_loop — TB-122)
+    # 1. CRON_DISPATCH tick-hook phase (TB-381 axis 1 — first tick-stage
+    # extraction). The cron scheduler — the due-check loop + per-job
+    # handler dispatch + `cron_*` lifecycle events — now runs as a
+    # registry tick-hook component (`ap2/components/cron/`) registered on
+    # `Phase.CRON_DISPATCH`. The daemon walks the phase instead of running
+    # the pre-TB-381 inline `load_jobs` → `due_jobs` → `run_cron` block,
+    # preserving the import-direction cleavage (core never statically
+    # imports the component; MM polling moved to `_mm_loop` — TB-122).
+    #
+    # The scheduler self-gates on `AP2_CRON_DISABLED` and owns the per-job
+    # `cron_*` events (per-job errors → `cron_error` WITH a `job=` field,
+    # caught inside each handler). The outer try/except here preserves the
+    # pre-TB-381 tick-wrap `cron_error` (no `job=` field) for a
+    # whole-stage failure — e.g. `load_jobs` raising on an unreadable
+    # `cron.yaml` — matching the TB-211 event-split regression-pin. The
+    # scheduler reads the daemon's `mcp_server` from the
+    # `status_report.configure(...)` singleton (it can't ride the uniform
+    # `(cfg, sdk)` tick-hook signature), so no extra arg threads here.
     try:
-        jobs = load_jobs(cfg.cron_file)
-        state = load_state(cfg.cron_state_file)
-        for job in due_jobs(jobs, state, cfg.project_root):
-            await run_cron(cfg, sdk, mcp_server, job)
+        for hook in default_registry().tick_hooks(Phase.CRON_DISPATCH):
+            result = hook(cfg, sdk)
+            if asyncio.iscoroutine(result):
+                await result
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "cron_error", error=f"{type(e).__name__}: {e}")
 
@@ -2831,6 +2745,20 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # function, the daemon-side walk does not change. Per-hook
     # error handling lives inside each manifest wrapper.
     for hook in default_registry().tick_hooks(Phase.POST_DISPATCH):
+        result = hook(cfg, sdk)
+        if asyncio.iscoroutine(result):
+            await result
+
+    # 3.9. IDEATION tick-hook phase (TB-381 axis 1 — reserved for axis 3).
+    # The `Phase.IDEATION` phase is added now so the ideation extraction
+    # (axis 3) only needs to ship its subpackage + register a tick hook
+    # here — no registry-side or daemon-side edit. The walk is empty today
+    # (ideation has not moved): `ideation.force_ideate` / `_maybe_ideate`
+    # below remain direct core calls. Walking the phase now pins the
+    # tick-stage shape the cron extraction (this task) established, so
+    # axis 3 is a mechanical reuse. Wrapped to mirror the other phase
+    # walks; no hooks means a zero-cost no-op.
+    for hook in default_registry().tick_hooks(Phase.IDEATION):
         result = hook(cfg, sdk)
         if asyncio.iscoroutine(result):
             await result

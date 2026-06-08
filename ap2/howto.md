@@ -1955,6 +1955,19 @@ See also `skills/ap2-task/SKILL.md` § "Reporting failures
 the per-task agent reads at run time, with one fenced worked example
 per bootstrap fix-shape (TB-229).
 
+- `AP2_CRON_DISABLED` — TB-381 component-level kill switch for the
+  cron scheduler (the `ap2/components/cron/` component that owns the
+  due-check loop + per-job handler dispatch + `cron_*` lifecycle
+  events). **Unset by default → cron fires on schedule.** When set to
+  a truthy value (`1` / `true` / `yes` / `on`, case-insensitive) the
+  scheduler's tick hook self-gates at the top of `Phase.CRON_DISPATCH`
+  and no cron job runs. Mirrors `AP2_JANITOR_DISABLED` /
+  `AP2_AUTO_UNFREEZE_DISABLED` polarity / naming (suppress-polarity /
+  `default_enabled=True`), so `ap2 status` renders the on/off state
+  correctly. The interval engine (`cron.yaml` / `cron_state.json`,
+  job schedules) and the `cron_propose` / `cron_edit` write-path are
+  unchanged — this knob only stops the daemon-side scheduler from
+  dispatching.
 - `AP2_AUTO_UNFREEZE_DISABLED` — TB-320 component-level kill switch
   for the auto-unfreeze sweep. **Unset by default → sweep runs.**
   When set to a truthy value (`1` / `true` / `yes` / `on`,

@@ -45,6 +45,7 @@ from .impl import (
     recent_finding_count,
     recent_finding_counts_by_verdict,
     run_janitor,
+    run_janitor_cron,
 )
 
 __all__ = [
@@ -82,4 +83,5 @@ __all__ = [
     "recent_finding_count",
     "recent_finding_counts_by_verdict",
     "run_janitor",
+    "run_janitor_cron",
 ]

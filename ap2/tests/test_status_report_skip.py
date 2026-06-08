@@ -34,7 +34,11 @@ import pytest
 from ap2 import events, status_report as status_report_mod
 from ap2.config import Config
 from ap2.cron import CronJob
-from ap2.daemon import _status_report_should_skip, run_cron
+from ap2.daemon import _status_report_should_skip
+# TB-381: the cron per-job dispatcher `run_cron` moved into the cron
+# scheduler component; `_status_report_should_skip` is still re-exported
+# from daemon.
+from ap2.components.cron import run_cron
 from ap2.status_report import run_status_report
 
 

@@ -412,6 +412,7 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_AUTO_UNFREEZE_MAX_PER_TASK",        # reason: internal default, rarely tuned
     "AP2_CHANNEL_FILE_PATH",                 # reason: TB-312 core sibling channel adapter target; default path is fine for most projects, only set via shell export when explicitly wiring `FileAppendChannelAdapter` to a non-default location
     "AP2_CONTROL_MAX_TURNS",                 # reason: internal default, rarely tuned
+    "AP2_CRON_DISABLED",                     # reason: debug/test only — TB-381 kill switch for the cron scheduler component; operators flip via shell export, not the per-project template
     "AP2_EVENT_CONTEXT",                     # reason: internal default, rarely tuned
     "AP2_IDEATION_HALT_EMPTY_CYCLES",        # reason: internal default, rarely tuned
     "AP2_IDEATION_HALT_DISABLED",            # reason: debug/test only

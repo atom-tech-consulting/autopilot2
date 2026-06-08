@@ -31,7 +31,10 @@ from pathlib import Path
 from ap2 import events, smoke_runner, tools
 from ap2.config import Config
 from ap2.cron import CronJob
-from ap2.daemon import run_cron
+# TB-381: `run_cron` (the cron per-job dispatcher that routes
+# `real-sdk-smoke` to the smoke routine) moved into the cron scheduler
+# component (`ap2/components/cron/`).
+from ap2.components.cron import run_cron
 
 
 # ---------------------------------------------------------------------------

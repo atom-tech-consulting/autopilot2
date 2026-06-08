@@ -51,7 +51,10 @@ from ap2 import events
 from ap2.components import janitor
 from ap2.config import Config
 from ap2.cron import CronJob
-from ap2.daemon import run_cron
+# TB-381: the cron per-job dispatcher `run_cron` moved into the cron
+# scheduler component (`ap2/components/cron/`). Tests import it from there
+# now; `daemon.run_cron` no longer exists.
+from ap2.components.cron import run_cron
 
 
 # ---------------------------------------------------------------------------

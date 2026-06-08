@@ -43,6 +43,19 @@ Manifest contract (goal.md L121-125):
                       cli_verb               — axis (5), `ap2 <verb>` impl
                       status_findings_counts — janitor-specific data accessor
                                                (used by cli_daemon + status_report)
+                      cron_job_handlers      — TB-381 axis 1: a
+                                               dict[str, JobHandler] a
+                                               component contributes to the
+                                               cron job-handler registry. The
+                                               cron scheduler aggregates these
+                                               (via `registry.cron_job_handlers()`)
+                                               with the core-registered
+                                               handlers and dispatches a due
+                                               job to its named handler —
+                                               replacing the pre-TB-381
+                                               `if job.name == …` switch. The
+                                               janitor component contributes
+                                               `{"janitor": <handler>}` here.
                     Components register only the hooks they actually
                     provide; consumers look up via
                     `registry.hook(<name>, component=<component_name>)`.
@@ -127,8 +140,8 @@ class Phase(enum.Enum):
     - POST_CRON          — fires during / after the cron stage (today:
                            the janitor cron job dispatches via
                            `registry.hook("tick_hook", component="janitor")`
-                           inside `run_cron`). Listed here for the
-                           manifest schema's completeness; daemon._tick
+                           inside the cron scheduler). Listed here for
+                           the manifest schema's completeness; daemon._tick
                            does not iterate POST_CRON itself — the cron
                            scheduler owns that invocation cadence.
     - POST_DISPATCH      — fires after task dispatch. Reserved for the
@@ -137,12 +150,36 @@ class Phase(enum.Enum):
                            today's stub-manifest registers a no-op on
                            this phase so the walk-everything contract
                            is uniform.
+    - CRON_DISPATCH      — TB-381 axis 1: the cron *scheduler* phase. The
+                           cron component (`ap2/components/cron/`)
+                           registers its due-check-loop + per-job
+                           handler-dispatch tick hook here; `daemon._tick`
+                           walks `registry.tick_hooks(Phase.CRON_DISPATCH)`
+                           at step 1 instead of running the cron loop
+                           inline (the pre-TB-381 `load_jobs` → `due_jobs`
+                           → `run_cron` block). The scheduler self-gates
+                           on `AP2_CRON_DISABLED` and owns the `cron_*`
+                           lifecycle events. This is the first tick-stage
+                           extraction; it pins the tick-phase + tick-hook +
+                           import-direction shape the later extractions
+                           (axis 3 — ideation) reuse mechanically.
+    - IDEATION           — TB-381 axis 1: reserved for the ideation
+                           extraction (axis 3). The phase is added now so
+                           axis 3 only needs to ship the ideation
+                           subpackage + register its tick hook here — no
+                           registry-side edit. `daemon._tick` already walks
+                           `registry.tick_hooks(Phase.IDEATION)` (empty
+                           today — `ideation._maybe_ideate` stays a direct
+                           core call until axis 3 moves it), so the walk is
+                           in place the moment a hook is registered.
     """
 
     PRE_DISPATCH = "pre_dispatch"
     POST_DISPATCH = "post_dispatch"
     POST_CRON = "post_cron"
     ATTENTION_EMISSION = "attention_emission"
+    CRON_DISPATCH = "cron_dispatch"
+    IDEATION = "ideation"
 
 
 @dataclass(frozen=True)
@@ -441,6 +478,38 @@ class Registry:
             for entry_phase, hook in manifest.tick_hooks:
                 if entry_phase is phase:
                     out.append(hook)
+        return out
+
+    def cron_job_handlers(self) -> dict[str, Callable]:
+        """Aggregated cron job-handler map contributed by components (TB-381).
+
+        Walks every discovered manifest's
+        `hook_points.get("cron_job_handlers")` (a `dict[str, handler]`)
+        and merges them into a single name→handler map. The cron
+        scheduler (`ap2/components/cron/`) overlays this on top of the
+        core-registered handlers (`ap2.cron_handlers.CORE_CRON_HANDLERS`)
+        and dispatches a due job to `handlers.get(job.name,
+        DEFAULT_CRON_HANDLER)` — the direct replacement for `run_cron`'s
+        pre-TB-381 `if job.name == …` switch. Each handler is a
+        self-contained `async (cfg, sdk, mcp_server, job) -> None`
+        callable that owns its own `cron_*` lifecycle events + `mark_run`
+        (so the scheduler "knows nothing of what the job does").
+
+        Walks ALL components (not enabled-filtered) to preserve the
+        pre-TB-381 behavior where the janitor cron job dispatched its
+        handler unconditionally via `registry.hook("tick_hook",
+        component="janitor")` regardless of the `AP2_JANITOR_DISABLED`
+        kill switch. Today only the `janitor` component contributes a
+        handler (`{"janitor": run_janitor_cron}`); there are no key
+        collisions with the core handler names (`status-report`,
+        `real-sdk-smoke`).
+        """
+        out: dict[str, Callable] = {}
+        for manifest in self.components:  # name-sorted iteration
+            handlers = manifest.hook_points.get("cron_job_handlers")
+            if not handlers:
+                continue
+            out.update(handlers)
         return out
 
     @classmethod

@@ -68,6 +68,9 @@ import pytest
 
 from ap2 import daemon, events, ideation, tools, web
 from ap2.board import Board
+from ap2.components import janitor as janitor_component
+from ap2.components.cron import impl as cron_impl
+from ap2.components.cron import run_cron as cron_run_cron
 from ap2.config import Config
 from ap2.cron import CronJob
 
@@ -301,21 +304,24 @@ def test_cron_bootstrap_no_emit_when_cron_yaml_exists(tmp_path, monkeypatch):
 
 
 def test_cron_error_carries_error_field_when_janitor_raises(tmp_path, monkeypatch):
-    """Happy emit-site (janitor branch, daemon.py:961): when
-    `janitor.run_janitor` raises, `run_cron`'s try/except catches the
-    exception and emits `cron_error` with `job="janitor"` plus
+    """Happy emit-site (janitor cron handler): when `janitor.run_janitor`
+    raises, the janitor cron handler's try/except catches the exception
+    and emits `cron_error` with `job="janitor"` plus
     `error="<exc_type>: <msg>"`.
 
-    Drives the real `daemon.run_cron` seam with a stubbed-to-raise
-    `janitor.run_janitor`. Source-pin proves the emit pattern is the
-    exact one in production.
+    TB-381: the per-job dispatch moved into the cron scheduler component
+    (`ap2/components/cron/`), and the janitor branch became the janitor
+    component's self-contained `run_janitor_cron` handler (contributed via
+    the manifest's `hook_points["cron_job_handlers"]`). The dispatcher
+    `run_cron` lives at `ap2.components.cron.run_cron`. Source-pin the
+    handler proves the emit pattern is the exact one in production.
     """
     cfg = _cfg(tmp_path)
 
-    src = inspect.getsource(daemon.run_cron)
+    src = inspect.getsource(janitor_component.run_janitor_cron)
     assert '"cron_error"' in src, (
-        "regression: `daemon.run_cron` no longer emits cron_error on "
-        "janitor exception"
+        "regression: the janitor cron handler no longer emits cron_error "
+        "on janitor exception"
     )
     assert 'error=f"{type(e).__name__}: {e}"' in src, (
         "regression: cron_error `error` field formatting drifted from "
@@ -339,7 +345,7 @@ def test_cron_error_carries_error_field_when_janitor_raises(tmp_path, monkeypatc
     job = CronJob(
         name="janitor", interval_s=300, prompt="ignored", max_turns=5,
     )
-    asyncio.run(daemon.run_cron(cfg, sdk, mcp_server=None, job=job))
+    asyncio.run(cron_run_cron(cfg, sdk, mcp_server=None, job=job))
 
     evts = events.tail(cfg.events_file, 50)
     cron_errs = [e for e in evts if e["type"] == "cron_error"]
@@ -357,21 +363,28 @@ def test_cron_error_carries_error_field_when_janitor_raises(tmp_path, monkeypatc
 
 
 def test_cron_error_wraps_load_jobs_failure_in_tick(tmp_path, monkeypatch):
-    """Branch (tick wrap, daemon.py:2401): when `load_jobs(cfg.cron_file)`
-    raises inside `_tick`, the surrounding try/except catches it and
-    emits `cron_error` with just an `error` field (no `job=` field —
-    no specific job was in flight).
+    """Branch (tick wrap): when `load_jobs(cfg.cron_file)` raises inside
+    the cron scheduler, the `_tick` try/except around the
+    `Phase.CRON_DISPATCH` walk catches it and emits `cron_error` with
+    just an `error` field (no `job=` field — no specific job was in
+    flight).
 
-    Drives `daemon._tick` end-to-end with the load_jobs path stubbed to
-    raise and every other tick stage stubbed to a no-op success, so the
-    `cron_error` emit is the ONLY error event produced by the tick.
+    TB-381: the cron loop moved into the cron scheduler component
+    (`ap2/components/cron/impl.py`), which `_tick` invokes by walking
+    `registry.tick_hooks(Phase.CRON_DISPATCH)`. The scheduler calls the
+    interval-engine `load_jobs` (imported into the component module), so
+    the whole-stage-failure stub now patches the component's `load_jobs`
+    reference. The `_tick` outer try/except still owns the tick-level
+    `cron_error` emit (no `job=` field). Every other tick stage is
+    stubbed to a no-op success so the `cron_error` emit is the ONLY error
+    event produced by the tick.
     """
     cfg = _cfg(tmp_path)
 
     src = inspect.getsource(daemon._tick)
     assert '"cron_error"' in src, (
         "regression: `daemon._tick` no longer emits cron_error around the "
-        "cron stage's load_jobs/run_cron block"
+        "Phase.CRON_DISPATCH walk"
     )
 
     _stub_tick_quiet(monkeypatch)
@@ -379,7 +392,7 @@ def test_cron_error_wraps_load_jobs_failure_in_tick(tmp_path, monkeypatch):
     def _boom_load_jobs(*a, **kw):  # noqa: ARG001
         raise RuntimeError("cron.yaml unreadable")
 
-    monkeypatch.setattr(daemon, "load_jobs", _boom_load_jobs)
+    monkeypatch.setattr(cron_impl, "load_jobs", _boom_load_jobs)
 
     sdk = _NoopSDK()
     asyncio.run(daemon._tick(cfg, sdk, mcp_server=None))

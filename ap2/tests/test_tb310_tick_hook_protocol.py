@@ -68,8 +68,15 @@ def test_tickhook_signature_importable_from_registry():
 # --- (b) Phase enum has the four canonical members ---
 
 def test_phase_enum_has_four_canonical_members():
-    """The phase Enum exposes PRE_DISPATCH, POST_DISPATCH, POST_CRON,
-    ATTENTION_EMISSION — the four phases the briefing enumerates.
+    """The phase Enum exposes the four TB-310 phases (PRE_DISPATCH,
+    POST_DISPATCH, POST_CRON, ATTENTION_EMISSION) plus the two TB-381
+    tick-stage-extraction phases (CRON_DISPATCH, IDEATION).
+
+    TB-381 (axis 1) extended the vocabulary: CRON_DISPATCH is the cron
+    scheduler phase `daemon._tick` walks at step 1 (replacing the inline
+    cron loop), and IDEATION is reserved for the ideation extraction
+    (axis 3). The membership is pinned exactly so a stray phase addition
+    surfaces here.
     """
     assert hasattr(Phase, "PRE_DISPATCH"), (
         "TB-310: Phase.PRE_DISPATCH should exist."
@@ -83,15 +90,23 @@ def test_phase_enum_has_four_canonical_members():
     assert hasattr(Phase, "ATTENTION_EMISSION"), (
         "TB-310: Phase.ATTENTION_EMISSION should exist."
     )
+    assert hasattr(Phase, "CRON_DISPATCH"), (
+        "TB-381: Phase.CRON_DISPATCH should exist."
+    )
+    assert hasattr(Phase, "IDEATION"), (
+        "TB-381: Phase.IDEATION should exist."
+    )
     names = {p.name for p in Phase}
     assert names == {
         "PRE_DISPATCH",
         "POST_DISPATCH",
         "POST_CRON",
         "ATTENTION_EMISSION",
+        "CRON_DISPATCH",
+        "IDEATION",
     }, (
-        f"TB-310: Phase enum should have exactly the four canonical "
-        f"members; got {sorted(names)}"
+        f"TB-381: Phase enum should have exactly the four TB-310 phases "
+        f"plus CRON_DISPATCH + IDEATION; got {sorted(names)}"
     )
 
 

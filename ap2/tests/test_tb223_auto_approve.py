@@ -477,7 +477,10 @@ def _stub_tick_quiet(monkeypatch) -> None:
 
     monkeypatch.setattr(ideation, "_maybe_ideate", _noop_async)
     monkeypatch.setattr(ideation, "force_ideate", _noop_async)
-    monkeypatch.setattr(daemon, "load_jobs", lambda path: [])
+    # TB-381: the cron stage is now the `Phase.CRON_DISPATCH` walk into the
+    # cron scheduler component; neutralize it by stubbing the component's
+    # `load_jobs` (string target avoids importing the impl module here).
+    monkeypatch.setattr("ap2.components.cron.impl.load_jobs", lambda path: [])
 
     # Critical: stub `run_task` so the auto-promote → dispatch chain
     # doesn't actually invoke a task agent.
