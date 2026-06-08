@@ -19,6 +19,7 @@ continue to resolve unchanged.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 
@@ -115,3 +116,112 @@ def _save_daemon_state(cfg: Config, state: dict) -> None:
     cfg.daemon_state_file.write_text(
         json.dumps(state, indent=2, sort_keys=True),
     )
+
+
+# ---------------------------------------------------------------------------
+# TB-379: effective-config snapshot — the daemon publishes what IT actually
+# resolved so `ap2 status` (a separate process) reports the daemon's live
+# config instead of re-resolving env locally.
+# ---------------------------------------------------------------------------
+
+
+def build_effective_config_snapshot(cfg: Config, *, registry=None) -> dict:
+    """Build the daemon's effective-config snapshot dict (TB-379).
+
+    Resolves every discovered component's enabled-state + env-flag value
+    against the daemon's LIVE process env (`os.environ`) — the same env
+    the in-daemon web UI reads correctly. This is what makes the snapshot
+    truthful where a CLI-local re-resolution diverges: the daemon's
+    `os.environ` carries any shell-pinned knob (`AP2_AUTO_APPROVE=1`
+    exported into the daemon's launch shell) that a later
+    `.cc-autopilot/env` edit could NOT override (env_reload's "existing
+    env vars win" rule). A `ap2 status` running from a clean shell would
+    re-resolve the file's `=0` and misreport; reading this snapshot fixes
+    that.
+
+    Shape (stable for the CLI reader + JSON consumers):
+
+        {
+          "pid": <int>,            # writing daemon's pid (liveness probe)
+          "ts": "<iso8601 Z>",     # write timestamp
+          "version": "<str>",      # running source version
+          "components": [
+            {
+              "name": str,
+              "enabled": bool,                # daemon-resolved on/off
+              "env_flag": str | None,
+              "env_flag_description": str,     # daemon-resolved knob value
+              "default_enabled": bool,
+            },
+            ...
+          ],
+        }
+
+    `registry` defaults to `default_registry()`; injectable for tests.
+    """
+    if registry is None:
+        from .registry import default_registry
+
+        registry = default_registry()
+    from . import get_version
+
+    components = [
+        {
+            "name": m.name,
+            # Resolve against the daemon's live os.environ (env=None) —
+            # the truthful effective state the web UI already shows.
+            "enabled": m.is_enabled(),
+            "env_flag": m.env_flag,
+            "env_flag_description": m.env_flag_description(),
+            "default_enabled": m.default_enabled,
+        }
+        for m in registry.components
+    ]
+    return {
+        "pid": os.getpid(),
+        "ts": _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "version": get_version(),
+        "components": components,
+    }
+
+
+def write_effective_config_snapshot(cfg: Config, *, registry=None) -> dict:
+    """Atomically write the effective-config snapshot (TB-379).
+
+    Called from the daemon tick (after `env_reload` so the snapshot
+    reflects the freshly-reloaded env) and once at daemon start. Writes
+    via a temp file + `os.replace` so a `ap2 status` read can never see a
+    half-written JSON. Best-effort: a file-system hiccup is swallowed by
+    the caller's try/except — a missing/stale snapshot just sends
+    `ap2 status` down the labelled local-fallback path, never crashes the
+    daemon.
+
+    Returns the snapshot dict it wrote (for caller logging / tests).
+    """
+    snapshot = build_effective_config_snapshot(cfg, registry=registry)
+    cfg.effective_config_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cfg.effective_config_file.with_suffix(
+        cfg.effective_config_file.suffix + ".tmp"
+    )
+    tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=True))
+    os.replace(tmp, cfg.effective_config_file)
+    return snapshot
+
+
+def load_effective_config_snapshot(cfg: Config) -> dict:
+    """Read `effective_config.json` (TB-379) → dict, or `{}` if missing /
+    malformed.
+
+    Defensive parse (mirrors `_load_daemon_state`): a truncated or
+    hand-edited file returns `{}` so `cmd_status` falls through to the
+    labelled local-resolution fallback rather than raising.
+    """
+    if not cfg.effective_config_file.exists():
+        return {}
+    try:
+        data = json.loads(cfg.effective_config_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}

@@ -52,6 +52,89 @@ def _is_running(pid: int | None) -> bool:
         return False
 
 
+def _resolve_component_view(cfg: Config) -> tuple[list[dict], str, list[str]]:
+    """Resolve the `ap2 status` component/knob rows (TB-379).
+
+    `ap2 status` runs in a SEPARATE process from the daemon, so
+    re-resolving component enabled-state from THIS shell's env layered
+    over `.cc-autopilot/env` can diverge from what the daemon actually
+    resolved — the bug that misreported auto-approve as `off` while a
+    shell-pinned `AP2_AUTO_APPROVE=1` kept it armed in the daemon
+    (2026-06-08). Instead, prefer the daemon's published
+    effective-config snapshot (`effective_config.json`), which records
+    the daemon's live `os.environ` resolution.
+
+    Returns `(rows, source, divergences)`:
+
+      - `rows`     — one dict per component with the keys
+        `name` / `enabled` / `env_flag` / `env_flag_description` /
+        `default_enabled`.
+      - `source`   — `"daemon"` when the rows came from a live daemon's
+        snapshot (snapshot present AND its `pid` is a running process),
+        else `"local"` (no snapshot, or its pid is dead → fall back to
+        local re-resolution and label it so the divergence can never
+        silently mislead again).
+      - `divergences` — component names whose daemon-snapshot `enabled`
+        disagrees with what a LOCAL re-resolution would produce (i.e. a
+        knob is shell-pinned in the daemon so a `.cc-autopilot/env` edit
+        didn't take). Empty unless `source == "daemon"`.
+    """
+    from . import daemon_state
+    from .registry import default_registry
+
+    registry = default_registry()
+    local_by_name = {m.name: m for m in registry.components}
+
+    snapshot = daemon_state.load_effective_config_snapshot(cfg)
+    snap_pid = snapshot.get("pid")
+    snap_components = snapshot.get("components")
+    snapshot_live = isinstance(snap_components, list) and _is_running(
+        snap_pid if isinstance(snap_pid, int) else None
+    )
+
+    if snapshot_live:
+        rows: list[dict] = []
+        divergences: list[str] = []
+        for entry in snap_components:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            enabled = bool(entry.get("enabled"))
+            rows.append(
+                {
+                    "name": name,
+                    "enabled": enabled,
+                    "env_flag": entry.get("env_flag"),
+                    "env_flag_description": entry.get(
+                        "env_flag_description", ""
+                    ),
+                    "default_enabled": bool(entry.get("default_enabled")),
+                }
+            )
+            # Divergence hint: does a local re-resolution disagree with
+            # the daemon's snapshot for this component? If so, the knob
+            # is pinned in the daemon's env and the operator's file edit
+            # hasn't taken (the exact footgun this task surfaces).
+            m = local_by_name.get(name)
+            if m is not None and m.is_enabled() != enabled:
+                divergences.append(name)
+        return rows, "daemon", divergences
+
+    # Fallback: re-resolve locally (no live daemon to read from). Labelled
+    # by the caller so the operator knows this is NOT the daemon's view.
+    rows = [
+        {
+            "name": m.name,
+            "enabled": m.is_enabled(),
+            "env_flag": m.env_flag,
+            "env_flag_description": m.env_flag_description(),
+            "default_enabled": m.default_enabled,
+        }
+        for m in registry.components
+    ]
+    return rows, "local", []
+
+
 # TB-358 (axis 5): the OpenAI API-key env var that satisfies a `codex`-backed
 # kind's credential requirement. The daemon-start auth gate walks the resolved
 # per-kind backend set and requires exactly the credentials that set implies.
@@ -383,12 +466,21 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         "status_findings_counts", component="janitor",
     )
     janitor_counts = _recent_finding_counts(cfg)
-    # TB-319: snapshot the registry's manifests once so both the JSON
-    # and text branches render the same enabled-state mapping (a
-    # second `default_registry()` call would re-read `os.environ` and
-    # could in principle disagree across the branches if the env
-    # mutated mid-call — unlikely but the snapshot is free).
-    _component_manifests = _registry.components
+    # TB-319 / TB-379: resolve the component/knob rows ONCE so both the
+    # JSON and text branches render the same enabled-state mapping. The
+    # rows come from the DAEMON's published effective-config snapshot
+    # when it is live (so `ap2 status` reports the daemon's actual
+    # resolution, not a CLI-local env re-resolution that could diverge —
+    # the TB-379 bug); they fall back to a clearly-labelled local
+    # re-resolution when no daemon is running. `_component_source` is
+    # `"daemon"` or `"local"`; `_component_divergences` names components
+    # whose daemon state disagrees with a local resolution (a shell-
+    # pinned knob).
+    (
+        _component_rows,
+        _component_source,
+        _component_divergences,
+    ) = _resolve_component_view(cfg)
     janitor_findings = sum(janitor_counts.values())
     # TB-189 / TB-251: count operator-authored impact verdicts
     # (`task_classified` events) in the last 30 days, broken down by
@@ -652,31 +744,41 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
                     for c in attention_conditions
                 ],
             },
-            # TB-319: enumerate every component the registry discovered.
-            # Machine-consumer parity for the text-mode `## Components`
-            # block — same source-of-truth walk (`default_registry().components`
-            # in alphabetic name order) so a JSON consumer (web UI,
-            # external monitor, ap2 ack scripts) sees the same wired-in
-            # surface the operator's terminal does. Each entry carries
-            # the four documented keys: `name`, `enabled` (resolved via
-            # `Manifest.is_enabled()` against the live process env so a
-            # hot-reloaded `.cc-autopilot/env` takes effect on the next
-            # invocation), `env_flag` (the raw env-var name or null for
-            # always-on manifests), and `default_enabled` (so a consumer
-            # can reason about polarity without re-deriving it from the
-            # env_flag name suffix). ALWAYS present (even on a fresh
-            # project — the registry walk is deterministic and shipping
-            # zero components would itself be a regression worth
-            # surfacing).
+            # TB-319 / TB-379: enumerate every component the daemon
+            # resolved. Machine-consumer parity for the text-mode
+            # `## Components` block — both branches read the SAME
+            # `_component_rows` (the daemon's effective-config snapshot
+            # when live, else a labelled local re-resolution) so a JSON
+            # consumer (web UI, external monitor, ap2 ack scripts) sees
+            # the daemon's actual config, not a CLI-local env
+            # re-resolution that could diverge (TB-379). Each entry
+            # carries the four documented keys: `name`, `enabled`,
+            # `env_flag` (the raw env-var name or null for always-on
+            # manifests), and `default_enabled` (so a consumer can reason
+            # about polarity without re-deriving it from the env_flag
+            # name suffix). ALWAYS present.
             "components": [
                 {
-                    "name": _m.name,
-                    "enabled": _m.is_enabled(),
-                    "env_flag": _m.env_flag,
-                    "default_enabled": _m.default_enabled,
+                    "name": _row["name"],
+                    "enabled": _row["enabled"],
+                    "env_flag": _row["env_flag"],
+                    "default_enabled": _row["default_enabled"],
                 }
-                for _m in _component_manifests
+                for _row in _component_rows
             ],
+            # TB-379: provenance of the `components` block above —
+            # `"daemon"` when read from the live daemon's published
+            # effective-config snapshot, `"local"` when no daemon is
+            # running and `ap2 status` fell back to re-resolving env
+            # itself. A machine consumer treats `"local"` the way the
+            # text branch's `(daemon not running ...)` label reads: this
+            # is NOT the daemon's view.
+            "effective_config_source": _component_source,
+            # TB-379: components whose daemon-resolved enabled-state
+            # disagrees with a local re-resolution (a shell-pinned knob
+            # the operator's `.cc-autopilot/env` edit didn't override).
+            # Empty unless `effective_config_source == "daemon"`.
+            "effective_config_divergences": _component_divergences,
         }
         print(json.dumps(out, indent=2))
         return 0
@@ -996,24 +1098,40 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     nxt = board.next_ready()
     if nxt:
         print(f"next:     {nxt.id} {nxt.title}")
-    # TB-319: enumerate every component the registry discovered, with
-    # each line showing name + on/off + env-flag description. Closes the
-    # goal.md L235-237 Progress signal that named `ap2 status` as the
-    # natural surface for component visibility (today the only way to
-    # discover what's wired in is to `ls ap2/components/` and read each
-    # manifest by hand). Pure read-layer over `default_registry()` +
-    # `Manifest.is_enabled` / `Manifest.env_flag_description` — no new
-    # env knobs, no filter knobs, no behavior change. Always emitted
-    # (even on a fresh project — every project has the same registry
-    # walk so there's no "zero components" omit-on-empty case to honor).
-    # Walks the snapshot taken above (alphabetic by manifest name,
-    # matching the order `tick_hooks(phase)` already uses) so the text
-    # branch can never disagree with the JSON branch on enabled state.
+    # TB-319 / TB-379: enumerate every component the daemon resolved,
+    # with each line showing name + on/off + env-flag description. The
+    # rows come from `_component_rows` — the DAEMON's published
+    # effective-config snapshot when it is live, so `ap2 status` reports
+    # the daemon's actual resolution rather than a CLI-local env
+    # re-resolution that could diverge (the TB-379 bug: a shell-pinned
+    # `AP2_AUTO_APPROVE=1` kept auto-approve armed in the daemon while
+    # `ap2 status` from a clean shell re-resolved the file's `=0` and
+    # misreported `off`). When no daemon is running, the rows fall back
+    # to a local re-resolution and the header carries a
+    # `(daemon not running ...)` label so the divergence can never
+    # silently mislead. Always emitted (the header line stays the bare
+    # `## Components` so the existing `grep -q "^## Components"` /
+    # exact-line pins hold; the fallback label is a SEPARATE line below
+    # it). Both branches read the same `_component_rows` so text + JSON
+    # can never disagree on enabled state.
     print("## Components")
-    for _manifest in _component_manifests:
-        _state = "on" if _manifest.is_enabled() else "off"
-        _flag_desc = _manifest.env_flag_description()
-        print(f"  {_manifest.name}: {_state} ({_flag_desc})")
+    if _component_source == "local":
+        # Fail loud, not silent: the original bug was a confident-but-
+        # wrong "off". This label converts a silent misreport into an
+        # explicit "I'm not reading the daemon" signal.
+        print("  (daemon not running — showing local config)")
+    for _row in _component_rows:
+        _state = "on" if _row["enabled"] else "off"
+        _flag_desc = _row["env_flag_description"]
+        _line = f"  {_row['name']}: {_state} ({_flag_desc})"
+        # TB-379 divergence hint: the daemon's snapshot disagrees with a
+        # local re-resolution for this component → the knob is pinned in
+        # the daemon's env and the operator's `.cc-autopilot/env` edit
+        # didn't take. Surface it inline (after the env-flag desc, so the
+        # leading `name: on/off` token a parser keys on is unchanged).
+        if _row["name"] in _component_divergences:
+            _line += " [daemon env pinned; local env disagrees]"
+        print(_line)
     return 0
 
 

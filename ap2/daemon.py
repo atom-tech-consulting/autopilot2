@@ -1881,6 +1881,7 @@ from .daemon_state import (
     _emit_daemon_start,
     _load_daemon_state,
     _save_daemon_state,
+    write_effective_config_snapshot,
 )
 
 
@@ -1991,6 +1992,19 @@ async def main_loop(cfg: Config) -> None:
     _emit_daemon_start(cfg)
     cfg.pid_file.parent.mkdir(parents=True, exist_ok=True)
     cfg.pid_file.write_text(str(os.getpid()))
+    # TB-379: publish the effective-config snapshot once at startup —
+    # before the first tick fires — so `ap2 status` reports the live
+    # daemon's config from the moment the pid file exists, not only
+    # after the first tick's per-tick refresh. Best-effort; a write
+    # hiccup just defers the snapshot to the first tick.
+    try:
+        write_effective_config_snapshot(cfg)
+    except Exception as e:  # noqa: BLE001
+        events.append(
+            cfg.events_file,
+            "effective_config_write_error",
+            error=f"{type(e).__name__}: {e}",
+        )
 
     # Track outstanding MM handler tasks so we can drain them on shutdown.
     # `_mm_loop` adds; the set's discard-on-done keeps it bounded.
@@ -2566,6 +2580,27 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
         events.append(
             cfg.events_file,
             "env_reload_error",
+            error=f"{type(e).__name__}: {e}",
+        )
+
+    # 0a'. Publish the daemon's effective-config snapshot (TB-379).
+    # Written immediately AFTER the env_reload above so the snapshot
+    # reflects this tick's freshly-resolved env — including any shell-
+    # pinned knob (e.g. `AP2_AUTO_APPROVE=1` exported into the daemon's
+    # launch shell) that env_reload's "existing env vars win" rule keeps
+    # live even after a `.cc-autopilot/env` edit. `ap2 status` reads this
+    # file so its component/knob lines report what the DAEMON resolved,
+    # not what a CLI-local re-resolution from a different shell would
+    # produce (the divergence that misreported auto-approve as `off`
+    # while it was armed, 2026-06-08). Best-effort: a write hiccup is
+    # surfaced as an event and the tick continues — a stale/absent
+    # snapshot just sends `ap2 status` down its labelled local fallback.
+    try:
+        write_effective_config_snapshot(cfg)
+    except Exception as e:  # noqa: BLE001
+        events.append(
+            cfg.events_file,
+            "effective_config_write_error",
             error=f"{type(e).__name__}: {e}",
         )
 

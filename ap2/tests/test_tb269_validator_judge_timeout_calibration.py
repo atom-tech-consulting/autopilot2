@@ -259,6 +259,10 @@ def _make_cfg(project_root: Path) -> Config:
         daemon_state_file=(
             project_root / ".cc-autopilot" / "daemon_state.json"
         ),
+        # TB-379: daemon effective-config snapshot path.
+        effective_config_file=(
+            project_root / ".cc-autopilot" / "effective_config.json"
+        ),
         env_file=project_root / ".cc-autopilot" / "env",
         next_task_id=1,
         # TB-280: project-identity headline prefix for status-report.

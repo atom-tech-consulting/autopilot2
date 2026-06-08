@@ -63,6 +63,8 @@ def _make_cfg(project_root: Path, verify_timeout_s: int) -> Config:
         # TB-260: per-daemon-lifetime state stash (env_file_mtime_at_start)
         # + canonical `.cc-autopilot/env` path for stale-detection.
         daemon_state_file=project_root / ".cc-autopilot" / "daemon_state.json",
+        # TB-379: daemon effective-config snapshot path.
+        effective_config_file=project_root / ".cc-autopilot" / "effective_config.json",
         env_file=project_root / ".cc-autopilot" / "env",
         next_task_id=1,
         # TB-280: project-identity headline prefix for status-report.

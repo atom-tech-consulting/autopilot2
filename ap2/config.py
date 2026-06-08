@@ -41,6 +41,17 @@ AUTO_DIAGNOSE_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/auto_diagnose_state.json"
 # `cmd_status` (a separate process) can compare current env mtime to
 # the daemon's start-mtime without going through the daemon's PID.
 DAEMON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/daemon_state.json"
+# TB-379: the running daemon's effective-config snapshot — what it
+# ACTUALLY resolved (per-component enabled-state + knob values + pid +
+# write timestamp), refreshed each tick. `ap2 status` reads this so the
+# component/knob lines reflect the daemon's live config instead of the
+# CLI process re-resolving env locally (the divergence that bit an
+# operator 2026-06-08: a shell-pinned `AP2_AUTO_APPROVE=1` kept the
+# daemon's auto-approve armed while `ap2 status`, run from a clean
+# shell, re-resolved the file's `=0` and printed `off`). Ephemeral
+# daemon-runtime state — gitignored like `daemon_state.json`; an
+# `ap2 rollback` should NOT restore a prior daemon's snapshot.
+EFFECTIVE_CONFIG_FILE = f"{AUTOPILOT_DIR_NAME}/effective_config.json"
 ENV_FILE = f"{AUTOPILOT_DIR_NAME}/env"
 
 DEFAULT_TICK_INTERVAL_S = 30
@@ -195,6 +206,14 @@ class Config:
     # can compare the live env file mtime against the value captured
     # at daemon start without going through the daemon's PID.
     daemon_state_file: Path
+    # TB-379: the running daemon's effective-config snapshot path. The
+    # daemon writes its actually-resolved component/knob state here each
+    # tick; `ap2 status` reads it (cross-process) so the component/knob
+    # lines reflect the daemon's live config rather than a CLI-local
+    # env re-resolution. Surfaced as a Config attribute (mirroring
+    # `daemon_state_file`) so the daemon-write and CLI-read paths share
+    # one canonical path.
+    effective_config_file: Path
     # TB-260: the `.cc-autopilot/env` source-of-truth path. Surfaced as
     # a Config attribute (not just the `ENV_FILE` module constant) so
     # both startup-capture (in `daemon._emit_daemon_start`) and the
@@ -343,6 +362,8 @@ class Config:
             auto_diagnose_state_file=root / AUTO_DIAGNOSE_STATE_FILE,
             # TB-260: daemon-lifetime state stash (env_file_mtime_at_start).
             daemon_state_file=root / DAEMON_STATE_FILE,
+            # TB-379: daemon's effective-config snapshot (per-tick).
+            effective_config_file=root / EFFECTIVE_CONFIG_FILE,
             env_file=root / ENV_FILE,
             next_task_id=autopilot_section.get("next_task_id", 1),
             # TB-280: project identity for status-report headline. Env

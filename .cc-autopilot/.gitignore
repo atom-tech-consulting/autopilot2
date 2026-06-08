@@ -17,6 +17,7 @@ operator_queue.jsonl
 operator_queue_state.json
 focus_pointer.json
 daemon_state.json
+effective_config.json
 
 # Per-run prompt + stream dumps for failure diagnosis (kept only on failure)
 debug/

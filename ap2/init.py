@@ -739,6 +739,15 @@ NESTED_GITIGNORE_BLOCKS: list[tuple[str, list[str]]] = [
         # bump. Runtime-only, like its `cron_state.json` /
         # `operator_queue_state.json` neighbors above.
         "daemon_state.json",
+        # TB-379: the daemon's effective-config snapshot (per-tick
+        # publish of its actually-resolved component/knob state, read by
+        # `ap2 status` cross-process). Pure daemon-runtime state, only
+        # meaningful for the CURRENT daemon process — an `ap2 rollback`
+        # that restored a prior daemon's snapshot would resurrect stale
+        # knob state and mislead the very surface this file exists to
+        # make truthful. Runtime-only, like its `daemon_state.json` /
+        # `cron_state.json` neighbors.
+        "effective_config.json",
         # TB-297: sticky `warned_no_destination` flag for the opt-in
         # immediate-MM-push surface (`daemon._maybe_push_attention`).
         # Same runtime-state semantics as `auto_diagnose_state.json` —

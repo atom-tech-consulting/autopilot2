@@ -1042,6 +1042,15 @@ downshift),
 `env_reload_error` (TB-271 — `env_reload.maybe_reload_env` raised at
 tick-top; swallowed defensively so the rest of the tick continues on
 whatever cfg state survived; payload `error=<ExceptionType>: <message>`),
+`effective_config_write_error` (TB-379 — publishing the per-tick
+effective-config snapshot (`.cc-autopilot/effective_config.json`, the
+daemon's actually-resolved component/knob state that `ap2 status` reads
+cross-process so it reports the DAEMON's config, not a CLI-local env
+re-resolution) raised; swallowed defensively at the tick-top write and
+the daemon-start write so a filesystem hiccup never takes the daemon
+down — a stale/absent snapshot just sends `ap2 status` down its labelled
+`(daemon not running — showing local config)` fallback; payload
+`error=<ExceptionType>: <message>`),
 `env_deprecated` (TB-323 — the structured-config back-compat shim in
 `ap2/config_compat.py::_apply_flat_back_compat` detected a flat-name
 `AP2_*` env var listed in `FLAT_TO_SECTIONED` and overlaid the value at
