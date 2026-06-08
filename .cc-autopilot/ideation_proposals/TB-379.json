@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/ap2-status-must-report-the-daemon-s-live.md",
   "focus_anchor": null,
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-08T20:12:14Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-08T20:09:35Z",
   "tb_id": "TB-379",
   "why_now": "this footgun directly caused an operator (this session) to believe\nauto-approve was off when it was armed; a status command that misreports the\ndaemon's safety-gate state is a reliability hazard. Meta-infra observability\nfix with no focus anchor \u2192 `--skip-goal-alignment`."

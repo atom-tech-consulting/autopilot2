@@ -8,7 +8,7 @@
 
 ## Backlog
 
-- [ ] **TB-379** **`ap2 status` must report the daemon's live effective config, not a locally re-resolved one** `#autopilot` `#bug` `#status` `#observability` `#config` `#reliability` `@blocked:review` [→ brief](.cc-autopilot/tasks/ap2-status-must-report-the-daemon-s-live.md)
+- [ ] **TB-379** **`ap2 status` must report the daemon's live effective config, not a locally re-resolved one** `#autopilot` `#bug` `#status` `#observability` `#config` `#reliability` [→ brief](.cc-autopilot/tasks/ap2-status-must-report-the-daemon-s-live.md)
 
 ## Pipeline Pending
 
