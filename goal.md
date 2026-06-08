@@ -90,7 +90,123 @@ For the structured-config focus specifically:
   key is mentioned in `ap2/howto.md`'s `## Configuration knobs`
   section."
 
-## Current focus: codex support through an agent adaptor layer
+## Current focus: extract the remaining core subsystems into components for the OSS cut
+
+The component refactor (shipped 2026-05-27) extracted the *opt-in autonomous
+behaviors* — auto-approve, auto-unfreeze, attention, focus-advance, janitor,
+validator-judge, mattermost. But the **core still carries several cohesive,
+tick-resident subsystems** wired directly into `daemon._tick`: the cron
+dispatch loop, the pipeline-pending sweep, ideation (the `_maybe_ideate` gate
++ roadmap-exhaustion halt), the retry / effort-downshift failure path, the
+status-report generator, and the per-task verify runner (whose *judges* are
+already components but whose *runner* is not). Each has the full component
+shape — a tick stage or failure-path hook, an owned `AP2_*` knob cluster, its
+own events — yet lives in core, so `daemon.py` is still a ~2,960-line monolith
+and the "minimal kernel" an OSS cut would ship doesn't exist.
+
+This focus extracts those subsystems into components and lands the
+**OSS-distribution capstone**: a minimal dispatch-verify-report core plus
+togglable components, a defaults-enabled policy, packaging extras, and a
+public quickstart. The earlier "Done when" note assumed OSS "can be defined
+entirely in terms of which components default to enabled, no further
+structural refactor required" — that was optimistic; these subsystems are the
+remaining refactor, and this focus closes it.
+
+Purely structural for the extractions (no behavior change, env-knob names
+preserved exactly — same contract as the 2026-05-27 refactor) and additive
+for the packaging capstone. It does NOT change dispatch/verify semantics,
+ideation logic, or any agent's behavior; it relocates subsystems behind the
+registry and decides the OSS surface.
+
+Why now: codex support just shipped, so the backend layer is pluggable and
+the core is otherwise stable — the cheapest moment to factor the last tick
+subsystems before more features compound the coupling. A minimal
+componentized core is the literal prerequisite for an OSS cut: you can't ship
+"ap2 + pick your components" while ideation / cron / pipeline are welded into
+the daemon.
+
+Axes (each has its failure mode):
+
+(1) **Extended phase/hook vocabulary + canary (pipeline)** — the registry
+exposes PRE_DISPATCH / POST_DISPATCH / POST_CRON / ATTENTION_EMISSION tick
+phases. Add the phases the remaining tick stages need (cron-dispatch,
+pipeline-sweep, ideation, a dispatch-failure hook for retry) and prove the
+shape by extracting the **pipeline** subsystem first (most isolated:
+`_sweep_pipeline_pending` + the `pipeline_task_start` tool + Pipeline Pending
+board state + `pipeline_*` events). Delete-test: if the new tick-stage shape
+isn't pinned in one converted subsystem, every later extraction re-invents it.
+
+(2) **Cron component (scheduler + job-handler registry)** — relocate the cron
+*scheduler* (the `cron.yaml` / `cron_state.json` interval engine, the `cron_*`
+lifecycle events, and the `cron_propose` / `cron_edit` surface) into
+`ap2/components/cron/`, and replace `run_cron`'s hardcoded `if job.name == …`
+switch with a registered job-handler protocol: components and core contribute
+named handlers, and the scheduler dispatches to them while knowing nothing of
+what a job does. The shared `_run_control_agent` primitive stays in core (the
+generic LLM-cron handler calls back into it). Couples with axis 5: cron's
+status-report handler tightens to the status-report component once that lands.
+Delete-test: if the `job.name` switch survives, the coupling just moves into a
+new folder.
+
+(3) **Ideation component** — extract `ap2/ideation.py` (the `_maybe_ideate`
+trigger gate, the roadmap-exhaustion halt, proposal records, scrub
+coordination) behind an ideation tick hook + the halt hook; owns the
+`AP2_IDEATION_*` knob cluster, all `ideation_*` events, and
+`AP2_IDEATION_DISABLED` as its `env_flag`. Sequenced after axis 1 proves the
+shape (largest blast radius). Delete-test: if ideation stays in core, the
+kernel still hard-depends on the proposal engine.
+
+(4) **Retry / effort-downshift component** — extract `ap2/retry.py` + the
+thinking-block classifier + `_step_down_effort` / `_resolve_task_effort` into
+`ap2/components/retry/`, hooking the dispatch-failure path; owns
+`retry_state.json`, the `effort_downshift` event, and
+`AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED` as `env_flag`. Delete-test: a
+distribution can't ship without the opinionated downshift policy baked in.
+
+(5) **Status-report generator + verify-runner** — extract the status-report
+*generator* (triggered by the cron component) into
+`ap2/components/status_report/`, and extract the per-task **verify runner**
+(the `AP2_VERIFY_CMD` execution + prose-judge dispatch + `verification_*`
+events) so it sits alongside its already-componentized judges
+(`verifier_judge` / `validator_judge`). Delete-test: digest composition stays
+a baseline value, but its generator and the verify runner staying in core
+means the judge/runner split is half-done and a headless cut can't drop them.
+
+(6) **OSS-distribution capstone** — with the core reduced to the
+dispatch-verify-report kernel: (a) a defaults-enabled policy for the OSS cut
+(which components ship on vs off); (b) packaging extras (`autopilot2[codex]`,
+`[mattermost]`, …) so optional backends/channels are opt-in installs; (c)
+extend the all-components-disabled CI gate to the newly-extracted subsystems —
+the minimal kernel must dispatch → verify → report a task with every component
+disabled; (d) a public README / quickstart + license decision. Delete-test:
+the OSS cut must be a packaging + policy decision; if the disabled kernel
+can't run a task, the extraction isn't done.
+
+Sequencing: (1) is the prerequisite. (2) / (4) / (5) are independent
+extractions against the axis-1 shape (sequence by blast radius:
+pipeline → cron → retry → status-report/verify), with ideation (3) last. (6)
+is the capstone once the kernel is minimal.
+
+The delete-test for any work in this focus: does it move a core subsystem
+behind the registry (preserving observable behavior), extend the registry to
+express a new subsystem shape, or land the OSS packaging/policy? Polishing a
+subsystem's internals while it stays welded to `daemon._tick`, or packaging
+work before the kernel is actually minimal, is not paying focus rent.
+
+Progress signals:
+- `daemon.py` no longer contains the cron loop, pipeline sweep, ideation gate,
+  or retry / effort logic inline; each is an `ap2/components/<name>/`
+  subpackage walked via the registry.
+- The import-direction CI gate (core never imports `ap2/components/`) still
+  passes with the new components.
+- The full suite passes with every component disabled, and a task
+  dispatches → verifies → reports in that minimal-kernel config.
+- `pyproject.toml` declares OSS packaging extras; a documented
+  defaults-enabled policy exists; a public quickstart boots a fresh project.
+
+## Shipped focus: codex support through an agent adaptor layer (shipped 2026-06-06)
+
+Shipped 2026-06-06: codex is a fully selectable second backend — 31/31 real-SDK smokes pass on both Claude and codex across all 9 agent kinds (dispatch, tool round-trips incl. `report_result` over the stdio-MCP bridge, judge verdicts, control agents, and real file-edit+commit work).
 
 Every agent run in ap2 is a `claude_agent_sdk.query()` call against the
 bundled Claude Code binary, across distinct dispatch sites: `run_task`
@@ -576,7 +692,7 @@ Progress signals:
   under `.cc-autopilot/`. No database, no message broker. Recovery is
   always "read files, resume."
 - **Pluggable agent backend (default Claude Code)**: agent runs dispatch
-  through an `AgentAdapter` layer (the active "codex support" focus); the
+  through an `AgentAdapter` layer (shipped via the codex-support focus); the
   default and behaviour-reference adapter is `sdk.query()` against the
   bundled Claude Code binary, with a Codex adapter selectable per agent
   kind. Token cost is the operational constraint, not API rate limits.

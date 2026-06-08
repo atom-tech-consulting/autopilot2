@@ -326,3 +326,5 @@ ideation won't re-propose decisions logged here._
 - 2026-06-04T07:48:53Z — applied operator-queued add_backlog → TB-378
 - 2026-06-04T17:39:21Z — Codex full-backend parity validated LIVE: 31/31 real-SDK smokes passed on BOTH claude and codex (5m31s, zero skips) across all 9 AGENT_KINDS — task tool-calls + real-work(edit/commit/real-SHA via workspace_write), verifier/validator/janitor judges (correct pass AND fail verdicts), and ideation(board_edit)/ideation_scrub/status_report/cron/mattermost control agents. The codex focus is functionally complete; remaining is the goal.md Shipped + next-focus update.
 - 2026-06-04T17:39:00Z — applied operator-queued ack
+- 2026-06-08T17:36:07Z — applied operator-queued update_goal
+- 2026-06-08T17:36:07Z — operator updated goal.md
