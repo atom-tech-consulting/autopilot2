@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/slim-the-per-task-lifecycle-events-renam.md",
+  "focus_anchor": null,
+  "proposed_at": "2026-06-08T21:04:53Z",
+  "tb_id": "TB-385",
+  "why_now": "the event history is already high-volume; this is a net reduction\nthat also fixes the misleading `verify_passed` naming and the\nscattered-verdict read. Meta-infra observability, no focus anchor \u2192\n`--skip-goal-alignment`."
+}

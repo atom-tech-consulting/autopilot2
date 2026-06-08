@@ -338,3 +338,4 @@ ideation won't re-propose decisions logged here._
 - 2026-06-08T20:12:02Z — applied operator-queued approve → TB-379
 - 2026-06-08T20:16:37Z — applied operator-queued ideate → (forced)
 - 2026-06-08T20:40:01Z — applied operator-queued add_backlog → TB-380 (goal-alignment check skipped)
+- 2026-06-08T21:04:46Z — applied operator-queued add_backlog → TB-385 (goal-alignment check skipped)
