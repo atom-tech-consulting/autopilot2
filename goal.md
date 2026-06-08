@@ -96,24 +96,29 @@ The component refactor (shipped 2026-05-27) extracted the *opt-in autonomous
 behaviors* — auto-approve, auto-unfreeze, attention, focus-advance, janitor,
 validator-judge, mattermost. But the **core still carries several cohesive,
 tick-resident subsystems** wired directly into `daemon._tick`: the cron
-dispatch loop, the pipeline-pending sweep, ideation (the `_maybe_ideate` gate
-+ roadmap-exhaustion halt), the status-report generator, and the per-task
-verify runner (whose *judges* are already components but whose *runner* is
-not). Each has the full component shape — a tick stage or hook, an owned
-`AP2_*` knob cluster, its own events — yet lives in core, so `daemon.py` is
-still a ~2,960-line monolith.
+dispatch loop, the pipeline-pending sweep, and ideation (the `_maybe_ideate`
+gate + roadmap-exhaustion halt). Each has the full component shape — a tick
+stage or hook, an owned `AP2_*` knob cluster, its own events — yet lives in
+core, so `daemon.py` is still a ~2,960-line monolith. Two further couplings
+muddy the boundary: the auto-approve strip is embedded in the `board_edit`
+tool, and the optional LLM prose-judge is welded into the per-task verify
+runner.
 
-This focus extracts those subsystems into `ap2/components/<name>/` behind the
-registry, shrinking core toward a minimal dispatch-verify-report kernel. It is
-purely structural — no behavior change, env-knob names preserved exactly (same
-contract as the 2026-05-27 refactor). It does NOT change dispatch/verify
-semantics, ideation logic, or any agent's behavior; it relocates subsystems
-behind the registry. One axis is not an extraction but a prerequisite
-*decoupling*: the auto-approve strip currently lives inside the `board_edit`
-tool and must move into the `auto_approve` component as a loop pass before
-ideation can cleanly leave core. (A public OSS distribution — packaging
-extras, a defaults-enabled policy, a quickstart — is a separate downstream
-focus that this extraction unblocks but does not itself deliver.)
+This focus extracts the tick subsystems (pipeline, cron, ideation) into
+`ap2/components/<name>/` behind the registry, untangles the auto-approve
+coupling, and splits the optional prose-judge out — shrinking core toward a
+minimal kernel. It is purely structural — no behavior change, env-knob names
+preserved exactly (same contract as the 2026-05-27 refactor). The kernel it
+leaves behind still does dispatch, **verification** (the deterministic
+shell-bullet path is baseline — verification is gating; only the LLM
+prose-judge becomes an optional component), and **report composition**
+(operator-legible reporting is baseline) — those are the kernel's job, not
+things to extract. One axis is not an extraction but a prerequisite
+*decoupling*: the auto-approve strip must move out of `board_edit` into the
+`auto_approve` component before ideation can cleanly leave core. (A public OSS
+distribution — packaging extras, a defaults-enabled policy, a quickstart — is
+a separate downstream focus that this extraction unblocks but does not itself
+deliver.)
 
 Why now: codex support just shipped, so the backend layer is pluggable and the
 core is otherwise stable — the cheapest moment to factor the last tick
@@ -140,10 +145,10 @@ lifecycle events, and the `cron_propose` / `cron_edit` surface) into
 switch with a registered job-handler protocol: components and core contribute
 named handlers, and the scheduler dispatches to them while knowing nothing of
 what a job does. The shared `_run_control_agent` primitive stays in core (the
-generic LLM-cron handler calls back into it). Couples with axis 5: cron's
-status-report handler tightens to the status-report component once that lands.
-Delete-test: if the `job.name` switch survives, the coupling just moves into a
-new folder.
+generic LLM-cron handler calls back into it). The status-report job stays a
+**core-registered** handler (its composition is baseline core — see axis 5),
+not a separate component. Delete-test: if the `job.name` switch survives, the
+coupling just moves into a new folder.
 
 (3) **Decouple auto-approve from `board_edit` into a loop pass** — today the
 auto-approve strip is evaluated *inside* `board_edit`'s `add_backlog` branch
@@ -166,24 +171,32 @@ shape and axis 3 unties the auto-approve coupling (largest blast radius).
 Delete-test: if ideation stays in core, the kernel still hard-depends on the
 proposal engine.
 
-(5) **Status-report generator + verify-runner** — extract the status-report
-*generator* (triggered by the cron component) into
-`ap2/components/status_report/`, and extract the per-task **verify runner**
-(the `AP2_VERIFY_CMD` execution + prose-judge dispatch + `verification_*`
-events) so it sits alongside its already-componentized judges
-(`verifier_judge` / `validator_judge`). Delete-test: digest composition stays
-a baseline value, but its generator and the verify runner staying in core
-means the judge/runner split is half-done and a headless cut can't drop them.
+(5) **Extract the prose-judge into a `verifier_judge` component** — the
+per-task verify runner (`verify.py:verify_task`) parses the Verification
+section, runs shell bullets, and dispatches prose bullets to an LLM judge
+(`_judge_prose_bullet`). Verification is gating, so the runner + the
+deterministic shell-bullet path + aggregation stay in **core**; only the
+optional LLM prose-judge moves into a `verifier_judge` component the runner
+calls via the registry — mirroring the existing `validator_judge` component
+(today `verifier_judge` is an agent kind welded into `verify.py`, not a
+component). A deployment can then verify with shell bullets alone, prose-judge
+disabled. Status-report composition is likewise baseline and stays a core
+rendering library (scheduling is cron, delivery is the channel component) — it
+is NOT extracted. Delete-test: if the prose-judge stays inside the verify
+runner, the LLM verification layer can't be disabled independently of the
+gating shell-bullet path.
 
-Sequencing: (1) is the prerequisite for the tick-stage shape. (2) and (5) are
-independent extractions against it. (3) decouples auto-approve and unblocks
-(4); ideation (4) lands last (largest blast radius).
+Sequencing: (1) is the prerequisite for the tick-stage shape; (2) is an
+extraction against it. (5) is independent (it mirrors the existing
+`validator_judge` component, no new tick phase needed). (3) decouples
+auto-approve and unblocks (4); ideation (4) lands last (largest blast radius).
 
 The delete-test for any work in this focus: does it move a core subsystem
 behind the registry (preserving observable behavior), untangle a cross-
-boundary coupling that blocks such a move, or extend the registry to express a
-new subsystem shape? Polishing a subsystem's internals while it stays welded
-to `daemon._tick` is not paying focus rent.
+boundary coupling that blocks such a move, split an optional LLM layer out of
+a baseline-core path, or extend the registry to express a new subsystem shape?
+Polishing a subsystem's internals while it stays welded to `daemon._tick` is
+not paying focus rent.
 
 Progress signals:
 - `daemon.py` no longer contains the cron loop, pipeline sweep, or ideation
@@ -191,10 +204,13 @@ Progress signals:
   registry.
 - `board_edit` carries no auto-approve policy; the strip runs as an
   `auto_approve` component loop pass.
+- The prose-judge runs as a `verifier_judge` component (mirroring
+  `validator_judge`); the verify runner + shell-bullet path stay in core.
 - The import-direction CI gate (core never imports `ap2/components/`) still
   passes with the new components.
 - The full suite passes with every component disabled, and a task
-  dispatches → verifies → reports in that minimal-kernel config.
+  dispatches → verifies (shell bullets) → reports in that minimal-kernel
+  config.
 
 ## Shipped focus
 

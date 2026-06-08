@@ -332,3 +332,5 @@ ideation won't re-propose decisions logged here._
 - 2026-06-08T17:44:14Z — operator updated goal.md
 - 2026-06-08T18:27:55Z — applied operator-queued update_goal
 - 2026-06-08T18:27:55Z — operator updated goal.md
+- 2026-06-08T18:47:17Z — applied operator-queued update_goal
+- 2026-06-08T18:47:17Z — operator updated goal.md
