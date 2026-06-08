@@ -340,3 +340,14 @@ ideation won't re-propose decisions logged here._
 - 2026-06-08T20:40:01Z — applied operator-queued add_backlog → TB-380 (goal-alignment check skipped)
 - 2026-06-08T21:04:46Z — applied operator-queued add_backlog → TB-385 (goal-alignment check skipped)
 - 2026-06-08T21:05:00Z — applied operator-queued approve → TB-380
+- 2026-06-08T21:12:46Z — applied operator-queued approve → TB-385
+- 2026-06-08T21:23:19Z — applied operator-queued update_goal
+- 2026-06-08T21:23:19Z — operator updated goal.md
+- 2026-06-08T21:24:58Z — applied operator-queued update → TB-381
+- 2026-06-08T21:24:58Z — applied operator-queued reject → TB-384
+- 2026-06-08T21:24:58Z — rejected ideation proposal → TB-384 (Cron component + job-handler registry (axis 2)): (no reason given)
+- 2026-06-08T21:32:34Z — Pipeline stays embedded in core — do NOT propose extracting it: pipeline_task_start is a task-agent (core) tool and pipeline drives core board sections + post-agent task disposition, so it isn't cleanly separable. Cron is now the focus's axis-1 canary (first tick-stage extraction, establishes the CRON_DISPATCH/IDEATION tick-phase vocabulary the others reuse); TB-381 rewritten pipeline→cron-canary, TB-384 (separate cron task) superseded/rejected.
+- 2026-06-08T21:25:10Z — applied operator-queued ack
+- 2026-06-08T21:27:22Z — applied operator-queued approve → TB-381
+- 2026-06-08T21:27:22Z — applied operator-queued approve → TB-382
+- 2026-06-08T21:27:22Z — applied operator-queued approve → TB-383

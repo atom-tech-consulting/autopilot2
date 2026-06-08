@@ -1,79 +1,85 @@
+# Cron component (scheduler + job-handler registry) + extended tick-phase vocabulary — the first tick-stage extraction (canary)
+
+Tags: #autopilot #components #refactor #cron #job-handler #registry #tick-phase #axis-1 #canary
+
 ## Goal
 
-Advance `Current focus: extract the remaining core subsystems into components`
-by extending the registry's tick-phase vocabulary and proving the new shape on
-the most-isolated subsystem: extract the **pipeline** sweep into
-`ap2/components/pipeline/` behind the registry. goal.md axis (1) names this the
-prerequisite "Extended phase/hook vocabulary + canary (pipeline)": add to the
-existing `Phase` enum the stages the remaining extractions need (pipeline-sweep,
-cron-dispatch, ideation), and move `ap2/pipeline_sweep.py::_sweep_pipeline_pending`
-+ the `pipeline_task_start` MCP tool + the Pipeline Pending board state + the
-`pipeline_*` events into a component subpackage. Purely structural — observable
-behavior and every `AP2_*` knob name preserved bit-for-bit (goal.md L110-111).
+This is **axis 1** of *Current focus: extract the remaining core subsystems
+into components* — the first tick-stage extraction, and the one that
+establishes the registry tick-phase vocabulary the later extractions reuse.
+(Pipeline, the original canary candidate, was kept in core — its
+`pipeline_task_start` tool is offered to the task agent and it drives core
+board sections / post-agent disposition, so it isn't cleanly separable.)
 
-Why now: goal.md's axis-(1) delete-test says "if the new tick-stage shape isn't
-pinned in one converted subsystem, every later extraction re-invents it" —
-pipeline is the most isolated subsystem, so converting it first de-risks axes 2
-and 4 before they touch higher-blast-radius code.
+Today the cron dispatch loop runs inline in `daemon._tick` (step 1):
+`load_jobs` → for each due job → `run_cron`, where `run_cron` is a hardcoded
+`if job.name == "status-report" / "janitor" / "real-sdk-smoke" / else` switch.
+That switch is core-coupling by another name — exactly what the component
+model should eliminate (the janitor branch already half-resolves its handler
+via the registry).
+
+Extract the cron *scheduler* into a component behind a registry tick hook, and
+replace the `job.name` switch with a registered job-handler protocol.
+
+Why now: cron is the most self-contained remaining tick subsystem, so it's the
+right canary to pin the tick-stage extraction shape (new `Phase` members,
+tick-hook wiring, the import-direction boundary) that the ideation extraction
+(axis 3) then reuses.
 
 ## Scope
 
-- Add the new `Phase` enum members the remaining tick stages need (a
-  pipeline-sweep phase, plus the cron-dispatch and ideation phases axes 2 and 4
-  will consume) to `ap2/registry.py`, documented like the existing
-  PRE_DISPATCH/POST_CRON members.
-- Create `ap2/components/pipeline/` (`impl.py` holding the relocated
-  `_sweep_pipeline_pending` body, `manifest.py` exposing a `MANIFEST` whose
-  `tick_hooks` registers the sweep on the new pipeline phase, thin `__init__.py`
-  re-export) following the `impl.py` / `manifest.py` / `__init__.py` subpackage
-  shape the existing components under `ap2/components/` already use.
-- Relocate the `pipeline_task_start` MCP tool registration and the `pipeline_*`
-  event emissions with the subsystem; keep the Pipeline Pending board section
-  semantics unchanged.
-- Make `daemon._tick` dispatch the sweep by walking
-  `default_registry().tick_hooks(<pipeline phase>)` instead of calling
-  `_sweep_pipeline_pending` directly; core must not statically import
-  `ap2/pipeline_sweep`.
-- Preserve the component's env knobs and default behavior; add a `config_schema`
-  mirroring the existing manifests if the subsystem owns tunables.
+- **Extend the registry `Phase` vocabulary** (`ap2/registry.py`) with the
+  phases the remaining tick stages need — at minimum a cron-dispatch phase
+  (used here) and an ideation phase (reserved for axis 3) — and wire
+  `daemon._tick` to walk `registry.tick_hooks(<phase>)` for them.
+- **Relocate the cron scheduler** into `ap2/components/cron/` (manifest +
+  impl): the `cron.yaml` / `cron_state.json` interval engine
+  (`load_jobs`/`load_state`/`mark_run`), the due-check loop, the `cron_*`
+  lifecycle events, and the `cron_propose` / `cron_edit` surface. Register it
+  as a cron-dispatch tick hook.
+- **Replace `run_cron`'s `if job.name == …` switch with a job-handler
+  registry**: components and core contribute named handlers; the scheduler
+  looks up the handler for a due job and dispatches to it, knowing nothing of
+  what the job does. The `janitor` handler is the janitor component's; the
+  `real-sdk-smoke` handler runs the smoke routine; the `status-report` handler
+  stays a **core-registered** handler (its composition is baseline core); the
+  generic LLM-cron handler calls back into the core `_run_control_agent`
+  primitive (which stays in core, shared with ideation/mattermost).
+- **Preserve behavior + env-knob names exactly** (same contract as the
+  2026-05-27 component refactor) — purely structural; cron jobs fire on the
+  same schedule and produce the same events.
+- **Import-direction**: core must not statically import `ap2/components/cron/`;
+  the daemon resolves the cron tick hook + job handlers via the registry. The
+  CI import-direction gate must still pass.
+- **Tests**: the cron component is registered + discoverable; a due job is
+  dispatched to its registered handler (not a `job.name` switch); the
+  all-components-disabled config still boots and runs a task (cron simply
+  doesn't fire).
 
 ## Design
 
-A component is a subpackage with `impl.py` (the relocated subsystem body), a
-thin `__init__.py` re-export, and a `manifest.py` exposing a module-level
-`MANIFEST = Manifest(...)`; `ap2/components/janitor/` is a concrete reference.
-The registry discovers it filesystem-side via `pkgutil.iter_modules` (no
-registry-side edit). Register the sweep on a new `Phase` member so
-`daemon._tick` dispatches it via `registry.tick_hooks(<phase>)` exactly as it
-already walks PRE_DISPATCH hooks (the `iscoroutine()`-aware dispatch loop). The
-`pipeline_task_start` MCP tool moves with the body and is registered through the
-existing tool-registration path; `pipeline_*` events keep their current
-`type`/`summary` shape so the events allowlist + web rendering are untouched.
-The cron-dispatch and ideation `Phase` members are declared now (documented,
-unused) so axes 2 and 4 consume a ready vocabulary rather than re-extending the
-enum. Keep the change behavior-neutral: the sweep's ordering relative to other
-`_tick` stages is preserved by choosing the phase whose walk fires at the same
-point the inline call fires today.
+- **Scheduler vs handlers.** The component owns *when* jobs run (timing,
+  due-detection, lifecycle events); *what* each job does is a registered
+  handler contributed by whoever owns the work (janitor component,
+  core status-report handler, smoke routine, generic LLM-cron → core
+  `_run_control_agent`). This is the direct analog of, and replacement for,
+  the `job.name` switch.
+- **Canary role.** Being first, this task pays the cost of defining the
+  tick-phase + tick-hook + import-direction shape once, so axis 3 (ideation)
+  is a mechanical reuse.
 
 ## Verification
 
-- `uv run pytest -q` — full suite passes.
-- `test -f ap2/components/pipeline/manifest.py` — the pipeline component
-  subpackage exists with a registry manifest.
-- `uv run pytest -q ap2/tests/e2e/test_pipeline_pending.py ap2/tests/e2e/test_pipeline.py` — Pipeline Pending dispatch behavior is preserved post-extraction.
-- `! grep -nE '_sweep_pipeline_pending' ap2/daemon.py` — core no longer calls the
-  sweep directly; it is reached via the registry walk.
-- `ap2/registry.py` Prose: the `Phase` enum gains the tick stages the remaining
-  extractions need — a pipeline-sweep phase plus cron-dispatch and ideation
-  phases; judge confirms via Read.
-- Prose: a regression test in `ap2/tests/test_tb310_tick_hook_protocol.py` (or a
-  new sibling) pins that `default_registry().tick_hooks(<pipeline phase>)`
-  returns the pipeline component's sweep hook; judge confirms the assertion
-  exists via Read.
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — full suite passes, including new cron-component + job-handler-registry tests and the all-disabled-config boot test.
+- `test -f ap2/components/cron/manifest.py` — the cron component subpackage exists.
+- `! grep -qE "if job\.name ==|job\.name == \"" ap2/daemon.py` — `run_cron`'s hardcoded job-name switch is gone (replaced by registry dispatch).
+- `! grep -rqE "from ap2.components.cron|import ap2.components.cron" ap2/daemon.py ap2/cli*.py ap2/tools.py` — core does not statically import the cron component (import-direction gate).
+- `ap2/registry.py` Prose: the `Phase` enum gains the cron-dispatch (and reserved ideation) tick phases, and `daemon._tick` walks `registry.tick_hooks(<phase>)` for them. Judge confirms via Read.
+- `ap2/components/cron/` + `ap2/daemon.py` Prose: the cron scheduler (interval engine + `cron_*` events + `cron_propose`/`cron_edit`) runs as a registry tick-hook component; `run_cron`'s `job.name` switch is replaced by a registered job-handler protocol; `_run_control_agent` and the status-report handler stay in core; behavior and env-knob names are unchanged. Judge confirms via Read.
 
 ## Out of scope
 
-- Extracting cron (axis 2), ideation (axis 4), auto-approve (axis 3), or the
-  prose-judge (axis 5) — separate tasks.
-- Any behavior change to the pipeline sweep, the `pipeline_task_start` tool
-  contract, or the Pipeline Pending board semantics.
+- The **pipeline** subsystem — stays embedded in core by design (not separable; its tool is a task-agent/core tool).
+- The **ideation** extraction (axis 3) — this task only *adds* the ideation tick phase to the registry; it does not move `ideation.py`.
+- The auto-approve decouple (axis 2) and the prose-judge split (axis 4).
+- Changing cron behavior, job schedules, or the `_run_control_agent` primitive.

@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/decouple-auto-approve-from-board-edit-in.md",
   "focus_anchor": "current focus extract the remaining core subsystems into components",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-08T21:32:34Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-08T21:02:34Z",
   "tb_id": "TB-383",
   "why_now": "goal.md's axis-(3) delete-test says \"if the strip stays in\n`board_edit`, ideation can't be extracted without core\u2192component import\nviolations\" \u2014 untangling this coupling is the prerequisite that unblocks axis 4."
