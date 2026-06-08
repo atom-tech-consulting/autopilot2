@@ -1479,3 +1479,9 @@
 - **Summary:** Added backend-parametrized real-SDK smokes for the five control-agent kinds (ideation->board_edit propose, ideation_scrub->scrubbed-output shape, status_report/mattermost->mattermost_reply, cron->log_event), each routing through select_adapter(<kind>,cfg)/the kind's production dispatch under force_backend, asserting a specific tool call or structured result for both claude and codex, plus a shared run_control_to_tool_calls helper in _adapter.py; full non-smoke suite passes (2979) and all new smokes skip cleanly by default.</summary>
 <parameter name="files_changed">ap2/tests/smoke/_adapter.py, ap2/tests/smoke/test_ideation_real_sdk.py, ap2/tests/smoke/test_ideation_scrub_real_sdk.py, ap2/tests/smoke/test_status_report_real_sdk.py, ap2/tests/smoke/test_cron_real_sdk.py, ap2/tests/smoke/test_mattermost_real_sdk.py
 - **Tests:** pass
+
+## [2026-06-08] TB-379: `ap2 status` must report the daemon's live effective config, not a locally re-resolved one
+- **Commit:** `2f49ec3`
+- **Summary:** ap2 status now reads the daemon's per-tick effective-config snapshot (.cc-autopilot/effective_config.json) for the component/knob lines so it reports the daemon's live config, falling back to a clearly-labelled local re-resolution (and a JSON effective_config_source flag) when no daemon is running; full suite passes (2986).
+- **Files:** ap2/cli_daemon.py, ap2/config.py, ap2/daemon.py, ap2/daemon_state.py, ap2/howto.md, ap2/init.py, ap2/tests/test_tb379_effective_config_snapshot.py, ap2/tests/test_doctor_verify_timeout.py, ap2/tests/test_tb269_validator_judge_timeout_calibration.py, .cc-autopilot/.gitignore
+- **Tests:** pass

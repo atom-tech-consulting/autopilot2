@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-379** **`ap2 status` must report the daemon's live effective config, not a locally re-resolved one** `#autopilot` `#bug` `#status` `#observability` `#config` `#reliability` [→ brief](.cc-autopilot/tasks/ap2-status-must-report-the-daemon-s-live.md)
 
 ## Pipeline Pending
 
@@ -264,5 +263,6 @@
 - [x] **TB-376** **Judge parity: backend-parametrize the verifier + validator real-SDK smokes over codex and add a janitor-judge smoke** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#judges` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/judge-parity-backend-parametrize-the-ver.md)
 - [x] **TB-377** **Real-work task parity: a smoke where the agent edits a file, runs a command, commits, and reports a real commit SHA — both backends** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#real-work` `#commit` `#axis-7` `@blocked:TB-374` [→ brief](.cc-autopilot/tasks/real-work-task-parity-a-smoke-where-the.md)
 - [x] **TB-378** **Control-agent parity: live real-SDK smokes for ideation (incl. board_edit), ideation_scrub, status_report, cron, mattermost — both backends** `#autopilot` `#agent-adapter` `#codex` `#tests` `#smoke` `#parity` `#control-agents` `#axis-7` `@blocked:TB-373,TB-374` [→ brief](.cc-autopilot/tasks/control-agent-parity-live-real-sdk-smoke.md)
+- [x] **TB-379** **`ap2 status` must report the daemon's live effective config, not a locally re-resolved one** `#autopilot` `#bug` `#status` `#observability` `#config` `#reliability` [→ brief](.cc-autopilot/tasks/ap2-status-must-report-the-daemon-s-live.md)
 
 ## Frozen
