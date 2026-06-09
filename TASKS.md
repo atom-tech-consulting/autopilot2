@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-389** **Communication component (inbound + outbound) wrapping the channel adapters** `#autopilot` `#components` `#communication` `#mattermost` `#refactor` — Extract the channel surface into a single communication component owning inbound + outbound as tick-phase work, with channel adapters (mattermost demoted) held in an internal registry invisible to core; delete channel_adapters() and the inbound_poll hook from core. [→ brief](.cc-autopilot/tasks/communication-component-inbound-outbound.md)
 
 ## Pipeline Pending
 
@@ -273,5 +272,6 @@
 - [x] **TB-386** **Demote both LLM judges from components to select_adapter layers** `#autopilot` `#components` `#registry` `#verify` `#refactor` `@blocked:TB-382` — Demote the verifier_judge and validator_judge from components back to select_adapter layers: revert TB-382's verifier_judge component, dissolve the validator_judge component, delete registry.briefing_validators() and registry.verifier_judge(); preserve AP2_VERIFY_JUDGE_DISABLED and AP2_VALIDATOR_JUDGE_DISABLED as plain knobs. [→ brief](.cc-autopilot/tasks/demote-both-llm-judges-from-components-t.md)
 - [x] **TB-387** **One generic contributions(point) registry accessor; delete bespoke per-kind methods** `#autopilot` `#components` `#registry` `#refactor` `@blocked:TB-386` — Collapse the registry's bespoke per-kind fan-out methods (channel_adapters, cron_job_handlers) into one generic contributions(point) accessor; keying stays consumer-local, the registry never does keyed dispatch. [→ brief](.cc-autopilot/tasks/one-generic-contributions-point-registry.md)
 - [x] **TB-388** **Delete core hook_points symbol-pull blocks; remove the dead POST_DISPATCH phase** `#autopilot` `#components` `#daemon` `#registry` `#refactor` `@blocked:TB-383` — Delete the daemon's core to component hook_points symbol-pull alias blocks (auto_approve, attention) and remove the dead POST_DISPATCH phase still walked every tick with zero registrants since auto-approve moved to PRE_DISPATCH. [→ brief](.cc-autopilot/tasks/delete-core-hook-points-symbol-pull-bloc.md)
+- [x] **TB-389** **Communication component (inbound + outbound) wrapping the channel adapters** `#autopilot` `#components` `#communication` `#mattermost` `#refactor` — Extract the channel surface into a single communication component owning inbound + outbound as tick-phase work, with channel adapters (mattermost demoted) held in an internal registry invisible to core; delete channel_adapters() and the inbound_poll hook from core. [→ brief](.cc-autopilot/tasks/communication-component-inbound-outbound.md)
 
 ## Frozen
