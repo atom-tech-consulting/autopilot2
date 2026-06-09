@@ -2104,73 +2104,31 @@ async def _mm_loop(
 
 
 def _check_inbound_messages(cfg: Config) -> list[dict]:
-    """Poll for inbound messages via the registry's `inbound_poll` hook
-    (TB-312 axis-(5) migration).
+    """Poll for inbound messages via the communication component (TB-389).
 
-    Pre-TB-312 this was a direct call to
-    `from .mattermost import check_new_messages`. The git-move of
-    `ap2/mattermost.py` into `ap2/components/mattermost/__init__.py`
-    forbids a static import from core (axis-(6) gate, TB-311); this
-    helper instead looks up the `inbound_poll` hook on every enabled
-    component that declares one. Today only the mattermost component
-    does — but the lookup shape is uniform so a future migration
-    (e.g. Slack inbound) can join the list by declaring its own
-    `inbound_poll` hook on its manifest.
+    Pre-TB-389 this walked every enabled component's one-off inbound
+    poll hook_point directly from core. TB-389 folds the channel surface
+    behind a single `communication` component that owns inbound polling
+    as tick-phase work and holds its channel adapters in an internal
+    registry invisible to core — so core no longer references channels.
+    This helper resolves the communication component's inbound poll via
+    the registry (NOT a static `from ap2.components... import …`, which
+    the import-direction gate forbids) and returns whatever it polls.
 
-    Returns the concatenation of all enabled adapters' poll results
-    in deterministic component-name-sorted order. Empty list means
-    "no component is configured to poll for inbound messages" — the
-    `_mm_loop` simply sleeps until the next interval.
+    Returns the concatenation of the component's per-channel poll
+    results. Empty list means "no channel is configured to poll for
+    inbound messages" — `_mm_loop` simply sleeps until the next
+    interval. A poll raise propagates to `_mm_loop`'s outer try/except,
+    which emits ONE coherent `mm_poll_error`.
     """
-    out: list[dict] = []
-    for manifest in default_registry().enabled_components(cfg):
-        poll = manifest.hook_points.get("inbound_poll")
-        if poll is None:
-            continue
-        try:
-            msgs = poll(cfg)
-        except Exception as e:  # noqa: BLE001
-            # Per-adapter poll failures emit a generic `mm_poll_error`
-            # event upstream in `_mm_loop`'s outer try/except so the
-            # operator sees ONE coherent failure rather than two
-            # nested ones; here we just re-raise to that surface.
-            raise
-        if msgs:
-            out.extend(msgs)
-    return out
-
-
-def _deliver(cfg: Config, text: str, **meta) -> list[dict]:
-    """Walk `registry.channel_adapters(cfg)` and best-effort `.post()`
-    on each (TB-312 axis (3)).
-
-    Replaces the pre-TB-312 direct Mattermost-`_mm_post` call sites
-    in `daemon.py` (attention immediate push) and `watchdog.py`
-    (auto-diagnose + pending-review reminder).
-    Each call site now passes the destination via `meta["channel"]`
-    if it has one (legacy `_first_mm_channel` semantics — the
-    watchdog and attention paths historically picked the first entry
-    from `AP2_MM_CHANNELS`; the Mattermost adapter falls back to
-    that env knob when `channel` is unset, preserving observable
-    behavior).
-
-    Returns the list of `{adapter, ...}` result dicts from each
-    adapter's `.post()`. A `None` return from an adapter means
-    "unconfigured" — silently skipped, not added to the result. A
-    raise from an adapter is RE-RAISED so the caller's existing
-    `*_error` audit-event path (e.g. `attention_push_error`,
-    `auto_diagnose_post_error`) still fires per the pre-TB-312
-    contract. The caller decides whether one adapter's failure
-    aborts further iteration; today's call sites surface the first
-    error and continue with the remaining adapters.
-    """
-    adapters = default_registry().channel_adapters(cfg)
-    results: list[dict] = []
-    for adapter in adapters:
-        outcome = adapter.post(text, **meta)
-        if outcome is not None:
-            results.append(outcome)
-    return results
+    try:
+        poll = default_registry().hook("poll_inbound", component="communication")
+    except KeyError:
+        # The communication component is always shipped; a KeyError
+        # would mean a half-installed tree. Treat as "nothing to poll".
+        return []
+    msgs = poll(cfg)
+    return list(msgs) if msgs else []
 
 
 async def _interruptible_sleep(total_s: int) -> None:
@@ -2842,6 +2800,27 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "auto_diagnose_error",
                       error=f"{type(e).__name__}: {e}")
+
+    # 6. COMMUNICATION tick-hook phase (TB-389) — OUTBOUND delivery. The
+    # `communication` component registers `run_outbound_tick` on
+    # `Phase.COMMUNICATION`; it drains the `ap2.notify` queue (the
+    # watchdog above and the smoke-runner cron append undelivered
+    # notifications to it instead of posting synchronously) and delivers
+    # each to the component's internal channel registry. Delivery is
+    # therefore EVENT-DRIVEN: core never walks a channel-adapter list —
+    # it enqueues, and this phase delivers on the tick pass. Fires AFTER
+    # the watchdog so a notification enqueued this tick is delivered the
+    # same tick. Wrapped so a delivery hiccup can't abort the tick.
+    for hook in default_registry().tick_hooks(Phase.COMMUNICATION):
+        try:
+            result = hook(cfg, sdk)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:  # noqa: BLE001
+            events.append(
+                cfg.events_file, "communication_error",
+                error=f"{type(e).__name__}: {e}",
+            )
 
 
 # TB-263: idle watchdog (TB-71) lives in `ap2.watchdog`. Re-exported

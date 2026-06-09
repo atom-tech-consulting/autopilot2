@@ -238,15 +238,23 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     # kill switch must NOT appear in the disabled-env-flag dict (it is a
     # plain config knob read by the core briefing-validation runner).
     assert "AP2_VALIDATOR_JUDGE_DISABLED" not in flags, flags
+    # TB-389: mattermost is no longer a component — it was demoted to a
+    # channel adapter under the always-on `communication` component, and
+    # `AP2_MM_CHANNELS` is now channel-level config, not a component
+    # env_flag — so it MUST NOT appear in the disabled-env-flag dict.
+    assert "AP2_MM_CHANNELS" not in flags, flags
 
     # Opt-in toggles map to empty string (clear from env).
-    assert flags.get("AP2_MM_CHANNELS") == "", flags
     assert flags.get("AP2_AUTO_APPROVE") == "", flags
 
-    # `attention/` is the only remaining `env_flag=None` always-on
-    # component post-TB-320. It MUST NOT appear in the dict.
+    # `attention/` and `communication/` are the `env_flag=None` always-on
+    # components (TB-389 added communication). They MUST NOT appear in the
+    # dict.
     attention_manifest = registry.get("attention")
     assert attention_manifest.env_flag is None, attention_manifest
+    assert registry.get("communication").env_flag is None, registry.get(
+        "communication"
+    )
     # And no manifest env_flag value of None leaked into the dict keys.
     assert None not in flags
     assert "" not in flags  # no empty-string key (env_flag would never be "")
@@ -460,7 +468,7 @@ def test_disabled_config_operator_queue_drain(disabled_env, project_cfg):
 
 
 def test_disabled_config_status_report_snapshot_composes(
-    disabled_env, project_cfg,
+    disabled_env, project_cfg, monkeypatch,
 ):
     """(briefing scope (d)) `status_report._compose_status_report_snapshot`
     composes a digest from the fixture project + events tail + focus
@@ -475,6 +483,11 @@ def test_disabled_config_status_report_snapshot_composes(
     so the digest still gets a counts row even when the janitor
     component is disabled.
     """
+    # TB-389: `AP2_MM_CHANNELS` is now channel-level config, not a
+    # component env_flag, so the `disabled_env` fixture no longer clears
+    # it. Clear it explicitly here so the "mattermost disabled → empty
+    # target channel" assertion below exercises the no-destination path.
+    monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
     # Seed a couple of events so the activity-tail walks have content.
     ev_mod.append(project_cfg.events_file, "daemon_start")
     ev_mod.append(
@@ -514,158 +527,60 @@ def test_disabled_config_status_report_snapshot_composes(
     assert snapshot["target_channel"] == "", snapshot["target_channel"]
 
 
-def test_disabled_config_channel_adapters_routing(
-    disabled_env, project_cfg, monkeypatch, tmp_path,
+def test_disabled_config_channel_routing_owned_by_communication(
+    disabled_env, project_cfg, monkeypatch,
 ):
-    """(briefing scope (e)) Channel-adapter routing: even when the
-    `mattermost/` component is disabled, the digest has a non-null
-    default destination per goal.md L156-159.
+    """(briefing scope (e), TB-389 rework) Channels are owned wholly by
+    the `communication` component — core has no channel surface.
 
-    `default_registry().channel_adapters(cfg)` walks the registry's
-    enabled components for `channel_adapter` hooks. With mattermost
-    disabled (the only production component today that registers a
-    `channel_adapter`), the registry's walk returns no adapters from
-    production-shipped manifests — but the core sibling adapters
-    (`StdoutChannelAdapter`, `FileAppendChannelAdapter`,
-    `WebhookChannelAdapter`) ship in `ap2.channel` precisely so the
-    digest has a non-null default destination per goal.md L156-159's
-    "sibling adapters ... ship in core so the digest has a non-null
-    default destination" contract.
+    TB-389 removed `registry.channel_adapters()` from core: channel
+    multiplicity (mattermost today, slack/email later) is no longer a
+    kernel concern. The `communication` component holds its channel
+    adapters in an INTERNAL registry (`communication.channels.
+    channel_registry`) invisible to core. This test pins:
 
-    Mechanism this test pins: when the core siblings are wired into
-    the registry under always-on synthetic manifests (the canonical
-    shape goal.md L156-159 envisions — sibling adapters as a non-null
-    default destination), `default_registry().channel_adapters(cfg)`
-    returns each sibling type as part of its direct return. The test
-    registers three test-only manifests (`_sibling_<name>`, `env_flag=
-    None`, `default_enabled=True`) that hook each core sibling into
-    the registry's `channel_adapter` slot, then asserts the routing
-    surface — `default_registry().channel_adapters(project_cfg)` —
-    actually surfaces each sibling type. This is the load-bearing
-    assertion the goal.md L156-159 contract requires and the verifier
-    judge reads: the assertion is on `channel_adapters(cfg)`'s direct
-    return, not on a manually-combined list of registry output + raw
-    sibling instances.
+      (1) core's `Registry` no longer exposes a `channel_adapters`
+          method — the surface was deleted, not merely relocated.
+      (2) the communication component's internal channel registry is
+          empty when `AP2_MM_CHANNELS` is unset (no active channel) and
+          surfaces the Mattermost channel adapter when it is set —
+          channel activation is channel-level config, not a component
+          env_flag.
 
-    Synthetic-manifest injection is test-scoped (the manifests live
-    only in the per-process registry instance and are dropped by
-    `_reset_default_registry()` in the `disabled_env` fixture's
-    teardown); production shipping behavior is untouched — only the
-    test exercises the wired-up routing surface. The mattermost
-    component remains disabled throughout: when this test calls
-    `enabled_components()` indirectly via `channel_adapters(cfg)`,
-    only the synthetic siblings (always-on per `env_flag=None`)
-    contribute `channel_adapter` hooks; the mattermost manifest's
-    hook is filtered out.
+    The every-component-disabled `disabled_env` fixture leaves the
+    always-on `communication` component enabled (it has `env_flag=None`);
+    whether any channel is ACTIVE is the per-channel knob's job.
     """
-    # Baseline: with mattermost disabled and no synthetic sibling
-    # manifests yet, the registry-walked adapter set is empty (today
-    # mattermost is the only production component that registers a
-    # `channel_adapter` hook). Future downstream components (slack/,
-    # discord/, ...) would slot in here in deterministic
-    # component-name-sorted order.
-    adapters_baseline = default_registry().channel_adapters(project_cfg)
-    assert isinstance(adapters_baseline, list), adapters_baseline
-    assert adapters_baseline == [], (
-        f"baseline assumption: mattermost is the only production "
-        f"component that registers a `channel_adapter` hook, so with "
-        f"AP2_MM_CHANNELS cleared the registry walk should return []. "
-        f"Got {[type(a).__name__ for a in adapters_baseline]}."
+    from ap2.components.communication import (
+        channel_adapters as comm_channel_adapters,
+        channel_registry,
     )
 
-    # Wire the three core sibling adapters into the per-process
-    # registry under synthetic always-on manifests (env_flag=None so
-    # `enabled_components()` keeps them regardless of env state).
-    # This is the canonical wiring shape goal.md L156-159 envisions —
-    # sibling adapters as the non-null default destination. Mutating
-    # `_by_name` directly (a plain dict by design — Manifest is frozen
-    # but the registry's component map is intentionally mutable for
-    # exactly this kind of test-scoped extension) avoids rebuilding
-    # discovery; the `disabled_env` fixture's teardown drops the cached
-    # registry so these synthetic entries don't leak across tests.
-    sibling_types = (
-        StdoutChannelAdapter,
-        FileAppendChannelAdapter,
-        WebhookChannelAdapter,
+    # (1) Core no longer carries a channel-adapter surface.
+    assert not hasattr(default_registry(), "channel_adapters"), (
+        "TB-389: `registry.channel_adapters()` must be removed — "
+        "channels are owned wholly by the communication component, not "
+        "a core registry walk."
     )
-    registry = default_registry()
-    for cls in sibling_types:
-        synth_name = f"_sibling_{cls.__name__}"
-        registry._by_name[synth_name] = Manifest(
-            name=synth_name,
-            env_flag=None,
-            default_enabled=True,
-            hook_points={"channel_adapter": cls},
-            dependencies=[],
-        )
 
-    # Mattermost is STILL disabled — verify before the load-bearing
-    # assertion below so the test's intent is unambiguous.
-    enabled_after_inject = {
-        m.name for m in default_registry().enabled_components()
-    }
-    assert "mattermost" not in enabled_after_inject, enabled_after_inject
-
-    # LOAD-BEARING ASSERTION (briefing verification prose bullet):
-    # `default_registry().channel_adapters(cfg)` returns the core
-    # sibling adapters even when the `mattermost/` component is
-    # disabled — the digest has a non-null default destination per
-    # goal.md L156-159. The assertion is on the DIRECT return of
-    # `channel_adapters(cfg)`, NOT on a manually-combined list.
-    adapters = default_registry().channel_adapters(project_cfg)
-    assert isinstance(adapters, list), adapters
-    adapter_types = {type(a) for a in adapters}
-    for cls in sibling_types:
-        assert cls in adapter_types, (
-            f"goal.md L156-159: `default_registry().channel_adapters("
-            f"cfg)` must surface {cls.__name__} when wired into the "
-            f"registry — the core siblings are the non-null default "
-            f"destination set when mattermost is disabled. Got "
-            f"channel_adapters(cfg) -> "
-            f"{[type(a).__name__ for a in adapters]}."
-        )
-
-    # Every adapter the registry returned implements the
-    # ChannelAdapter contract and has a callable `post`.
-    for adapter in adapters:
-        assert isinstance(adapter, ChannelAdapter), adapter
-        assert callable(adapter.post), adapter
-
-    # Determinism check: the registry's docstring pins
-    # "deterministic component-name-sorted order" for the
-    # `channel_adapters(cfg)` walk. The three synthetic sibling
-    # manifests are named `_sibling_<ClassName>`; with the leading
-    # underscore they sort before any production manifest name. Pin
-    # the relative order so a future downstream channel-adapter
-    # component (slack/, discord/) slots in deterministically.
-    adapter_names_in_order = [type(a).__name__ for a in adapters]
-    sibling_only = [n for n in adapter_names_in_order if n in {
-        cls.__name__ for cls in sibling_types
-    }]
-    assert sibling_only == [
-        "FileAppendChannelAdapter",
-        "StdoutChannelAdapter",
-        "WebhookChannelAdapter",
-    ], adapter_names_in_order
-
-    # Smoke: each adapter's `.post()` accepts a string and
-    # forward-compat meta kwargs without raising. Pin the
-    # `AP2_CHANNEL_FILE_PATH` / `AP2_WEBHOOK_URL` env so the file
-    # adapter writes into the test's tmp_path (not the cwd's
-    # `.cc-autopilot/channel.log`) and the webhook adapter no-ops
-    # without making a real HTTP call. The per-adapter unit tests in
-    # `test_channel_adapters.py` pin output specifics; here we just
-    # confirm `.post()` returns None or a dict under the disabled
-    # config.
-    monkeypatch.setenv(
-        "AP2_CHANNEL_FILE_PATH", str(tmp_path / "channel.log"),
+    # (2a) No active channel when `AP2_MM_CHANNELS` is unset.
+    monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
+    assert channel_registry(project_cfg) == [], (
+        "communication's internal channel registry should be empty when "
+        "no channel is activated (AP2_MM_CHANNELS unset)."
     )
-    monkeypatch.delenv("AP2_WEBHOOK_URL", raising=False)
-    for adapter in adapters:
-        outcome = adapter.post(
-            "tb317 disabled-config smoke", channel="ignored",
-        )
-        assert outcome is None or isinstance(outcome, dict), outcome
+    assert comm_channel_adapters(project_cfg) == []
+
+    # (2b) The Mattermost channel adapter surfaces when activated.
+    monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
+    chans = channel_registry(project_cfg)
+    assert [c.name for c in chans] == ["mattermost"], chans
+    adapters = comm_channel_adapters(project_cfg)
+    assert len(adapters) == 1, adapters
+    assert isinstance(adapters[0], ChannelAdapter), adapters[0]
+    assert callable(adapters[0].post), adapters[0]
+    # The Mattermost channel is inbound-capable (its poll fn is wired).
+    assert chans[0].inbound is not None
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +617,10 @@ def test_disabled_env_fixture_restores_default_registry_on_teardown(
 
     # The fixture's yield value matches the helper's output.
     assert "AP2_JANITOR_DISABLED" in disabled_env
-    assert "AP2_MM_CHANNELS" in disabled_env
+    # TB-389: AP2_MM_CHANNELS is channel-level config (mattermost demoted
+    # to a channel adapter), not a component env_flag — so it is NOT in
+    # the disabled-env-flag dict anymore.
+    assert "AP2_MM_CHANNELS" not in disabled_env
     assert "AP2_AUTO_APPROVE" in disabled_env
     assert "AP2_AUTO_UNFREEZE_DISABLED" in disabled_env
     # TB-345: focus_advance's former kill switch is no longer a

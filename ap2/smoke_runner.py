@@ -41,12 +41,13 @@ Behavior:
     coverage) and posts an alert. When codex is legitimately absent (SDK not
     installed or no codex credential) the guard stays quiet and a Claude-only
     box still passes.
-  - **Failure-only alerting.** On failure ONLY, post a concise alert to
-    Mattermost via the shared channel-adapter delivery path
-    (`registry.channel_adapters(cfg)` — the same path the watchdog /
-    attention pushes use), with the channel resolved like the
-    status-report routine (`AP2_MM_REPORT_CHANNEL`, falling back to the
-    first `AP2_MM_CHANNELS` entry). No post on success — `events.jsonl`
+  - **Failure-only alerting.** On failure ONLY, ENQUEUE a concise alert
+    onto the `ap2.notify` outbound queue (TB-389) — the communication
+    component delivers it to Mattermost on its tick pass. The smoke runner
+    never walks a channel-adapter list; it only appends a notification
+    (channel resolved like the status-report routine —
+    `AP2_MM_REPORT_CHANNEL`, falling back to the first `AP2_MM_CHANNELS`
+    entry — as a destination hint). No post on success — `events.jsonl`
     carries the pass record, and a 6h "smokes OK" post would be noise
     alongside the 8h status-report digest.
 """
@@ -56,9 +57,8 @@ import os
 import subprocess
 import time
 
-from . import events
+from . import events, notify
 from .config import Config
-from .registry import default_registry
 
 
 # Tail length (chars) of the captured pytest output carried on a
@@ -148,24 +148,21 @@ def _resolve_report_channel() -> str:
 
 
 def _post_failure_alert(cfg: Config, text: str) -> None:
-    """Best-effort post `text` to every enabled channel adapter.
+    """Enqueue `text` onto the outbound notification queue (TB-389).
 
-    Walks `registry.channel_adapters(cfg)` (the same delivery path the
-    watchdog's auto-diagnose + attention immediate-push use) and posts to
-    each with the resolved report channel. Best-effort by design: a post
-    failure is swallowed because the authoritative failure record already
-    landed as a `smoke_check_failed` event before this call — losing the
-    Mattermost ping must not also lose the audit trail or wedge the tick.
-    When no adapter is registered (Mattermost disabled because
-    `AP2_MM_CHANNELS` is unset) the walk is a silent no-op.
+    Pre-TB-389 this walked `registry.channel_adapters(cfg)` and posted
+    synchronously. TB-389 folds the channel surface behind the
+    `communication` component: the smoke runner appends an undelivered
+    notification to the `ap2.notify` queue (a pure filesystem write — no
+    channel reference, no `ap2.components.*` import) and the communication
+    component's tick pass delivers it. The resolved report channel rides
+    along as a destination hint; the Mattermost channel adapter falls back
+    to `AP2_MM_CHANNELS[0]` when it is empty. Best-effort by design: the
+    authoritative failure record already landed as a `smoke_check_failed`
+    event before this call, and the queue delivers on the next tick.
     """
     channel = _resolve_report_channel()
-    adapters = default_registry().channel_adapters(cfg)
-    for adapter in adapters:
-        try:
-            adapter.post(text, channel=channel)
-        except Exception:  # noqa: BLE001 — best-effort; record already saved
-            continue
+    notify.enqueue(cfg, text, channel=channel, kind="smoke_alert")
 
 
 async def run_smoke_check(cfg: Config) -> None:

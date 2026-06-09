@@ -13,6 +13,8 @@ paused
 cron_state.json
 mm_state.json
 auto_diagnose_state.json
+notifications.jsonl
+notifications_state.json
 operator_queue.jsonl
 operator_queue_state.json
 focus_pointer.json

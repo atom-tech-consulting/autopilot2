@@ -55,8 +55,8 @@ _EXPECTED_COMPONENTS: tuple[str, ...] = (
     "attention",
     "auto_approve",
     "auto_unfreeze",
+    "communication",
     "janitor",
-    "mattermost",
 )
 
 
@@ -73,7 +73,7 @@ _PARITY_WALK_COMPONENTS: tuple[str, ...] = (
     "attention",
     "auto_approve",
     "auto_unfreeze",
-    "mattermost",
+    "communication",
 )
 
 
@@ -121,7 +121,9 @@ def _grep_env_reads(component_dir: Path) -> set[str]:
 # key; an unmapped env name fails the assert with a clear
 # "no schema-key mapping" message).
 _ENV_TO_SCHEMA_KEY: dict[str, str] = {
-    # mattermost
+    # communication (Mattermost channel knobs — TB-389 demoted mattermost
+    # to a channel adapter under the communication component, so these are
+    # channel-level config the communication manifest declares).
     "AP2_MM_CHANNELS": "channels",
     "AP2_MM_BOT_USER_ID": "bot_user_id",
     "AP2_MM_MENTION": "mention",
@@ -268,9 +270,9 @@ _SCHEMA_KEY_TO_ENV: dict[tuple[str, str], str] = {}
 # module we list it explicitly so a parity test failure pinpoints
 # the owning manifest unambiguously.
 _ENV_OWNER: dict[str, str] = {
-    "AP2_MM_CHANNELS": "mattermost",
-    "AP2_MM_BOT_USER_ID": "mattermost",
-    "AP2_MM_MENTION": "mattermost",
+    "AP2_MM_CHANNELS": "communication",
+    "AP2_MM_BOT_USER_ID": "communication",
+    "AP2_MM_MENTION": "communication",
     "AP2_TASK_STUCK_THRESHOLD_S": "attention",
     "AP2_TASK_FROZEN_RECENCY_S": "attention",
     "AP2_AUTO_APPROVE_COST_APPROACH_PCT": "attention",

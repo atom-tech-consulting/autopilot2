@@ -236,6 +236,9 @@ def test_run_smoke_check_emits_distinct_event_on_codex_skip_marker(tmp_path, mon
     posts = _patch_mm_post(monkeypatch)
 
     asyncio.run(smoke_runner.run_smoke_check(cfg))
+    # TB-389: the alert is enqueued; the communication tick delivers it.
+    from ap2.components.communication import run_outbound_tick
+    run_outbound_tick(cfg)
 
     # DISTINCT alarm event — NOT smoke_check_passed, NOT the generic failed.
     missing = _events_of(cfg, "smoke_check_codex_coverage_missing")

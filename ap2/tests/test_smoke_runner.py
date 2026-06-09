@@ -35,6 +35,11 @@ from ap2.cron import CronJob
 # `real-sdk-smoke` to the smoke routine) moved into the cron scheduler
 # component (`ap2/components/cron/`).
 from ap2.components.cron import run_cron
+# TB-389: the smoke runner's failure alert is now event-driven — it
+# enqueues onto the `ap2.notify` queue, and the communication
+# component's outbound tick delivers it. Tests drain the queue via
+# `run_outbound_tick` then assert on the captured `_mm_post` calls.
+from ap2.components.communication import run_outbound_tick
 
 
 # ---------------------------------------------------------------------------
@@ -194,6 +199,8 @@ def test_failure_emits_failed_event_and_one_alert_with_tail(tmp_path, monkeypatc
     posts = _patch_mm_post(monkeypatch)
 
     asyncio.run(smoke_runner.run_smoke_check(cfg))
+    # TB-389: the alert is enqueued; deliver it via the communication tick.
+    run_outbound_tick(cfg)
 
     failed = _events_of(cfg, "smoke_check_failed")
     assert len(failed) == 1
@@ -221,6 +228,7 @@ def test_failure_alert_prefers_report_channel(tmp_path, monkeypatch):
     posts = _patch_mm_post(monkeypatch)
 
     asyncio.run(smoke_runner.run_smoke_check(cfg))
+    run_outbound_tick(cfg)  # TB-389: deliver the enqueued alert.
 
     assert len(posts) == 1
     assert posts[0]["channel"] == "report-channel"
@@ -241,6 +249,7 @@ def test_timeout_emits_failed_event_with_timeout_reason(tmp_path, monkeypatch):
     posts = _patch_mm_post(monkeypatch)
 
     asyncio.run(smoke_runner.run_smoke_check(cfg))
+    run_outbound_tick(cfg)  # TB-389: deliver the enqueued alert.
 
     failed = _events_of(cfg, "smoke_check_failed")
     assert len(failed) == 1

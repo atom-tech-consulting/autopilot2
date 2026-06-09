@@ -1135,27 +1135,29 @@ def _maybe_push_attention(cfg: Config, cond) -> None:
     `_STATUS_REPORT_AUTOMATION_INTERESTING_TYPES` so a fresh push
     un-skips the dedup/idle gate).
     """
-    # Lazy imports for the watchdog / registry callouts so import-time
-    # cycles stay quiet — the subpackage is discovered before
-    # `ap2.watchdog` is imported by the daemon, but the registry lookup
-    # below resolves only at call time.
-    from ap2.registry import default_registry
+    # Lazy imports for the watchdog / communication callouts so
+    # import-time cycles stay quiet — the subpackages are discovered
+    # before `ap2.watchdog` is imported by the daemon, but the lookups
+    # below resolve only at call time.
+    from ap2.components.communication import channel_adapters
     from ap2.watchdog import _first_mm_channel
 
     if not _is_attention_immediate_push_enabled(cfg):
         return
 
-    # TB-312: route through `_deliver(cfg, text, **meta)` so the
-    # destination is owned by the registered channel-adapter list
-    # rather than hard-coded to Mattermost. `_first_mm_channel()`
-    # still drives the no-destination warning shape — pre-TB-312
-    # behavior preserved for operators who only have Mattermost
-    # wired: when `AP2_MM_CHANNELS` is unset the mattermost
-    # component is disabled by its `env_flag`, so
-    # `channel_adapters(cfg)` returns [] and the sticky-warning
-    # branch fires per the existing contract.
+    # TB-389: the attention immediate-push is the one outbound path that
+    # stays SYNCHRONOUS — immediacy is its whole point (a stuck-task /
+    # cost-cap alert waiting for the next tick defeats "proactively
+    # surfaced"). It reaches the communication component's INTERNAL
+    # channel registry (`communication.channel_adapters`) as a peer
+    # component rather than via core's removed `registry.channel_adapters`
+    # — core never references channels. `_first_mm_channel()` still drives
+    # the no-destination warning shape: when `AP2_MM_CHANNELS` is unset the
+    # Mattermost channel is absent from the internal registry, so
+    # `channel_adapters(cfg)` returns [] and the sticky-warning branch
+    # fires per the existing contract.
     channel = _first_mm_channel()
-    adapters = default_registry().channel_adapters(cfg)
+    adapters = channel_adapters(cfg)
     if not adapters:
         # No destination configured. Emit one sticky audit event then
         # suppress further such audits via the state-file flag, parity

@@ -31,6 +31,14 @@ PID_FILE = f"{AUTOPILOT_DIR_NAME}/daemon.pid"
 PAUSE_FLAG = f"{AUTOPILOT_DIR_NAME}/paused"
 CRON_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/cron_state.json"
 MM_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/mm_state.json"
+# TB-389: the communication component's outbound notification queue +
+# its delivered-cursor state. Core call sites (watchdog, smoke_runner)
+# enqueue undelivered notifications here via `ap2.notify`; the
+# communication component drains + delivers them on its tick pass. Both
+# are daemon-managed runtime state (gitignored, like the other
+# `*_state` siblings) — never a rollback substrate.
+NOTIFICATIONS_FILE = f"{AUTOPILOT_DIR_NAME}/notifications.jsonl"
+NOTIFICATIONS_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/notifications_state.json"
 RETRY_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/retry_state.json"
 AUTO_DIAGNOSE_STATE_FILE = f"{AUTOPILOT_DIR_NAME}/auto_diagnose_state.json"
 # TB-260: per-daemon-lifetime runtime-introspection facts (currently
@@ -408,6 +416,23 @@ class Config:
                 )
             ),
         )
+
+    @property
+    def notifications_file(self) -> Path:
+        """Outbound notification queue (TB-389).
+
+        Derived from `project_root` (not a constructor field) so the
+        TOML / env Config builders need no extra positional arg. Core
+        call sites append undelivered notifications here via
+        `ap2.notify.enqueue`; the communication component drains it on
+        its tick pass.
+        """
+        return self.project_root / NOTIFICATIONS_FILE
+
+    @property
+    def notifications_state_file(self) -> Path:
+        """Delivered-cursor state for the notification queue (TB-389)."""
+        return self.project_root / NOTIFICATIONS_STATE_FILE
 
     def ensure_dirs(self) -> None:
         self.tasks_dir.mkdir(parents=True, exist_ok=True)

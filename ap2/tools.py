@@ -687,27 +687,28 @@ def build_tool_set(cfg: Config) -> list:
     async def cron_edit(args):
         return do_cron_edit(cfg, args)
 
-    # TB-312: Mattermost MCP-tool handlers come from the `mattermost`
-    # component's manifest (axis-(6) import-direction gate forbids a
-    # static `from ap2.components.mattermost import …` here). The
-    # handler bodies live in `ap2/components/mattermost/__init__.py`;
-    # this lookup grabs them via the registry's hook-point slots so
-    # the tool's external name (`mattermost_reply`) stays stable per
-    # goal.md L184-186 even though the implementation moved.
+    # TB-389: the Mattermost MCP-tool handlers are discovered under the
+    # `communication` component now that mattermost is a channel adapter
+    # rather than a top-level component (the import-direction gate forbids
+    # a static `from ap2.components.communication import …` here). The
+    # handler bodies still live in `ap2/components/mattermost/__init__.py`,
+    # re-exported on the communication manifest's hook-point slots so the
+    # tool's external name (`mattermost_reply`) stays stable per goal.md
+    # L184-186.
     from .registry import default_registry as _default_registry
     try:
-        _mm_manifest = _default_registry().get("mattermost")
-        _do_mattermost_reply = _mm_manifest.hook_points["mcp_tool_reply"]
-        _do_mattermost_thread_read = _mm_manifest.hook_points["mcp_tool_thread_read"]
+        _comm_manifest = _default_registry().get("communication")
+        _do_mattermost_reply = _comm_manifest.hook_points["mcp_tool_reply"]
+        _do_mattermost_thread_read = _comm_manifest.hook_points["mcp_tool_thread_read"]
     except (KeyError, Exception):  # noqa: BLE001
         # Component absent (e.g. someone removed the subpackage from
         # the tree) — stub handlers that return a clean MCP error so
         # the agent gets a coherent "not configured" signal rather
         # than an MCP-server import-time crash.
         def _do_mattermost_reply(_cfg, _args):
-            return _err("mattermost component is not installed")
+            return _err("communication component is not installed")
         def _do_mattermost_thread_read(_cfg, _args):
-            return _err("mattermost component is not installed")
+            return _err("communication component is not installed")
 
     @tool(
         "mattermost_reply",

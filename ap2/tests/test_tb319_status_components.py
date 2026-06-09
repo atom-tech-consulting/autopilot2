@@ -239,51 +239,35 @@ def test_janitor_disabled_flips_enabled_to_false(
     assert janitor_lines[0].startswith("  janitor: off "), janitor_lines[0]
 
 
-def test_mattermost_require_polarity(cfg: Config, capsys, monkeypatch):
-    """`AP2_MM_CHANNELS` is require-polarity (`default_enabled=False`,
-    env_flag is an opt-in toggle): empty/unset → disabled, non-empty
-    → enabled. Mirrors the briefing's inverse-polarity test
-    requirement.
+def test_mattermost_demoted_communication_always_on(cfg: Config, capsys, monkeypatch):
+    """TB-389: mattermost is no longer a top-level component — it was
+    demoted to a channel adapter under the always-on `communication`
+    component, and `AP2_MM_CHANNELS` is channel-level config rather than
+    a component env_flag. So `ap2 status` lists NO `mattermost` component
+    and a `communication` component that is always-on (`env_flag=None`),
+    independent of `AP2_MM_CHANNELS`.
 
-    The fresh project's `.cc-autopilot/env` may pre-set
-    `AP2_MM_CHANNELS` (sandbox `install-channel`), and `Config.load`
-    layers env-file values onto `os.environ`. We use
-    `monkeypatch.delenv` + `monkeypatch.setenv` to control the live
-    process env directly — `Manifest.is_enabled` reads `os.environ`
-    at evaluation time, so this is the authoritative override."""
+    The fresh project's `.cc-autopilot/env` may pre-set `AP2_MM_CHANNELS`
+    (sandbox `install-channel`); we toggle it both ways to prove it no
+    longer flips a component's `enabled` bit."""
     from ap2 import cli_daemon
 
-    # --- unset → disabled ---
-    monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
-    rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    mm_entry = next(
-        c for c in payload["components"] if c["name"] == "mattermost"
-    )
-    assert mm_entry["enabled"] is False, mm_entry
-    assert mm_entry["env_flag"] == "AP2_MM_CHANNELS"
-    assert mm_entry["default_enabled"] is False
-
-    # --- empty → still disabled ---
-    monkeypatch.setenv("AP2_MM_CHANNELS", "")
-    rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    mm_entry = next(
-        c for c in payload["components"] if c["name"] == "mattermost"
-    )
-    assert mm_entry["enabled"] is False, mm_entry
-
-    # --- set non-empty → enabled ---
-    monkeypatch.setenv("AP2_MM_CHANNELS", "channel-id")
-    rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    mm_entry = next(
-        c for c in payload["components"] if c["name"] == "mattermost"
-    )
-    assert mm_entry["enabled"] is True, mm_entry
+    for mm_value in (None, "", "channel-id"):
+        if mm_value is None:
+            monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
+        else:
+            monkeypatch.setenv("AP2_MM_CHANNELS", mm_value)
+        rc = cli_daemon.cmd_status(cfg, Namespace(json=True))
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        names = {c["name"] for c in payload["components"]}
+        # mattermost is gone as a top-level component.
+        assert "mattermost" not in names, names
+        # communication is present and always-on regardless of the knob.
+        comm = next(c for c in payload["components"] if c["name"] == "communication")
+        assert comm["enabled"] is True, comm
+        assert comm["env_flag"] is None, comm
+        assert comm["default_enabled"] is True, comm
 
 
 # ===========================================================================

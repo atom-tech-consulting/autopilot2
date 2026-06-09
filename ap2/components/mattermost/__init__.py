@@ -1,10 +1,13 @@
-"""mattermost component — thin package shim (TB-343).
+"""mattermost channel adapter — thin package shim (TB-343; TB-389 demotion).
 
-The implementation lives in the sibling :mod:`impl` module; this
-``__init__`` re-exports the public surface so ``import
-ap2.components.mattermost``, every ``from ap2.components.mattermost
-import X`` call site, and the sibling ``manifest.py``'s ``from .
-import …`` all keep resolving unchanged.
+TB-389 demoted mattermost from a top-level component to a channel adapter
+owned by the `communication` component — this package no longer ships a
+``manifest.py``, so the registry does not discover it as a loop
+participant. The implementation lives in the sibling :mod:`impl` module;
+this ``__init__`` re-exports the public surface so ``import
+ap2.components.mattermost`` and every ``from ap2.components.mattermost
+import X`` call site (now the ``communication`` component's internal
+channel registry + manifest) keep resolving unchanged.
 
 TB-343 moved the module body out of ``__init__.py`` into ``impl.py``
 (``git mv``, history-preserving) to match the conventional package

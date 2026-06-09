@@ -51,10 +51,13 @@ Contract:
             # Raise on hard failure so the caller's per-adapter
             # try/except can emit a `*_error` audit event.
 
-The registry's `channel_adapters(cfg)` accessor returns enabled
-adapters in deterministic component-name-sorted order so digest
-delivery is reproducible across daemon restarts (load-bearing for
-e2e tests that assert on adapter dispatch order).
+TB-389: the registry's `channel_adapters(cfg)` accessor was removed —
+channels are now owned wholly by the `communication` component, which
+holds its adapters in an internal registry
+(`ap2/components/communication/channels.py`) and delivers outbound
+notifications on its tick pass. The `ChannelAdapter` ABC + the three
+core sibling adapters below stay in core as the reusable contract any
+channel adapter (the Mattermost one, future slack/email) implements.
 """
 from __future__ import annotations
 

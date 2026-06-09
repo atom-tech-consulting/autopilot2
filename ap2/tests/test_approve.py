@@ -224,6 +224,9 @@ def test_watchdog_skips_diagnose_when_wholly_pending_review(
     # Force the threshold/cooldown checks to pass by faking a far-future now.
     far_future = float(2 ** 31)
     daemon._maybe_auto_diagnose(cfg, now=far_future)
+    # TB-389: the reminder is enqueued; the communication tick delivers it.
+    from ap2.components.communication import run_outbound_tick
+    run_outbound_tick(cfg)
 
     # Exactly one post — the soft reminder, not the diagnose dump.
     assert len(posted) == 1

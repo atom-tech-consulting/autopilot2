@@ -1,4 +1,15 @@
-"""Mattermost component (TB-312 axis-(3) + axis-(5) bundled migration).
+"""Mattermost channel adapter (TB-312 origins; TB-389 demotion).
+
+TB-389 DEMOTED mattermost from a top-level loop-participant component to
+a CHANNEL ADAPTER owned by the `communication` component. This package no
+longer ships a `manifest.py` / `MANIFEST`, so the registry does NOT
+discover it as a component — it is not a loop participant. The
+`communication` component instantiates `MattermostChannelAdapter` (and
+wires `check_new_messages` for inbound) inside its internal channel
+registry (`ap2/components/communication/channels.py`), and re-exports the
+two MCP-tool handlers (`do_mattermost_reply`, `do_mattermost_thread_read`)
+on the communication manifest. `AP2_MM_CHANNELS` is now channel-level
+config (whether the Mattermost channel is active), not a component toggle.
 
 Mattermost integration for the daemon.
 

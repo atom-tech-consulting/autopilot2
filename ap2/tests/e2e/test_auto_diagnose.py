@@ -10,6 +10,11 @@ import time
 from pathlib import Path
 
 from ap2 import daemon, events, tools
+# TB-389: the watchdog is now event-driven — `_maybe_auto_diagnose`
+# ENQUEUES a digest onto the `ap2.notify` queue and the communication
+# component's outbound tick (`run_outbound_tick`) delivers it. Tests
+# drive the tick explicitly then assert on the captured `_mm_post` calls.
+from ap2.components.communication import run_outbound_tick
 
 
 def _seed_meaningful_event(cfg, *, ts_offset_s: float, now: float) -> None:
@@ -49,7 +54,8 @@ def _capture_posts(monkeypatch) -> list[tuple[str, str]]:
 
 
 def test_watchdog_fires_after_threshold(e2e_project, monkeypatch):
-    """Past-threshold idle + a configured channel → diagnose post fires."""
+    """Past-threshold idle → digest ENQUEUED + `auto_diagnose_fired`; the
+    communication tick then delivers it to the configured channel."""
     cfg = e2e_project()
     monkeypatch.setenv("AP2_MM_CHANNELS", "ch_aaa")
     posts = _capture_posts(monkeypatch)
@@ -59,6 +65,10 @@ def test_watchdog_fires_after_threshold(e2e_project, monkeypatch):
     _seed_meaningful_event(cfg, ts_offset_s=4 * 3600, now=now)
 
     daemon._maybe_auto_diagnose(cfg, now=now)
+    # TB-389: enqueue happened; the communication tick delivers it. The
+    # Mattermost channel adapter resolves its destination from
+    # `AP2_MM_CHANNELS[0]` since the notification carries no channel hint.
+    run_outbound_tick(cfg)
 
     assert len(posts) == 1
     assert posts[0][0] == "ch_aaa"
@@ -67,7 +77,6 @@ def test_watchdog_fires_after_threshold(e2e_project, monkeypatch):
     evts = events.tail(cfg.events_file, 30)
     fired = [e for e in evts if e["type"] == "auto_diagnose_fired"]
     assert len(fired) == 1
-    assert fired[0]["channel"] == "ch_aaa"
     assert fired[0]["idle_s"] >= 4 * 3600
 
 
@@ -80,9 +89,12 @@ def test_watchdog_respects_cooldown(e2e_project, monkeypatch):
     now = time.time()
     _seed_meaningful_event(cfg, ts_offset_s=4 * 3600, now=now)
 
-    # First fire at t=now; second tick 1 hour later (cooldown is 6h).
+    # First fire at t=now; second tick 1 hour later (cooldown is 6h) —
+    # the second call is inside the cooldown, so only ONE digest is
+    # enqueued. Delivering the queue yields exactly one post.
     daemon._maybe_auto_diagnose(cfg, now=now)
     daemon._maybe_auto_diagnose(cfg, now=now + 3600)
+    run_outbound_tick(cfg)
 
     assert len(posts) == 1
 
@@ -99,13 +111,19 @@ def test_watchdog_re_fires_after_cooldown(e2e_project, monkeypatch):
     daemon._maybe_auto_diagnose(cfg, now=now)
     # 7 hours later — past the 6h cooldown, still idle (no new meaningful events).
     daemon._maybe_auto_diagnose(cfg, now=now + 7 * 3600)
+    # Two digests enqueued (past-cooldown re-fire) → two delivered posts.
+    run_outbound_tick(cfg)
 
     assert len(posts) == 2
 
 
 def test_watchdog_skip_when_no_channels(e2e_project, monkeypatch):
-    """No AP2_MM_CHANNELS → emit `auto_diagnose_no_destination` ONCE,
-    then quiet on subsequent idle ticks (the warning is sticky in state)."""
+    """No AP2_MM_CHANNELS → the digest is enqueued but the communication
+    tick finds no channel, so it delivers NOTHING (the notification stays
+    pending for a channel that may be configured later). TB-389 dropped
+    the watchdog's sticky `auto_diagnose_no_destination` warning — the
+    no-destination concern moved to the communication component, which
+    simply holds the backlog."""
     cfg = e2e_project()
     # AP2_MM_CHANNELS is scrubbed by the e2e fixture, so it's already absent.
     posts = _capture_posts(monkeypatch)
@@ -116,11 +134,14 @@ def test_watchdog_skip_when_no_channels(e2e_project, monkeypatch):
     daemon._maybe_auto_diagnose(cfg, now=now)
     daemon._maybe_auto_diagnose(cfg, now=now + 60)
     daemon._maybe_auto_diagnose(cfg, now=now + 120)
+    run_outbound_tick(cfg)
 
+    # No channel configured → no post. The watchdog no longer emits a
+    # no-destination warning.
     assert posts == []
     evts = events.tail(cfg.events_file, 30)
     nodest = [e for e in evts if e["type"] == "auto_diagnose_no_destination"]
-    assert len(nodest) == 1, f"expected exactly 1 warning, got {len(nodest)}"
+    assert nodest == [], "TB-389 removed the no-destination warning"
 
 
 def test_watchdog_resets_on_meaningful_event(e2e_project, monkeypatch):
@@ -174,32 +195,38 @@ def test_watchdog_does_not_fire_on_first_tick_after_resume(e2e_project, monkeypa
 
 
 def test_watchdog_recovers_after_destination_set(e2e_project, monkeypatch):
-    """warned_no_destination is sticky until a successful post resets it.
-    Once AP2_MM_CHANNELS is set later, the watchdog should fire as normal
-    (the previous warning doesn't suppress future fires when destination
-    becomes available)."""
+    """A digest enqueued while no channel is configured stays PENDING and
+    delivers once a channel appears (TB-389 communication delivery
+    policy). So the backlog is not lost when the operator wires up
+    `AP2_MM_CHANNELS` after a fresh install."""
     cfg = e2e_project()
     posts = _capture_posts(monkeypatch)
 
     now = time.time()
     _seed_meaningful_event(cfg, ts_offset_s=4 * 3600, now=now)
 
-    # First tick with no destination → emits the warning.
+    # First tick with no destination → digest enqueued, nothing delivered.
     daemon._maybe_auto_diagnose(cfg, now=now)
+    run_outbound_tick(cfg)
     assert posts == []
 
-    # Operator sets the channel; watchdog re-tries on the next tick — but
-    # the cooldown timer hasn't started yet (no successful post → no
-    # last_fired update), so this should fire immediately.
+    # Operator sets the channel; the next communication tick delivers the
+    # still-pending backlog digest. The second `_maybe_auto_diagnose` is
+    # inside the cooldown so it enqueues nothing new — the delivered post
+    # is the digest queued on the first tick.
     monkeypatch.setenv("AP2_MM_CHANNELS", "ch_aaa")
     daemon._maybe_auto_diagnose(cfg, now=now + 60)
+    run_outbound_tick(cfg)
 
     assert len(posts) == 1
 
 
 def test_watchdog_handles_post_failure(e2e_project, monkeypatch):
-    """A `_mm_post` exception is logged as `auto_diagnose_post_error` and
-    must NOT update `last_fired` (so the next tick can retry)."""
+    """TB-389: a delivery failure happens in the communication tick, not
+    the watchdog. The watchdog still ENQUEUES (emitting
+    `auto_diagnose_fired`); the failing delivery emits
+    `notification_error` and LEAVES the notification pending so the next
+    tick retries (a second delivery attempt → a second error)."""
     cfg = e2e_project()
     monkeypatch.setenv("AP2_MM_CHANNELS", "ch_aaa")
 
@@ -212,14 +239,17 @@ def test_watchdog_handles_post_failure(e2e_project, monkeypatch):
     _seed_meaningful_event(cfg, ts_offset_s=4 * 3600, now=now)
 
     daemon._maybe_auto_diagnose(cfg, now=now)
+    run_outbound_tick(cfg)
 
     evts = events.tail(cfg.events_file, 30)
-    err = [e for e in evts if e["type"] == "auto_diagnose_post_error"]
+    err = [e for e in evts if e["type"] == "notification_error"]
     fired = [e for e in evts if e["type"] == "auto_diagnose_fired"]
     assert len(err) == 1
-    assert fired == []  # post failed, so no fire was emitted
-    # state["last_fired"] must still be 0 — verified by retry on next tick.
-    daemon._maybe_auto_diagnose(cfg, now=now + 60)
+    # The digest WAS queued (auto_diagnose_fired fires at enqueue time).
+    assert len(fired) == 1
+    # The notification stayed pending (delivery failed) → a second
+    # delivery attempt retries and fails again.
+    run_outbound_tick(cfg)
     err2 = [e for e in events.tail(cfg.events_file, 60)
-            if e["type"] == "auto_diagnose_post_error"]
+            if e["type"] == "notification_error"]
     assert len(err2) == 2

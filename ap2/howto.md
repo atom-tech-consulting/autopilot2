@@ -1102,6 +1102,11 @@ lands as `true` here, not the raw string)),
 `pipeline_pending_sweep_error`, `operator_queue_error` /
 `operator_queue_drain_error`, `auto_diagnose_error` /
 `auto_diagnose_post_error` / `auto_diagnose_no_destination`,
+`notification_error` (TB-389 — the communication component's outbound
+tick failed to post a queued notification to a channel; the
+notification stays pending for the next tick's retry),
+`communication_error` (TB-389 — the `Phase.COMMUNICATION` tick walk in
+`daemon._tick` raised),
 `classify_record_missing` / `classify_record_unreadable` (TB-194/195
 post-task classify routine couldn't find or read its record).
 
@@ -1113,6 +1118,8 @@ post-task auto-classifier verdict), `backlog_auto_promoted`,
 `cron_proposed`, `cron_proposal_error`, `pipeline_start`,
 `orphan_recovery`, `board_malformed_line`, `mattermost`,
 `mattermost_reply` (handler emitted a reply), `auto_diagnose_fired`,
+`notification_delivered` (TB-389 — the communication component's
+outbound tick delivered a queued notification to a channel),
 `janitor_finding` (TB-178 chore-judge surfaced a candidate), `goal_updated`
 (TB-189 operator-queued `update_goal` op landed), `pending_review_reminder`
 (TB-184 unadopted cron-proposal nudge), `operator_ack` (TB-141
@@ -2935,25 +2942,29 @@ identifies.
   fallback). Mirrors `AP2_JANITOR_MAX_FINDINGS_LLM`; read fresh at
   each janitor cron run via `cfg.get_component_value` (TB-330).
 
-### `[components.mattermost]` — operator chat integration
+### `[components.communication]` — channel surface (inbound + outbound)
 
-The Mattermost adapter handles `@bot`-mention polling on the
-inbound side and routes outbound digests / status-reports /
-attention pushes on the outbound side. Channel + bot identity are
-authentication-bearing; they sit on the env-only side per goal.md
-L356-358 (the `_KNOBS_STAYING_ENV_ONLY` partition).
+The `communication` component (TB-389) owns the channel surface in
+both directions: `@bot`-mention polling on the inbound side and
+routing outbound digests / status-reports / attention pushes on the
+outbound side. Mattermost was demoted from a top-level component to
+a channel adapter the communication component holds in an internal
+registry, so these Mattermost channel knobs are now channel-level
+config under `[components.communication]`. Channel + bot identity
+are authentication-bearing; they sit on the env-only side per
+goal.md L356-358 (the `_KNOBS_STAYING_ENV_ONLY` partition).
 
-- `components.mattermost.bot_user_id` — str, default `""`.
+- `components.communication.bot_user_id` — str, default `""`.
   Mattermost user ID for the bot account; used to filter the bot's
   own posts out of the inbound poll. Mirrors `AP2_MM_BOT_USER_ID`;
   not in `HOT_RELOADABLE_KNOBS`.
-- `components.mattermost.channels` — str, default `""`.
-  Comma-separated Mattermost channel IDs the daemon polls for
-  inbound mentions and posts outbound messages to. Unset/empty
-  disables the mattermost component entirely. Mirrors
-  `AP2_MM_CHANNELS`; listed in `env_reload.FIXED_KNOBS` so a change
-  requires `ap2 stop && ap2 start`.
-- `components.mattermost.mention` — str, default `"@claude-bot"`.
+- `components.communication.channels` — str, default `""`.
+  Comma-separated Mattermost channel IDs the communication component
+  polls for inbound mentions and posts outbound messages to.
+  Unset/empty leaves the Mattermost channel inactive (channel-level
+  activation, TB-389). Mirrors `AP2_MM_CHANNELS`; listed in
+  `env_reload.FIXED_KNOBS` so a change requires `ap2 stop && ap2 start`.
+- `components.communication.mention` — str, default `"@claude-bot"`.
   Mention token (e.g. `@claude-bot`) the bot recognizes as
   addressing it in poll content. Mirrors `AP2_MM_MENTION`; not in
   `HOT_RELOADABLE_KNOBS`.

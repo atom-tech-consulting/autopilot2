@@ -101,6 +101,10 @@ def test_phase_enum_has_four_canonical_members():
     assert hasattr(Phase, "IDEATION"), (
         "TB-381: Phase.IDEATION should exist."
     )
+    assert hasattr(Phase, "COMMUNICATION"), (
+        "TB-389: Phase.COMMUNICATION should exist (the communication "
+        "component's outbound-delivery tick phase)."
+    )
     names = {p.name for p in Phase}
     assert names == {
         "PRE_DISPATCH",
@@ -108,10 +112,11 @@ def test_phase_enum_has_four_canonical_members():
         "ATTENTION_EMISSION",
         "CRON_DISPATCH",
         "IDEATION",
+        "COMMUNICATION",
     }, (
-        f"TB-388: Phase enum should have exactly the TB-310 phases "
-        f"(POST_DISPATCH removed) plus CRON_DISPATCH + IDEATION; "
-        f"got {sorted(names)}"
+        f"TB-389: Phase enum should have the TB-310 phases "
+        f"(POST_DISPATCH removed) plus CRON_DISPATCH + IDEATION + "
+        f"COMMUNICATION; got {sorted(names)}"
     )
 
 
