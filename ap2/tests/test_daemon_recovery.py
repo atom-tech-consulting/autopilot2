@@ -220,9 +220,9 @@ def test_run_task_emits_start_and_complete_events(cfg):
     asyncio.run(run_task(cfg, sdk, None, task))
     evts = events.tail(cfg.events_file, 20)
     kinds = [e["type"] for e in evts]
-    assert "task_start" in kinds
+    assert "task_solve" in kinds
     assert "task_complete" in kinds
-    start = next(e for e in evts if e["type"] == "task_start")
+    start = next(e for e in evts if e["type"] == "task_solve")
     end = next(e for e in reversed(evts) if e["type"] == "task_complete")
     assert start["task"] == "TB-5"
     assert start["title"] == "Victim"

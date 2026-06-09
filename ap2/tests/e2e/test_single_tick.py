@@ -40,9 +40,9 @@ def test_single_tick_completes_ready_task(e2e_project):
 
     evts = events.tail(cfg.events_file, 20)
     kinds = [e["type"] for e in evts]
-    assert "task_start" in kinds
+    assert "task_solve" in kinds
     assert "task_complete" in kinds
-    assert kinds.index("task_start") < kinds.index("task_complete")
+    assert kinds.index("task_solve") < kinds.index("task_complete")
 
     end = next(e for e in reversed(evts) if e["type"] == "task_complete")
     assert end["task"] == "TB-5"
@@ -245,7 +245,7 @@ def test_single_tick_auto_promotes_backlog_when_ready_empty(e2e_project):
     evts = events.tail(cfg.events_file, 20)
     kinds = [e["type"] for e in evts]
     assert "backlog_auto_promoted" in kinds
-    assert kinds.index("backlog_auto_promoted") < kinds.index("task_start")
+    assert kinds.index("backlog_auto_promoted") < kinds.index("task_solve")
     promo = next(e for e in evts if e["type"] == "backlog_auto_promoted")
     assert promo["task"] == "TB-7"
 

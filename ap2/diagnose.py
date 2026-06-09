@@ -37,7 +37,13 @@ from .config import Config
 # keep retriggering immediately after a fire (the cooldown is the primary
 # guard, but this makes the math cleaner).
 MEANINGFUL_EVENT_TYPES = frozenset({
+    # TB-385: `task_solve` (renamed from `task_start`) + the folded
+    # `task_verify` lifecycle verb. `task_start` is retained so a daemon
+    # resuming against pre-TB-385 history still sees its last event as
+    # meaningful (events are never rewritten).
+    "task_solve",
     "task_start",
+    "task_verify",
     "task_complete",
     "task_implicit_commit",
     "task_pipeline_pending",  # TB-114

@@ -25,7 +25,6 @@ reverse).
 """
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -216,10 +215,7 @@ async def _judge_prose_bullet(
         # envelopes; `stop_reason` (absent from the normalized usage record)
         # is read off the terminal envelope the adapter retains on
         # `raw_result`.
-        result_meta: dict = {}
-        t0 = time.monotonic()
         result = await adapter.run_to_result(prompt, tools, options)
-        duration_s = time.monotonic() - t0
 
         # A backend error / timeout surfaces as a non-`complete` status with
         # the `"<Type>: <msg>"` string on `.error` (`run_to_result` folds in
@@ -233,23 +229,12 @@ async def _judge_prose_bullet(
                 notes=f"judge error: {result.error or result.status}",
             )
 
+        # TB-385: the prose judge no longer emits a per-bullet `judge_call`
+        # event — the per-bullet verdict is folded into the daemon's single
+        # terminal `task_verify` event (`bullets[]`) instead. So the per-call
+        # usage / model / cost capture that fed `judge_call` is gone; only the
+        # final-message `text` is needed to parse the verdict.
         text = (result.text or "").strip()
-        usage = result.usage
-        if usage.model:
-            result_meta["model"] = usage.model
-        if usage.num_turns:
-            result_meta["num_turns"] = usage.num_turns
-        if usage.total_cost_usd:
-            result_meta["total_cost_usd"] = usage.total_cost_usd
-        if usage.usage:
-            result_meta["usage"] = usage.usage
-        if usage.model_usage:
-            result_meta["model_usage"] = usage.model_usage
-        raw_result = result.raw_result
-        if raw_result is not None:
-            sr = getattr(raw_result, "stop_reason", None)
-            if sr is not None:
-                result_meta["stop_reason"] = sr
     except Exception as e:  # noqa: BLE001
         return CriterionResult(
             bullet=bullet.text, kind="prose", status="unverified",
@@ -262,13 +247,17 @@ async def _judge_prose_bullet(
     # TB-236: when the response can't be parsed into a verdict, dump the
     # FULL raw last-assistant-text to a per-bullet debug file so the
     # operator can diagnose WHY without being limited to the 200-char
-    # truncated preview the verifier carries in `notes`. Categorization
-    # (`parse_error`) + length metrics (`response_length` /
-    # `rationale_length`) ride on the `judge_call` event so events.jsonl
-    # alone is enough to pattern-detect across many failures without
-    # opening dumps. Dumps are written ONLY on parse failure — successful
-    # judge calls leave no trace on disk beyond the existing event.
-    dump_path: Path | None = None
+    # truncated preview the verifier carries in `notes`. Dumps are written
+    # ONLY on parse failure — a successful judge call leaves no trace on
+    # disk.
+    #
+    # TB-385: the per-bullet `judge_call` event that used to carry the
+    # `parse_error` / `response_length` / `rationale_length` categorization
+    # is gone (folded — for the verdict only — into the daemon's terminal
+    # `task_verify` event). The on-disk dump is retained as the operator's
+    # parse-failure diagnostic surface, keyed by the same
+    # `<run_ts>-<task>-judge-bullet<idx>-response.txt` convention so the
+    # existing `ap2 logs` / debug-dir grep workflow is unaffected.
     if outcome.parse_error is not None and events_file is not None:
         try:
             import datetime as _dt
@@ -285,45 +274,7 @@ async def _judge_prose_bullet(
             )
             dump_path.write_text(text or "")
         except Exception:  # noqa: BLE001
-            # Diagnostic write must never break verification. If the
-            # write fails, drop the path (event won't carry it either).
-            dump_path = None
-
-    # TB-157: emit `judge_call` so events.jsonl is the canonical aggregation
-    # surface for prose-judge cost. Composes with `events.tail`, the web
-    # events table, and the diagnose report — same envelope shape as
-    # `task_complete`, `verification_failed`, etc. Best-effort: a write
-    # failure here must not flip the judge's verdict.
-    # TB-236: extended with `response_length` (always), `rationale_length`
-    # (on successful parse), `parse_error` (on parse failure), and
-    # `judge_response_dump` (path to the per-bullet dump file, when the
-    # dump fired). The length fields are present on every call so an
-    # operator can track whether the prompt-tightening prevention is
-    # actually shortening rationales over time.
-    if events_file is not None:
-        try:
-            from ap2 import events as _events
-            payload = {
-                "task": task_id or "",
-                "bullet_idx": bullet_idx if bullet_idx is not None else -1,
-                "bullet_kind": bullet.kind,
-                "verdict": verdict.status,
-                "duration_s": round(duration_s, 3),
-                "response_length": len(text or ""),
-            }
-            if outcome.rationale_length is not None:
-                payload["rationale_length"] = outcome.rationale_length
-            if outcome.parse_error is not None:
-                payload["parse_error"] = outcome.parse_error
-            if dump_path is not None:
-                payload["judge_response_dump"] = str(dump_path)
-            for k in ("model", "num_turns", "total_cost_usd",
-                      "stop_reason", "usage", "model_usage"):
-                if k in result_meta:
-                    payload[k] = result_meta[k]
-            _events.append(events_file, "judge_call", **payload)
-        except Exception:  # noqa: BLE001
-            # Instrumentation must never break verification. Swallow.
+            # Diagnostic write must never break verification.
             pass
 
     return verdict

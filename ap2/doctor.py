@@ -461,10 +461,11 @@ _VALIDATOR_JUDGE_TIMEOUT_AUDIT_FIX_MULT = 1.5
 def _iter_passed_durations(
     events_file: Path,
     *,
-    event_type: str,
+    event_type: str | tuple[str, ...],
     window_days: int,
     max_samples: int,
     now: _dt.datetime | None = None,
+    duration_getter=None,
 ) -> tuple[list[float], int]:
     """Return (durations, sample_days) for recent successful runs of a
     `<event_type>` event (one of `verify_passed` (TB-252) or
@@ -523,9 +524,22 @@ def _iter_passed_durations(
                     continue
                 if not isinstance(evt, dict):
                     continue
-                if evt.get("type") != event_type:
+                types = (
+                    (event_type,) if isinstance(event_type, str)
+                    else event_type
+                )
+                if evt.get("type") not in types:
                     continue
-                dur = evt.get("duration_s")
+                # TB-385: callers passing multiple event types (e.g. the
+                # verify-timeout audit, which now reads BOTH the legacy
+                # `verify_passed` and the new `task_verify`) supply a
+                # `duration_getter` that knows where each shape stows its
+                # duration (top-level vs nested `verify_cmd.duration_s`).
+                # Default extractor preserves the pre-TB-385 top-level read.
+                if duration_getter is not None:
+                    dur = duration_getter(evt)
+                else:
+                    dur = evt.get("duration_s")
                 if not isinstance(dur, (int, float)):
                     continue
                 ts_raw = evt.get("ts")
@@ -568,6 +582,33 @@ def _iter_passed_durations(
     return durations, span
 
 
+def _verify_cmd_duration(evt: dict) -> float | None:
+    """TB-385: extract the project-wide regression-gate duration from
+    either event shape the verify-timeout audit accepts:
+
+      - legacy `verify_passed` (pre-TB-385) — top-level `duration_s`.
+      - new `task_verify` (TB-385) — nested `verify_cmd.duration_s`, and
+        ONLY when the gate exited 0. The terminal `task_verify` is emitted
+        on the project-wide-FAIL path too (verdict=fail), but the audit
+        sizes the timeout against *successful* runs, so a failing /
+        timed-out gate (exit_code != 0 / None) is excluded — matching the
+        pre-TB-385 semantics where `verify_passed` only fired on success.
+
+    Returns `None` for any other shape so the sample is skipped.
+    """
+    typ = evt.get("type")
+    if typ == "verify_passed":
+        d = evt.get("duration_s")
+        return float(d) if isinstance(d, (int, float)) else None
+    if typ == "task_verify":
+        vc = evt.get("verify_cmd")
+        if not isinstance(vc, dict) or vc.get("exit_code") != 0:
+            return None
+        d = vc.get("duration_s")
+        return float(d) if isinstance(d, (int, float)) else None
+    return None
+
+
 def _iter_verify_passed_durations(
     events_file: Path,
     *,
@@ -575,17 +616,22 @@ def _iter_verify_passed_durations(
     max_samples: int,
     now: _dt.datetime | None = None,
 ) -> tuple[list[float], int]:
-    """TB-252 thin wrapper around `_iter_passed_durations` pinning the
-    `verify_passed` event-type. Kept as a public function so any existing
-    tests pinning the name stay green (per TB-269's "keep the public
-    function names" rule for the helper refactor).
+    """TB-252 thin wrapper around `_iter_passed_durations`. Kept as a public
+    function so any existing tests pinning the name stay green (per TB-269's
+    "keep the public function names" rule for the helper refactor).
+
+    TB-385: now scans BOTH the legacy `verify_passed` event AND the new
+    terminal `task_verify` event (reading its nested `verify_cmd.duration_s`
+    on the success path). Historical `verify_passed` events are never
+    rewritten, so the audit tolerates both during and after the cutover.
     """
     return _iter_passed_durations(
         events_file,
-        event_type="verify_passed",
+        event_type=("verify_passed", "task_verify"),
         window_days=window_days,
         max_samples=max_samples,
         now=now,
+        duration_getter=_verify_cmd_duration,
     )
 
 

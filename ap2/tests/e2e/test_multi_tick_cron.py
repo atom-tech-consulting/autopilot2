@@ -115,7 +115,7 @@ def test_multi_tick_cron_unfreezes_follow_up(e2e_project, clock):
     evts = events.tail(cfg.events_file, 200)
     kinds = [e["type"] for e in evts]
     # Pipeline ran once; follow-up ran once → two task_start entries.
-    task_starts = [e for e in evts if e["type"] == "task_start"]
+    task_starts = [e for e in evts if e["type"] == "task_solve"]
     assert [e["task"] for e in task_starts] == ["TB-5", "TB-6"]
     # Cron fired on tick 1 and tick 3 (not tick 2).
     cron_starts = [e for e in evts if e["type"] == "cron_start"]
@@ -127,7 +127,7 @@ def test_multi_tick_cron_unfreezes_follow_up(e2e_project, clock):
     )
     foll_start = next(
         i for i, e in enumerate(evts)
-        if e["type"] == "task_start" and e["task"] == "TB-6"
+        if e["type"] == "task_solve" and e["task"] == "TB-6"
     )
     assert pipe_complete < foll_start
 

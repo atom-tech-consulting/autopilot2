@@ -1,50 +1,38 @@
-"""TB-236: prose-judge parse-failure observability + prompt-tightening tests.
+"""TB-236 + TB-385: prose-judge parse-failure observability + prompt-tightening.
 
-The prose judge (``ap2.verify._judge_prose_bullet``) is responsible for
-turning a free-form acceptance bullet into a pass/fail verdict via an SDK
-call against the cumulative task diff + working tree. Pre-TB-236, when
-the SDK's final message couldn't be parsed into a
-``{"status": ..., "rationale": ...}`` envelope, the verifier:
+The prose judge (``ap2.verify._judge_prose_bullet``, relocated to the
+``verifier_judge`` component) turns a free-form acceptance bullet into a
+pass/fail verdict via an SDK call against the cumulative task diff + working
+tree. When the SDK's final message can't be parsed into a
+``{"status": ..., "rationale": ...}`` envelope, the verifier records the
+bullet as ``unverified`` (soft-pass) and — for diagnosis — dumps the FULL
+raw last-assistant-text to
+``.cc-autopilot/debug/<run_ts>-<task>-judge-bullet<idx>-response.txt``.
 
-  1. Recorded the bullet as ``unverified`` (soft-pass — the daemon treats
-     ``verification_partial`` as Complete under ``AP2_AUTO_APPROVE=1``).
-  2. Truncated the offending response to 200 chars and stuffed it into
-     the event's ``notes`` field.
+TB-236 originally ALSO rode the parse-failure categorization
+(``parse_error``) and length signals (``response_length`` /
+``rationale_length``) on a per-bullet ``judge_call`` event. **TB-385
+removed that event**: the per-task verifier's per-bullet ``judge_call``
+events were folded into the daemon's single terminal ``task_verify`` event
+(the per-bullet verdict lives in ``task_verify.bullets[]``), so the judge
+no longer streams a ``judge_call`` per bullet. What survives unchanged is:
 
-Under auto-approve that combination silently skipped prose bullets with
-no diagnostic surface. TB-228 bullet 7 (2026-05-15T18:30:53Z) was the
-observed instance that motivated this TB. TB-231 proposed retrying the
-SDK call — operator rejected the shape (doubles cost without telling us
-WHY the parse failed). TB-236 ships the root-cause replacement:
-
-  - **Prevention**: the prompt now caps the rationale at 200 characters
-    and is explicit that the FINAL message must be JSON-only (no markdown
-    fences, no preamble, no trailing prose). Intermediate Read/Grep tool
-    calls stay legal — only the last message is constrained.
+  - **Prevention**: the prompt caps the rationale at 200 characters and is
+    explicit that the FINAL message must be JSON-only (no markdown fences,
+    no preamble, no trailing prose).
   - **Observability — dump**: on parse failure, the FULL raw last-
-    assistant-text is written to
-    ``.cc-autopilot/debug/<run_ts>-<task>-judge-bullet<idx>-response.txt``.
-    Successful parses leave nothing on disk.
-  - **Observability — categorization**: on parse failure, the
-    ``judge_call`` event carries a ``parse_error`` field tagged with one
-    of ``ap2.verify.PARSE_ERROR_CATEGORIES`` so the operator can pattern-
-    detect across many failures without opening every dump.
-  - **Observability — length signals**: every ``judge_call`` event
-    carries ``response_length`` (chars), and successful parses also
-    carry ``rationale_length`` — lets operators track whether prompt-
-    tightening is actually shortening rationales over time.
+    assistant-text is written to the per-bullet debug file. Successful
+    parses leave nothing on disk.
+  - **Categorization (pure function)**: ``_categorize_parse_error`` still
+    classifies a malformed response into one of ``PARSE_ERROR_CATEGORIES``;
+    it's exercised directly here (the event that used to carry it is gone).
 
-Tests below pin all six behaviors. The stub SDK mirrors the shape used
-in ``ap2/tests/e2e/test_verify_per_task.py``'s TB-157 judge-event tests
-— one assistant text envelope + (optionally) a ResultMessage carrying
-usage / cost. The judge's own SDK loop in ``_judge_prose_bullet`` is what
-we're exercising; the parser ``_parse_judge_response`` is exercised
-indirectly through it (its outcomes drive the event fields under test).
+Tests below pin those surviving behaviors PLUS the TB-385 contract that NO
+``judge_call`` event is emitted by the prose judge anymore.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -68,18 +56,16 @@ class _StubSDK:
     """Stub mirror of ``claude_agent_sdk``'s surface used by the judge.
 
     Yields one assistant-text envelope with ``self.text`` and (when
-    ``with_result=True``) a ResultMessage carrying usage / cost so the
-    judge_call event's TB-157 fields populate too. The text is whatever
-    the caller wires up — well-formed JSON for the success cases, the
-    various malformed shapes for the failure cases.
+    ``with_result=True``) a ResultMessage carrying usage / cost. The text is
+    whatever the caller wires up — well-formed JSON for the success cases,
+    the various malformed shapes for the failure cases.
     """
 
     def __init__(self, text: str, *, with_result: bool = True) -> None:
         self.text = text
         self.with_result = with_result
-        # Capture the prompt so tests can assert on prompt content
-        # without monkeypatching the SDK shape (e.g. the rationale-
-        # length constraint test).
+        # Capture the prompt so tests can assert on prompt content without
+        # monkeypatching the SDK shape (e.g. the rationale-length test).
         self.captured_prompt: str | None = None
 
     class ClaudeAgentOptions:
@@ -132,11 +118,11 @@ def _run_judge(
     )
 
 
-def _judge_event(events_file: Path) -> dict:
+def _judge_call_rows(events_file: Path) -> list[dict]:
+    """TB-385: the prose judge no longer emits `judge_call` — this should
+    always be empty. Helper kept so the regression pins read clearly."""
     rows = events.tail(events_file, n=10)
-    judge_rows = [r for r in rows if r.get("type") == "judge_call"]
-    assert len(judge_rows) == 1, judge_rows
-    return judge_rows[0]
+    return [r for r in rows if r.get("type") == "judge_call"]
 
 
 def _dump_dir(events_file: Path) -> Path:
@@ -144,17 +130,48 @@ def _dump_dir(events_file: Path) -> Path:
 
 
 # --------------------------------------------------------------------------
-# Scope §2: dump file on parse failure
+# TB-385: the prose judge emits NO `judge_call` event (folded into task_verify)
+# --------------------------------------------------------------------------
+
+
+def test_no_judge_call_event_emitted_on_success(tmp_path):
+    """A successful prose-judge call emits NO `judge_call` event — the
+    per-bullet verdict is folded into the daemon's terminal `task_verify`
+    event instead (TB-385)."""
+    events_file = tmp_path / "events.jsonl"
+    stub = _StubSDK('{"status": "pass", "rationale": "ok"}')
+
+    res = _run_judge(stub, project_root=tmp_path, events_file=events_file)
+    assert res.status == "pass"
+    assert _judge_call_rows(events_file) == []
+
+
+def test_no_judge_call_event_emitted_on_parse_failure(tmp_path):
+    """A parse failure still records the bullet as `unverified` and writes
+    the diagnostic dump, but emits NO `judge_call` event (TB-385)."""
+    events_file = tmp_path / "events.jsonl"
+    stub = _StubSDK("no json here")
+
+    res = _run_judge(stub, project_root=tmp_path, events_file=events_file)
+    assert res.status == "unverified"
+    assert _judge_call_rows(events_file) == []
+    # The on-disk dump is the surviving diagnostic surface.
+    dumps = list(_dump_dir(events_file).glob("*-judge-bullet*-response.txt"))
+    assert len(dumps) == 1, dumps
+
+
+# --------------------------------------------------------------------------
+# Dump file on parse failure (TB-236 — surface retained under TB-385)
 # --------------------------------------------------------------------------
 
 
 def test_response_dumped_on_parse_failure(tmp_path):
     """Malformed-JSON response → debug file with FULL raw last-message text.
 
-    The verifier's pre-TB-236 ``notes`` truncated to 200 chars, which made
-    it impossible to tell whether the failure was an unescaped quote,
-    trailing prose, truncation, or something else. The dump captures the
-    full text so the operator can diagnose.
+    The verifier's ``notes`` truncate to 200 chars, which made it impossible
+    to tell whether the failure was an unescaped quote, trailing prose,
+    truncation, or something else. The dump captures the full text so the
+    operator can diagnose.
     """
     events_file = tmp_path / "events.jsonl"
     # Long enough to PROVE we capture beyond the 200-char `notes` cap.
@@ -195,39 +212,36 @@ def test_no_dump_on_successful_parse(tmp_path):
         assert list(debug_dir.iterdir()) == [], list(debug_dir.iterdir())
 
 
-# --------------------------------------------------------------------------
-# Scope §2: judge_call event carries dump path
-# --------------------------------------------------------------------------
-
-
-def test_judge_call_event_carries_dump_path_on_failure(tmp_path):
-    """The dump file's path is referenced from the ``judge_call`` event so
-    log readers can locate the dump without scanning the debug dir."""
+def test_dump_filename_shape(tmp_path):
+    """Dump filename follows the documented convention:
+    ``<run_ts>-<task>-judge-bullet<idx>-response.txt``. Operators grep
+    the debug dir on this convention; a drift would silently break
+    diagnostic workflow."""
     events_file = tmp_path / "events.jsonl"
-    stub = _StubSDK('garbage that is not json at all')
+    stub = _StubSDK("not json")
 
-    _run_judge(stub, project_root=tmp_path, events_file=events_file)
+    _run_judge(
+        stub,
+        project_root=tmp_path,
+        events_file=events_file,
+        task_id="TB-999",
+        bullet_idx=7,
+    )
 
-    e = _judge_event(events_file)
-    assert "judge_response_dump" in e, e
-    assert Path(e["judge_response_dump"]).exists()
-    assert Path(e["judge_response_dump"]).read_text() == "garbage that is not json at all"
-
-
-def test_no_dump_path_on_event_when_parse_succeeds(tmp_path):
-    """Successful parse → ``judge_response_dump`` field absent (don't bloat
-    events.jsonl with empty fields per Scope §2)."""
-    events_file = tmp_path / "events.jsonl"
-    stub = _StubSDK('{"status": "fail", "rationale": "no foo.py"}')
-
-    _run_judge(stub, project_root=tmp_path, events_file=events_file)
-
-    e = _judge_event(events_file)
-    assert "judge_response_dump" not in e, e
+    dumps = list(_dump_dir(events_file).glob("*"))
+    assert len(dumps) == 1, dumps
+    name = dumps[0].name
+    assert name.endswith("-TB-999-judge-bullet7-response.txt"), name
+    # Run-ts prefix is a UTC-millisecond-free compact timestamp shaped
+    # like 20260515T191234Z (matches `_prep_debug_dumps` convention).
+    ts_part = name.split("-TB-999-")[0]
+    assert len(ts_part) == 16, ts_part  # YYYYMMDDTHHMMSSZ
+    assert ts_part.endswith("Z"), ts_part
 
 
 # --------------------------------------------------------------------------
-# Scope §3: parse_error categorization
+# parse_error categorization (pure function — the surviving categorization
+# surface now that the `judge_call` event is gone)
 # --------------------------------------------------------------------------
 
 
@@ -278,16 +292,29 @@ def test_categorize_parse_error_pure(label, response, expected):
     _PARSE_ERROR_CASES,
     ids=[c[0] for c in _PARSE_ERROR_CASES],
 )
-def test_parse_error_categorized(tmp_path, label, response, expected):
-    """End-to-end: each malformed shape lands the right category on the
-    ``judge_call`` event."""
+def test_malformed_response_dumps_with_no_judge_call(tmp_path, label, response, expected):
+    """End-to-end: each `parse_error`-classified shape writes a diagnostic
+    dump capturing the FULL raw response, and emits NO `judge_call` event
+    (TB-385). The category itself is asserted by the pure-function test
+    above — TB-385 dropped the per-bullet event that used to carry it, so
+    the on-disk dump is the operator's diagnostic surface.
+
+    Note `trailing_prose_after_json` parses to a usable `pass` verdict
+    (the trailing commentary is recoverable) yet still flags a
+    `parse_error`, so a dump is written; the other shapes land the bullet
+    `unverified`. The dump invariant holds across all of them, so it's the
+    shared assertion here."""
     events_file = tmp_path / "events.jsonl"
     stub = _StubSDK(response)
 
     _run_judge(stub, project_root=tmp_path, events_file=events_file)
-
-    e = _judge_event(events_file)
-    assert e.get("parse_error") == expected, e
+    assert _judge_call_rows(events_file) == []
+    # Every `parse_error`-classified shape (including the empty response,
+    # which dumps an empty file) writes exactly one dump carrying the FULL
+    # raw response text.
+    dumps = list(_dump_dir(events_file).glob("*-judge-bullet*-response.txt"))
+    assert len(dumps) == 1, (dumps, expected)
+    assert dumps[0].read_text() == response
 
 
 def test_parse_error_other_catchall_in_categories():
@@ -297,51 +324,16 @@ def test_parse_error_other_catchall_in_categories():
 
 
 # --------------------------------------------------------------------------
-# Scope §4: length signals on every judge_call
-# --------------------------------------------------------------------------
-
-
-def test_response_length_recorded_on_all_calls(tmp_path):
-    """Both success and failure paths populate ``response_length``."""
-    # Success path
-    events_file_ok = tmp_path / "events_ok.jsonl"
-    good_text = '{"status": "pass", "rationale": "ok"}'
-    _run_judge(
-        _StubSDK(good_text),
-        project_root=tmp_path,
-        events_file=events_file_ok,
-    )
-    e_ok = _judge_event(events_file_ok)
-    assert e_ok.get("response_length") == len(good_text)
-    # Successful parse must also carry rationale_length (Scope §4).
-    assert e_ok.get("rationale_length") == len("ok")
-
-    # Failure path
-    events_file_bad = tmp_path / "events_bad.jsonl"
-    bad_text = "not json"
-    _run_judge(
-        _StubSDK(bad_text),
-        project_root=tmp_path,
-        events_file=events_file_bad,
-    )
-    e_bad = _judge_event(events_file_bad)
-    assert e_bad.get("response_length") == len(bad_text)
-    # Failure path does NOT carry rationale_length — there's no
-    # rationale to measure.
-    assert "rationale_length" not in e_bad, e_bad
-
-
-# --------------------------------------------------------------------------
 # Scope §1: strict-JSON prompt-tightening constraints
 # --------------------------------------------------------------------------
 
 
 def test_strict_prompt_includes_rationale_length_constraint(tmp_path):
-    """The system/user prompt sent to the judge must spell out both the
-    ≤200 character rationale cap (prevention against escape bugs and cost)
-    AND the 'JSON object only' final-message constraint (prevents prose-
-    wrapped responses). Both literal strings are pinned so a future
-    prompt rewrite doesn't silently drop the constraints."""
+    """The prompt sent to the judge must spell out both the ≤200 character
+    rationale cap (prevention against escape bugs and cost) AND the 'JSON
+    object only' final-message constraint (prevents prose-wrapped responses).
+    Both literal strings are pinned so a future prompt rewrite doesn't
+    silently drop the constraints."""
     events_file = tmp_path / "events.jsonl"
     stub = _StubSDK('{"status": "pass", "rationale": "ok"}')
 
@@ -352,52 +344,3 @@ def test_strict_prompt_includes_rationale_length_constraint(tmp_path):
     assert "JSON object only" in prompt, prompt
     # Example JSON shape is also part of the contract (Scope §1).
     assert '{"status": "pass", "rationale": "X exists per L42"}' in prompt
-
-
-# --------------------------------------------------------------------------
-# Cross-cutting: failure path still emits a judge_call event
-# (regression pin — the dump-write must not short-circuit the event)
-# --------------------------------------------------------------------------
-
-
-def test_judge_call_event_still_emits_on_parse_failure(tmp_path):
-    """A parse failure dumps the response AND emits the ``judge_call``
-    event — the dump is additive, not a replacement."""
-    events_file = tmp_path / "events.jsonl"
-    stub = _StubSDK("no json here")
-
-    _run_judge(stub, project_root=tmp_path, events_file=events_file)
-
-    e = _judge_event(events_file)
-    assert e["verdict"] == "unverified"
-    assert e["task"] == "TB-236"
-    assert e["bullet_idx"] == 0
-    # Length signal present on the failure path too.
-    assert e.get("response_length") == len("no json here")
-
-
-def test_dump_filename_shape(tmp_path):
-    """Dump filename follows the documented convention:
-    ``<run_ts>-<task>-judge-bullet<idx>-response.txt``. Operators grep
-    the debug dir on this convention; a drift would silently break
-    diagnostic workflow."""
-    events_file = tmp_path / "events.jsonl"
-    stub = _StubSDK("not json")
-
-    _run_judge(
-        stub,
-        project_root=tmp_path,
-        events_file=events_file,
-        task_id="TB-999",
-        bullet_idx=7,
-    )
-
-    dumps = list(_dump_dir(events_file).glob("*"))
-    assert len(dumps) == 1, dumps
-    name = dumps[0].name
-    assert name.endswith("-TB-999-judge-bullet7-response.txt"), name
-    # Run-ts prefix is a UTC-millisecond-free compact timestamp shaped
-    # like 20260515T191234Z (matches `_prep_debug_dumps` convention).
-    ts_part = name.split("-TB-999-")[0]
-    assert len(ts_part) == 16, ts_part  # YYYYMMDDTHHMMSSZ
-    assert ts_part.endswith("Z"), ts_part

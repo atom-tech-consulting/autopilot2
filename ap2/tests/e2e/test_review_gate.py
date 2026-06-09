@@ -67,7 +67,7 @@ def test_tick_does_not_promote_review_gated_backlog(e2e_project):
     # No task lifecycle events (since dispatch never started).
     evts = events.tail(cfg.events_file, n=20)
     kinds = [e["type"] for e in evts]
-    assert "task_start" not in kinds
+    assert "task_solve" not in kinds
     assert "backlog_auto_promoted" not in kinds
 
 
@@ -111,10 +111,10 @@ def test_approve_then_tick_promotes_and_dispatches(e2e_project):
     evts = events.tail(cfg.events_file, n=20)
     kinds = [e["type"] for e in evts]
     assert "ideation_approved" in kinds
-    assert "task_start" in kinds
+    assert "task_solve" in kinds
     assert "task_complete" in kinds
     # Approved before dispatch (drain runs before backlog promotion).
-    assert kinds.index("ideation_approved") < kinds.index("task_start")
+    assert kinds.index("ideation_approved") < kinds.index("task_solve")
 
 
 # ---------------------------------------------------------------------------

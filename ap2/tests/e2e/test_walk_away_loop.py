@@ -364,7 +364,7 @@ def test_auto_approve_dispatches_ideation_proposal_without_operator(
     expected_chain = (
         "ideation_empty_board",
         "auto_approved",
-        "task_start",
+        "task_solve",
         "task_complete",
     )
     indices: dict[str, int] = {}
@@ -736,7 +736,7 @@ def test_focus_advance_and_roadmap_complete_across_ticks(
     # ----- No `task_start` events appear after `roadmap_complete`. -----
     task_starts_after_halt = [
         e for e in evts[idx_rc + 1:]
-        if e.get("type") == "task_start"
+        if e.get("type") == "task_solve"
     ]
     assert task_starts_after_halt == [], (
         f"no `task_start` events should fire after `roadmap_complete` "

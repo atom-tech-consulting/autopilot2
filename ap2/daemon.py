@@ -104,7 +104,12 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
     # report `duration_s` regardless of which terminal path the run takes.
     run_t0 = time.monotonic()
     prompt = prompts.build_task_prompt(cfg, task)
-    events.append(cfg.events_file, "task_start", task=task.id, title=task.title)
+    # TB-385: lifecycle verb 1 of 3 (`task_solve` → `task_verify` →
+    # `task_complete`). Renamed from the pre-TB-385 `task_start` so the
+    # three per-task lifecycle events read as parallel verbs. History
+    # scanners accept BOTH `task_solve` (new) and `task_start` (pre-existing
+    # events are never rewritten).
+    events.append(cfg.events_file, "task_solve", task=task.id, title=task.title)
     # TB-110 rollback boundary: capture HEAD BEFORE the daemon writes
     # `move_to_active` to TASKS.md. If the agent later violates the
     # state-file fence, `git reset --hard <pre_run_head>` restores the
@@ -615,7 +620,31 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         # want a verify failure to mask a successful recovery — see
         # _infer_result_from_head).
         verify_res = _run_verify(cfg, task)
+        # TB-385: the project-wide gate's result is folded into the single
+        # terminal `task_verify` event's `verify_cmd` field rather than its
+        # own `verify_passed` / mid-stream emission. `duration_s` is kept so
+        # the doctor's `verify_timeout_audit` still has a per-run duration
+        # signal to size `AP2_VERIFY_TIMEOUT_S` against.
+        verify_cmd_payload = None
+        if verify_res is not None:
+            verify_cmd_payload = {
+                "command": verify_res.command,
+                "exit_code": verify_res.exit_code,
+                "duration_s": round(verify_res.duration_s, 2),
+            }
         if verify_res is not None and not verify_res.passed:
+            # TB-385 failure-path symmetry: emit the terminal `task_verify`
+            # (verdict=fail, carrying the failing project-wide gate) BEFORE
+            # the `verification_failed` disposition, so `task_verify` is the
+            # single terminal verification event regardless of outcome. The
+            # per-task bullet judging never ran on this path (the gate fails
+            # first), so `bullets` is empty.
+            verify.emit_task_verify(
+                cfg.events_file, task.id,
+                verdict="fail",
+                per_verdict=None,
+                verify_cmd=verify_cmd_payload,
+            )
             events.append(
                 cfg.events_file,
                 "verification_failed",
@@ -642,28 +671,29 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
             )
             final_status = "verification_failed"
         else:
-            # TB-252: emit a `verify_passed` audit event on successful
-            # project-wide verify so the doctor's `verify_timeout_audit`
-            # has a per-run duration signal to size `AP2_VERIFY_TIMEOUT_S`
-            # against. Mirror of `verification_failed` payload shape
-            # (task, command, exit_code, duration_s) so events.jsonl
-            # carries the same fields for both terminal paths; the
-            # difference is only the type discriminator + the
-            # `passed=True` invariant. Skipped when the gate is
-            # unconfigured (`verify_res is None`).
-            if verify_res is not None:
-                events.append(
-                    cfg.events_file,
-                    "verify_passed",
-                    task=task.id,
-                    command=verify_res.command,
-                    exit_code=verify_res.exit_code,
-                    duration_s=round(verify_res.duration_s, 2),
-                )
             # Per-task verification (TB-69): run the briefing's `## Verification`
             # bullets after the project-wide gate (TB-66) but before
             # move_to_complete. Skip when no briefing or no section.
             per_verdict = await _maybe_per_task_verify(cfg, sdk, task)
+            # TB-385: emit the single terminal `task_verify` event once,
+            # after the regression/shell command AND all prose-bullet
+            # judging, just before the disposition (move_to_complete /
+            # verification_partial). Overall verdict is the per-task verdict
+            # when bullets ran, else `pass` (the project-wide gate already
+            # passed). Emitted only when verification actually ran (the gate
+            # was configured OR the briefing had a `## Verification` section)
+            # — a task with neither stays event-free between solve & complete,
+            # exactly as it did pre-TB-385.
+            overall_verdict = (
+                per_verdict.overall if per_verdict is not None else "pass"
+            )
+            if verify_res is not None or per_verdict is not None:
+                verify.emit_task_verify(
+                    cfg.events_file, task.id,
+                    verdict=overall_verdict,
+                    per_verdict=per_verdict,
+                    verify_cmd=verify_cmd_payload,
+                )
             if per_verdict is not None and per_verdict.overall == "fail":
                 events.append(
                     cfg.events_file,

@@ -807,6 +807,80 @@ def _cumulative_task_diff(project_root: Path, task_id: str | None) -> str:
     return diff.stdout
 
 
+def emit_task_verify(
+    events_file: "Path | None",
+    task_id: str,
+    *,
+    verdict: str,
+    per_verdict: "VerifyVerdict | None",
+    verify_cmd: dict | None = None,
+    transient_retries: int | None = None,
+) -> None:
+    """TB-385: emit the single terminal `task_verify` event.
+
+    Collapses the pre-TB-385 mid-stream `verify_passed` (the project-wide
+    `AP2_VERIFY_CMD` regression-gate success audit) AND the per-bullet
+    `judge_call` events into ONE terminal lifecycle event, emitted once
+    when verification completes — after the regression/shell command AND
+    all prose-bullet judging — just before `task_complete` (and before the
+    `verification_failed` / `verification_partial` disposition on the
+    non-pass paths). It is the second of the three lifecycle verbs
+    (`task_solve` → `task_verify` → `task_complete`).
+
+    Per-bullet verdict detail that used to stream as K separate
+    `judge_call` events is folded into `bullets[]`, so a reader keeps the
+    drill-down (which bullet passed/failed, shell vs prose) without the
+    K+2-event scatter. `verdict` is the overall pass/fail/partial; `shell`
+    / `prose` are `"N_pass/N_total"` tallies; `verify_cmd` (optional)
+    carries the project-wide gate's `{command, exit_code, duration_s}`;
+    `transient_retries` (optional) folds the judge-retry count in WITHOUT
+    emitting any per-retry event (volume-first — the briefing's explicit
+    trade-off).
+
+    No-op when `events_file` is None (legacy callers / harness paths
+    without a wired events file).
+    """
+    if events_file is None:
+        return
+    bullets: list[dict] = []
+    shell_pass = shell_total = 0
+    prose_pass = prose_total = 0
+    if per_verdict is not None:
+        for idx, c in enumerate(per_verdict.criteria):
+            # `bullet` (truncated) names the criterion so the failure-path
+            # `task_verify` is self-contained — a reader sees WHICH bullet
+            # failed without cross-referencing the briefing (the briefing's
+            # "failing bullet(s) named" requirement). Truncated to the same
+            # 200-char bound `verification_failed`'s `criteria` uses.
+            bullets.append({
+                "idx": idx,
+                "kind": c.kind,
+                "verdict": c.status,
+                "bullet": (c.bullet or "")[:200],
+            })
+            if c.kind == "shell":
+                shell_total += 1
+                if c.status == "pass":
+                    shell_pass += 1
+            elif c.kind == "prose":
+                prose_total += 1
+                if c.status == "pass":
+                    prose_pass += 1
+    payload: dict = {
+        "task": task_id,
+        "verdict": verdict,
+        "shell": f"{shell_pass}/{shell_total}",
+        "prose": f"{prose_pass}/{prose_total}",
+        "bullets": bullets,
+    }
+    if verify_cmd is not None:
+        payload["verify_cmd"] = verify_cmd
+    if transient_retries is not None:
+        payload["transient_retries"] = transient_retries
+    from . import events as _events
+    _events.append(events_file, "task_verify", **payload)
+
+
 async def verify_task(
     *,
     briefing_text: str | None,

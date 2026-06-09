@@ -599,7 +599,8 @@ def _row_class(e: dict) -> str:
         return "failure"
     if typ in _WARNING_EVENT_TYPES:
         return "warning"
-    if typ in {"task_start", "cron_start", "cron_complete",
+    if typ in {"task_solve", "task_start", "task_verify",
+               "cron_start", "cron_complete",
                "ideation_empty_board", "ideation_complete", "daemon_start",
                "daemon_stop", "backlog_auto_promoted"}:
         return "lifecycle"
@@ -921,7 +922,10 @@ def _events_table(
         full_json = json.dumps(e, indent=2, default=str)
         extra = _event_extra(e)
         run_link = ""
-        if cfg is not None and typ == "task_start":
+        # TB-385: the per-task dispatch event was renamed `task_start` →
+        # `task_solve`; accept BOTH so the `→ live` debug-run link attaches
+        # to new rows AND to pre-TB-385 history (never rewritten).
+        if cfg is not None and typ in ("task_solve", "task_start"):
             rid = _find_run_id_for_event(cfg, ts, str(e.get("task") or ""))
             if rid:
                 run_link = (

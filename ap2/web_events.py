@@ -58,9 +58,12 @@ def _render_events(
     # Quick-filter buttons for the most common types.
     # TB-157: include `judge_call` so operators can isolate prose-judge
     # cost spikes without grepping events.jsonl by hand.
+    # TB-385: surface the `task_verify` terminal verification event (folds
+    # the old `verify_passed` + per-bullet `judge_call`); `judge_call`
+    # remains (the janitor still emits it + pre-TB-385 history).
     quick = ["task_complete", "task_error", "cron_complete", "cron_error",
              "ideation_empty_board", "ideation_complete", "ideation_error",
-             "verification_failed", "verification_partial",
+             "task_verify", "verification_failed", "verification_partial",
              "backlog_auto_promoted", "daemon_start", "judge_call"]
     filt = '<div class="filter">filter:'
     filt += f' <a href="/events?n={n}" class="{"on" if not typ else ""}">all</a>'

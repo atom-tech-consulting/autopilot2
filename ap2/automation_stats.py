@@ -380,7 +380,10 @@ def _build_attempts_histogram(
     }
     for e in all_events:
         typ = e.get("type")
-        if typ == "task_start":
+        # TB-385: the per-task dispatch event was renamed `task_start` →
+        # `task_solve`. Accept BOTH so the histogram counts attempts across
+        # the cutover (pre-existing `task_start` events are never rewritten).
+        if typ in ("task_solve", "task_start"):
             tid = str(e.get("task") or "").strip()
             if not tid:
                 continue
@@ -415,18 +418,36 @@ def _build_attempts_histogram(
 
 
 def _build_verifier_metrics(in_window: list[dict]) -> dict:
-    """Aggregate `judge_call` events into the per-bullet verifier
-    metrics block. Shells today have no `judge_call` event (only prose
-    bullets go to the LLM judge), so the metrics are prose-only by
-    construction; the briefing's Out-of-scope clause flags this as a
-    follow-up.
+    """Aggregate per-bullet verifier-judge activity into the metrics block.
+
+    TB-385: the verifier's per-bullet `judge_call` events were folded into
+    the terminal `task_verify` event — the prose-bullet verdicts now live in
+    `task_verify.bullets[]`. This aggregator derives the prose-judge
+    evaluation count (`judge_call_count`) from `task_verify` while still
+    tolerating the legacy `judge_call` shape (pre-TB-385 history AND the
+    janitor's per-finding judge, which still emits `judge_call`). Per-
+    evaluation durations / cost only exist on the legacy `judge_call` shape
+    — the lean `task_verify` carries verdicts, not timings (the briefing's
+    volume-first trade-off) — so the duration / slowest breakdown is
+    legacy-only and degrades to empty for purely-`task_verify` windows.
     """
     durations: list[float] = []
     by_kind: dict[str, list[float]] = {}
     slowest_rows: list[dict] = []
+    prose_eval_count = 0
     for e in in_window:
-        if e.get("type") != "judge_call":
+        typ = e.get("type")
+        if typ == "task_verify":
+            # TB-385: each prose bullet in the terminal verify event is one
+            # prose-judge evaluation. Shell bullets are deterministic (no
+            # judge), so only `kind == "prose"` counts here.
+            for b in e.get("bullets") or []:
+                if isinstance(b, dict) and b.get("kind") == "prose":
+                    prose_eval_count += 1
             continue
+        if typ != "judge_call":
+            continue
+        prose_eval_count += 1
         dur = e.get("duration_s")
         if not isinstance(dur, (int, float)):
             continue
@@ -466,7 +487,7 @@ def _build_verifier_metrics(in_window: list[dict]) -> dict:
     )
 
     return {
-        "judge_call_count": len(durations),
+        "judge_call_count": prose_eval_count,
         "duration_s": _summary_stats(durations),
         "by_bullet_kind": kind_breakdown,
         "slowest_prose_judges": slowest_rows[:10],

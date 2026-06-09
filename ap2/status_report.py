@@ -682,6 +682,13 @@ def render_stats_window_section(stats: dict) -> list[str]:
     (TB-235's fail-open audit events). Both fields are in the
     existing `collect_stats` shape — no new aggregates were added
     (Out-of-scope per briefing).
+
+    TB-385: `judge_call_count` is now derived in
+    `automation_stats._build_verifier_metrics` from the terminal
+    `task_verify` event's prose `bullets[]` (the per-bullet `judge_call`
+    events were folded into `task_verify`), while still tolerating legacy
+    `judge_call` events. The digest renderer is unchanged — it reads the
+    same key, whose value now sources from `task_verify`.
     """
     tasks = stats.get("tasks") or {}
     if int(tasks.get("complete_count") or 0) <= 0:
@@ -1429,8 +1436,9 @@ Freshness contract (TB-128 — non-negotiable):
   post. The board counts in the snapshot block above are
   authoritative; the embedded events tail is a courtesy.
 - If nothing of substance has happened since the last
-  `status_report` event in the tail (no new task_start /
-  task_complete / verification_failed / pipeline_* /
+  `status_report` event in the tail (no new task_solve (the
+  TB-385-renamed task_start) / task_verify / task_complete /
+  verification_failed / pipeline_* /
   retry_exhausted / daemon_pause / daemon_resume / operator_ack /
   cron_proposed / ideation_complete events), SKIP the Mattermost
   post entirely. Just call

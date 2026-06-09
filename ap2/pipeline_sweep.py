@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 
-from . import events, retry, tools
+from . import events, retry, tools, verify
 from .board import Board
 from .config import Config
 from .result import TaskResult
@@ -106,7 +106,26 @@ async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
         result_summary = summaries.get(task.id, {})
         final_status = "complete"
         verify_res = _daemon._run_verify(cfg, task)
+        # TB-385: fold the project-wide gate result into the terminal
+        # `task_verify` event's `verify_cmd` field (mirrors the synchronous
+        # `run_task` path); the doctor's `verify_timeout_audit` reads the
+        # nested `duration_s` for sizing `AP2_VERIFY_TIMEOUT_S`.
+        verify_cmd_payload = None
+        if verify_res is not None:
+            verify_cmd_payload = {
+                "command": verify_res.command,
+                "exit_code": verify_res.exit_code,
+                "duration_s": round(verify_res.duration_s, 2),
+            }
         if verify_res is not None and not verify_res.passed:
+            # TB-385 failure-path symmetry: terminal `task_verify` (fail)
+            # before the `verification_failed` disposition.
+            verify.emit_task_verify(
+                cfg.events_file, task.id,
+                verdict="fail",
+                per_verdict=None,
+                verify_cmd=verify_cmd_payload,
+            )
             events.append(
                 cfg.events_file,
                 "verification_failed",
@@ -130,23 +149,21 @@ async def _sweep_pipeline_pending(cfg: Config, sdk) -> None:
             )
             final_status = "verification_failed"
         else:
-            # TB-252: same `verify_passed` audit emission as the
-            # synchronous path above — gives the doctor's
-            # `verify_timeout_audit` a duration signal from the
-            # pipeline-pending verify path too. Carries `source` so
-            # the audit can distinguish path-of-origin if needed
-            # (today the audit aggregates both).
-            if verify_res is not None:
-                events.append(
-                    cfg.events_file,
-                    "verify_passed",
-                    task=task.id,
-                    source="pipeline_pending",
-                    command=verify_res.command,
-                    exit_code=verify_res.exit_code,
-                    duration_s=round(verify_res.duration_s, 2),
-                )
             per_verdict = await _daemon._maybe_per_task_verify(cfg, sdk, task)
+            # TB-385: single terminal `task_verify` for the pipeline-pending
+            # path, emitted once after the gate + all prose judging, just
+            # before the disposition. Same emit-only-when-verification-ran
+            # gate as `run_task`.
+            overall_verdict = (
+                per_verdict.overall if per_verdict is not None else "pass"
+            )
+            if verify_res is not None or per_verdict is not None:
+                verify.emit_task_verify(
+                    cfg.events_file, task.id,
+                    verdict=overall_verdict,
+                    per_verdict=per_verdict,
+                    verify_cmd=verify_cmd_payload,
+                )
             if per_verdict is not None and per_verdict.overall == "fail":
                 events.append(
                     cfg.events_file,

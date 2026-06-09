@@ -222,7 +222,7 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
     assert kinds.count("mattermost") == 1
 
     # Exactly one pipeline run (the mm-queued task) + one follow-up run.
-    task_starts = [e for e in evts if e["type"] == "task_start"]
+    task_starts = [e for e in evts if e["type"] == "task_solve"]
     assert len(task_starts) == 2
     assert "Pipeline" in task_starts[0]["title"]
     assert task_starts[1]["task"] == "TB-6"
@@ -236,7 +236,7 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
     idx_mm = kinds.index("mattermost")
     idx_pipe_start = next(
         i for i, e in enumerate(evts)
-        if e["type"] == "task_start" and "Pipeline" in e.get("title", "")
+        if e["type"] == "task_solve" and "Pipeline" in e.get("title", "")
     )
     idx_pipe_complete = next(
         i for i, e in enumerate(evts)
@@ -244,7 +244,7 @@ def test_remote_start_pipeline_end_to_end(e2e_project, clock, monkeypatch):
     )
     idx_foll_start = next(
         i for i, e in enumerate(evts)
-        if e["type"] == "task_start" and e.get("task") == "TB-6"
+        if e["type"] == "task_solve" and e.get("task") == "TB-6"
     )
     idx_foll_complete = next(
         i for i, e in enumerate(evts)

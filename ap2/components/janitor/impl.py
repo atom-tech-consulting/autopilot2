@@ -258,7 +258,12 @@ JUDGE_REPO_READ_TOOLS = ["Read", "Glob", "Grep"]
 # tightly so the judge sees task arcs (start, complete, pipeline pending,
 # verification fail, ideation approval) rather than the full firehose.
 _JUDGE_LIFECYCLE_EVENT_TYPES = frozenset({
+    # TB-385: `task_solve` (renamed from `task_start`) + the folded
+    # `task_verify` terminal verification event. `task_start` retained so
+    # pre-TB-385 history still surfaces as task-arc context to the judge.
+    "task_solve",
     "task_start",
+    "task_verify",
     "task_complete",
     "task_pipeline_pending",
     "verification_failed",

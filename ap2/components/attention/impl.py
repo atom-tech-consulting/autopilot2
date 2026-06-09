@@ -338,9 +338,12 @@ def _detect_task_stuck(
     out: list[AttentionCondition] = []
     for task_id in active_ids:
         # Walk the tail in reverse looking for either a terminal event
-        # for this task (→ NOT stuck) or a `task_start` (→ candidate).
+        # for this task (→ NOT stuck) or a `task_solve` (→ candidate).
         # Terminal-first stop semantics: if a terminal event landed
-        # after the most recent `task_start`, the run already closed.
+        # after the most recent `task_solve`, the run already closed.
+        # TB-385: the dispatch event was renamed `task_start` →
+        # `task_solve`; accept BOTH so the stuck-task detector fires on
+        # new runs AND on any pre-TB-385 `task_start` still in the tail.
         start_ts: str | None = None
         for ev in reversed(tail):
             if (ev.get("task") or "").strip() != task_id:
@@ -348,12 +351,12 @@ def _detect_task_stuck(
             typ = ev.get("type", "")
             if typ in _TERMINAL_TASK_EVENT_TYPES:
                 # Terminal event closes the run — not stuck. Even if
-                # an older `task_start` precedes this terminal event,
+                # an older `task_solve` precedes this terminal event,
                 # the dispatch closed and the board section hasn't
                 # been moved YET (drift between sections and events).
                 start_ts = None
                 break
-            if typ == "task_start":
+            if typ in ("task_solve", "task_start"):
                 start_ts = ev.get("ts") or ""
                 break
 

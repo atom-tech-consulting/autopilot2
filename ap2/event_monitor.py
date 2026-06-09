@@ -53,9 +53,14 @@ KEEP = {
     "validator_judge_failed",
     "operator_queue_append",
     "operator_queue_drained",
-    # Task lifecycle (promotion → run → verify → complete/fail)
+    # Task lifecycle (promotion → solve → verify → complete/fail)
     "backlog_auto_promoted",
+    # TB-385: `task_solve` / `task_verify` are the renamed/folded lifecycle
+    # verbs; `task_start` / `verify_passed` are retained so follow-mode keeps
+    # rendering pre-TB-385 history (events are never rewritten).
+    "task_solve",
     "task_start",
+    "task_verify",
     "task_complete",
     "task_failed",
     "verify_passed",

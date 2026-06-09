@@ -310,19 +310,19 @@ def test_add_backlog_rejects_missing_briefing():
         assert sorted(p.name for p in tasks_dir.iterdir()) == before_briefings
 
 
-# --------- TB-157: judge_call event emission ---------
+# --------- TB-385: prose judge emits NO per-bullet judge_call event ---------
 
 
-def test_judge_prose_bullet_emits_judge_call_event(tmp_path):
-    """TB-157: each `_judge_prose_bullet` SDK call must land exactly one
-    `judge_call` event on `events.jsonl` carrying task / bullet_idx /
-    verdict / the full `usage` dict.
+def test_judge_prose_bullet_emits_no_judge_call_event(tmp_path):
+    """TB-385: the per-task verifier's per-bullet `judge_call` event was
+    folded into the daemon's single terminal `task_verify` event (the
+    per-bullet verdict rides in `task_verify.bullets[]`). So a direct
+    `_judge_prose_bullet` SDK call must land ZERO `judge_call` events while
+    still RETURNING the parsed verdict for the daemon to aggregate.
 
-    The judge has its own SDK loop in `verify._judge_prose_bullet` —
-    it bypasses the daemon's `_log_message`, so this is the only
-    capture point for prose-judge cost. Without this event, cache
-    experiments (judge batching, prompt restructure) have no
-    measurement surface.
+    (Pre-TB-385 this test pinned exactly one `judge_call` event carrying
+    task / bullet_idx / verdict / usage — that streaming-per-bullet event
+    is gone; volume-first per the briefing.)
     """
     import asyncio
     from types import SimpleNamespace
@@ -363,7 +363,7 @@ def test_judge_prose_bullet_emits_judge_call_event(tmp_path):
 
     bullet = VerifyBullet(kind="prose", text="The diff adds foo.py")
 
-    asyncio.run(_judge_prose_bullet(
+    verdict = asyncio.run(_judge_prose_bullet(
         bullet,
         project_root=tmp_path,
         sdk=_StubSDK(),
@@ -373,26 +373,139 @@ def test_judge_prose_bullet_emits_judge_call_event(tmp_path):
         bullet_idx=3,
     ))
 
+    # TB-385: the judge returns the parsed verdict (for the daemon to fold
+    # into `task_verify.bullets[]`) but emits NO `judge_call` event.
+    assert verdict.status == "pass"
+    assert verdict.kind == "prose"
     rows = events.tail(events_file, n=10)
     judge_rows = [r for r in rows if r.get("type") == "judge_call"]
-    assert len(judge_rows) == 1, judge_rows
-    e = judge_rows[0]
-    assert e["task"] == "TB-99"
-    assert e["bullet_idx"] == 3
-    assert e["bullet_kind"] == "prose"
-    assert e["verdict"] == "pass"
-    # Full usage dict is on the event — downstream aggregators read
-    # the nested shape directly without re-deriving from individual
-    # field names.
-    assert e["usage"] == {
-        "input_tokens": 8200,
-        "output_tokens": 90,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 7800,
-    }
-    assert e["model"] == "claude-opus-4-7"
-    assert e["total_cost_usd"] == 0.042
-    assert e["num_turns"] == 3
+    assert judge_rows == [], judge_rows
+
+
+# --------- TB-385: terminal `task_verify` event (folds verify_passed + judge_call) ---------
+
+
+def _pass_judge_responder(sdk: FakeSDK) -> None:
+    """Wire the FakeSDK so the prose-bullet judge returns a `pass` verdict."""
+    from ap2.tests.e2e._fakes import _FakeMsg
+
+    async def _judge_gen(prompt, options):  # noqa: ARG001
+        yield _FakeMsg('{"status": "pass", "rationale": "looks good"}')
+
+    sdk.on("evaluating ONE acceptance bullet", _judge_gen)
+
+
+def _fail_judge_responder(sdk: FakeSDK) -> None:
+    """Wire the FakeSDK so the prose-bullet judge returns a `fail` verdict."""
+    from ap2.tests.e2e._fakes import _FakeMsg
+
+    async def _judge_gen(prompt, options):  # noqa: ARG001
+        yield _FakeMsg('{"status": "fail", "rationale": "not satisfied"}')
+
+    sdk.on("evaluating ONE acceptance bullet", _judge_gen)
+
+
+def test_task_verify_single_terminal_event_mixed_shell_prose(e2e_project):
+    """TB-385: a task with mixed shell + prose verification emits EXACTLY
+    ONE `task_verify` event carrying per-bullet verdicts (both the shell
+    and the prose bullet) and an overall verdict — and emits NO legacy
+    `verify_passed` or per-bullet `judge_call` events. `task_solve`
+    precedes the `task_verify`, and `task_complete` follows it.
+    """
+    cfg = e2e_project()
+    _seed_ready_with_briefing(
+        cfg, "TB-380",
+        briefing_section=(
+            "- `true` — shell bullet passes\n"
+            "- The diff satisfies the prose requirement\n"
+        ),
+    )
+
+    sdk = FakeSDK()
+    _complete_responder(sdk, "TB-380")
+    _pass_judge_responder(sdk)
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-380")[0] == "Complete"
+
+    evts = events.tail(cfg.events_file, 40)
+    kinds = [e["type"] for e in evts]
+
+    # Exactly ONE terminal task_verify; zero legacy verify_passed / judge_call.
+    verifies = [e for e in evts if e["type"] == "task_verify"]
+    assert len(verifies) == 1, evts
+    assert "verify_passed" not in kinds
+    assert "judge_call" not in kinds
+
+    tv = verifies[0]
+    assert tv["task"] == "TB-380"
+    assert tv["verdict"] == "pass"
+    # Per-bullet verdicts survived the fold — one shell, one prose.
+    bullet_kinds = sorted(b["kind"] for b in tv["bullets"])
+    assert bullet_kinds == ["prose", "shell"], tv["bullets"]
+    assert all(b["verdict"] == "pass" for b in tv["bullets"]), tv["bullets"]
+    assert tv["shell"] == "1/1"
+    assert tv["prose"] == "1/1"
+
+    # Lifecycle ordering: task_solve → task_verify → task_complete.
+    assert "task_solve" in kinds
+    assert "task_complete" in kinds
+    assert (
+        kinds.index("task_solve")
+        < kinds.index("task_verify")
+        < kinds.index("task_complete")
+    )
+
+
+def test_task_verify_failure_path_names_failing_prose_bullet(e2e_project):
+    """TB-385 failure-path symmetry: a failing prose bullet produces a
+    terminal `task_verify` with `verdict` fail (naming the failing bullet
+    in `bullets[]`) — NOT the legacy `verify_passed` / `judge_call`
+    vocabulary. The downstream disposition (verification_failed → Backlog)
+    is unchanged.
+    """
+    cfg = e2e_project()
+    _seed_ready_with_briefing(
+        cfg, "TB-381",
+        briefing_section=(
+            "- `true` — shell bullet passes\n"
+            "- The diff satisfies the prose requirement\n"
+        ),
+    )
+
+    sdk = FakeSDK()
+    _complete_responder(sdk, "TB-381")
+    _fail_judge_responder(sdk)
+
+    asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    # Failing prose bullet → overall fail → Backlog (retry).
+    board = Board.load(cfg.tasks_file)
+    assert board.find("TB-381")[0] == "Backlog"
+
+    evts = events.tail(cfg.events_file, 40)
+    kinds = [e["type"] for e in evts]
+
+    verifies = [e for e in evts if e["type"] == "task_verify"]
+    assert len(verifies) == 1, evts
+    assert "verify_passed" not in kinds
+    assert "judge_call" not in kinds
+
+    tv = verifies[0]
+    assert tv["verdict"] == "fail"
+    # The failing bullet is named (kind=prose, verdict=fail) in the event.
+    failing = [b for b in tv["bullets"] if b["verdict"] == "fail"]
+    assert len(failing) == 1, tv["bullets"]
+    assert failing[0]["kind"] == "prose"
+    assert failing[0]["bullet"], "failing bullet text must name the criterion"
+
+    # task_verify is emitted BEFORE the verification_failed disposition.
+    assert "verification_failed" in kinds
+    assert kinds.index("task_verify") < kinds.index("verification_failed")
+    # task_solve precedes task_verify on the failure path too.
+    assert kinds.index("task_solve") < kinds.index("task_verify")
 
 
 def test_judge_prose_bullet_no_event_when_events_file_omitted(tmp_path):

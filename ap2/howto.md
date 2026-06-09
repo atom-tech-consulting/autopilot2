@@ -970,7 +970,21 @@ richer vocabulary.
 ISO-8601) + `type`; other fields vary. Categories:
 
 **Lifecycle.** `daemon_start`, `daemon_stop`, `daemon_pause`,
-`daemon_resume`, `task_start`, `task_complete`, `cron_start`,
+`daemon_resume`, `task_solve` (TB-385 — renamed from `task_start`; the
+first of the three per-task lifecycle verbs `task_solve` → `task_verify`
+→ `task_complete`; pre-TB-385 history still carries `task_start`, which
+readers accept alongside the new name), `task_verify` (TB-385 — the
+single terminal verification event, emitted once after the project-wide
+`AP2_VERIFY_CMD` gate AND all per-task prose-bullet judging, just before
+`task_complete`; folds the old mid-stream `verify_passed` + per-bullet
+`judge_call` events into one legible event. Payload: `verdict`
+(pass|fail|partial), `shell`/`prose` `"N_pass/N_total"` tallies,
+`verify_cmd` (optional `{command, exit_code, duration_s}` from the
+project-wide gate), `bullets` (per-bullet `{idx, kind, verdict}` so the
+drill-down survives without per-bullet events), optional
+`transient_retries`. Emitted on ALL outcomes — pass, fail, AND partial —
+so it is the one terminal verification event regardless of result),
+`task_complete`, `cron_start`,
 `cron_complete`, `cron_skipped` (status-report no-op — carries a
 `reason` field naming which gate fired:
 `reason=no_activity_since_last_report` (TB-128/153 — the inter-report
@@ -1017,13 +1031,16 @@ each tick — see `## Configuration knobs` for the hot-reloadable vs
 fixed split).
 Per-run cost/usage: `task_run_usage` (per task agent run, TB-180),
 `control_run_usage` (per cron / ideation / MM-handler run, TB-179),
-`judge_call` (per per-task-verifier prose-bullet judge invocation,
-TB-69 + TB-181). Verifier per-run wall-clock: `verify_passed` (TB-252
-— project-wide `AP2_VERIFY_CMD` ran to completion AND exited zero;
-payload mirrors `verification_failed` shape (task, command,
-exit_code, duration_s); consumed by `verify_timeout_audit` to size
-`AP2_VERIFY_TIMEOUT_S` against observed-typical successful run
-duration).
+`judge_call` (TB-69 + TB-181 — **as of TB-385 emitted only by the
+janitor's per-finding judge**; the per-task-VERIFIER prose-bullet
+`judge_call` was folded into the terminal `task_verify` event's
+`bullets[]`, so verifier prose verdicts no longer stream as separate
+events). Verifier per-run wall-clock: `verify_passed` (TB-252 — **legacy
+as of TB-385**; the project-wide `AP2_VERIFY_CMD` success audit is now
+carried by `task_verify`'s `verify_cmd.duration_s`; pre-TB-385 history
+still carries `verify_passed`, and `verify_timeout_audit` reads BOTH
+shapes to size `AP2_VERIFY_TIMEOUT_S` against observed-typical successful
+run duration).
 
 **Failure.** `task_error`, `task_timeout`, `task_state_violation` (TB-110
 post-hoc fenced-file check tripped), `task_rollback` (TB-110
