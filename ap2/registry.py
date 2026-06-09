@@ -48,7 +48,8 @@ Manifest contract (goal.md L121-125):
                                                component contributes to the
                                                cron job-handler registry. The
                                                cron scheduler aggregates these
-                                               (via `registry.cron_job_handlers()`)
+                                               (via
+                                               `registry.contributions("cron_job_handlers")`)
                                                with the core-registered
                                                handlers and dispatches a due
                                                job to its named handler —
@@ -449,37 +450,58 @@ class Registry:
                     out.append(hook)
         return out
 
-    def cron_job_handlers(self) -> dict[str, Callable]:
-        """Aggregated cron job-handler map contributed by components (TB-381).
+    def contributions(self, point: str, cfg=None):
+        """Generic fan-out accessor for a named hook point (TB-387).
 
-        Walks every discovered manifest's
-        `hook_points.get("cron_job_handlers")` (a `dict[str, handler]`)
-        and merges them into a single name→handler map. The cron
-        scheduler (`ap2/components/cron/`) overlays this on top of the
-        core-registered handlers (`ap2.cron_handlers.CORE_CRON_HANDLERS`)
-        and dispatches a due job to `handlers.get(job.name,
-        DEFAULT_CRON_HANDLER)` — the direct replacement for `run_cron`'s
-        pre-TB-381 `if job.name == …` switch. Each handler is a
-        self-contained `async (cfg, sdk, mcp_server, job) -> None`
-        callable that owns its own `cron_*` lifecycle events + `mark_run`
-        (so the scheduler "knows nothing of what the job does").
+        The single replacement for the registry's bespoke per-kind
+        fan-out methods: walk every manifest's `hook_points.get(point)`
+        in name-sorted order and merge the contributions into one
+        aggregate. The aggregate shape follows the contributions
+        themselves — dict-shaped points (e.g. cron's
+        `dict[str, JobHandler]`) dict-merge via `.update()` (later
+        manifests win on a key collision); list-shaped points list-merge
+        via `.extend()`; a scalar (non-dict, non-list) contribution is
+        appended to the list. A point no manifest contributes to yields
+        an empty list.
 
-        Walks ALL components (not enabled-filtered) to preserve the
-        pre-TB-381 behavior where the janitor cron job dispatched its
-        handler unconditionally via `registry.hook("tick_hook",
-        component="janitor")` regardless of the `AP2_JANITOR_DISABLED`
-        kill switch. Today only the `janitor` component contributes a
-        handler (`{"janitor": run_janitor_cron}`); there are no key
-        collisions with the core handler names (`status-report`,
-        `real-sdk-smoke`).
+        This is FAN-OUT ONLY: the registry assembles and returns the
+        merged contributions and performs NO keyed dispatch. Keying stays
+        consumer-local — the cron scheduler still does
+        `handlers.get(job.name, DEFAULT)` itself. A surface earns a
+        generic `contributions(point)` only when multiple owners feed it
+        AND it stays in core (cron job handlers — contributed by the
+        janitor component AND core); a surface owned wholly by one
+        component is internal to that component, not a core point.
+        `channel_adapters()` is therefore NOT routed here — channels are
+        owned wholly by the communication component (TB-389) and never
+        become a core extension point.
+
+        Walk scope preserves the per-point "walk-all vs walk-enabled"
+        semantics via `cfg`: with `cfg is None` (the cron job-handler
+        case) the accessor walks ALL discovered manifests — a contributed
+        handler dispatches regardless of the component's env_flag kill
+        switch; with a `cfg` supplied it walks only
+        `enabled_components(cfg)`. Name-sorted iteration order is
+        load-bearing: the merge is deterministic (later manifests
+        overwrite earlier ones on a dict key collision, and list order is
+        stable across daemon restarts).
         """
-        out: dict[str, Callable] = {}
-        for manifest in self.components:  # name-sorted iteration
-            handlers = manifest.hook_points.get("cron_job_handlers")
-            if not handlers:
+        manifests = self.components if cfg is None else self.enabled_components(cfg)
+        merged_dict: dict = {}
+        merged_list: list = []
+        is_dict = False
+        for manifest in manifests:  # name-sorted iteration
+            contribution = manifest.hook_points.get(point)
+            if not contribution:
                 continue
-            out.update(handlers)
-        return out
+            if isinstance(contribution, dict):
+                is_dict = True
+                merged_dict.update(contribution)
+            elif isinstance(contribution, (list, tuple)):
+                merged_list.extend(contribution)
+            else:
+                merged_list.append(contribution)
+        return merged_dict if is_dict else merged_list
 
     @classmethod
     def discover(cls, *, components_pkg_name: str = "ap2.components") -> "Registry":

@@ -173,9 +173,10 @@ def test_resolve_cron_handler_routes_by_name():
 
 def test_janitor_handler_contributed_via_registry():
     """The `janitor` handler comes from the janitor component's manifest
-    (`hook_points["cron_job_handlers"]`), aggregated by
-    `registry.cron_job_handlers()` — not hardcoded in the scheduler."""
-    handlers = default_registry().cron_job_handlers()
+    (`hook_points["cron_job_handlers"]`), aggregated by the registry's
+    generic `contributions("cron_job_handlers")` accessor — not hardcoded
+    in the scheduler."""
+    handlers = default_registry().contributions("cron_job_handlers")
     assert handlers.get("janitor") is janitor_component.run_janitor_cron
 
 

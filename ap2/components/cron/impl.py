@@ -77,16 +77,21 @@ def resolve_cron_handler(name: str) -> cron_handlers.JobHandler:
     """Resolve a cron job name to its registered handler (TB-381).
 
     Overlays the component-contributed handlers
-    (`registry.cron_job_handlers()` — today only the janitor component's
-    `{"janitor": …}`) on top of the core-registered handlers
-    (`cron_handlers.CORE_CRON_HANDLERS`). An unrecognized job name falls
-    through to `cron_handlers.DEFAULT_CRON_HANDLER` (the generic LLM-cron
-    path). This is the data-driven replacement for `run_cron`'s
-    pre-TB-381 `if job.name == …` switch — the scheduler knows nothing of
-    what each job does.
+    (`registry.contributions("cron_job_handlers")` — today only the
+    janitor component's `{"janitor": …}`) on top of the core-registered
+    handlers (`cron_handlers.CORE_CRON_HANDLERS`). An unrecognized job
+    name falls through to `cron_handlers.DEFAULT_CRON_HANDLER` (the
+    generic LLM-cron path). This is the data-driven replacement for
+    `run_cron`'s pre-TB-381 `if job.name == …` switch — the scheduler
+    knows nothing of what each job does.
+
+    The registry's `contributions(point)` accessor is fan-out only — it
+    merges every manifest's `hook_points["cron_job_handlers"]` dict and
+    returns the aggregate; the keyed dispatch (`handlers.get(name, …)`)
+    stays here, local to the scheduler.
     """
     handlers: dict[str, Callable] = dict(cron_handlers.CORE_CRON_HANDLERS)
-    handlers.update(default_registry().cron_job_handlers())
+    handlers.update(default_registry().contributions("cron_job_handlers"))
     return handlers.get(name, cron_handlers.DEFAULT_CRON_HANDLER)
 
 

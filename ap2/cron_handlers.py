@@ -12,7 +12,8 @@ LLM-cron path; the smoke routine for `real-sdk-smoke`).
 The `janitor` handler is NOT here — it's the janitor component's
 (`ap2/components/janitor/`), contributed via that manifest's
 `hook_points["cron_job_handlers"]`. The cron scheduler aggregates the
-component-contributed handlers (via `registry.cron_job_handlers()`) on
+component-contributed handlers (via
+`registry.contributions("cron_job_handlers")`) on
 top of the core handlers below and dispatches a due job to its named
 handler, replacing the pre-TB-381 `if job.name == …` switch in
 `run_cron`.
@@ -163,7 +164,8 @@ async def generic_llm_handler(cfg: Config, sdk, mcp_server, job: CronJob) -> Non
 
 
 # Core-registered cron handler map (TB-381). The cron scheduler overlays
-# the component-contributed handlers (`registry.cron_job_handlers()`) on
+# the component-contributed handlers
+# (`registry.contributions("cron_job_handlers")`) on
 # top of this; any job name not present in either map falls through to
 # `DEFAULT_CRON_HANDLER`. `status-report`'s composition is baseline core;
 # `real-sdk-smoke` runs the core smoke routine.
