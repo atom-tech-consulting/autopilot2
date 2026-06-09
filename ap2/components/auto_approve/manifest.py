@@ -15,14 +15,25 @@ block into a single tick-callable carries observable-behavior risk
 (per-task event payloads) and is a separate follow-up refactor; the
 canonical TB-318 scope is the structural relocation only.
 
-For axis (2)'s daemon-walks-registry contract, this manifest registers a
-no-op `_tick_hook` on `POST_DISPATCH`. The daemon's `_tick` walks
-`POST_DISPATCH` after task dispatch; today's walk finds only this no-op
-so observable behavior is bit-for-bit unchanged. When a follow-up
-extracts the gate-application helper, the no-op stub becomes the real
-callable and the daemon's inline gate block goes away — daemon-side
-code does not change at that point because it already walks the
-registry.
+TB-383 (axis 3): the `_tick_hook` is now a REAL loop pass registered on
+`Phase.PRE_DISPATCH` (it was a `POST_DISPATCH` no-op placeholder). The
+auto-approve decision is decoupled from `board_edit`'s mutation-time
+`add_backlog` branch: proposals are born `@blocked:review` (policy-free
+`board_edit`) and this between-runs pass evaluates approval via
+`run_auto_approve_pass` — walking Backlog `@blocked:review` tasks and
+stripping the token for those that clear the existing
+`evaluate_auto_approve_decision` gate chain. PRE_DISPATCH placement is
+load-bearing: the daemon walks it before the dispatch stage promotes
+Ready tasks, so a proposal added on the previous tick is auto-approved
+here and dispatched on this tick exactly as the pre-TB-383 proposal-time
+strip produced. The per-task DISPATCH-time gate block in `daemon._tick`
+(`_auto_promote_gate_halts`, which emits per-task `auto_approve_paused` /
+`auto_approve_skipped` / `auto_approve_halted` events) is unchanged — it
+stays the canonical safety check at promote time. The `should_auto_approve`
+tags policy + the `AP2_AUTO_APPROVE` / `AP2_AUTO_APPROVE_GATE_TAGS` readers
+also relocated from `ideation.py` into this component (TB-383) so the gate
+chain is self-contained and the ideation extraction (axis 4) no longer
+trips a core→component import.
 
 `hook_points` exposure (TB-318): the manifest publishes every symbol
 the daemon's pre-TB-318 module-level alias block at L1760-1777 sourced
@@ -81,6 +92,7 @@ from ap2.config_loader import ConfigKey
 from ap2.registry import Manifest, Phase
 
 from . import (
+    AUTO_APPROVE_DEFAULT_GATE_TAGS,
     _AUTO_APPROVE_FAILURE_STATUSES,
     _AUTO_APPROVE_UNFREEZE_TOKEN,
     _AUTO_APPROVE_WINDOW_RESUME_TOKEN,
@@ -89,31 +101,46 @@ from . import (
     _auto_approve_already_halted,
     _auto_approve_check_violations,
     _auto_approve_freeze_threshold,
+    _auto_approve_gate_tags,
     _auto_approve_paused,
     _auto_approve_window_resume_idx,
     _auto_approved_task_ids,
     _event_combined_tokens,
+    _is_auto_approve_enabled,
     _parse_event_ts,
     _per_task_token_cap,
     _validator_judge_noisy_paused,
     _was_auto_approved,
     _window_token_cap,
     evaluate_auto_approve_decision,
+    run_auto_approve_pass,
+    should_auto_approve,
 )
 
 
 def _tick_hook(cfg, sdk) -> None:
-    """No-op POST_DISPATCH placeholder.
+    """PRE_DISPATCH loop pass: strip `@blocked:review` from gate-clearing
+    Backlog tasks (TB-383 axis 3).
 
-    auto_approve's per-task gate logic remains inline in `daemon._tick`
-    because each gate emits a task-specific event with observable
-    payload (see module docstring). This hook is a registration
-    placeholder that satisfies the daemon's walk-every-phase contract
-    uniformly; it intentionally does nothing at tick time. When a
-    follow-up extracts the gate-application helper, this becomes the
-    real callable and the daemon's inline block goes away.
+    No longer the pre-TB-383 no-op placeholder. `board_edit` is now
+    policy-free (every proposal is born `@blocked:review`); this hook is
+    the discrete loop pass that evaluates approval BETWEEN agent runs,
+    reusing the `evaluate_auto_approve_decision` gate chain verbatim. It
+    walks Backlog `@blocked:review` tasks, strips the token for tasks that
+    clear the gates (master knob + tags + freeze/violation/window), and
+    emits the existing `auto_approved` / `would_auto_approve` events with
+    unchanged payloads. Registered on `Phase.PRE_DISPATCH` so the daemon
+    runs it before the dispatch stage promotes Ready tasks — a proposal
+    added on the previous tick is auto-approved here and dispatched on this
+    tick exactly as the pre-TB-383 proposal-time strip produced.
+
+    Delegates to `run_auto_approve_pass(cfg)`; the per-task DISPATCH-time
+    gate block (`_auto_promote_gate_halts` in `daemon._tick`) stays where
+    it is — it emits per-task `auto_approve_paused` / `auto_approve_skipped`
+    / `auto_approve_halted` events at promote time and is the canonical
+    safety check, unchanged by this extraction.
     """
-    return None
+    run_auto_approve_pass(cfg)
 
 
 MANIFEST = Manifest(
@@ -160,8 +187,21 @@ MANIFEST = Manifest(
         "_was_auto_approved": _was_auto_approved,
         "_window_token_cap": _window_token_cap,
         "evaluate_auto_approve_decision": evaluate_auto_approve_decision,
+        # TB-383: the auto-approve tags policy (relocated from `ideation.py`)
+        # + the loop-pass entry point are owned by this component now. Exposed
+        # here so the gate-chain surface is fully registry-visible (a future
+        # ideation component resolves the tags policy via the registry rather
+        # than reaching back into core).
+        "AUTO_APPROVE_DEFAULT_GATE_TAGS": AUTO_APPROVE_DEFAULT_GATE_TAGS,
+        "_is_auto_approve_enabled": _is_auto_approve_enabled,
+        "_auto_approve_gate_tags": _auto_approve_gate_tags,
+        "should_auto_approve": should_auto_approve,
+        "run_auto_approve_pass": run_auto_approve_pass,
     },
-    tick_hooks=[(Phase.POST_DISPATCH, _tick_hook)],
+    # TB-383: the loop pass runs at PRE_DISPATCH (was a POST_DISPATCH no-op)
+    # so the daemon strips `@blocked:review` from gate-clearing Backlog tasks
+    # BEFORE the dispatch stage promotes Ready tasks on the same tick.
+    tick_hooks=[(Phase.PRE_DISPATCH, _tick_hook)],
     dependencies=[],
     # TB-322 (axis 3): per-component `config_schema` declarations for
     # the auto-approve knobs the component logically owns

@@ -10,11 +10,16 @@ _append` instead so chat-driven adds during in-flight runs don't trip
 TB-110's snapshot check.
 
 Moved out of `ap2/tools.py` by TB-262 — the synchronous board-edit
-surface (auto-approve gate chain integration, per-target fence
-decisions, briefing-file write, allocator + approve-token sharing
-with the queue drain) is one coherent concept that benefits from
-sitting next to its siblings rather than mixed in with MCP dispatch
-plumbing.
+surface (per-target fence decisions, briefing-file write, allocator +
+approve-token sharing with the queue drain) is one coherent concept
+that benefits from sitting next to its siblings rather than mixed in
+with MCP dispatch plumbing.
+
+TB-383 (axis 3): the add_backlog path is POLICY-FREE — it no longer
+evaluates the auto-approve gate inline. Proposals are born
+`@blocked:review`; the `auto_approve` component's PRE_DISPATCH loop pass
+(`run_auto_approve_pass`) strips the token for gate-clearing tasks
+between agent runs.
 
 Public symbols (re-exported from `ap2.tools` for backward compat):
 - `do_board_edit` — the only symbol new code should import directly.
@@ -151,85 +156,25 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                 # than being injected into the description as
                 # `(blocked on: ...)`. The codespan lives in `meta` and
                 # round-trips through Task.render() / parse_task_line.
+                # TB-383 (axis 3): `board_edit`'s add_backlog path is now
+                # POLICY-FREE. Proposals are uniformly born `@blocked:review`;
+                # the auto-approve decision (strip / dry-run / noop) NO LONGER
+                # happens at this mutation-time site. It moved into the
+                # `auto_approve` component's PRE_DISPATCH loop pass
+                # (`run_auto_approve_pass`), which walks Backlog
+                # `@blocked:review` tasks BETWEEN agent runs and emits the
+                # `auto_approved` / `would_auto_approve` events with identical
+                # payloads. Inverting the control flow this way means a
+                # task-agent snapshot can never capture a half-applied board
+                # mid-run, and the gate chain + `should_auto_approve` tags
+                # policy live in the component that owns the
+                # `AP2_AUTO_APPROVE*` knobs — untangling the cross-boundary
+                # knot that blocked the ideation extraction (goal.md axis
+                # 3/4). The `review` token simply rides onto the task line
+                # here; the loop pass decides its fate next tick.
                 meta: dict[str, str] = {}
-                effective_blocked_on = blocked_on
-                # TB-223: AP2_AUTO_APPROVE opt-in mode strips the
-                # `review` token from `blocked_on` for ideation-authored
-                # `add_backlog` rows so the daemon's next-tick
-                # auto-promote dispatches the task without waiting for
-                # `ap2 approve`. Gate-tag opt-out: a proposed task
-                # carrying any of `AP2_AUTO_APPROVE_GATE_TAGS` (default
-                # `#breaking-change,#high-risk`) retains the review
-                # blocker even in auto-approve mode — operator's
-                # escape hatch for elevated-risk shapes. Decision is
-                # delegated to `ideation.should_auto_approve(tags)` so
-                # the env-knob layer + gate-tag intersection live in
-                # one place. Audit event `auto_approved` fires after a
-                # successful `board.add` so `ap2 logs` and the cron
-                # status-report can surface what auto-approval
-                # shipped without operator review.
-                auto_approved_stripped = False
-                # TB-232: dry-run on-ramp local flag — set when the
-                # full auto-approve gate chain passes but
-                # `AP2_AUTO_APPROVE_DRY_RUN=1` redirects the WRITE
-                # action from strip+emit to preserve+emit-simulated.
-                # Parallel to `auto_approved_stripped`; the post-add
-                # emit branch picks one of the two.
-                would_auto_approved_simulated = False
-                if (
-                    action == "add_backlog"
-                    and effective_blocked_on
-                ):
-                    tokens = [
-                        tok.strip()
-                        for tok in effective_blocked_on.split(",")
-                        if tok.strip()
-                    ]
-                    review_present = any(
-                        tok.lower() == "review" for tok in tokens
-                    )
-                    if review_present:
-                        # Delegate the full gate chain to
-                        # `daemon.evaluate_auto_approve_decision`
-                        # (TB-232): tags → freeze-threshold →
-                        # per-task-token-cap → window-token-cap → then
-                        # the dry-run branch decides the WRITE action.
-                        # Lazy import to avoid the tools⇄daemon load-
-                        # time cycle (daemon imports tools at module
-                        # level for `do_board_edit`).
-                        from . import daemon as _daemon
-                        decision = _daemon.evaluate_auto_approve_decision(
-                            cfg, tags=tags,
-                        )
-                        if decision == "strip":
-                            # Real auto-approve: strip the review
-                            # token so the row's @blocked: codespan
-                            # drops cleanly. All four gates passed
-                            # AND dry-run mode is off.
-                            kept = [
-                                tok for tok in tokens
-                                if tok.lower() != "review"
-                            ]
-                            effective_blocked_on = ",".join(kept)
-                            auto_approved_stripped = True
-                        elif decision == "dry_run":
-                            # Monitor-only on-ramp: all four gates
-                            # passed but `AP2_AUTO_APPROVE_DRY_RUN=1`
-                            # redirects the WRITE step. The
-                            # `@blocked:review` codespan survives so
-                            # the task still requires operator
-                            # `ap2 approve` to dispatch — the operator
-                            # observes the resulting
-                            # `would_auto_approve` event for ≥24h
-                            # before flipping the dry-run knob off.
-                            would_auto_approved_simulated = True
-                        # decision == "noop": at least one gate failed
-                        # (tags / freeze / per-task / window). The
-                        # proposal lands with `@blocked:review` intact
-                        # and no audit event — same surface an
-                        # operator-driven `ap2 add` would produce.
-                if effective_blocked_on:
-                    meta["blocked"] = effective_blocked_on
+                if blocked_on:
+                    meta["blocked"] = blocked_on
                 board.add(
                     add_map[action],
                     task_id=new_id,
@@ -239,40 +184,6 @@ def do_board_edit(cfg: Config, args: dict) -> dict:
                     description=description,
                     briefing=briefing_rel,
                 )
-                if auto_approved_stripped:
-                    # TB-332 axis-5 cross-package migration: read the
-                    # `AP2_AUTO_APPROVE` knob value via
-                    # `cfg.get_component_value("auto_approve", "enabled")`
-                    # so the event payload preserves the same string
-                    # shape downstream parsers already expect (TB-223 /
-                    # TB-232 audit consumers read `knob` as the raw
-                    # env-style value). The default="" mirrors the
-                    # legacy `os.environ.get(..., "")` shape — never
-                    # emit a `None` here.
-                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
-                    events.append(
-                        cfg.events_file,
-                        "auto_approved",
-                        task=new_id,
-                        knob=str(_knob or ""),
-                    )
-                elif would_auto_approved_simulated:
-                    # TB-232: payload mirrors `auto_approved` shape so
-                    # the 24h-counter aggregator + any forensic
-                    # tooling can parse both event streams uniformly.
-                    # `dry_run=True` discriminator field lets
-                    # downstream consumers distinguish the simulated
-                    # decision from the real one. TB-332: same
-                    # `cfg.get_component_value("auto_approve",
-                    # "enabled")` read path as the strip branch above.
-                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
-                    events.append(
-                        cfg.events_file,
-                        "would_auto_approve",
-                        task=new_id,
-                        knob=str(_knob or ""),
-                        dry_run=True,
-                    )
                 # TB-141: persist the new high-water mark to CLAUDE.md
                 # synchronously here. `_allocate_id` no longer writes —
                 # this path (ideation / control agents calling the

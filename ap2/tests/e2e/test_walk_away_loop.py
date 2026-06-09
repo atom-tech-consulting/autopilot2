@@ -298,26 +298,41 @@ def test_auto_approve_dispatches_ideation_proposal_without_operator(
         f"awaits next-tick auto-promote); got section={section}"
     )
     row = board.sections[section][idx]
-    # AP2_AUTO_APPROVE=1 strips the @blocked:review codespan synchronously
-    # in `do_board_edit`. After tick 1 the row is dispatchable.
-    assert "@blocked:review" not in row, (
-        f"tick 1: AP2_AUTO_APPROVE must strip `@blocked:review` from the "
-        f"ideation-queued row; got: {row!r}"
+    # TB-383: `board_edit` is policy-free, so ideation's proposal is born
+    # `@blocked:review` on tick 1 (ideation runs at the END of the tick,
+    # AFTER the PRE_DISPATCH loop pass). No `auto_approved` event has fired
+    # yet — the loop pass strips the token on tick 2, before that tick's
+    # dispatch stage. This preserves the pre-TB-383 DISPATCH timing (the
+    # proposal still dispatches on tick 2) while moving the strip out of
+    # the mid-agent-run mutation.
+    assert "@blocked:review" in row, (
+        f"tick 1: policy-free `board_edit` must leave `@blocked:review` on "
+        f"the ideation-queued row (the loop pass strips it next tick); "
+        f"got: {row!r}"
     )
 
     evts_tick1 = events.tail(cfg.events_file, 200)
-    auto_evts = [e for e in evts_tick1 if e.get("type") == "auto_approved"]
-    assert len(auto_evts) == 1, (
-        f"tick 1: exactly one `auto_approved` event must fire; got: {auto_evts}"
+    assert [e for e in evts_tick1 if e.get("type") == "auto_approved"] == [], (
+        "tick 1: no `auto_approved` event fires at proposal time "
+        "(policy-free `board_edit`); the loop pass emits it on tick 2"
     )
-    assert auto_evts[0]["task"] == expected_tb
-    # The knob field captures the env value at proposal time — pins the
-    # TB-223 payload contract.
-    assert auto_evts[0]["knob"] == "1"
 
-    # Tick 2: backlog auto-promote dispatches the task; the FakeSDK task
-    # responder calls report_result(status=complete) → Complete.
+    # Tick 2: the PRE_DISPATCH loop pass strips `@blocked:review` + emits
+    # `auto_approved`; the auto-promote step then dispatches the task; the
+    # FakeSDK task responder calls report_result(status=complete) → Complete.
     asyncio.run(_tick(cfg, sdk, mcp_server=None))
+
+    auto_evts = [
+        e for e in events.tail(cfg.events_file, 300)
+        if e.get("type") == "auto_approved" and e.get("task") == expected_tb
+    ]
+    assert len(auto_evts) == 1, (
+        f"tick 2: exactly one `auto_approved` event must fire for "
+        f"{expected_tb} (from the loop pass); got: {auto_evts}"
+    )
+    # The knob field captures the env value at strip time — pins the
+    # TB-223 payload contract (unchanged across the TB-383 relocation).
+    assert auto_evts[0]["knob"] == "1"
 
     board = Board.load(cfg.tasks_file)
     loc = board.find(expected_tb)

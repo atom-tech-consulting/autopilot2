@@ -39,6 +39,7 @@ import pytest
 
 from ap2 import daemon, events, retry, tools
 from ap2.board import Board
+from ap2.components.auto_approve import run_auto_approve_pass
 from ap2.config import Config
 from ap2.daemon import _is_thinking_block_corruption, run_task
 from ap2.init import init_project
@@ -327,6 +328,9 @@ def _unwrap(res: dict) -> dict:
 
 
 def _seed_auto_approved_task(cfg: Config, *, title: str) -> str:
+    # TB-383: `board_edit` is policy-free; run the loop pass after the add
+    # (caller sets `AP2_AUTO_APPROVE=1`) so the review token is stripped +
+    # `auto_approved` emitted, reproducing the daemon's PRE_DISPATCH step.
     res = tools.do_board_edit(
         cfg,
         {
@@ -337,7 +341,9 @@ def _seed_auto_approved_task(cfg: Config, *, title: str) -> str:
             "tags": ["#autopilot"],
         },
     )
-    return _unwrap(res)["task_id"]
+    tb_id = _unwrap(res)["task_id"]
+    run_auto_approve_pass(cfg)
+    return tb_id
 
 
 def _seed_operator_approved_task(cfg: Config, *, title: str) -> str:

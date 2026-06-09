@@ -56,6 +56,7 @@ import pytest
 
 from ap2 import daemon, events, tools
 from ap2.board import Board
+from ap2.components.auto_approve import run_auto_approve_pass
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -174,10 +175,14 @@ class _NoopSDK:
 
 
 def _seed_auto_approved_task(cfg: Config, *, title: str, tags=None) -> str:
-    """Add an auto-approved Backlog task (the TB-223 `do_board_edit`
-    `add_backlog` path with `AP2_AUTO_APPROVE=1`). Returns the TB-N
-    assigned by the daemon. Caller is responsible for setting
-    `AP2_AUTO_APPROVE=1` in the env before calling."""
+    """Add an auto-approved Backlog task. Returns the TB-N assigned by the
+    daemon. Caller is responsible for setting `AP2_AUTO_APPROVE=1` in the
+    env before calling.
+
+    TB-383: `board_edit` is policy-free (the row is born `@blocked:review`);
+    the auto-approve strip + `auto_approved` emit now happen in the
+    `auto_approve` loop pass, so this helper runs `run_auto_approve_pass`
+    after the add to reproduce the daemon's PRE_DISPATCH step."""
     res = tools.do_board_edit(
         cfg,
         {
@@ -188,7 +193,9 @@ def _seed_auto_approved_task(cfg: Config, *, title: str, tags=None) -> str:
             "tags": tags or ["#autopilot"],
         },
     )
-    return _unwrap(res)["task_id"]
+    tb_id = _unwrap(res)["task_id"]
+    run_auto_approve_pass(cfg)
+    return tb_id
 
 
 def _seed_task_run_usage(

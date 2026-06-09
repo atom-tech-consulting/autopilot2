@@ -143,6 +143,9 @@ def _seed_validator_judge_events(
 
 
 def _seed_auto_approved_task(cfg: Config, *, title: str) -> str:
+    # TB-383: `board_edit` is policy-free; the auto-approve strip + emit
+    # happen in the loop pass. Run it after the add (caller sets
+    # `AP2_AUTO_APPROVE=1`) to reproduce the daemon's PRE_DISPATCH step.
     res = tools.do_board_edit(
         cfg,
         {
@@ -153,7 +156,9 @@ def _seed_auto_approved_task(cfg: Config, *, title: str) -> str:
             "tags": ["#autopilot"],
         },
     )
-    return _unwrap(res)["task_id"]
+    tb_id = _unwrap(res)["task_id"]
+    auto_approve.run_auto_approve_pass(cfg)
+    return tb_id
 
 
 def _stub_tick_quiet(monkeypatch) -> None:

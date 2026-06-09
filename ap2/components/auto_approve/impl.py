@@ -34,6 +34,7 @@ follow-up.
 """
 from __future__ import annotations
 
+import os
 import re as _re
 import time
 from datetime import datetime
@@ -41,6 +42,156 @@ from datetime import datetime
 from ap2 import events, ideation
 from ap2.adapters.base import AgentUsage
 from ap2.config import Config
+
+
+# ============================================================================
+# TB-383: the auto-approve TAGS POLICY (master-switch + gate-tag readers +
+# `should_auto_approve`) relocated here from `ap2/ideation.py`. The policy
+# reads auto-approve-owned knobs (`AP2_AUTO_APPROVE`,
+# `AP2_AUTO_APPROVE_GATE_TAGS`) and decides whether an ideation proposal's
+# `@blocked:review` codespan may be stripped. It squatted in `ideation.py`
+# for historical reasons (TB-223 put the "three-knob safety model" next to
+# the ideation prompt); moving it into the component that OWNS the knobs is
+# the prerequisite that lets the ideation extraction (goal.md axis 4)
+# proceed without an `evaluate_auto_approve_decision` → `ideation` reach-
+# back. Behavior is preserved bit-for-bit — the cfg-kwarg-with-TypeError-
+# guard shape (TB-332) and the permissive truthy/tag parse are verbatim.
+# ============================================================================
+
+# TB-223 default gate-tag set: the categories ideation itself self-tags as
+# elevated-risk, so the auto-approve defaults align with ideation's existing
+# labels. A proposal carrying any of these retains `@blocked:review` even in
+# auto-approve mode (operator escape hatch for risky shapes).
+AUTO_APPROVE_DEFAULT_GATE_TAGS: tuple[str, ...] = (
+    "#breaking-change",
+    "#high-risk",
+)
+
+
+def _is_auto_approve_enabled(cfg: "Config | None" = None) -> bool:
+    """True iff `AP2_AUTO_APPROVE` is set to a truthy value.
+
+    Truthy values: `"1"`, `"true"`, `"yes"` (case-sensitive, leading/trailing
+    whitespace stripped). Default unset → False (current behavior; every
+    ideation-proposed task carries `@blocked:review` and waits for
+    `ap2 approve`).
+
+    Resolution shape (TB-332 cross-package migration; preserved across the
+    TB-383 relocation): same cfg-kwarg-with-TypeError-guard pattern as the
+    sibling `automation_status._is_auto_approve_dry_run` helper. Default
+    ``cfg=None`` preserves the legacy env-read fallback so pre-TB-332
+    callers (TB-223 unit tests) see bit-for-bit identical behavior.
+    """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_is_auto_approve_enabled(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(
+            cfg.get_component_value("auto_approve", "enabled", default="") or "",
+        )
+    else:
+        # Legacy fallback (TB-332 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; the canonical NEW-read path
+        # is `cfg.get_component_value`).
+        raw = os.getenv("AP2_AUTO_APPROVE", "")
+    return raw.strip() in ("1", "true", "yes")
+
+
+def _auto_approve_gate_tags(cfg: "Config | None" = None) -> frozenset[str]:
+    """Parsed `AP2_AUTO_APPROVE_GATE_TAGS` as a frozenset of normalized
+    tag strings.
+
+    Comma-separated, whitespace-stripped, normalized to a leading `#`
+    (so operators may type `"#high-risk,#breaking-change"` or bare
+    `"high-risk,breaking-change"` and both parse identically). Default
+    (env unset or empty) is `AUTO_APPROVE_DEFAULT_GATE_TAGS` —
+    `#breaking-change` + `#high-risk`. Empty entries are dropped;
+    deliberate `AP2_AUTO_APPROVE_GATE_TAGS=""` falls back to the default
+    set (the explicit way to opt out of every gate-tag is
+    `AP2_AUTO_APPROVE_GATE_TAGS="#__never__"` or a similar sentinel that
+    no real task carries).
+
+    Resolution shape (TB-332 cross-package migration; preserved across the
+    TB-383 relocation): same cfg-kwarg-with-TypeError-guard pattern as
+    `_is_auto_approve_enabled`. Default ``cfg=None`` preserves the legacy
+    env-read fallback for back-compat.
+    """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "_auto_approve_gate_tags(cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if cfg is not None:
+        raw = str(
+            cfg.get_component_value(
+                "auto_approve", "gate_tags", default="",
+            )
+            or "",
+        ).strip()
+    else:
+        # Legacy fallback (TB-332 back-compat shape — `os.getenv` for
+        # cross-package grep-gate hygiene; see `_is_auto_approve_enabled`).
+        raw = os.getenv("AP2_AUTO_APPROVE_GATE_TAGS", "").strip()
+    if not raw:
+        return frozenset(AUTO_APPROVE_DEFAULT_GATE_TAGS)
+    out: set[str] = set()
+    for token in raw.split(","):
+        t = token.strip()
+        if not t:
+            continue
+        if not t.startswith("#"):
+            t = "#" + t
+        out.add(t)
+    return frozenset(out) if out else frozenset(AUTO_APPROVE_DEFAULT_GATE_TAGS)
+
+
+def should_auto_approve(
+    tags: "list[str] | tuple[str, ...] | None",
+    cfg: "Config | None" = None,
+) -> bool:
+    """Should this ideation-proposed task have its `@blocked:review`
+    codespan dropped by the auto-approve loop pass?
+
+    True iff `AP2_AUTO_APPROVE` is enabled AND `tags` does NOT intersect
+    `_auto_approve_gate_tags()`. Tag comparison normalizes leading `#`
+    (so a task tagged `"breaking-change"` matches a gate-tag
+    `"#breaking-change"`).
+
+    Gate-1 of `evaluate_auto_approve_decision`'s chain and — post-TB-383 —
+    the tags policy the `auto_approve` component owns end-to-end (relocated
+    from `ideation.py` so the ideation extraction no longer drags the
+    auto-approve policy with it). Pure / no I/O — relies only on the env /
+    cfg layer + the in-memory tag list.
+
+    Resolution shape (TB-332 cross-package migration; preserved across the
+    TB-383 relocation): same cfg-kwarg-with-TypeError-guard pattern as the
+    sibling helpers above. Default ``cfg=None`` preserves the legacy
+    env-read fallback so the TB-223 unit tests
+    (`test_should_auto_approve_helper_directly`) work without modification.
+    """
+    if cfg is not None and not isinstance(cfg, Config):
+        raise TypeError(
+            "should_auto_approve(tags, cfg=...) expects a Config instance; "
+            f"got {type(cfg).__name__}",
+        )
+    if not _is_auto_approve_enabled(cfg):
+        return False
+    if not tags:
+        return True
+    gate_tags = _auto_approve_gate_tags(cfg)
+    if not gate_tags:
+        return True
+    for t in tags:
+        norm = t.strip()
+        if not norm:
+            continue
+        if not norm.startswith("#"):
+            norm = "#" + norm
+        if norm in gate_tags:
+            return False
+    return True
 
 
 # ============================================================================
@@ -639,7 +790,7 @@ def evaluate_auto_approve_decision(
     Gate-evaluation order (serial; each evaluated top-to-bottom so the
     judge can read the branch ordering directly):
 
-      1. `tags` — `ideation.should_auto_approve(tags)` excludes
+      1. `tags` — `should_auto_approve(tags)` excludes
          proposals carrying any of `AP2_AUTO_APPROVE_GATE_TAGS`
          (default `#breaking-change,#high-risk`). Existing TB-223 gate.
          A tag opt-out short-circuits to `"noop"` for both real and
@@ -687,7 +838,7 @@ def evaluate_auto_approve_decision(
     branch order by reading top-to-bottom in this function.
 
     Caller responsibility: `tags` is the proposal's tag list (may be
-    `None` / empty — `ideation.should_auto_approve` treats both as
+    `None` / empty — `should_auto_approve` treats both as
     "no opt-out tag"). The caller pre-checks that the proposal
     actually carries `@blocked:review` so this helper isn't invoked
     for operator-driven adds.
@@ -707,8 +858,11 @@ def evaluate_auto_approve_decision(
     # `AP2_AUTO_APPROVE_GATE_TAGS`) opt out of auto-approve entirely.
     # Short-circuits both real and dry-run modes — a tag opt-out
     # means "operator must manually approve", which the
-    # `@blocked:review` codespan already enforces.
-    if not ideation.should_auto_approve(tags, cfg):
+    # `@blocked:review` codespan already enforces. TB-383: the tags
+    # policy now lives in THIS module (relocated from `ideation.py`)
+    # so the gate chain is self-contained — no reach-back into core
+    # ideation.
+    if not should_auto_approve(tags, cfg):
         return "noop"
     # Gate 2: freeze-threshold (TB-223 circuit-breaker). Evaluated
     # here so the dry-run terminal branch below can honor it; real
@@ -795,3 +949,120 @@ def _append_decisions_needed_bullet(cfg: Config, bullet: str) -> None:
     tmp = path.with_suffix(".md.tmp")
     tmp.write_text(new_text)
     tmp.replace(path)
+
+
+# ============================================================================
+# TB-383: the auto-approve LOOP PASS (axis 3). Decouples the auto-approve
+# decision from `board_edit`'s mutation-time `add_backlog` branch (where a
+# task-agent snapshot could capture a half-applied board mid-run) into a
+# discrete daemon loop pass that runs BETWEEN agent runs. `board_edit` is
+# now policy-free — every proposal is born `@blocked:review` — and this
+# pass evaluates approval, reusing the existing
+# `evaluate_auto_approve_decision` gate chain verbatim. Registered as the
+# component's PRE_DISPATCH tick hook so the daemon walks it before the
+# dispatch stage promotes Ready tasks: a proposal added on the previous
+# tick is auto-approved here and dispatched on this tick exactly as the
+# pre-TB-383 proposal-time strip produced (same effective timing).
+# ============================================================================
+
+
+def _already_would_auto_approved(cfg: Config, task_id: str) -> bool:
+    """True iff a `would_auto_approve` event already fired for `task_id`.
+
+    Dedup gate for the dry-run branch of the loop pass: in dry-run mode the
+    `@blocked:review` codespan is PRESERVED, so the task stays in the pass's
+    candidate set on every subsequent tick. Without this gate the pass would
+    re-emit `would_auto_approve` each tick — flooding the 24h dry-run counter
+    the operator watches. The pre-TB-383 proposal-time site emitted exactly
+    once (at `add_backlog`); this preserves that one-shot semantics.
+
+    Pure / events.jsonl tail-read only. Same 2000-event window as the
+    cost-guard scan so a long-lived dry-run proposal is covered.
+    """
+    if not cfg.events_file.exists():
+        return False
+    for e in events.tail(cfg.events_file, 2000):
+        if (
+            e.get("type") == "would_auto_approve"
+            and str(e.get("task") or "") == task_id
+        ):
+            return True
+    return False
+
+
+def run_auto_approve_pass(cfg: Config) -> None:
+    """Strip `@blocked:review` from gate-clearing Backlog tasks (TB-383).
+
+    The between-runs successor to the proposal-time gate that used to live
+    in `board_edit`'s `add_backlog` branch. Walks every Backlog task still
+    carrying a `review` token in its `@blocked:` codespan and applies the
+    existing `evaluate_auto_approve_decision` gate chain (master knob → tags
+    → freeze-threshold → cost/blast-radius) to each:
+
+      - ``"strip"``   — real auto-approve: drop the `review` token and emit
+                        `auto_approved` (`task=`, `knob=` — identical payload
+                        to the pre-TB-383 proposal-time site).
+      - ``"dry_run"`` — monitor-only: emit a one-shot `would_auto_approve`
+                        (`dry_run=True`), leave the codespan intact so the
+                        task still requires `ap2 approve`.
+      - ``"noop"``    — a gate-tag opt-out or a tripped safety gate: leave
+                        the task untouched.
+
+    The strip reuses `operator_queue._approve_review_token` so the codespan-
+    rewrite logic stays single-source-of-truth with the operator-approve and
+    queue-drain paths. Board mutations are committed via the daemon's state-
+    commit machinery (no-op outside a git repo) so the strip rides into git
+    history for rollback cohesion. Safe to call every tick: a cheap unlocked
+    pre-scan skips the board lock entirely when no candidate is present.
+    """
+    # Lazy imports avoid any module-load cycle (the component is imported
+    # during registry discovery at daemon import; board / operator_queue /
+    # state_commit are core modules already loaded by tick time).
+    from ap2.board import Board, locked_board
+    from ap2.operator_queue import _approve_review_token
+    from ap2.state_commit import _commit_state_files
+
+    if not cfg.tasks_file.exists():
+        return
+
+    def _has_review(task) -> bool:
+        return any(tok.lower() == "review" for tok in task.blocked_on)
+
+    # Cheap unlocked pre-scan: only take the board lock when at least one
+    # Backlog task still carries the `review` token.
+    board0 = Board.load(cfg.tasks_file)
+    if not any(_has_review(t) for t in board0.iter_tasks("Backlog")):
+        return
+
+    knob = str(
+        cfg.get_component_value("auto_approve", "enabled", default="") or "",
+    )
+    stripped_any = False
+    with locked_board(cfg.tasks_file) as board:
+        for t in list(board.iter_tasks("Backlog")):
+            if not _has_review(t):
+                continue
+            decision = evaluate_auto_approve_decision(cfg, tags=list(t.tags))
+            if decision == "strip":
+                try:
+                    _approve_review_token(board, t.id)
+                except RuntimeError:
+                    # Task vanished / malformed between scan and strip —
+                    # skip it; the next tick re-evaluates a fresh board.
+                    continue
+                events.append(
+                    cfg.events_file, "auto_approved", task=t.id, knob=knob,
+                )
+                stripped_any = True
+            elif decision == "dry_run":
+                if _already_would_auto_approved(cfg, t.id):
+                    continue
+                events.append(
+                    cfg.events_file, "would_auto_approve",
+                    task=t.id, knob=knob, dry_run=True,
+                )
+            # decision == "noop": leave the task untouched.
+    if stripped_any:
+        _commit_state_files(
+            cfg, "state: auto-approve review strip", paths=["TASKS.md"],
+        )

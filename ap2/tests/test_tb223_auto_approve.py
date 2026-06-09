@@ -5,8 +5,10 @@
 bottleneck). The trio of knobs forms a layered safety model:
 
   - `AP2_AUTO_APPROVE` (master switch, default unset) — when truthy,
-    ideation-authored `add_backlog` rows omit the `@blocked:review`
-    codespan so the daemon's next-tick auto-promote dispatches the
+    the `auto_approve` loop pass strips the `@blocked:review` codespan
+    from ideation-authored Backlog rows (TB-383: `board_edit` is
+    policy-free; proposals are born blocked and the PRE_DISPATCH pass
+    strips them) so the daemon's next-tick auto-promote dispatches the
     task without operator approval.
   - `AP2_AUTO_APPROVE_GATE_TAGS` (default `#breaking-change,#high-risk`)
     — per-shape opt-out. A proposed task carrying any gate-tag retains
@@ -20,8 +22,10 @@ Five behavioral pinning cases (briefing's `## Verification` enumerates
 the contract):
 
   (a) Unset knob → `@blocked:review` preserved on the proposed row.
-  (b) Set knob → `@blocked:review` stripped on the proposed row AND
-      the audit-trail `auto_approved` event fires.
+  (b) Set knob → after the loop pass runs, `@blocked:review` is
+      stripped from the row AND the audit-trail `auto_approved` event
+      fires (TB-383: the strip is done by `run_auto_approve_pass`, not
+      at `board_edit` mutation time).
   (c) Gate-tag-matching task → `@blocked:review` retained even when
       the master switch is on.
   (d) Cumulative-regression threshold N consecutive failures →
@@ -51,6 +55,7 @@ import pytest
 
 from ap2 import daemon, events, ideation, tools
 from ap2.board import Board
+from ap2.components.auto_approve import run_auto_approve_pass, should_auto_approve
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -178,11 +183,14 @@ def test_unset_knob_preserves_blocked_review_codespan(cfg: Config, monkeypatch):
 def test_set_knob_strips_blocked_review_and_emits_audit_event(
     cfg: Config, monkeypatch,
 ):
-    """`AP2_AUTO_APPROVE=1` → the proposed row lands in Backlog WITHOUT
-    the `@blocked:review` codespan, and an `auto_approved` event fires
-    with `task=TB-N` and `knob=` capturing the env value at proposal
-    time. The next-tick auto-promote will pick the task up immediately
-    because no review gate remains."""
+    """`AP2_AUTO_APPROVE=1` → after the `auto_approve` loop pass runs, the
+    proposed row lands in Backlog WITHOUT the `@blocked:review` codespan,
+    and an `auto_approved` event fires with `task=TB-N` and `knob=`
+    capturing the env value. TB-383: `board_edit` is policy-free (the row
+    is born `@blocked:review`); the loop pass (`run_auto_approve_pass`)
+    does the strip between agent runs, exactly as the daemon's
+    PRE_DISPATCH walk drives it. The next-tick auto-promote will pick the
+    task up immediately because no review gate remains."""
     monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
 
     res = tools.do_board_edit(
@@ -197,6 +205,11 @@ def test_set_knob_strips_blocked_review_and_emits_audit_event(
     )
     body = _unwrap(res)
     tb_id = body["task_id"]
+
+    # TB-383: `board_edit` is policy-free — the proposal is born
+    # `@blocked:review`. Run the loop pass (the daemon's PRE_DISPATCH
+    # step) to perform the auto-approve strip + emit.
+    run_auto_approve_pass(cfg)
 
     board = Board.load(cfg.tasks_file)
     loc = board.find(tb_id)
@@ -244,6 +257,9 @@ def test_set_knob_with_mixed_blockers_only_strips_review(
     body = _unwrap(res)
     tb_id = body["task_id"]
 
+    # TB-383: loop pass performs the surgical review-only strip.
+    run_auto_approve_pass(cfg)
+
     board = Board.load(cfg.tasks_file)
     loc = board.find(tb_id)
     line = board.sections[loc[0]][loc[1]]
@@ -284,6 +300,10 @@ def test_gate_tag_match_retains_blocked_review_even_when_knob_on(
     )
     body = _unwrap(res)
     tb_id = body["task_id"]
+
+    # TB-383: even after the loop pass runs, the gate-tag keeps the
+    # review codespan (the pass's gate chain returns "noop").
+    run_auto_approve_pass(cfg)
 
     board = Board.load(cfg.tasks_file)
     loc = board.find(tb_id)
@@ -334,6 +354,9 @@ def test_custom_gate_tag_list_overrides_default(cfg: Config, monkeypatch):
     )
     tb2 = _unwrap(res2)["task_id"]
 
+    # TB-383: loop pass strips tb1 (not in custom gate set), keeps tb2.
+    run_auto_approve_pass(cfg)
+
     board = Board.load(cfg.tasks_file)
     line1 = board.sections[board.find(tb1)[0]][board.find(tb1)[1]]
     line2 = board.sections[board.find(tb2)[0]][board.find(tb2)[1]]
@@ -342,24 +365,25 @@ def test_custom_gate_tag_list_overrides_default(cfg: Config, monkeypatch):
 
 
 def test_should_auto_approve_helper_directly(monkeypatch):
-    """Direct unit pin on `ideation.should_auto_approve(tags)` so a
-    refactor that changes the helper signature surfaces clearly
-    instead of cascading through the `do_board_edit` integration."""
+    """Direct unit pin on `should_auto_approve(tags)` so a refactor that
+    changes the helper signature surfaces clearly instead of cascading
+    through the loop-pass integration. TB-383: the tags policy relocated
+    from `ideation` into the `auto_approve` component."""
     monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
-    assert ideation.should_auto_approve(["#anything"]) is False
-    assert ideation.should_auto_approve(None) is False
+    assert should_auto_approve(["#anything"]) is False
+    assert should_auto_approve(None) is False
 
     monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
     monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
     # Default gate-tags exclude #autopilot → auto-approve.
-    assert ideation.should_auto_approve(["#autopilot"]) is True
+    assert should_auto_approve(["#autopilot"]) is True
     # Default gate-tags include #breaking-change → retain review.
-    assert ideation.should_auto_approve(["#breaking-change"]) is False
+    assert should_auto_approve(["#breaking-change"]) is False
     # No tags at all → auto-approve (operator opted in, no gate hit).
-    assert ideation.should_auto_approve([]) is True
-    assert ideation.should_auto_approve(None) is True
+    assert should_auto_approve([]) is True
+    assert should_auto_approve(None) is True
     # Bare tag without `#` prefix still matches the gate.
-    assert ideation.should_auto_approve(["breaking-change"]) is False
+    assert should_auto_approve(["breaking-change"]) is False
 
 
 # ===========================================================================
@@ -521,9 +545,13 @@ def test_tick_halts_auto_promote_when_freeze_active(
     monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
     monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
 
-    # 1. Land an auto-approved Backlog task (the do_board_edit path
-    #    we pinned in case (b); this also emits the `auto_approved`
-    #    event the `_was_auto_approved` lookup needs).
+    # 1. Land a proposal carrying `@blocked:review`. TB-383: `board_edit`
+    #    is policy-free, so the row is born blocked and NO `auto_approved`
+    #    event fires yet — the `auto_approve` loop pass (run inside `_tick`
+    #    below at PRE_DISPATCH) strips the token + emits `auto_approved`
+    #    even while the freeze is active (real mode returns "strip"; the
+    #    freeze is enforced at the DISPATCH-time gate, not at strip time —
+    #    exactly as the pre-TB-383 proposal-time strip behaved).
     res = tools.do_board_edit(
         cfg,
         {
@@ -544,14 +572,16 @@ def test_tick_halts_auto_promote_when_freeze_active(
         end_in_retry_exhausted=True,
     )
     assert daemon._auto_approve_paused(cfg) is True
-    assert daemon._was_auto_approved(cfg, tb_paused) is True
 
-    # 3. Drive `_tick`. The auto-promote step should observe the
-    #    freeze, emit `auto_approve_paused`, and skip the
-    #    move_to_ready.
+    # 3. Drive `_tick`. The loop pass (PRE_DISPATCH) auto-approves the
+    #    proposal; the auto-promote step then observes the freeze, emits
+    #    `auto_approve_paused`, and skips the move_to_ready.
     _stub_tick_quiet(monkeypatch)
     sdk = _NoopSDK()
     asyncio.run(daemon._tick(cfg, sdk, mcp_server=None))
+
+    # The loop pass made the task auto-approved during the tick.
+    assert daemon._was_auto_approved(cfg, tb_paused) is True
 
     evts = events.tail(cfg.events_file, 200)
     paused = [e for e in evts if e.get("type") == "auto_approve_paused"]

@@ -49,6 +49,7 @@ import pytest
 # tests that need them (only the grep-shape pin reads their source
 # text, which is filesystem-level — no Python import required).
 from ap2 import automation_status, doctor, ideation  # noqa: F401
+from ap2.components import auto_approve
 from ap2.config import Config
 from ap2.config_compat import (
     FLAT_TO_SECTIONED,
@@ -152,16 +153,19 @@ def test_no_direct_env_reads_in_cross_package_files():
 
 
 def test_cfg_get_component_value_path_present_in_primary_consumers():
-    """Positive form of the grep-shape pin: the three primary
-    cross-package consumers (`automation_status.py`, `board_edits.py`,
-    `operator_queue.py`) call `cfg.get_component_value("auto_approve",
-    ...)` at least once. The briefing's secondary Verification bullet
-    (`grep -rE "get_component_value\\(.auto_approve."` on those three
-    files) requires the resolved-config read path to be present in each.
+    """Positive form of the grep-shape pin: the primary cross-package
+    consumers (`automation_status.py`, `operator_queue.py`) call
+    `cfg.get_component_value("auto_approve", ...)` at least once.
+
+    TB-383: `board_edits.py` was DROPPED from this list — its add_backlog
+    path is now policy-free (it no longer evaluates the auto-approve gate
+    nor reads the `AP2_AUTO_APPROVE` knob inline). The gate-chain read
+    moved into the `auto_approve` component's loop pass + the gate
+    helpers. `operator_queue.py` keeps its queue-drain gate (TB-293), so
+    it remains a consumer.
     """
     for rel in (
         "ap2/automation_status.py",
-        "ap2/board_edits.py",
         "ap2/operator_queue.py",
     ):
         src = (_REPO_ROOT / rel).read_text(encoding="utf-8")
@@ -251,22 +255,22 @@ def test_positive_int_cap_helper_cfg_reads_match_env(
 def test_ideation_should_auto_approve_cfg_reads_match_env(
     cfg, clean_env, emit_reset,
 ):
-    """`ideation.should_auto_approve(tags, cfg)` honors both the master
+    """`auto_approve.should_auto_approve(tags, cfg)` honors both the master
     switch (`AP2_AUTO_APPROVE`) and the per-shape gate
     (`AP2_AUTO_APPROVE_GATE_TAGS`) read via cfg. Same gate logic as the
     pre-TB-332 env-only helper.
     """
     # Master switch off → False regardless of tags.
     clean_env.delenv("AP2_AUTO_APPROVE", raising=False)
-    assert ideation.should_auto_approve(["#anything"], cfg) is False
+    assert auto_approve.should_auto_approve(["#anything"], cfg) is False
     # Master switch on, default gate tags → #breaking-change blocks.
     clean_env.setenv("AP2_AUTO_APPROVE", "1")
     clean_env.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
-    assert ideation.should_auto_approve(["#breaking-change"], cfg) is False
-    assert ideation.should_auto_approve(["#autopilot"], cfg) is True
+    assert auto_approve.should_auto_approve(["#breaking-change"], cfg) is False
+    assert auto_approve.should_auto_approve(["#autopilot"], cfg) is True
     # Operator-customized gate tags via flat env.
     clean_env.setenv("AP2_AUTO_APPROVE_GATE_TAGS", "#__never__")
-    assert ideation.should_auto_approve(["#breaking-change"], cfg) is True
+    assert auto_approve.should_auto_approve(["#breaking-change"], cfg) is True
 
 
 def test_collect_auto_approve_state_cfg_reads_match_env(
@@ -351,18 +355,18 @@ def test_positive_int_cap_default_none_falls_back_to_env(clean_env):
 
 
 def test_ideation_should_auto_approve_default_none_falls_back_to_env(clean_env):
-    """`ideation.should_auto_approve(tags)` (no cfg) reads
+    """`auto_approve.should_auto_approve(tags)` (no cfg) reads
     `AP2_AUTO_APPROVE` + `AP2_AUTO_APPROVE_GATE_TAGS` via the env-
     fallback branch. Pins the TB-223 `test_should_auto_approve_helper_
     directly` contract.
     """
     clean_env.delenv("AP2_AUTO_APPROVE", raising=False)
-    assert ideation.should_auto_approve(["#anything"]) is False
-    assert ideation.should_auto_approve(None) is False
+    assert auto_approve.should_auto_approve(["#anything"]) is False
+    assert auto_approve.should_auto_approve(None) is False
     clean_env.setenv("AP2_AUTO_APPROVE", "1")
     clean_env.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
-    assert ideation.should_auto_approve(["#autopilot"]) is True
-    assert ideation.should_auto_approve(["#breaking-change"]) is False
+    assert auto_approve.should_auto_approve(["#autopilot"]) is True
+    assert auto_approve.should_auto_approve(["#breaking-change"]) is False
 
 
 def test_doctor_auto_approve_audit_default_none_falls_back_to_env(clean_env):
@@ -388,8 +392,8 @@ def test_doctor_auto_approve_audit_default_none_falls_back_to_env(clean_env):
         (automation_status._is_auto_approve_dry_run, ()),
         (automation_status._is_validator_judge_noisy_pause_disabled, ()),
         (automation_status._freeze_threshold, ()),
-        (ideation._is_auto_approve_enabled, ()),
-        (ideation._auto_approve_gate_tags, ()),
+        (auto_approve._is_auto_approve_enabled, ()),
+        (auto_approve._auto_approve_gate_tags, ()),
         (doctor.auto_approve_audit, ()),
     ],
 )
@@ -422,7 +426,7 @@ def test_should_auto_approve_rejects_non_config_positional():
     positional `tags`; pin TypeError on the second arg explicitly.
     """
     with pytest.raises(TypeError):
-        ideation.should_auto_approve(["#x"], "not-a-config")
+        auto_approve.should_auto_approve(["#x"], "not-a-config")
 
 
 # ---------------------------------------------------------------------------

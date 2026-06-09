@@ -59,6 +59,7 @@ import pytest
 
 from ap2 import automation_status, events, tools
 from ap2.board import Board
+from ap2.components.auto_approve import run_auto_approve_pass
 from ap2.config import Config
 from ap2.init import init_project
 
@@ -151,6 +152,10 @@ def test_would_auto_approve_event_fires_when_dry_run_set(
     body = _unwrap(res)
     tb_id = body["task_id"]
 
+    # TB-383: `board_edit` is policy-free — run the loop pass (the
+    # daemon's PRE_DISPATCH step) to drive the dry-run evaluation.
+    run_auto_approve_pass(cfg)
+
     # (a) `would_auto_approve` event fires with the right shape.
     evts = events.tail(cfg.events_file, 50)
     would_evts = [e for e in evts if e.get("type") == "would_auto_approve"]
@@ -215,6 +220,9 @@ def test_blocked_review_codespan_preserved_in_dry_run_mode(
     )
     tb_id = _unwrap(res)["task_id"]
 
+    # TB-383: drive the loop pass; dry-run must preserve the codespan.
+    run_auto_approve_pass(cfg)
+
     # Re-read TASKS.md from disk to catch a regression where the
     # in-memory row reads correctly but the persisted line dropped
     # the codespan.
@@ -266,6 +274,9 @@ def test_real_auto_approve_unaffected_when_dry_run_unset(
     )
     tb_id = _unwrap(res)["task_id"]
 
+    # TB-383: loop pass performs the real strip (dry-run unset).
+    run_auto_approve_pass(cfg)
+
     # Row's `@blocked:review` is stripped (TB-223 behavior).
     board = Board.load(cfg.tasks_file)
     loc = board.find(tb_id)
@@ -314,6 +325,10 @@ def test_falsy_dry_run_values_treated_as_unset(cfg: Config, monkeypatch):
         },
     )
     tb_id = _unwrap(res)["task_id"]
+
+    # TB-383: loop pass strips (falsy dry-run → real path).
+    run_auto_approve_pass(cfg)
+
     board = Board.load(cfg.tasks_file)
     loc = board.find(tb_id)
     line = board.sections[loc[0]][loc[1]]
