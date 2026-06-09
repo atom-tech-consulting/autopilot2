@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/communication-component-inbound-outbound.md",
   "focus_anchor": "every loop level autonomous behavior auto",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-09T04:41:24Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-09T00:36:13Z",
   "tb_id": "TB-389",
   "why_now": "channel multiplicity (mattermost today, slack/email later) is currently a\nkernel concern \u2014 core walks `channel_adapters()` in four call sites and polls\ninbound via a one-off hook_point; folding it behind one component now, while\nmattermost is the only channel, is far cheaper than after a second channel\nhard-codes the leak deeper."
