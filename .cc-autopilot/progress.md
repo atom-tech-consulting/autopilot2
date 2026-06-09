@@ -1503,3 +1503,9 @@
 - **Summary:** Extracted the optional LLM prose-judge (`_judge_prose_bullet`) out of core verify.py into a new `ap2/components/verifier_judge/` component reached via a new `Registry.verifier_judge(cfg)` resolver; the shell-bullet gating path, parse helpers, and aggregation stay in core, the component is a default-on kill switch (`AP2_VERIFY_JUDGE_DISABLED`), and a back-compat module `__getattr__` keeps legacy `verify._judge_prose_bullet` references working without core importing ap2.components — full suite 3047 passed.
 - **Files:** ap2/components/verifier_judge/__init__.py, ap2/components/verifier_judge/impl.py, ap2/components/verifier_judge/manifest.py, ap2/verify.py, ap2/registry.py, ap2/env_reload.py, ap2/init.py, ap2/config_compat.py, ap2/howto.md, ap2/tests/test_tb334_core_cfg_reads.py, ap2/tests/test_tb382_verifier_judge_component.py
 - **Tests:** pass
+
+## [2026-06-09] TB-383: Decouple auto-approve from board_edit into a loop pass (axis 3)
+- **Commit:** `563e9d0`
+- **Summary:** Made board_edit policy-free (proposals born @blocked:review) and moved the auto-approve gate chain + should_auto_approve tags policy into the auto_approve component as a real PRE_DISPATCH loop pass (run_auto_approve_pass); behavior/event payloads preserved bit-for-bit and the full suite (3027) passes.
+- **Files:** ap2/board_edits.py, ap2/components/auto_approve/impl.py, ap2/components/auto_approve/__init__.py, ap2/components/auto_approve/manifest.py, ap2/ideation.py, ap2/tests/test_tb383_auto_approve_loop_pass.py, ap2/tests/test_tb223_auto_approve.py, ap2/tests/test_tb232_auto_approve_dry_run.py, ap2/tests/test_tb224_token_caps.py, ap2/tests/test_tb272_validator_judge_noisy_pause.py, ap2/tests/test_tb361_thinking_block_recovery.py, ap2/tests/test_tb332_auto_approve_cross_package_cfg_reads.py, ap2/tests/e2e/test_walk_away_loop.py
+- **Tests:** pass
