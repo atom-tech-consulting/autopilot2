@@ -16,24 +16,40 @@ These three constraints drive every other decision in the codebase.
 
 `daemon.main_loop` (TB-122) runs two concurrent asyncio coroutines via `asyncio.gather`:
 
-**`_main_tick_loop`** — scheduled work, default 30s (`AP2_TICK_S`):
+**`_main_tick_loop`** — scheduled work, default 30s (`AP2_TICK_S`). The tick is **phase-walked**: the component registry (see **Component model**) defines a `Phase` vocabulary, and `_tick` walks `default_registry().tick_hooks(<phase>)` at each stage — interleaving those component hooks with the core steps that stay inline (operator-queue drain, pipeline-pending sweep, task dispatch). Each registered hook self-gates on its component's `env_flag` and owns its own error surface, so the walk is a uniform iteration over both sync and async hooks (the daemon `await`s any coroutine a hook returns):
 
 ```
 _tick(cfg, sdk, mcp_server):
-  1. Cron       — load_jobs + due_jobs → run_cron per due job
-  2. Tasks      — board.next_ready, or auto-promote next_dispatchable("Backlog")
-                  → run_task on the picked task
-  3. Pipeline   — _sweep_pipeline_pending (no-op unless Pipeline Pending tasks exist)
-  4. Ideation   — _maybe_ideate (no-op unless Active is empty AND Ready+Backlog
-                  count < AP2_IDEATION_TRIGGER_TASK_COUNT (default 3) + cooldown)
-  5. Watchdog   — _maybe_auto_diagnose (no-op unless idle threshold passed)
+  0a.  env hot-reload + effective-config snapshot                      (core)
+  0.   operator-queue drain → commit applied ops                       (core)
+  0.5  Phase.PRE_DISPATCH       — auto_unfreeze sweep, ideation roadmap-
+                                  exhaustion halt, auto_approve pass
+                                  (deterministic name-sorted order:
+                                   auto_approve < auto_unfreeze < ideation)
+  0.7  Phase.ATTENTION_EMISSION — attention detector → attention_raised events
+                                  (before cron so a status-report fire sees them)
+  1.   Phase.CRON_DISPATCH      — cron scheduler component: load_jobs + due_jobs,
+                                  resolve each job.name to its registered handler
+  2.   pipeline-pending sweep   — _sweep_pipeline_pending                (core)
+  3.   task dispatch            — board.next_ready, else iterate dispatchable
+                                  Backlog past auto-approve-gated heads → run_task
+                                  (the per-task promote-time gate is inline)  (core)
+  3.9  Phase.IDEATION           — ideation component: operator-forced force_ideate
+                                  (hook-point), then natural empty-board _maybe_ideate
+  5.   idle watchdog            — _maybe_auto_diagnose                    (core)
+  6.   Phase.COMMUNICATION      — communication component: drain the `ap2.notify`
+                                  queue → deliver outbound to internal channels
 ```
+
+`Phase.POST_CRON` is in the vocabulary but `_tick` does **not** walk it — the cron scheduler owns the janitor cron job's invocation cadence (it resolves janitor's handler from the cron job-handler registry), so janitor's tick-callable is registered on `POST_CRON` only to keep the registry's phase-keyed view complete. `Phase.POST_DISPATCH` was **removed** (TB-388): its sole registrant was an auto_approve placeholder, which TB-383 promoted to a real `PRE_DISPATCH` loop pass, leaving the phase walked-but-empty every tick; the per-task dispatch-time auto-approve gate stays inline in step 3.
 
 **`_mm_loop`** — Mattermost polling, default 10s (`AP2_MM_TICK_S`):
 
 ```
 _mm_loop(cfg, sdk, mcp_server):
-  - check_new_messages → asyncio.create_task(handle_message(...)) per mention
+  - _check_inbound_messages → resolves the communication component's
+    `poll_inbound` hook (TB-389 — core no longer walks a channel list)
+    → asyncio.create_task(handle_message(...)) per mention
   - Every handler runs with the SAME fixed toolset (TB-145):
       MM_HANDLER_TOOLS  (CONTROL_AGENT_TOOLS minus
                          ideation_state_write, board_edit)
@@ -47,7 +63,48 @@ _mm_loop(cfg, sdk, mcp_server):
 
 The two loops share the same `Config`, SDK handle, and MCP server. Board mutations go through `locked_board()` (fcntl.flock), which serializes concurrent access. The pause flag (`<root>/.cc-autopilot/paused`, presence-only) short-circuits both loops.
 
-Steps in `_tick` run sequentially. A failure in any step emits an event and continues to the next — one broken cron job doesn't block task dispatch. Each loop body is wrapped in try/except so the daemon never exits on an unhandled error.
+Stages in `_tick` run sequentially. A failure in most stages emits an event and continues to the next — one broken cron job doesn't block task dispatch. Most stages are wrapped in try/except; the `PRE_DISPATCH` / `ATTENTION_EMISSION` walks intentionally are not, because each hook owns its own error surface (e.g. `auto_unfreeze_skipped reason=sweep_error`) and a uniform handler would mask that observable shape. Each loop body is wrapped so the daemon never exits on an unhandled error.
+
+## Component model
+
+The loop subsystems that used to be flat top-level modules wired into `_tick` by direct import are now **components**: opt-in subpackages under `ap2/components/<name>/`, each a `manifest.py` + `impl.py` pair, discovered and dispatched through a registry. Today's components: `attention`, `auto_approve`, `auto_unfreeze`, `janitor`, `cron`, `communication`, `ideation`.
+
+**The registry (`registry.py`).** `Registry.discover()` walks `ap2/components/*/manifest.py` via `pkgutil.iter_modules` and reads each module's `MANIFEST` attribute — there is **no hardcoded list of component names** anywhere in core. A future migration ships a subpackage with a `MANIFEST` and the registry picks it up with zero registry-side edits. `default_registry()` caches the discovered set per process.
+
+**`Manifest`.** A frozen dataclass declaring one component's shape: `name`, `env_flag`, `default_enabled`, `hook_points` (a `dict[str, Callable]` of named hooks the component provides), `tick_hooks` (a list of `(Phase, TickHook)` pairs), `dependencies`, and a `config_schema` (per-component TOML knobs). `tick_hooks(phase)` assembles the ordered hook list across all manifests for that phase, name-sorted by component for determinism.
+
+**`env_flag` polarity.** `Manifest.is_enabled()` is the single source of truth (shared by the registry's enabled-walk and the `ap2 status` `## Components` enumeration):
+
+- `env_flag is None` → always-on (subject to `default_enabled`). Only `attention` and `communication` are always-on today.
+- `env_flag` set with `default_enabled=True` → the env var is a **kill switch** (suppress polarity): a truthy value DISABLES. The conventional shape is `*_DISABLED` (e.g. `AP2_JANITOR_DISABLED`, `AP2_CRON_DISABLED`, `AP2_AUTO_UNFREEZE_DISABLED`).
+- `env_flag` set with `default_enabled=False` → the env var is an **opt-in toggle** (require polarity): a truthy value ENABLES (e.g. `AP2_AUTO_APPROVE`).
+
+**Import-direction CI gate.** Core never statically imports `ap2/components/` — a component may import core freely (component → core), but core → component is forbidden. `tests/test_core_import_direction.py` AST-walks every `.py` under `ap2/` (except `ap2/components/` and `ap2/tests/`) and fails the build on any `Import` / `ImportFrom` referencing `ap2.components`. The only exempt path is `registry.py`, whose discovery uses dynamic `importlib.import_module(...)` (a `Call`, not a static import, so the gate is quiet by construction). This is what keeps the cleavage from eroding silently and is the prerequisite for an eventual OSS cut.
+
+**The generic `contributions(point)` accessor.** A single fan-out accessor replaces the registry's former bespoke per-kind methods (`channel_adapters()`, `briefing_validators()`, `verifier_judge()` — all removed). It walks every manifest's `hook_points.get(point)` in name-sorted order and merges: dict-shaped points dict-merge (later manifests win on a key collision), list/scalar points list-merge. It is **fan-out only** — the registry assembles and returns the merged contributions and performs **no keyed dispatch**. Keying stays consumer-local: the cron scheduler does `handlers.get(job.name, DEFAULT)` itself. A surface earns a `contributions(point)` only when multiple owners feed it AND it stays in core (cron job handlers — fed by core + the janitor component).
+
+**The loop-level boundary principle.** A component is a **top-level loop participant** — a tick phase, or a coarse loop surface (inbound/outbound communication). Three corollaries:
+
+- **Sub-step leaves are adapters, not components.** An LLM judge invoked only as an internal sub-step of a deterministic core runner (the verification prose-judge, the briefing dep-coherence judge) is not a loop participant; it is an `AgentAdapter` the runner resolves via `select_adapter(...)`, not a component. (See **Judges are adapters, not components**.)
+- **Internal multiplicity lives inside its owning component.** Multiple cron jobs live behind the one cron scheduler; multiple communication channels live inside the communication component. The core surface sees one phase, not the fan-out.
+- **A surface owned wholly by one component is internal to it**, never a core extension point — which is why `channel_adapters()` was removed (channels are wholly the communication component's) while `cron_job_handlers` stays a `contributions(point)` (fed by both core and the janitor component).
+
+### Cron: scheduler + job-handler registry
+
+Cron is two layers. The **scheduler** is the `cron` component (`Phase.CRON_DISPATCH`): it owns *when* jobs run — `load_jobs` → `due_jobs` → per-job dispatch + the `cron_*` lifecycle events. *What* each job does is a **registered handler**, resolved by name from a cross-component registry that overlays `registry.contributions("cron_job_handlers")` (today only the janitor component's `{"janitor": …}`) on top of `cron_handlers.CORE_CRON_HANDLERS` (`status-report`, `real-sdk-smoke`), falling through to `cron_handlers.DEFAULT_CRON_HANDLER` (the generic LLM-cron path). This data-driven lookup replaced the pre-component `if job.name == …` switch. The reusable interval-engine primitives (`CronJob`, `parse_interval`, `load_jobs`, `due_jobs`, `mark_run`, …) stay in core `ap2/cron.py` because core consumers depend on them and the import-direction gate forbids core from importing the component; the scheduler component drives that core library on the tick.
+
+### Communication: one component owns both directions
+
+The `communication` component owns inbound + outbound as tick-phase work and holds its channel adapters (Mattermost today; Slack / email later) in an **internal** registry (`communication.channels.channel_registry`) that core cannot see. Outbound is event-driven: a core call site appends to the `ap2.notify` queue (`notify.py` — a pure filesystem write, no `ap2.components.*` import), and the component's `Phase.COMMUNICATION` tick hook drains and delivers. Inbound: `_mm_loop` resolves the component's `poll_inbound` hook. The former core surface — `registry.channel_adapters()` and a one-off `inbound_poll` core walk — is **gone** (TB-389); channel multiplicity is no longer a kernel concern. (`ap2/components/mattermost/` survives as a channel-adapter subpackage with no `manifest.py`, so the registry does not discover it as a top-level component; the communication component imports its handlers internally.)
+
+### Judges are adapters, not components
+
+Neither LLM judge is a component:
+
+- The **verification prose-judge** (`verify._judge_prose_bullet`) is an internal sub-step of the deterministic `verify_task` runner.
+- The **briefing dependency-coherence judge** (`briefing_validators._check_dependency_coherence` / `_judge_dep_coherence_default`) is an internal sub-step of the deterministic `_validate_briefing_structure` runner.
+
+TB-382 / TB-316 had briefly modeled these as `verifier_judge/` and `validator_judge/` components; TB-386 demoted both back into their core runners because a sub-step leaf is not a loop-level participant. Each still resolves its backend via `select_adapter("verifier_judge", cfg)` / `select_adapter("validator_judge", cfg)` (see **Agent backends**) — the adapter seam stays; only the redundant component wrapper is gone. Each has a config off-switch (`AP2_VERIFY_JUDGE_DISABLED` / `AP2_VALIDATOR_JUDGE_DISABLED`) so a deployment can verify with shell bullets / structural checks alone; with the judge disabled, prose bullets fall through to the non-gating `unverified` path while the deterministic checks still gate. The pipeline subsystem (`pipeline_sweep.py`, `pipeline_task_start`) likewise stays in core — it is loop plumbing, not an opt-in component.
 
 ## Agent kinds
 
@@ -56,9 +113,9 @@ There are four kinds of SDK queries, each with its own prompt builder, tool allo
 | Kind | Trigger | Prompt builder | Tools | Timeout |
 |---|---|---|---|---|
 | **Task** | `run_task` (step 3) | `prompts.build_task_prompt` | `TASK_AGENT_TOOLS` (Read/Edit/Write/Bash + `pipeline_task_start`) | `AP2_TASK_TIMEOUT_S` (1200s) |
-| **Cron** | `run_cron` (step 2) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/mm/log_event/daemon_control/ideation_state_write — `cron_edit` dropped TB-146) | `AP2_CONTROL_TIMEOUT_S` (1200s) |
+| **Cron** | `run_cron` (step 1, `Phase.CRON_DISPATCH`) | `prompts.build_control_prompt` | `CONTROL_AGENT_TOOLS` (board/mm/log_event/daemon_control/ideation_state_write — `cron_edit` dropped TB-146) | `AP2_CONTROL_TIMEOUT_S` (1200s) |
 | **Mattermost** | `handle_message` (`_mm_loop`) | `prompts.build_mattermost_prompt` | `MM_HANDLER_TOOLS` (CONTROL_AGENT_TOOLS minus ideation_state_write/board_edit — TB-145, was TB-122's RESTRICTED; `cron_edit` separately dropped from CONTROL_AGENT_TOOLS in TB-146) | `AP2_CONTROL_TIMEOUT_S` |
-| **Ideation** | `_maybe_ideate` (step 4) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `IDEATION_TOOLS` (CONTROL_AGENT_TOOLS minus operator_queue_append; TB-291) | `AP2_CONTROL_TIMEOUT_S` |
+| **Ideation** | `_maybe_ideate` (step 3.9, `Phase.IDEATION`) | `prompts.build_control_prompt` + `ap2/ideation.default.md` body | `IDEATION_TOOLS` (CONTROL_AGENT_TOOLS minus operator_queue_append; TB-291) | `AP2_CONTROL_TIMEOUT_S` |
 
 Task agents are the only kind that gets `Write`/`Edit`. They commit code; everything else mutates state through MCP tools.
 
@@ -190,32 +247,36 @@ State-file commits land with subject `state: TB-N → Complete` (per task) or `s
 
 ## Module map
 
-The layout is intentionally flat — sibling modules instead of subpackages — so a reader can `ls ap2/*.py` and see the full surface in one screen, and each split (TB-262 → `tools.py`; TB-263 → `daemon.py`; TB-264 → `cli.py`; TB-265 → `web.py`) lands as new top-level files rather than nested namespaces. The descriptions below name the load-bearing public symbols each module hosts so a reader can re-attribute a stale `tools.py:684`-style citation to its new home.
+**Core** is intentionally flat — sibling modules instead of subpackages — so a reader can `ls ap2/*.py` and see the surface in one screen, and each split (TB-262 → `tools.py`; TB-263 → `daemon.py`; TB-264 → `cli.py`; TB-265 → `web.py`) lands as new top-level files rather than nested namespaces. The **components** (see **Component model**) are the exception: each loop subsystem lives in its own `ap2/components/<name>/` subpackage (a `manifest.py` + `impl.py` pair) walked by the registry at startup. The descriptions below name the load-bearing public symbols each module hosts so a reader can re-attribute a stale `tools.py:684`-style citation to its new home. Note what is **not** a component: the LLM judges (the verification prose-judge in `verify.py`, the briefing dep-coherence judge in `briefing_validators.py`) are core sub-steps reached via `select_adapter(...)`, the cron interval engine stays in core `cron.py`, and the pipeline subsystem (`pipeline_sweep.py`) stays in core.
 
 ```
 ap2/
+├── registry.py           # Manifest, Phase, Registry.discover (pkgutil walk of components/*/manifest.py),
+│                         # default_registry, contributions(point) — the component registry (no hardcoded
+│                         # component list; core resolves every component through this seam)
+├── config_loader.py      # ConfigKey + validate_config (per-component [components.<name>] TOML schema)
+├── components/           # opt-in loop subsystems, each a manifest.py + impl.py subpackage the
+│   │                     # registry discovers; core never statically imports this tree (CI-gated)
+│   ├── attention/        # proactive attention-condition detector (Phase.ATTENTION_EMISSION) — the
+│   │                     # task_stuck / task_frozen / validator_judge_noisy / auto_approve_paused /
+│   │                     # cost_cap_approach conditions; emits attention_raised events (one per fresh
+│   │                     # condition) + optional immediate MM push (always-on; env_flag=None)
+│   ├── auto_approve/      # evaluate_auto_approve_decision + the promote-time gate chain (Phase.PRE_DISPATCH
+│   │                     # pass); opt-in via AP2_AUTO_APPROVE (default_enabled=False)
+│   ├── auto_unfreeze/     # _maybe_auto_unfreeze sweep consuming `BriefingFix:` lines (Phase.PRE_DISPATCH);
+│   │                     # kill switch AP2_AUTO_UNFREEZE_DISABLED
+│   ├── cron/             # the cron SCHEDULER (Phase.CRON_DISPATCH): load_jobs → due_jobs → resolve each
+│   │                     # job.name to its handler; kill switch AP2_CRON_DISABLED (interval engine stays in cron.py)
+│   ├── communication/    # owns inbound (poll_inbound hook) + outbound (Phase.COMMUNICATION, drains ap2.notify);
+│   │                     # wraps its channel adapters (mattermost/ subpackage) in an internal registry (always-on)
+│   ├── ideation/         # the proposal engine (Phase.IDEATION run_ideation_tick → _maybe_ideate) + the
+│   │                     # roadmap-exhaustion halt (Phase.PRE_DISPATCH); kill switch AP2_IDEATION_DISABLED
+│   ├── janitor/          # repo-hygiene findings (TB-217 family); contributes {"janitor": handler} to the
+│   │                     # cron job-handler registry + status_findings_counts; kill switch AP2_JANITOR_DISABLED
+│   └── mattermost/       # channel-adapter subpackage (NO manifest.py — not a discovered component);
+│                         # owned by communication; check_new_messages / reply / thread-read handlers
 ├── _shared.py            # cross-module utilities (locks, parsers) imported by both daemon and tools without cycling
 ├── audit.py              # ap2 audit retrospective-walk helpers (TB-248)
-├── auto_approve.py       # evaluate_auto_approve_decision, _auto_approve_paused, _validator_judge_noisy_paused
-│                         # (TB-223 / TB-224 / TB-225 / TB-272 — auto-promote-from-Backlog gate + halt bookkeeping)
-├── auto_unfreeze.py      # _maybe_auto_unfreeze, _auto_unfreeze_allowlist, _apply_auto_unfreeze_patch
-│                         # (TB-225 — sweep that consumes `BriefingFix:` lines from blocked summaries)
-├── attention.py          # detect_attention_conditions, _detect_task_stuck (TB-282), _detect_task_frozen
-│                         # (TB-287), _detect_validator_judge_noisy (TB-288), _detect_auto_approve_paused
-│                         # (TB-289 — per-reason `auto_approve_paused:<reason>` surface naming the
-│                         # `ap2 ack <verb>` resume nudge), _detect_cost_cap_approach (TB-290 —
-│                         # singleton `cost_cap_approach:window` pre-trip companion to the post-trip
-│                         # `auto_approve_paused:window_token_cap_exceeded` surface; reuses
-│                         # `auto_approve._auto_approve_check_violations`'s window walk so the
-│                         # approach-sum matches the trip-sum) — proactive attention-detector
-│                         # surface; daemon's `_maybe_emit_attention_events` consumes the AttentionCondition
-│                         # list and emits `attention_raised` events per fresh condition; TB-297
-│                         # adds an opt-in `_maybe_push_attention` companion that posts a one-line
-│                         # `[<project>] ⚠ <summary>` to AP2_MM_CHANNELS[0] (gated on
-│                         # AP2_ATTENTION_IMMEDIATE_PUSH; debounce reuses AP2_ATTENTION_DEBOUNCE_S
-│                         # structurally — push runs only after a fresh attention_raised appends —
-│                         # emits attention_pushed / attention_push_error / attention_push_no_destination
-│                         # audit events parallel to the watchdog's no-destination sticky-warn pattern)
 ├── automation_stats.py   # /stats aggregation helpers (windows, sparklines, top-N expensive tasks)
 ├── automation_status.py  # collect_auto_approve_state, status-line composer for ap2 status / web home
 ├── backfill.py           # ap2 backfill-proposals — historical proposal-record reconstruction (TB-195)
@@ -240,7 +301,14 @@ ap2/
 ├── cli_review.py         # cmd_audit / cmd_ideate / cmd_update_goal / cmd_rollback / cmd_backfill_proposals /
 │                         # cmd_ack (TB-264 split: the review / ack operator verbs)
 ├── config.py             # Config dataclass, env-var resolution, .cc-autopilot/env loader
-├── cron.py               # CronJob dataclass, load_jobs, due_jobs, mark_run, bootstrap
+├── channel.py            # ChannelAdapter ABC + core stdout/file fallback adapters (TB-312) — the
+│                         # destination abstraction the communication component's channels build on
+├── cron.py               # the cron INTERVAL ENGINE library: CronJob dataclass, load_jobs, due_jobs,
+│                         # mark_run, bootstrap (stays in core so core consumers can use it; the
+│                         # SCHEDULER that drives it on the tick is the cron component)
+├── cron_handlers.py      # CORE_CRON_HANDLERS (status-report, real-sdk-smoke) + DEFAULT_CRON_HANDLER
+│                         # (generic LLM-cron) + JobHandler type — the core side of the cron job-handler
+│                         # registry the scheduler aggregates with the janitor component's contribution
 ├── daemon.py             # main_loop, _tick, _main_tick_loop, _mm_loop, run_task, run_cron, handle_message,
 │                         # _run_control_agent, _make_stderr_sink, _handle_failure, _recover_orphans,
 │                         # _infer_result_from_head (post-TB-263: state-commit / pipeline-sweep /
@@ -254,17 +322,20 @@ ap2/
 ├── events.py             # append-only JSONL writer, tail(), MEANINGFUL_EVENT_TYPES
 ├── goal.py               # goal.md parsing + roadmap_exhausted predicate consumed by ideation / dispatch /
 │                         # auto-approve gates
-├── ideation.py           # _maybe_ideate (empty-board trigger + cooldown + TB-246 roadmap_complete skip)
-├── ideation_halt.py      # maybe_halt_on_exhaustion (TB-345 — CORE ideation-exhaustion halt; merged the
-│                         # former focus_advance component; focus_pointer.json bookkeeping +
-│                         # roadmap_complete emission; called from the daemon's PRE_DISPATCH phase, not the registry)
+├── ideation.py           # back-compat `__getattr__` shim (TB-391: the proposal engine moved to the
+│                         # ideation component) + the read-layer / shared data that stays core: prompt
+│                         # loader (load_prompt → ideation.default.md), decision/focus parsers, the
+│                         # *_DEFAULT knobs
+├── ideation_halt.py      # back-compat shim (TB-391: maybe_halt_on_exhaustion moved to the ideation
+│                         # component's Phase.PRE_DISPATCH hook; focus_pointer.json bookkeeping +
+│                         # roadmap_complete emission live there now)
 ├── init.py               # init_project (gitignores, dirs, board templates) + BRIEFING_TEMPLATE
 ├── insights.py           # maybe_regenerate_index (.cc-autopilot/insights/_index.md)
-├── janitor.py            # ap2 janitor — repo-hygiene findings (TB-217 family)
 ├── json_extract.py       # extract_rightmost_json_object — shared JSON tail-parse helper (TB-261)
 │                         # used by the validator-judge parsers and any other LLM-response consumer
-├── mattermost.py         # check_new_messages (one-shot poll), reply
 ├── message_dump.py       # .stream.jsonl / .messages.jsonl per-run debug-dump writers (TB-85)
+├── notify.py             # outbound notification queue (TB-389) — core call sites append a JSONL record
+│                         # here instead of walking a channel list; the communication component drains it
 ├── operator_log.py       # operator_log.md append helpers (operator-decision audit trail)
 ├── operator_queue.py     # do_operator_queue_append (TB-262 split out of tools.py), drain_operator_queue,
 │                         # _apply_operator_op, enqueue_operator_ack — the TB-131/TB-141 queue-routed
@@ -318,7 +389,7 @@ ap2/
 ```
 
 Cycles to watch out for:
-- `daemon` ↔ `ideation`: `daemon` imports `ideation` at top-level (step 4 calls `_maybe_ideate`); `ideation` lazy-imports `daemon` inside `_maybe_ideate` to call `_run_control_agent` + `state_commit._commit_state_files`. The lazy import is load-bearing.
+- `daemon` → components: `daemon._tick` resolves every component purely through the registry (`default_registry().tick_hooks(<phase>)` and the `force_ideate` hook-point) — it never statically imports `ap2/components/`, and the CI import-direction gate enforces that. A component may import core freely (e.g. the ideation component's `impl.py` imports `ap2.ideation` / `ap2.daemon` to reach `_run_control_agent` + `state_commit._commit_state_files`); only core → component is forbidden.
 - `daemon` ↔ `tools` / `board_edits` / `operator_queue`: `daemon` imports `tools` (which now re-exports the TB-262-split sibling handlers) and directly imports `do_board_edit` from `board_edits`; none of those tool modules import `daemon`. Tool handlers receive a `Config` and read events directly.
 - `tools` ↔ `briefing_validators` / `board_edits` / `operator_queue`: `tools.py` lazy-imports the split siblings AFTER its own `_ok`/`_err`/`slugify` definitions so the siblings can resolve `from .tools import _ok, _err, slugify` against `tools`'s partial-load state. The bottom-of-file re-export block (`from .briefing_validators import IMPACT_VERDICTS, _validate_briefing_structure, …`) keeps the pre-TB-262 `ap2.tools` import surface intact for callers (tests + ideation) that haven't been migrated to the new homes.
 
