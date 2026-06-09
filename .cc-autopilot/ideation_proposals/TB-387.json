@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-386",
+  "briefing_path": ".cc-autopilot/tasks/one-generic-contributions-point-registry.md",
+  "focus_anchor": "a ci gate fails the build",
+  "proposed_at": "2026-06-09T00:34:29Z",
+  "tb_id": "TB-387",
+  "why_now": "with the judge accessors removed (TB-386) the registry's only remaining\nbespoke fan-out methods are `channel_adapters()` and `cron_job_handlers()`;\ncollapsing them now \u2014 before the communication and ideation extractions add new\ncall sites \u2014 prevents each new component from minting another one-off accessor and\nre-growing the clutter the boundary refactor exists to remove."
+}

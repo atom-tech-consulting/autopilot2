@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-382",
+  "briefing_path": ".cc-autopilot/tasks/demote-both-llm-judges-from-components-t.md",
+  "focus_anchor": "a ci gate fails the build",
+  "proposed_at": "2026-06-09T00:33:31Z",
+  "tb_id": "TB-386",
+  "why_now": "verifier-judge-as-a-component shipped hours before the operator reframed\nthe boundary to exclude sub-step leaves; left in place it is a live wrong-direction\nprecedent that later axis-5 work would build on, and it keeps two dead per-kind\nregistry accessors (briefing_validators, verifier_judge) blocking the\nsingle-generic-accessor signal."
+}
