@@ -145,12 +145,6 @@ class Phase(enum.Enum):
                            the manifest schema's completeness; daemon._tick
                            does not iterate POST_CRON itself — the cron
                            scheduler owns that invocation cadence.
-    - POST_DISPATCH      — fires after task dispatch. Reserved for the
-                           auto_approve gate logic when axis (5)
-                           extracts it from the inline dispatch block;
-                           today's stub-manifest registers a no-op on
-                           this phase so the walk-everything contract
-                           is uniform.
     - CRON_DISPATCH      — TB-381 axis 1: the cron *scheduler* phase. The
                            cron component (`ap2/components/cron/`)
                            registers its due-check-loop + per-job
@@ -173,10 +167,15 @@ class Phase(enum.Enum):
                            today — `ideation._maybe_ideate` stays a direct
                            core call until axis 3 moves it), so the walk is
                            in place the moment a hook is registered.
+
+    TB-388 removed the `POST_DISPATCH` member (and its `daemon._tick` walk).
+    It was a placeholder for the auto_approve gate, but TB-383 moved that
+    gate to a real `PRE_DISPATCH` loop pass, leaving the phase with zero
+    registrants walked every tick. The promote-time gate stays inline in
+    `daemon._tick`'s dispatch block.
     """
 
     PRE_DISPATCH = "pre_dispatch"
-    POST_DISPATCH = "post_dispatch"
     POST_CRON = "post_cron"
     ATTENTION_EMISSION = "attention_emission"
     CRON_DISPATCH = "cron_dispatch"
@@ -195,7 +194,7 @@ class Manifest:
     TB-310 (axis 2) adds the `tick_hooks` field: a list of
     `(Phase, TickHook)` pairs declaring which phase(s) this component
     participates in. Multiple entries per phase are allowed (a
-    component might register one PRE_DISPATCH hook and one POST_DISPATCH
+    component might register one PRE_DISPATCH hook and one POST_CRON
     hook). The registry's `tick_hooks(phase)` method assembles the
     ordered list across all manifests for that phase — name-sorted by
     component, deterministic for tests. The TB-309-pinned

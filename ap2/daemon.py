@@ -2204,63 +2204,75 @@ async def _interruptible_sleep(total_s: int) -> None:
 # unchanged.
 # TB-318 (axis 5): auto_approve was relocated from the flat module path
 # at `ap2/auto_approve` to the subpackage `ap2/components/auto_approve/`.
-# Core must not statically import from `ap2/components/` (TB-311
-# import-direction gate), so the module-level aliases below resolve via
-# the registry's manifest hook_points at module-load time. Tests that
-# monkey-patch `daemon._auto_approve_paused` (or any other alias here)
-# still work — the rebind happens once here, and the test's setattr on
-# the daemon module overrides this attribute for the duration of the
-# test.
-_auto_approve_manifest = default_registry().get("auto_approve")
-_AUTO_APPROVE_FAILURE_STATUSES = _auto_approve_manifest.hook_points[
-    "_AUTO_APPROVE_FAILURE_STATUSES"
-]
-_AUTO_APPROVE_UNFREEZE_TOKEN = _auto_approve_manifest.hook_points[
-    "_AUTO_APPROVE_UNFREEZE_TOKEN"
-]
-_AUTO_APPROVE_WINDOW_RESUME_TOKEN = _auto_approve_manifest.hook_points[
-    "_AUTO_APPROVE_WINDOW_RESUME_TOKEN"
-]
-_AUTO_APPROVE_WINDOW_S = _auto_approve_manifest.hook_points[
-    "_AUTO_APPROVE_WINDOW_S"
-]
-_append_decisions_needed_bullet = _auto_approve_manifest.hook_points[
-    "_append_decisions_needed_bullet"
-]
-_auto_approve_already_halted = _auto_approve_manifest.hook_points[
-    "_auto_approve_already_halted"
-]
-_auto_approve_check_violations = _auto_approve_manifest.hook_points[
-    "_auto_approve_check_violations"
-]
-_auto_approve_freeze_threshold = _auto_approve_manifest.hook_points[
-    "_auto_approve_freeze_threshold"
-]
-_auto_approve_paused = _auto_approve_manifest.hook_points[
-    "_auto_approve_paused"
-]
-_auto_approve_window_resume_idx = _auto_approve_manifest.hook_points[
-    "_auto_approve_window_resume_idx"
-]
-_auto_approved_task_ids = _auto_approve_manifest.hook_points[
-    "_auto_approved_task_ids"
-]
-_event_combined_tokens = _auto_approve_manifest.hook_points[
-    "_event_combined_tokens"
-]
-_parse_event_ts = _auto_approve_manifest.hook_points["_parse_event_ts"]
-_per_task_token_cap = _auto_approve_manifest.hook_points[
-    "_per_task_token_cap"
-]
-_validator_judge_noisy_paused = _auto_approve_manifest.hook_points[
-    "_validator_judge_noisy_paused"
-]
-_was_auto_approved = _auto_approve_manifest.hook_points["_was_auto_approved"]
-_window_token_cap = _auto_approve_manifest.hook_points["_window_token_cap"]
-evaluate_auto_approve_decision = _auto_approve_manifest.hook_points[
-    "evaluate_auto_approve_decision"
-]
-del _auto_approve_manifest
+# TB-388 (axis 5b-i): auto-approve's behavior is reached through its
+# REGISTERED tick-hook — the PRE_DISPATCH loop pass `run_auto_approve_pass`
+# (TB-383) the daemon walks at the PRE_DISPATCH stage — plus the
+# promote-time gate `_auto_promote_gate_halts`, which stays the canonical
+# per-task safety check at dispatch. The symbols that gate needs, together
+# with the test-compat + `operator_queue.evaluate_auto_approve_decision`
+# re-export surface, now resolve through the registry's generic single-hook
+# accessor `default_registry().hook(<name>, component="auto_approve")` —
+# NOT the pre-TB-388 `<manifest>.hook_points[...]` symbol-pull block, which
+# was a wrong-direction core→component coupling. Core still never statically
+# imports from `ap2/components/` (TB-311 import-direction gate); the registry
+# is the sanctioned cross-reference path. Tests that monkey-patch
+# `daemon._auto_approve_paused` (or any other alias here) still work — the
+# rebind happens once here, and the test's setattr on the daemon module
+# overrides this attribute for the duration of the test.
+_AUTO_APPROVE_FAILURE_STATUSES = default_registry().hook(
+    "_AUTO_APPROVE_FAILURE_STATUSES", component="auto_approve"
+)
+_AUTO_APPROVE_UNFREEZE_TOKEN = default_registry().hook(
+    "_AUTO_APPROVE_UNFREEZE_TOKEN", component="auto_approve"
+)
+_AUTO_APPROVE_WINDOW_RESUME_TOKEN = default_registry().hook(
+    "_AUTO_APPROVE_WINDOW_RESUME_TOKEN", component="auto_approve"
+)
+_AUTO_APPROVE_WINDOW_S = default_registry().hook(
+    "_AUTO_APPROVE_WINDOW_S", component="auto_approve"
+)
+_append_decisions_needed_bullet = default_registry().hook(
+    "_append_decisions_needed_bullet", component="auto_approve"
+)
+_auto_approve_already_halted = default_registry().hook(
+    "_auto_approve_already_halted", component="auto_approve"
+)
+_auto_approve_check_violations = default_registry().hook(
+    "_auto_approve_check_violations", component="auto_approve"
+)
+_auto_approve_freeze_threshold = default_registry().hook(
+    "_auto_approve_freeze_threshold", component="auto_approve"
+)
+_auto_approve_paused = default_registry().hook(
+    "_auto_approve_paused", component="auto_approve"
+)
+_auto_approve_window_resume_idx = default_registry().hook(
+    "_auto_approve_window_resume_idx", component="auto_approve"
+)
+_auto_approved_task_ids = default_registry().hook(
+    "_auto_approved_task_ids", component="auto_approve"
+)
+_event_combined_tokens = default_registry().hook(
+    "_event_combined_tokens", component="auto_approve"
+)
+_parse_event_ts = default_registry().hook(
+    "_parse_event_ts", component="auto_approve"
+)
+_per_task_token_cap = default_registry().hook(
+    "_per_task_token_cap", component="auto_approve"
+)
+_validator_judge_noisy_paused = default_registry().hook(
+    "_validator_judge_noisy_paused", component="auto_approve"
+)
+_was_auto_approved = default_registry().hook(
+    "_was_auto_approved", component="auto_approve"
+)
+_window_token_cap = default_registry().hook(
+    "_window_token_cap", component="auto_approve"
+)
+evaluate_auto_approve_decision = default_registry().hook(
+    "evaluate_auto_approve_decision", component="auto_approve"
+)
 
 # TB-314 (axis 5): auto_unfreeze was relocated from the flat module
 # `ap2/auto_unfreeze.py` to the subpackage
@@ -2322,60 +2334,64 @@ del _auto_unfreeze_manifest
 
 # TB-315 (axis 5): attention was relocated from the flat module
 # `ap2/attention.py` to the subpackage `ap2/components/attention/`.
-# Core must not statically import from `ap2/components/` (TB-311
-# import-direction gate), so the module-level aliases below resolve
-# via the registry's manifest hook_points at module-load time. The
-# attention surface is wider than focus_advance / auto_unfreeze: the
-# alias block spans both the original detector layer
-# (`detect_attention_conditions`, `should_suppress`, `AttentionCondition`,
-# debounce / approach-pct env helpers) and the daemon-side wire-up
-# helpers (`_maybe_emit_attention_events`, `_maybe_push_attention`,
-# and the push-state file helpers) which TB-315 also relocated from
-# daemon.py into the subpackage so the manifest's tick hook can call
-# them body-locally. Tests that monkey-patch
-# `daemon._maybe_emit_attention_events` (or any other alias here)
-# still work — the rebind happens once here, and the test's setattr
-# on the daemon module overrides this attribute for the duration of
-# the test.
-_attention_manifest = default_registry().get("attention")
-AttentionCondition = _attention_manifest.hook_points["AttentionCondition"]
-detect_attention_conditions = _attention_manifest.hook_points[
-    "detect_attention_conditions"
-]
-find_last_attention_fire = _attention_manifest.hook_points[
-    "find_last_attention_fire"
-]
-should_suppress = _attention_manifest.hook_points["should_suppress"]
-_parse_ts = _attention_manifest.hook_points["parse_ts"]
-_task_stuck_threshold_s = _attention_manifest.hook_points[
-    "task_stuck_threshold_s"
-]
-_task_frozen_recency_s = _attention_manifest.hook_points[
-    "task_frozen_recency_s"
-]
-_cost_approach_pct = _attention_manifest.hook_points["cost_approach_pct"]
-_attention_debounce_s = _attention_manifest.hook_points[
-    "attention_debounce_s"
-]
-_maybe_emit_attention_events = _attention_manifest.hook_points[
-    "maybe_emit_attention_events"
-]
-_maybe_push_attention = _attention_manifest.hook_points[
-    "maybe_push_attention"
-]
-_attention_push_state_path = _attention_manifest.hook_points[
-    "attention_push_state_path"
-]
-_load_attention_push_state = _attention_manifest.hook_points[
-    "load_attention_push_state"
-]
-_save_attention_push_state = _attention_manifest.hook_points[
-    "save_attention_push_state"
-]
-_is_attention_immediate_push_enabled = _attention_manifest.hook_points[
-    "is_attention_immediate_push_enabled"
-]
-del _attention_manifest
+# TB-388 (axis 5b-i): attention's behavior is reached through its
+# REGISTERED tick-hook — the `Phase.ATTENTION_EMISSION` pass the daemon
+# walks at step 0.7 (`maybe_emit_attention_events` + the immediate-push
+# piggyback). No daemon-side code reads these symbols anymore; the block
+# below is purely the test-compat re-export surface
+# (`daemon._maybe_emit_attention_events`, `daemon.AttentionCondition`, …),
+# and it now resolves through the registry's generic single-hook accessor
+# `default_registry().hook(<name>, component="attention")` — NOT the
+# pre-TB-388 `<manifest>.hook_points[...]` symbol-pull block, which was a
+# wrong-direction core→component coupling. Core still never statically
+# imports from `ap2/components/` (TB-311 import-direction gate); the
+# registry is the sanctioned cross-reference path. Tests that monkey-patch
+# `daemon._maybe_emit_attention_events` (or any other alias here) still
+# work — the rebind happens once here, and the test's setattr on the daemon
+# module overrides this attribute for the duration of the test.
+AttentionCondition = default_registry().hook(
+    "AttentionCondition", component="attention"
+)
+detect_attention_conditions = default_registry().hook(
+    "detect_attention_conditions", component="attention"
+)
+find_last_attention_fire = default_registry().hook(
+    "find_last_attention_fire", component="attention"
+)
+should_suppress = default_registry().hook(
+    "should_suppress", component="attention"
+)
+_parse_ts = default_registry().hook("parse_ts", component="attention")
+_task_stuck_threshold_s = default_registry().hook(
+    "task_stuck_threshold_s", component="attention"
+)
+_task_frozen_recency_s = default_registry().hook(
+    "task_frozen_recency_s", component="attention"
+)
+_cost_approach_pct = default_registry().hook(
+    "cost_approach_pct", component="attention"
+)
+_attention_debounce_s = default_registry().hook(
+    "attention_debounce_s", component="attention"
+)
+_maybe_emit_attention_events = default_registry().hook(
+    "maybe_emit_attention_events", component="attention"
+)
+_maybe_push_attention = default_registry().hook(
+    "maybe_push_attention", component="attention"
+)
+_attention_push_state_path = default_registry().hook(
+    "attention_push_state_path", component="attention"
+)
+_load_attention_push_state = default_registry().hook(
+    "load_attention_push_state", component="attention"
+)
+_save_attention_push_state = default_registry().hook(
+    "save_attention_push_state", component="attention"
+)
+_is_attention_immediate_push_enabled = default_registry().hook(
+    "is_attention_immediate_push_enabled", component="attention"
+)
 
 
 def _auto_promote_gate_halts(cfg: Config, candidate) -> bool:
@@ -2764,20 +2780,11 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     except Exception as e:  # noqa: BLE001
         events.append(cfg.events_file, "task_error", error=f"{type(e).__name__}: {e}")
 
-    # 3.5. POST_DISPATCH tick-hook phase (TB-310 axis 2). Walks
-    # registry hooks registered on `Phase.POST_DISPATCH`. The
-    # auto_approve component registers a no-op placeholder here
-    # because its gate logic remains inline in the dispatch block
-    # above (the gates evaluate per-task state and emit per-task
-    # events — extracting them into a single tick-callable belongs
-    # to axis (5)). The walk-every-phase uniformity matters: when
-    # axis (5) replaces the stub with the real gate-application
-    # function, the daemon-side walk does not change. Per-hook
-    # error handling lives inside each manifest wrapper.
-    for hook in default_registry().tick_hooks(Phase.POST_DISPATCH):
-        result = hook(cfg, sdk)
-        if asyncio.iscoroutine(result):
-            await result
+    # TB-388: the dead `Phase.POST_DISPATCH` walk that used to live here was
+    # removed. Its sole registrant — auto_approve's no-op placeholder — moved
+    # to a real `Phase.PRE_DISPATCH` loop pass in TB-383, leaving this phase
+    # with zero registrants firing every tick. The per-task DISPATCH-time gate
+    # (`_auto_promote_gate_halts`) stays inline in the dispatch block above.
 
     # 3.9. IDEATION tick-hook phase (TB-381 axis 1 — reserved for axis 3).
     # The `Phase.IDEATION` phase is added now so the ideation extraction

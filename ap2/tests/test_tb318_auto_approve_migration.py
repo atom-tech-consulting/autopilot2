@@ -244,11 +244,11 @@ def test_manifest_hook_points_expose_daemon_alias(symbol: str):
 
 
 def test_manifest_also_registers_tick_hook():
-    """The manifest keeps the `tick_hook` POST_DISPATCH registration
-    from the pre-TB-318 stub (a no-op placeholder). The inline
-    per-task gate logic in `daemon._tick` stays inline this cycle, so
-    the hook stays a no-op; an axis-5 follow-up may extract the gate
-    and turn this into the real callable.
+    """The manifest keeps a `tick_hook` registration. TB-383 promoted it
+    from the pre-TB-318 no-op `POST_DISPATCH` placeholder to a real
+    `PRE_DISPATCH` loop pass (`run_auto_approve_pass`); TB-388 then deleted
+    the now-dead POST_DISPATCH phase entirely. The inline per-task gate
+    logic in `daemon._tick` (`_auto_promote_gate_halts`) stays inline.
     """
     registry = Registry.discover()
     manifest = registry.get("auto_approve")

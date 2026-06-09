@@ -8,9 +8,11 @@ daemon._tick's pre-TB-310 direct imports + direct calls into
 
   (a) The `TickHook` typed callable signature is importable from
       `ap2.registry` — proves the type contract is established.
-  (b) The `Phase` enum exposes the four canonical phase names
-      (PRE_DISPATCH, POST_DISPATCH, POST_CRON, ATTENTION_EMISSION) —
-      proves the phase enumeration is in place.
+  (b) The `Phase` enum exposes the canonical phase names
+      (PRE_DISPATCH, POST_CRON, ATTENTION_EMISSION) — proves the phase
+      enumeration is in place. (TB-388 removed the dead POST_DISPATCH
+      phase — auto_approve's gate moved to a real PRE_DISPATCH pass in
+      TB-383, leaving POST_DISPATCH with zero registrants.)
   (c) `Registry.discover()` returns the components named
       `janitor`, `auto_approve`, `auto_unfreeze`, `attention`, each
       with a tick_hook registered — proves the component-side wiring
@@ -68,21 +70,24 @@ def test_tickhook_signature_importable_from_registry():
 # --- (b) Phase enum has the four canonical members ---
 
 def test_phase_enum_has_four_canonical_members():
-    """The phase Enum exposes the four TB-310 phases (PRE_DISPATCH,
-    POST_DISPATCH, POST_CRON, ATTENTION_EMISSION) plus the two TB-381
-    tick-stage-extraction phases (CRON_DISPATCH, IDEATION).
+    """The phase Enum exposes the TB-310 phases (PRE_DISPATCH, POST_CRON,
+    ATTENTION_EMISSION) plus the two TB-381 tick-stage-extraction phases
+    (CRON_DISPATCH, IDEATION).
 
     TB-381 (axis 1) extended the vocabulary: CRON_DISPATCH is the cron
     scheduler phase `daemon._tick` walks at step 1 (replacing the inline
     cron loop), and IDEATION is reserved for the ideation extraction
-    (axis 3). The membership is pinned exactly so a stray phase addition
-    surfaces here.
+    (axis 3). TB-388 removed the dead POST_DISPATCH phase (zero
+    registrants since TB-383 moved auto_approve's gate to PRE_DISPATCH).
+    The membership is pinned exactly so a stray phase addition surfaces
+    here.
     """
     assert hasattr(Phase, "PRE_DISPATCH"), (
         "TB-310: Phase.PRE_DISPATCH should exist."
     )
-    assert hasattr(Phase, "POST_DISPATCH"), (
-        "TB-310: Phase.POST_DISPATCH should exist."
+    assert not hasattr(Phase, "POST_DISPATCH"), (
+        "TB-388: Phase.POST_DISPATCH was removed (dead phase, zero "
+        "registrants since TB-383)."
     )
     assert hasattr(Phase, "POST_CRON"), (
         "TB-310: Phase.POST_CRON should exist."
@@ -99,14 +104,14 @@ def test_phase_enum_has_four_canonical_members():
     names = {p.name for p in Phase}
     assert names == {
         "PRE_DISPATCH",
-        "POST_DISPATCH",
         "POST_CRON",
         "ATTENTION_EMISSION",
         "CRON_DISPATCH",
         "IDEATION",
     }, (
-        f"TB-381: Phase enum should have exactly the four TB-310 phases "
-        f"plus CRON_DISPATCH + IDEATION; got {sorted(names)}"
+        f"TB-388: Phase enum should have exactly the TB-310 phases "
+        f"(POST_DISPATCH removed) plus CRON_DISPATCH + IDEATION; "
+        f"got {sorted(names)}"
     )
 
 
@@ -271,8 +276,8 @@ def test_daemon_no_relative_imports_of_componentized_modules():
         grep -nE '^\\s*(from \\.attention|from \\.auto_approve|...)' ap2/daemon.py
 
     must return zero matches. Today's daemon walks the registry for
-    PRE_DISPATCH / ATTENTION_EMISSION / POST_DISPATCH hooks instead of
-    direct-importing each module via dotted-relative paths. The
+    PRE_DISPATCH / ATTENTION_EMISSION hooks instead of direct-importing
+    each module via dotted-relative paths. The
     auto_approve / auto_unfreeze / focus_advance namespaces are
     reached through the `from . import (...)` package-level import
     (which the grep regex specifically does not match — multi-line
