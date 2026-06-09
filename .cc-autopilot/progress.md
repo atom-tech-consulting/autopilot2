@@ -1527,3 +1527,9 @@
 - **Summary:** Added a single generic fan-out-only contributions(point, cfg=None) accessor to Registry (name-sorted, dict-merge/list-merge, no keyed dispatch; cfg=None walks all, cfg walks enabled), migrated the cron scheduler's resolve_cron_handler to contributions("cron_job_handlers"), deleted the bespoke cron_job_handlers() method, and left channel_adapters() untouched for TB-389; full suite green (3015 passed).
 - **Files:** ap2/registry.py, ap2/components/cron/impl.py, ap2/cron_handlers.py, ap2/tests/test_tb381_cron_component.py
 - **Tests:** pass
+
+## [2026-06-09] TB-388: Delete core hook_points symbol-pull blocks; remove the dead POST_DISPATCH phase
+- **Commit:** `ddb375a`
+- **Summary:** Replaced daemon's auto_approve + attention `<manifest>.hook_points[...]` symbol-pull blocks with the registry's generic `default_registry().hook(name, component=...)` accessor (identity-preserving, so test-compat aliases + operator_queue.evaluate_auto_approve_decision are unchanged), and removed the dead Phase.POST_DISPATCH member + its daemon._tick walk; full suite passes (3015).
+- **Files:** ap2/daemon.py, ap2/registry.py, ap2/tests/test_tb310_tick_hook_protocol.py, ap2/tests/test_tb318_auto_approve_migration.py
+- **Tests:** pass
