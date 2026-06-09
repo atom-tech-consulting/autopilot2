@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-383",
   "briefing_path": ".cc-autopilot/tasks/delete-core-hook-points-symbol-pull-bloc.md",
   "focus_anchor": "a ci gate fails the build",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-09T05:35:06Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-09T00:35:04Z",
   "tb_id": "TB-388",
   "why_now": "TB-383 moved auto-approve to a PRE_DISPATCH pass but left both the\ndaemon-level auto_approve symbol-pull block and the now-registrant-less\nPOST_DISPATCH walk in place \u2014 so a dead phase fires every tick and core still\nimports component internals, the exact coupling that would force import-direction\nCI violations when ideation (axis 4) is later extracted."

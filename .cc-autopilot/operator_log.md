@@ -358,3 +358,6 @@ ideation won't re-propose decisions logged here._
 - 2026-06-08T22:40:44Z — applied operator-queued ideate → (forced)
 - 2026-06-09T04:41:07Z — applied operator-queued approve → TB-386
 - 2026-06-09T04:41:08Z — applied operator-queued approve → TB-389
+- 2026-06-09T04:43:58Z — applied operator-queued update → TB-387
+- 2026-06-09T04:46:13Z — applied operator-queued approve → TB-387
+- 2026-06-09T04:46:13Z — applied operator-queued approve → TB-388
