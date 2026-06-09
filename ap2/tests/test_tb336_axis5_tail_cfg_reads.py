@@ -144,7 +144,12 @@ _GREP_ABSENCE_CASES = [
         "ap2/doctor.py",
         r"os\.environ\.get\([\"']AP2_VERIFY_(CMD|TIMEOUT_S)",
     ),
-    ("ap2/ideation.py", r"os\.environ\.get\([\"']AP2_IDEATION_MAX_TURNS"),
+    # TB-391: `_run_ideation` (the `ideation_max_turns` reader) moved into
+    # the ideation component impl.
+    (
+        "ap2/components/ideation/impl.py",
+        r"os\.environ\.get\([\"']AP2_IDEATION_MAX_TURNS",
+    ),
     (
         # TB-343: the attention body moved to impl.py.
         "ap2/components/attention/impl.py",
@@ -193,7 +198,11 @@ def test_positive_cfg_helper_read_path_present_in_migrated_files():
         # goal.py when the component merged into the core ideation_halt
         # module, so goal.py no longer calls get_component_value here.
         ("ap2/doctor.py", r"get_core_value\([\"']verify_(cmd|timeout_s)[\"']"),
-        ("ap2/ideation.py", r"get_core_value\([\"']ideation_max_turns[\"']"),
+        # TB-391: `_run_ideation` moved into the ideation component impl.
+        (
+            "ap2/components/ideation/impl.py",
+            r"get_core_value\([\"']ideation_max_turns[\"']",
+        ),
         (
             # TB-343: the attention body moved to impl.py.
             "ap2/components/attention/impl.py",

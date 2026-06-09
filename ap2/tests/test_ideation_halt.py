@@ -781,9 +781,17 @@ def test_dispatch_promotes_when_roadmap_exhausted(cfg, monkeypatch):
 
 def test_ideation_trigger_gate_still_intact():
     """TB-275 sibling pin: the ideation-trigger gate in
-    `_maybe_ideate` still uses the canonical predicate."""
+    `_maybe_ideate` still uses the canonical predicate.
+
+    TB-391 relocated `_maybe_ideate` into the `ideation` component
+    (`ap2/components/ideation/impl.py`); `ap2.ideation` re-exports it via
+    a `__getattr__` shim. We inspect the resolved function's source (which
+    reads from the impl module regardless of the shim) so the pin tracks
+    the moved body."""
+    import inspect
+
     from ap2 import ideation as _ideation
-    ideation_src = Path(_ideation.__file__).read_text()
+    ideation_src = inspect.getsource(_ideation._maybe_ideate)
     assert "_goal.roadmap_exhausted(cfg)" in ideation_src or \
         "goal.roadmap_exhausted(cfg)" in ideation_src, (
         "TB-275: the ideation-trigger roadmap-complete gate has been "

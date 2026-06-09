@@ -27,8 +27,6 @@ from . import (
     diagnose,
     env_reload,
     events,
-    ideation,
-    ideation_halt,
     prompts,
     retry,
     rollback,
@@ -36,6 +34,16 @@ from . import (
     verify,
     web,
 )
+# TB-391 (axis 4): the ideation proposal engine (`_maybe_ideate` /
+# `force_ideate` / `_run_ideation`) and the roadmap-exhaustion halt
+# (`maybe_halt_on_exhaustion`) moved into the `ideation` component
+# (`ap2/components/ideation/`). `_tick` drives them purely through the
+# registry — the natural empty-board path via
+# `registry.tick_hooks(Phase.IDEATION)`, the halt via the PRE_DISPATCH
+# walk, and the operator-forced run via the `force_ideate` hook-point —
+# so core no longer imports `ideation` / `ideation_halt` here (the last
+# inline import + direct call removed). The import-direction CI gate
+# (TB-311) stays green.
 from .registry import Phase, default_registry
 from .board import Board, board_file_lock
 from .config import Config, DEFAULT_TASK_MAX_TURNS
@@ -2282,12 +2290,13 @@ _most_recent_blocked_complete_for = _auto_unfreeze_manifest.hook_points[
 _shared_parse = _auto_unfreeze_manifest.hook_points["shared_parse"]
 del _auto_unfreeze_manifest
 
-# TB-345: the focus-advance component was merged into the core module
-# `ap2/ideation_halt.py` (ideation-exhaustion halt is core ideation
-# lifecycle, not an opt-in component). The daemon imports it directly
-# (core→core) and calls `ideation_halt.maybe_halt_on_exhaustion(cfg)`
-# from the PRE_DISPATCH phase below — no registry hook_points
-# indirection, no module-level alias rebind.
+# TB-345 merged the focus-advance component into `ap2/ideation_halt.py`
+# as a core module; TB-391 then relocated the ideation-exhaustion halt
+# (with the rest of the proposal engine) into the `ideation` component
+# (`ap2/components/ideation/`). The daemon no longer imports
+# `ideation_halt` or calls `maybe_halt_on_exhaustion(cfg)` directly — the
+# detector runs as the ideation component's `Phase.PRE_DISPATCH` hook,
+# walked by `_tick`'s PRE_DISPATCH loop (step 0.5 below) via the registry.
 
 
 # TB-315 (axis 5): attention was relocated from the flat module
@@ -2557,25 +2566,19 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
         if asyncio.iscoroutine(result):
             await result
 
-    # 0.6. Ideation-exhaustion halt (TB-345 — merged from the old
-    # `focus_advance` PRE_DISPATCH component hook into core ideation
-    # lifecycle). Counts consecutive empty ideation cycles since the
-    # last `goal_updated` and, at the `AP2_IDEATION_HALT_EMPTY_CYCLES`
-    # threshold, emits `roadmap_complete` once to park the ideation
-    # trigger (or, when `AP2_IDEATION_HALT_DISABLED` is set, surfaces a
-    # decisions-needed bullet for manual halt). Called directly here at
-    # the same point the `focus_advance` hook previously occupied —
-    # after the auto_unfreeze sweep, before cron — so the freshly-set
-    # pointer / `roadmap_complete` event is visible to every later
-    # stage on this tick. Self-handles its own error surface; the bare
-    # try/except mirrors the pre-TB-345 component wrapper's stderr line.
-    try:
-        ideation_halt.maybe_halt_on_exhaustion(cfg)
-    except Exception as e:  # noqa: BLE001
-        print(
-            f"[ap2] maybe_halt_on_exhaustion error: {type(e).__name__}: {e}",
-            file=sys.stderr,
-        )
+    # 0.6. Ideation-exhaustion halt — TB-391 relocated the detector into
+    # the `ideation` component's `Phase.PRE_DISPATCH` hook
+    # (`run_ideation_halt`), so it now fires INSIDE the PRE_DISPATCH walk
+    # above (step 0.5). Name-sorted component order
+    # (`auto_approve` < `auto_unfreeze` < `ideation`) runs it after the
+    # auto-* sweeps and before cron — exactly the slot the pre-TB-391
+    # inline `ideation_halt.maybe_halt_on_exhaustion(cfg)` call occupied
+    # (TB-345). The hook self-handles its own error surface (the same
+    # `[ap2] maybe_halt_on_exhaustion error: ...` stderr line the inline
+    # try/except emitted) and always runs regardless of
+    # `AP2_IDEATION_DISABLED` (only `AP2_IDEATION_HALT_DISABLED` suppresses
+    # the auto-halt), preserving the pre-TB-391 core-ideation-lifecycle
+    # semantics. No inline call here anymore — the registry walk drives it.
 
     # 0.7. ATTENTION_EMISSION tick-hook phase (TB-310 axis 2). Walks
     # registry hooks registered on `Phase.ATTENTION_EMISSION`. Today's
@@ -2744,51 +2747,51 @@ async def _tick(cfg: Config, sdk, mcp_server) -> None:
     # with zero registrants firing every tick. The per-task DISPATCH-time gate
     # (`_auto_promote_gate_halts`) stays inline in the dispatch block above.
 
-    # 3.9. IDEATION tick-hook phase (TB-381 axis 1 — reserved for axis 3).
-    # The `Phase.IDEATION` phase is added now so the ideation extraction
-    # (axis 3) only needs to ship its subpackage + register a tick hook
-    # here — no registry-side or daemon-side edit. The walk is empty today
-    # (ideation has not moved): `ideation.force_ideate` / `_maybe_ideate`
-    # below remain direct core calls. Walking the phase now pins the
-    # tick-stage shape the cron extraction (this task) established, so
-    # axis 3 is a mechanical reuse. Wrapped to mirror the other phase
-    # walks; no hooks means a zero-cost no-op.
-    for hook in default_registry().tick_hooks(Phase.IDEATION):
-        result = hook(cfg, sdk)
-        if asyncio.iscoroutine(result):
-            await result
-
-    # 4. Ideation. Two parallel triggers:
+    # 3.9 / 4. Ideation (TB-391 axis 4). The proposal engine moved into
+    # the `ideation` component; `_tick` drives BOTH triggers through the
+    # registry — no inline `ideation.force_ideate` / `_maybe_ideate` call.
     #
-    # (a) Natural empty-board path — `_maybe_ideate` fires when
-    #     AP2_IDEATION_DISABLED is unset, Active is empty, Ready+Backlog
-    #     count is below AP2_IDEATION_TRIGGER_TASK_COUNT, and the
-    #     AP2_IDEATION_COOLDOWN_S cooldown elapsed. Owned by
-    #     `ap2.ideation`; see that module for the prompt + override
-    #     mechanism.
-    #
-    # (b) Forced operator trigger (TB-159) — `force_ideate` fires when
-    #     `ap2 ideate` was queued and drained on this tick. Bypasses
+    # (b) Forced operator trigger (TB-159) — resolved via the registry
+    #     hook-point protocol (`force_ideate` needs `mcp_server`, so it
+    #     can't ride the uniform `(cfg, sdk)` tick-hook signature). Fires
+    #     when `ap2 ideate` was queued and drained on this tick; bypasses
     #     the disable knob, the cooldown, AND the queue-depth gate (the
-    #     Active-task gate is enforced at queue-append time).
-    #
-    # We run BOTH if both fire on the same tick (rare: requires the
-    # operator to queue an `ap2 ideate` on the exact tick where the
-    # natural cooldown also unlatches). The forced path runs first so
-    # the natural path's `mark_run` doesn't reset the cooldown out from
-    # under it; the natural path then no-ops (cooldown is now fresh).
+    #     Active-task gate is enforced at queue-append time). Runs FIRST
+    #     (before the natural walk below) so the natural path's `mark_run`
+    #     doesn't reset the cooldown out from under it; the natural path
+    #     then no-ops (cooldown is now fresh). This preserves the
+    #     pre-TB-391 force-before-natural ordering exactly.
     if drain_res.get("force_ideate"):
         try:
-            await ideation.force_ideate(cfg, sdk, mcp_server)
+            run_force_ideate = default_registry().get("ideation").hook_points[
+                "force_ideate"
+            ]
+            await run_force_ideate(cfg, sdk, mcp_server)
         except Exception as e:  # noqa: BLE001
             events.append(
                 cfg.events_file, "ideation_error",
                 error=f"{type(e).__name__}: {e}",
             )
-    try:
-        await ideation._maybe_ideate(cfg, sdk, mcp_server)
-    except Exception as e:  # noqa: BLE001
-        events.append(cfg.events_file, "ideation_error", error=f"{type(e).__name__}: {e}")
+
+    # (a) Natural empty-board path — the `ideation` component's
+    #     `Phase.IDEATION` tick hook (`run_ideation_tick` → `_maybe_ideate`).
+    #     The hook self-gates on `AP2_IDEATION_DISABLED`, resolves the
+    #     daemon's `mcp_server` from the `status_report.configure(...)`
+    #     singleton, and fires when Active is empty, Ready+Backlog is below
+    #     `AP2_IDEATION_TRIGGER_TASK_COUNT`, and the `AP2_IDEATION_COOLDOWN_S`
+    #     cooldown elapsed. Replaces the pre-TB-391 inline
+    #     `ideation._maybe_ideate(...)` call; the per-hook try/except
+    #     preserves the inline call's `ideation_error` event on a failure.
+    for hook in default_registry().tick_hooks(Phase.IDEATION):
+        try:
+            result = hook(cfg, sdk)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:  # noqa: BLE001
+            events.append(
+                cfg.events_file, "ideation_error",
+                error=f"{type(e).__name__}: {e}",
+            )
 
     # 5. Idle watchdog (TB-71) — when nothing meaningful has happened for
     # AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S (default 3h), build a self-diagnose

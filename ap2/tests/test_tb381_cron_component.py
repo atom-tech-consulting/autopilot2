@@ -126,10 +126,15 @@ def test_tick_walks_cron_dispatch_and_ideation_phases():
     )
 
 
-def test_ideation_phase_is_empty_today():
-    """The IDEATION phase has no registered hooks yet — axis 3 ships the
-    ideation subpackage; this task only adds the phase."""
-    assert default_registry().tick_hooks(Phase.IDEATION) == []
+def test_ideation_phase_now_filled_by_axis_4():
+    """TB-381 reserved `Phase.IDEATION` and walked it empty; TB-391 (axis 4)
+    shipped the `ideation` component and registered its natural empty-board
+    trigger gate (`run_ideation_tick`) on the phase. The walk is no longer
+    empty — the daemon's IDEATION-phase walk now drives ideation."""
+    from ap2.components.ideation import run_ideation_tick
+
+    hooks = default_registry().tick_hooks(Phase.IDEATION)
+    assert run_ideation_tick in hooks, hooks
 
 
 def test_daemon_has_no_job_name_switch():

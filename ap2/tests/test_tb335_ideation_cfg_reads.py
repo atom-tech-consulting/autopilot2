@@ -82,12 +82,15 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 # (file_rel_path, flat_env_name) pairs the briefing's Verification grep
-# gates pin to zero. `ap2/ideation.py` owns three of the four reads;
-# `ap2/ideation_scrub.py` owns the fourth (`AP2_IDEATION_SCRUB_MODEL`).
+# gates pin to zero. TB-391 relocated the three trigger-gate knob readers
+# (`_ideation_disabled` / `_cooldown_s` / `_trigger_task_count`) from
+# `ap2/ideation.py` into the ideation component impl, so the grep gate
+# tracks the new owner file; `ap2/ideation_scrub.py` owns the fourth
+# (`AP2_IDEATION_SCRUB_MODEL`).
 _GREP_GATES: tuple[tuple[str, str], ...] = (
-    ("ap2/ideation.py", "AP2_IDEATION_DISABLED"),
-    ("ap2/ideation.py", "AP2_IDEATION_COOLDOWN_S"),
-    ("ap2/ideation.py", "AP2_IDEATION_TRIGGER_TASK_COUNT"),
+    ("ap2/components/ideation/impl.py", "AP2_IDEATION_DISABLED"),
+    ("ap2/components/ideation/impl.py", "AP2_IDEATION_COOLDOWN_S"),
+    ("ap2/components/ideation/impl.py", "AP2_IDEATION_TRIGGER_TASK_COUNT"),
     ("ap2/ideation_scrub.py", "AP2_IDEATION_SCRUB_MODEL"),
 )
 
@@ -175,7 +178,7 @@ def test_get_core_value_path_present_in_migrated_files():
     requires the resolved-config read path to be present.
     """
     pattern = re.compile(r"get_core_value\([\"']ideation_")
-    for rel_path in ("ap2/ideation.py", "ap2/ideation_scrub.py"):
+    for rel_path in ("ap2/components/ideation/impl.py", "ap2/ideation_scrub.py"):
         src = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
         assert pattern.search(src), (
             f"TB-335: {rel_path} should call "

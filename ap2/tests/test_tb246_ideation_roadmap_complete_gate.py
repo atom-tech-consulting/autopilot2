@@ -283,8 +283,11 @@ def test_skip_event_precedes_mark_run(tmp_path, monkeypatch):
 
     seen_event_at_mark_run: dict[str, bool] = {"value": False}
 
-    import ap2.ideation as ideation_mod
-    real_mark_run = ideation_mod.mark_run
+    # TB-391: `_maybe_ideate` moved into the ideation component impl, which
+    # binds `mark_run` from `ap2.cron`; patch the impl's binding so the spy
+    # intercepts the call the moved gate makes.
+    from ap2.components.ideation import impl as ideation_impl
+    real_mark_run = ideation_impl.mark_run
 
     def spy_mark_run(state_path, name):
         evts = events.tail(cfg.events_file, 20)
@@ -295,7 +298,7 @@ def test_skip_event_precedes_mark_run(tmp_path, monkeypatch):
         )
         return real_mark_run(state_path, name)
 
-    monkeypatch.setattr(ideation_mod, "mark_run", spy_mark_run)
+    monkeypatch.setattr(ideation_impl, "mark_run", spy_mark_run)
 
     asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
 

@@ -308,15 +308,19 @@ def test_kill_switch_helper_import_retained():
     would break the kill-switch surface.
 
     TB-345 merged the residual detector into the core module
-    `ap2/ideation_halt.py`. The core module must NOT statically
-    import from `ap2.components` (the TB-311 import-direction gate),
-    so the bullet writer is resolved through the registry hook-point
-    protocol (`default_registry().get("auto_approve").hook_points[...]`)
-    inside a local `_append_decisions_needed_bullet` helper. The
-    contract this test pins is "the helper is retained somewhere in
-    the module," not the exact syntactic shape of the lookup.
+    `ap2/ideation_halt.py`; TB-391 then relocated it into the `ideation`
+    component (`ap2/components/ideation/impl.py`), where the bullet writer
+    is resolved through the registry hook-point protocol
+    (`default_registry().get("auto_approve").hook_points[...]`) inside a
+    local `_append_decisions_needed_bullet` helper. The contract this test
+    pins is "the helper is retained somewhere in the module," not the
+    exact syntactic shape of the lookup. The body lives in the component
+    impl now (`ap2.ideation_halt` is a back-compat `__getattr__` shim), so
+    we read the impl source.
     """
-    src = Path(ideation_halt.__file__).read_text()
+    from ap2.components.ideation import impl as _ideation_impl
+
+    src = Path(_ideation_impl.__file__).read_text()
     assert "_append_decisions_needed_bullet" in src, (
         "TB-302: the kill-switch branch still depends on this "
         "helper. If it is removed, the kill-switch path "
@@ -333,8 +337,14 @@ def test_no_bullet_call_within_roadmap_complete_branch():
     detector into the core module). This is the literal shape the
     briefing's first Verification bullet checks; pinning it here
     surfaces a regression even when the bullet call moves to a
-    slightly different line number."""
-    src_path = Path(ideation_halt.__file__)
+    slightly different line number.
+
+    TB-391: the halt body lives in the `ideation` component impl now
+    (`ap2.ideation_halt` is a back-compat shim), so we read the impl
+    source."""
+    from ap2.components.ideation import impl as _ideation_impl
+
+    src_path = Path(_ideation_impl.__file__)
     lines = src_path.read_text().splitlines()
     violations = []
     for i, line in enumerate(lines):

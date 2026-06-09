@@ -231,6 +231,10 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     # Suppress-style kill switches map to truthy "1".
     assert flags.get("AP2_JANITOR_DISABLED") == "1", flags
     assert flags.get("AP2_AUTO_UNFREEZE_DISABLED") == "1", flags
+    # TB-391: the ideation component is a default-on kill-switch component
+    # (mirroring janitor / cron / auto_unfreeze) — its `AP2_IDEATION_DISABLED`
+    # env_flag joins the disabled-env-flag dict at truthy "1".
+    assert flags.get("AP2_IDEATION_DISABLED") == "1", flags
     # TB-345: focus_advance is no longer a component, so its former
     # kill switch must NOT appear in the disabled-env-flag dict.
     assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" not in flags, flags
@@ -674,6 +678,27 @@ def test_tb320_auto_unfreeze_independent_disable():
     assert manifest.default_enabled is True, manifest
     # Kill switch / suppress-polarity: truthy → disabled.
     assert manifest.is_enabled(env={"AP2_AUTO_UNFREEZE_DISABLED": "1"}) is False
+    # Unset → enabled (round-trip the polarity).
+    assert manifest.is_enabled(env={}) is True
+
+
+def test_tb391_ideation_independent_disable():
+    """TB-391: setting `AP2_IDEATION_DISABLED=1` flips the `ideation`
+    manifest's `is_enabled(env)` to False independently of every other
+    component's env knob.
+
+    Pins the manifest's TB-391 wiring: `env_flag="AP2_IDEATION_DISABLED"`,
+    `default_enabled=True` (suppress / kill-switch polarity, mirroring
+    `AP2_JANITOR_DISABLED` / `AP2_CRON_DISABLED` / `AP2_AUTO_UNFREEZE_DISABLED`).
+    The `is_enabled` check uses a synthetic env mapping (not monkeypatching
+    the process env) so the assertion is hermetic.
+    """
+    registry = Registry.discover()
+    manifest = registry.get("ideation")
+    assert manifest.env_flag == "AP2_IDEATION_DISABLED", manifest
+    assert manifest.default_enabled is True, manifest
+    # Kill switch / suppress-polarity: truthy → disabled.
+    assert manifest.is_enabled(env={"AP2_IDEATION_DISABLED": "1"}) is False
     # Unset → enabled (round-trip the polarity).
     assert manifest.is_enabled(env={}) is True
 
