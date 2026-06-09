@@ -1539,3 +1539,9 @@
 - **Summary:** Extracted the channel surface into a new always-on `communication` component owning inbound (poll_inbound) + outbound (Phase.COMMUNICATION run_outbound_tick) as tick-phase work, with mattermost demoted to a channel adapter in its internal registry; removed registry.channel_adapters() + daemon._deliver + the inbound_poll hook from core, made outbound event-driven via the new ap2.notify queue, and updated all affected tests — full suite green (3026 passed, smokes excluded per AP2_VERIFY_CMD).
 - **Files:** ap2/notify.py, ap2/components/communication/{__init__, channels, impl, manifest}.py, ap2/components/mattermost/manifest.py (deleted), ap2/components/mattermost/{__init__, impl}.py, ap2/registry.py, ap2/daemon.py, ap2/watchdog.py, ap2/smoke_runner.py, ap2/components/attention/impl.py, ap2/tools.py, ap2/config.py, ap2/channel.py, ap2/howto.md, .cc-autopilot/.gitignore, ap2/tests/test_tb389_communication.py, ap2/tests/{test_components_disabled, test_tb319_status_components, test_tb322_component_schemas, test_tb310_tick_hook_protocol, test_smoke_runner, test_tb375_codex_skip_guard, test_approve}.py, ap2/tests/e2e/test_auto_diagnose.py
 - **Tests:** pass
+
+## [2026-06-09] TB-393: Docs: document the agent-backend layer (Claude Code default + Codex) across architecture.md, howto.md, README
+- **Commit:** `25703f7`
+- **Summary:** Documented the agent-backend layer: added "## Agent backends" to architecture.md (AgentAdapter, ClaudeCodeAdapter/CodexAdapter, select_adapter resolution order, stdio-MCP bridge) + updated agent-kinds/SDK-plumbing/task-lifecycle/MCP-tools sections for adapter indirection; added [agent_backends]/AP2_AGENT_BACKEND_<KIND> selection + resolution-order docs to howto.md plus a Config-keys-TOML entry; added a pluggable-backend blurb to README.md and ap2/README.md. Docs only; full suite (3057) + docs-drift gate pass.
+- **Files:** ap2/architecture.md, ap2/howto.md, README.md, ap2/README.md
+- **Tests:** pass
