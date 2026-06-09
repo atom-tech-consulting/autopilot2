@@ -1,6 +1,6 @@
 # ap2 — autopilot v2
 
-External Python daemon that drives a Claude Code project through a list of tasks. Each unit of work runs as a fresh Claude Agent SDK `query()` call; shared state lives on disk. The daemon never accumulates context.
+External Python daemon that drives a Claude Code project through a list of tasks. Each unit of work runs as a fresh agent dispatch through a pluggable backend — Claude Code by default, with OpenAI Codex selectable per agent kind (each backend brings its own auth) — and shared state lives on disk. The daemon never accumulates context.
 
 ## What it does
 

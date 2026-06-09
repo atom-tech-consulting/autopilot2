@@ -51,7 +51,7 @@ Steps in `_tick` run sequentially. A failure in any step emits an event and cont
 
 ## Agent kinds
 
-There are four kinds of SDK queries, each with its own prompt builder, tool allowlist, and lifecycle event vocabulary.
+There are four kinds of SDK queries, each with its own prompt builder, tool allowlist, and lifecycle event vocabulary. Each dispatch is routed through the backend-adapter layer — `select_adapter(kind, cfg)` resolves the kind's backend (see **Agent backends**) — rather than calling `claude_agent_sdk` directly.
 
 | Kind | Trigger | Prompt builder | Tools | Timeout |
 |---|---|---|---|---|
@@ -66,16 +66,76 @@ Ideation and cron share the same prompt builder (`build_control_prompt`) — the
 
 ### Shared SDK plumbing
 
-`daemon._run_control_agent(label, prompt, allowed_tools, max_turns)` is the shared SDK plumbing for cron + ideation. It does:
+`daemon._run_control_agent(label, prompt, allowed_tools, max_turns)` is the shared dispatch plumbing for cron + ideation. It does:
 
 - `_prep_debug_dumps(label)` — write the prompt to `.cc-autopilot/debug/<ts>-<label>.prompt.md`.
-- `_make_stderr_sink()` — 200-line ring buffer attached to `ClaudeAgentOptions.stderr` so an opaque SDK subprocess crash leaves us a tail to diagnose.
-- `await asyncio.wait_for(consume(), timeout=cfg.control_timeout_s)` — bounded SDK consume.
+- `select_adapter(<kind>, cfg)` — resolve the control surface's backend (see **Agent backends**) and drive the streaming `adapter.run(...)` instead of calling `claude_agent_sdk` directly. Under the default map the resolved adapter is a `ClaudeCodeAdapter` wrapping the daemon's already-imported `sdk` handle, so behavior is unchanged.
+- `_make_stderr_sink()` — 200-line ring buffer passed via the normalized `AgentOptions.stderr` (the Claude adapter threads it onto `ClaudeAgentOptions.stderr`) so an opaque SDK subprocess crash leaves us a tail to diagnose.
+- A bounded consume (`timeout=cfg.control_timeout_s`) — the adapter's `run_to_result` owns the `asyncio.wait_for` wrapper that used to live inline here.
 - Returns `(timed_out, error, stderr_tail, prompt_dump)`.
 
 The caller owns the surrounding event vocabulary (`cron_*` for `run_cron`, `ideation_*` for `_maybe_ideate`), the cooldown bookkeeping (`mark_run`), and the state commit. This split is what keeps ideation off the `cron_*` event channel without duplicating the SDK plumbing.
 
 `run_task` doesn't use `_run_control_agent` because it has a salvage path: on timeout or crash, `_infer_result_from_head` checks `git log` for a commit prefixed with the task ID, and if found, treats the task as completed (the agent committed before the SDK subprocess died). That branch is too divergent to share cleanly.
+
+## Agent backends
+
+Every agent dispatch flows through a backend-agnostic adapter layer
+(`ap2/adapters/`) rather than calling `claude_agent_sdk` directly. The
+`AgentAdapter` ABC (`ap2/adapters/base.py`) is the single seam: a caller hands
+it a `prompt`, an `AgentTools` (allow/deny tool policy + MCP servers), and a
+normalized `AgentOptions` (model / effort / max_turns / timeout / cwd /
+permission mode / stderr), and `run()` yields normalized `AgentEvent`s — one per
+backend stream envelope — ending in a terminal `AgentResult` (status / text /
+usage). The concrete `run_to_result()` drains that stream and folds in the
+per-run `asyncio.wait_for` timeout / error handling the daemon used to inline
+(`status="timeout"` / `"error"`).
+
+Two concrete adapters implement the contract:
+
+- **`ClaudeCodeAdapter`** (`backend = "claude"`, the default) — wraps
+  `claude_agent_sdk.query()` against the bundled Claude Code binary, reproducing
+  the daemon's original consume loop bit-for-bit (same `ap2.message_dump`
+  summary/full/text triple feeding `.stream.jsonl` / `.messages.jsonl`, same
+  usage derivation). It is the behavior reference.
+- **`CodexAdapter`** (`backend = "codex"`) — drives OpenAI's Codex agent via the
+  official `openai_codex` SDK (`thread_start` → `turn` → notification stream),
+  normalizing each codex `Notification` into the same `AgentEvent` shape so the
+  cost guards / `task_run_usage` emission / `ap2 status` read one usage record
+  regardless of backend.
+
+`select_adapter(kind, cfg)` (`ap2/adapters/select.py`) returns the adapter
+instance backing an agent kind, reading the merged backend id from
+`Config.get_agent_backend(kind)`. Resolution order, high → low:
+
+1. `AP2_AGENT_BACKEND_<KIND>` env override (`<KIND>` upper-cased — e.g. the
+   `task` kind reads `AP2_AGENT_BACKEND_TASK`).
+2. The `[agent_backends]` TOML table (e.g. `task = "codex"`).
+3. `DEFAULT_AGENT_BACKEND = "claude"`.
+
+An unknown / typo'd backend id degrades to the Claude adapter rather than
+crashing dispatch, so a default install behaves exactly as it did before the
+adapter layer existed. Selection is per-kind across the canonical `AGENT_KINDS`
+inventory (`task`, `ideation`, `status_report`, `cron`, `mattermost`, plus the
+`verifier_judge` / `ideation_scrub` / `validator_judge` / `janitor_judge`
+component calls), so an operator can route, say, `task` to codex while
+everything else stays on claude.
+
+Because the Claude SDK's in-process `create_sdk_mcp_server` is Claude-specific,
+the codex adapter exposes ap2's custom tools (`report_result`, `cron_propose`,
+…) to a live Codex agent over an **external stdio MCP bridge**: `CodexAdapter`
+translates the tool policy into a `mcp_servers` config entry that launches
+`python -m ap2.mcp_stdio` (`ap2/mcp_stdio.py`, serving the same tool set) and
+merges it into `thread_start(config=...)`. Both adapters record their registered
+tool short-names so `registered_tool_names()` enumerates one identical toolset
+across backends.
+
+The daemon-start auth gate walks the resolved backend set and refuses to start
+unless every referenced backend's credentials are present (Claude:
+`CLAUDE_CODE_OAUTH_TOKEN`; Codex: `OPENAI_API_KEY` or a `~/.codex/auth.json`
+ChatGPT-login session). See `howto.md` for the operational config (the
+`[agent_backends]` table, the `AP2_AGENT_BACKEND_<KIND>` override, per-backend
+auth, and the daemon-start gate).
 
 ## Task lifecycle
 
@@ -93,7 +153,7 @@ Backlog → Ready → Active → Complete  (happy path; auto-promotion at the
 `run_task`:
 1. `move_to_active` (board lock).
 2. Build the prompt: header + briefing + recent events + RESULT format spec.
-3. `sdk.query()` consumed turn-by-turn; messages dumped to `.stream.jsonl` + `.messages.jsonl` for diagnosis (TB-85).
+3. Dispatched through `select_adapter("task", cfg)` → `adapter.run(...)` (a `ClaudeCodeAdapter` over `sdk.query()` by default; see **Agent backends**) and consumed turn-by-turn; messages dumped to `.stream.jsonl` + `.messages.jsonl` for diagnosis (TB-85).
 4. Capture the agent's `report_result(...)` MCP tool call — `status` + `commit` + `summary` + `files_changed` + `tests_passed` + optional `cron` list. If the agent didn't call it, daemon sets `status="unknown"` and routes through HEAD-recovery (step 7).
 5. Two-tier verify:
    - Per-task verification (`verify.verify_task`) runs the briefing's `## Verification` bullets — shell bullets via subprocess, prose bullets via SDK judge.
@@ -264,7 +324,7 @@ Cycles to watch out for:
 
 ## Custom MCP tools
 
-The daemon registers an MCP server with `claude_agent_sdk.create_sdk_mcp_server` and passes it as `mcp_servers={"autopilot": mcp_server}` in every `ClaudeAgentOptions`. Two tool pools, partitioned by `allowed_tools`:
+The daemon hands ap2's custom tool set to the resolved adapter's `build_tool_server(...)`, which exposes it to the backend (see **Agent backends**): the `ClaudeCodeAdapter` wraps it in a `claude_agent_sdk.create_sdk_mcp_server` and threads it through `AgentTools.mcp_servers` as `{"autopilot": mcp_server}` (the default path); the `CodexAdapter` serves the identical tool set to a live Codex agent over the `python -m ap2.mcp_stdio` external stdio bridge. Two tool pools, partitioned by `allowed_tools`:
 
 ```python
 CONTROL_AGENT_TOOLS = [

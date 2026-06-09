@@ -1,9 +1,11 @@
 # autopilot2
 
 External Python daemon that drives a Claude Code project through a list of
-tasks. Each unit of work runs as a fresh [Claude Agent SDK][sdk] `query()`
-call; shared state lives on disk. The daemon never accumulates context, so
-sessions don't degrade as work piles up.
+tasks. Each unit of work runs as a fresh agent dispatch through a pluggable
+backend — [Claude Code][sdk] `query()` by default, with OpenAI Codex
+selectable per agent kind (each backend brings its own auth). Shared state
+lives on disk, so the daemon never accumulates context and sessions don't
+degrade as work piles up.
 
 [sdk]: https://github.com/anthropics/claude-agent-sdk-python
 

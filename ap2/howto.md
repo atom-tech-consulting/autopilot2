@@ -2261,6 +2261,29 @@ status-report cron's tick rate):
 - `AP2_WEB_DISABLED` — set to `1`/`true`/`yes`/`on` to skip starting
   the daemon-spawned web UI.
 
+**Agent backend selection (`[agent_backends]` / `AP2_AGENT_BACKEND_<KIND>`,
+TB-358).** Every agent kind runs on a pluggable backend — `claude` (the
+default; `claude_agent_sdk` against the bundled Claude Code binary) or `codex`
+(OpenAI's `openai_codex` SDK). `select_adapter(kind, cfg)` resolves a kind's
+backend via `Config.get_agent_backend(kind)`, precedence high → low:
+
+1. `AP2_AGENT_BACKEND_<KIND>` env override — `<KIND>` upper-cased onto the
+   suffix (e.g. `AP2_AGENT_BACKEND_TASK=codex`,
+   `AP2_AGENT_BACKEND_STATUS_REPORT=codex`). Call-time-evaluated, so a
+   mid-process export propagates on the next dispatch; a blank value is treated
+   as unset.
+2. The `[agent_backends]` TOML table in `.cc-autopilot/config.toml`
+   (`task = "codex"`, …).
+3. `DEFAULT_AGENT_BACKEND = "claude"` — an unmapped kind, and an all-default
+   install, resolves to claude.
+
+Selectable kinds (`ap2.adapters.select.AGENT_KINDS`): `task`, `ideation`,
+`status_report`, `cron`, `mattermost`, plus the `verifier_judge`,
+`ideation_scrub`, `validator_judge`, `janitor_judge` component calls — each
+independently routable. An unknown / typo'd backend id degrades to claude
+rather than crashing dispatch. Whichever backends the resolved map references
+must have their credentials present at daemon start (next).
+
 **Daemon-start auth gate (`_require_oauth_token`, TB-79 → TB-358 →
 TB-370).** Before forking, the daemon walks the resolved per-kind
 backend map and requires exactly the credentials that set implies:
@@ -2605,6 +2628,11 @@ declared and not listed here OR in
                                 # with a clear "did you mean ...?" hint.
     [components.<name>.<key>]   # per-component knobs declared on
                                 # `Manifest.config_schema`.
+    [agent_backends]            # per-agent-kind backend map (TB-358):
+                                # `<kind> = "claude" | "codex"`. NOT a
+                                # `ConfigKey` — stashed verbatim by
+                                # `config_loader.from_toml`; see the
+                                # dedicated subsection below.
 
 **Precedence** (high → low, applied by
 `ap2.config_compat.apply_env_overrides` at daemon-start):
@@ -2980,6 +3008,28 @@ goal.md L356-358 (the `_KNOBS_STAYING_ENV_ONLY` partition).
 > `AP2_VALIDATOR_JUDGE_DISABLED`, `AP2_VALIDATOR_JUDGE_TIMEOUT_S`,
 > `AP2_VALIDATOR_JUDGE_MAX_TURNS`, `AP2_VALIDATOR_JUDGE_MAX_TOKENS` —
 > documented in the `## Configuration knobs` section above.
+
+### `[agent_backends]` — per-agent-kind backend map (TB-358)
+
+A top-level table (not `[core.*]` / `[components.*]`) mapping an agent
+kind to its backend id, consumed verbatim by `config_loader.from_toml`
+into `Config.agent_backends_config`. Keys are the `AGENT_KINDS`
+(`task`, `ideation`, `status_report`, `cron`, `mattermost`,
+`verifier_judge`, `ideation_scrub`, `validator_judge`,
+`janitor_judge`); values are `"claude"` (default) or `"codex"`. Omit
+the table entirely to keep every kind on claude.
+
+    [agent_backends]
+    task = "codex"          # run task agents on Codex …
+    ideation = "claude"     # … while ideation stays on Claude
+
+Resolution precedence (with the `AP2_AGENT_BACKEND_<KIND>` env override
+winning over this table) and the per-backend credential requirement are
+documented under **Agent backend selection** + **Daemon-start auth
+gate** in `## Configuration knobs` above. Because `[agent_backends]` is
+not a declared `ConfigKey`, it is exempt from the
+`test_every_config_key_documented` drift gate and is not rendered into
+the `ap2 init` config-template scaffold.
 
 ## Sandbox model
 
