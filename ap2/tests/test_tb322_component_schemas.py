@@ -47,15 +47,16 @@ from ap2.env_reload import FIXED_KNOBS, HOT_RELOADABLE_KNOBS
 from ap2.registry import _reset_default_registry, default_registry
 
 
-# All seven manifests the TB-322 axis-3 cleavage is required to cover
-# (the janitor canary from TB-321 + the six TB-322 targets).
+# Manifests the TB-322 axis-3 cleavage covers (the janitor canary from
+# TB-321 + the TB-322 targets). TB-386 demoted the validator_judge component
+# into the core briefing-validation runner, so it is no longer a discoverable
+# component and drops out of this set.
 _EXPECTED_COMPONENTS: tuple[str, ...] = (
     "attention",
     "auto_approve",
     "auto_unfreeze",
     "janitor",
     "mattermost",
-    "validator_judge",
 )
 
 
@@ -73,7 +74,6 @@ _PARITY_WALK_COMPONENTS: tuple[str, ...] = (
     "auto_approve",
     "auto_unfreeze",
     "mattermost",
-    "validator_judge",
 )
 
 
@@ -143,11 +143,6 @@ _ENV_TO_SCHEMA_KEY: dict[str, str] = {
     "AP2_AUTO_APPROVE_FREEZE_THRESHOLD": "freeze_threshold",
     "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP": "per_task_token_cap",
     "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP": "window_token_cap",
-    # validator_judge
-    "AP2_VALIDATOR_JUDGE_DISABLED": "disabled",
-    "AP2_VALIDATOR_JUDGE_TIMEOUT_S": "timeout_s",
-    "AP2_VALIDATOR_JUDGE_MAX_TURNS": "max_turns",
-    "AP2_VALIDATOR_JUDGE_MAX_TOKENS": "max_tokens",
     # janitor canary (TB-321)
     "AP2_JANITOR_DISABLED": "disabled",
 }
@@ -291,10 +286,6 @@ _ENV_OWNER: dict[str, str] = {
     "AP2_AUTO_APPROVE_FREEZE_THRESHOLD": "auto_approve",
     "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP": "auto_approve",
     "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP": "auto_approve",
-    "AP2_VALIDATOR_JUDGE_DISABLED": "validator_judge",
-    "AP2_VALIDATOR_JUDGE_TIMEOUT_S": "validator_judge",
-    "AP2_VALIDATOR_JUDGE_MAX_TURNS": "validator_judge",
-    "AP2_VALIDATOR_JUDGE_MAX_TOKENS": "validator_judge",
     "AP2_JANITOR_DISABLED": "janitor",
 }
 for env_name, owner in _ENV_OWNER.items():
@@ -351,13 +342,14 @@ def test_hot_reloadable_flag_matches_env_reload_set():
 # ---------------------------------------------------------------------
 
 
-def test_aggregate_schemas_returns_all_seven_component_schemas():
+def test_aggregate_schemas_returns_all_component_schemas():
     """`aggregate_schemas(default_registry())` walks every manifest
-    and returns the per-component dict union. Post-TB-345 the union
-    contains 6 components (the remaining axis-3 targets + the janitor
-    canary from TB-321) — the former focus_advance component was
-    merged into the core `ap2/ideation_halt.py` module; pre-TB-322
-    only janitor was present."""
+    and returns the per-component dict union. Post-TB-386 the union
+    contains 5 components (the remaining axis-3 targets + the janitor
+    canary from TB-321) — TB-345 merged the former focus_advance component
+    into core `ap2/ideation_halt.py`, and TB-386 demoted the validator_judge
+    component into the core briefing-validation runner; pre-TB-322 only
+    janitor was present."""
     schemas = aggregate_schemas(default_registry())
     assert set(schemas) == set(_EXPECTED_COMPONENTS), (
         f"TB-322: aggregate_schemas must surface every TB-322 "
@@ -397,13 +389,16 @@ def test_aggregate_schemas_has_no_cross_component_key_collisions():
     # `_cost_approach_pct(cfg)` reads it via `cfg.get_component_value`
     # so the howto.md `test_every_config_key_documented` gate stays
     # green); post-TB-345 (the focus_advance component and its 2 schema
-    # keys merged into the core `ap2/ideation_halt.py` module):
+    # keys merged into the core `ap2/ideation_halt.py` module); post-TB-386
+    # (the validator_judge component and its 4 schema keys demoted into
+    # the core briefing-validation runner — the four knobs survive as a
+    # plain config namespace resolved via `cfg.get_component_value`, with
+    # no manifest config_schema):
     # janitor(4) + mattermost(3) + attention(5) + auto_unfreeze(5)
-    # + auto_approve(6) + validator_judge(4) = 27 distinct
-    # (component, key) pairs.
-    assert len(seen) == 27, (
+    # + auto_approve(6) = 23 distinct (component, key) pairs.
+    assert len(seen) == 23, (
         f"TB-322: total config-schema entries across all components "
-        f"changed from 27; got {len(seen)}. If the change is "
+        f"changed from 23; got {len(seen)}. If the change is "
         f"intentional, bump this assertion and document the new "
         f"shape in the TB-322 progress entry."
     )

@@ -48,13 +48,11 @@ import pytest
 
 from ap2 import doctor as doctor_mod
 from ap2 import events as events_mod
-# TB-316: the flat module `ap2/validator_judge.py` moved to
-# `ap2/components/validator_judge/`. Tests are exempt from the TB-311
-# import-direction gate (`_iter_core_py_files` skips `ap2/tests/`), so
-# the direct subpackage import is allowed here. The new alias name
-# stays the same (`vj`) so the rest of this module's bodies keep
-# reading byte-identically.
-from ap2.components import validator_judge as vj
+# TB-386: the dep-coherence judge surface was demoted out of
+# `ap2/components/validator_judge/` back into the core briefing-validation
+# runner (`ap2/briefing_validators.py`). The alias name (`vj`) stays the
+# same so the rest of this module's bodies keep reading byte-identically.
+from ap2 import briefing_validators as vj
 from ap2.config import Config, DEFAULT_VERIFY_TIMEOUT_S, EVENTS_FILE
 from ap2.doctor import (
     _VALIDATOR_JUDGE_TIMEOUT_AUDIT_INSUFFICIENT_SAMPLES,

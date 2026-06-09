@@ -853,7 +853,6 @@ that controls it.
       focus_advance: on (env_flag=None)
       janitor: on (AP2_JANITOR_DISABLED unset)
       mattermost: on (AP2_MM_CHANNELS=channel-id)
-      validator_judge: on (AP2_VALIDATOR_JUDGE_DISABLED unset)
 
 Entries are alphabetic by manifest name (matching
 `default_registry().components` iteration so a reader's mental model
@@ -874,9 +873,13 @@ takes effect on the next invocation. The polarity convention
   master kill switch for these four; whether to add one is the
   open ideation question logged at the `## Decisions needed` surface.
 - **Suppress polarity** (`*_DISABLED` env_flag, `default_enabled=True`
-  — janitor / `AP2_JANITOR_DISABLED`, validator_judge /
-  `AP2_VALIDATOR_JUDGE_DISABLED`) — the env var is a kill switch:
-  truthy disables, unset/empty/falsy keeps the component on.
+  — janitor / `AP2_JANITOR_DISABLED`) — the env var is a kill switch:
+  truthy disables, unset/empty/falsy keeps the component on. (TB-386
+  demoted the validator_judge / verifier_judge LLM judges out of
+  `ap2/components/`; their `AP2_VALIDATOR_JUDGE_DISABLED` /
+  `AP2_VERIFY_JUDGE_DISABLED` off-switches survive as plain config knobs
+  read directly by the core briefing-validation / verify runners, NOT as
+  component env_flags, so they no longer appear in this list.)
 - **Require polarity** (opt-in env_flag, `default_enabled=False`
   — mattermost / `AP2_MM_CHANNELS`) — the env var is an opt-in
   toggle: unset/empty disables, non-empty enables.
@@ -1621,14 +1624,17 @@ restart, or set the value via the file before daemon-start).
 **Verification.**
 - `AP2_VERIFY_CMD` — project-wide regression gate (e.g.
   `uv run pytest -q`). Unset = no project-wide gate.
-- `AP2_VERIFY_JUDGE_DISABLED` — hard off-switch for the `verifier_judge`
-  component (the per-task verifier's optional LLM prose-bullet judge,
-  TB-382). When set to a truthy value (`1` / `true` / `yes`), the
-  registry drops the component, `verify.py::verify_task` skips the SDK
-  judge, and prose bullets record as `unverified` (soft, non-gating)
-  while the deterministic shell bullets still gate — so a deployment can
-  verify with shell bullets alone. Prose judging is on by default;
-  mirrors `AP2_VALIDATOR_JUDGE_DISABLED`'s suppress-style polarity.
+- `AP2_VERIFY_JUDGE_DISABLED` — hard off-switch for the per-task
+  verifier's optional LLM prose-bullet judge. TB-382 had modeled the
+  prose judge as a `verifier_judge` component; TB-386 demoted it back
+  into the core verify runner (a judge invoked only as an internal
+  sub-step of `verify_task` is not a loop-level participant), so this is
+  now a plain config knob read directly by `verify.py::verify_task` via
+  `os.environ.get`. When set to a truthy value (`1` / `true` / `yes`),
+  `verify_task` skips the SDK judge and prose bullets record as
+  `unverified` (soft, non-gating) while the deterministic shell bullets
+  still gate — so a deployment can verify with shell bullets alone. Prose
+  judging is on by default; mirrors `AP2_VALIDATOR_JUDGE_DISABLED`.
 - `AP2_VERIFY_TIMEOUT_S` (600) — timeout for the project-wide gate.
   `ap2 doctor` warns when set below observed-typical successful verify
   duration (TB-252; reads `verify_passed` events for the last 7 days
@@ -1682,9 +1688,10 @@ symmetry.
   TB-270 ships the complementary axis-1 lever the same artifact named
   as the secondary factor (`prompt-too-heavy`):
   `_slice_briefing_for_dep_judge(briefing_text)` in
-  `ap2/components/validator_judge/__init__.py` (relocated from the
-  flat module `ap2/validator_judge.py` by TB-316) narrows the user
-  payload's
+  `ap2/briefing_validators.py` (the dep-coherence judge lived in the
+  flat module `ap2/validator_judge.py` until TB-316 moved it to a
+  `validator_judge` component, then TB-386 demoted it back into the core
+  briefing-validation runner) narrows the user payload's
   `briefing_markdown` field to the briefing's `## Goal` + `## Scope`
   sections only (Design / Verification / Out-of-scope are bytes the
   judge wouldn't have used to change its hard-predecessor verdict).
@@ -2951,34 +2958,17 @@ L356-358 (the `_KNOBS_STAYING_ENV_ONLY` partition).
   addressing it in poll content. Mirrors `AP2_MM_MENTION`; not in
   `HOT_RELOADABLE_KNOBS`.
 
-### `[components.validator_judge]` — briefing dep-coherence judge (TB-235)
-
-Haiku judge that runs as check #7 in
-`_validate_briefing_structure`, identifying hard predecessor
-dependencies a briefing's prose implies but its `@blocked:`
-codespan omits. Fail-open by design.
-
-- `components.validator_judge.disabled` — bool, default `false`
-  (hot-reloadable). Kill switch for the LLM-driven dep-coherence
-  check (TB-235). True short-circuits the validator inside
-  `_check_dependency_coherence` and (at the manifest env_flag
-  layer) drops the component from `registry.briefing_validators()`.
-  Mirrors `AP2_VALIDATOR_JUDGE_DISABLED`.
-- `components.validator_judge.max_tokens` — int, default `500`.
-  TB-249 deprecated alias for `max_turns`; honored (ceiling-capped
-  at 5) when `max_turns` is unset so operators with stale
-  `AP2_VALIDATOR_JUDGE_MAX_TOKENS` exports don't break. Mirrors
-  `AP2_VALIDATOR_JUDGE_MAX_TOKENS`; not in `HOT_RELOADABLE_KNOBS`
-  (deprecated knob — operators should migrate to `max_turns`).
-- `components.validator_judge.max_turns` — int, default `2`
-  (hot-reloadable). Per-call max-turns budget for the dep-coherence
-  judge (TB-249). Default 2 — one verdict message plus one optional
-  Read/Grep tool call. Mirrors `AP2_VALIDATOR_JUDGE_MAX_TURNS`.
-- `components.validator_judge.timeout_s` — float, default `60.0`
-  (hot-reloadable). Per-call timeout (seconds) for the dep-coherence
-  SDK invocation (TB-235). Default 60s — short enough to keep `ap2
-  add` responsive, long enough for a Haiku judge round-trip.
-  Mirrors `AP2_VALIDATOR_JUDGE_TIMEOUT_S`.
+> **Note (TB-386):** the briefing dep-coherence judge (TB-235, Haiku
+> check that identifies hard-predecessor dependencies a briefing's prose
+> implies but its `@blocked:` codespan omits) was demoted out of the
+> `validator_judge` component back into the core briefing-validation
+> runner (`ap2/briefing_validators.py`). It is a sub-step of
+> `_validate_briefing_structure`, not a loop-level component, so it no
+> longer has a `[components.validator_judge]` TOML block. Its off-switch
+> and tunables survive as plain env-only knobs —
+> `AP2_VALIDATOR_JUDGE_DISABLED`, `AP2_VALIDATOR_JUDGE_TIMEOUT_S`,
+> `AP2_VALIDATOR_JUDGE_MAX_TURNS`, `AP2_VALIDATOR_JUDGE_MAX_TOKENS` —
+> documented in the `## Configuration knobs` section above.
 
 ## Sandbox model
 

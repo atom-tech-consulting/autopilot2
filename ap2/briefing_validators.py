@@ -40,14 +40,17 @@ Public symbols (still re-exported from `ap2.tools` for backward compat):
   registry-walked validators (today: the validator_judge component's
   dep-coherence wrapper) run.
 
-TB-316: the LLM-driven dep-coherence check (`_check_dependency_coherence`)
-no longer lives at the flat `ap2/validator_judge.py` path; it moved to
-`ap2/components/validator_judge/` and registers itself as a
-`briefing_validator` hook via the component registry. Core resolves it
-through `registry.briefing_validators()` rather than a static import —
-the TB-311 import-direction gate forbids the latter. The dependency
-is still one-way: the validator_judge component has no awareness of
-briefing-section parsing.
+TB-235 / TB-316 / TB-386: the LLM-driven dep-coherence check
+(`_check_dependency_coherence`) is a core sub-step of this briefing-
+validation runner. TB-316 had briefly modeled it as a
+`ap2/components/validator_judge/` component reached via
+`registry.briefing_validators()`; TB-386 demoted it back into core,
+because a judge invoked only as an internal sub-step of
+`_validate_briefing_structure` is NOT a loop-level participant. The judge
+still resolves its backend via `select_adapter("validator_judge", cfg)` —
+the adapter seam stays; only the redundant component wrapper is gone.
+`_validate_briefing_structure` appends the dep-coherence validator after
+the five deterministic core checks and calls it directly.
 """
 from __future__ import annotations
 
@@ -55,9 +58,10 @@ import datetime as _dt
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from . import events
 from .config import Config
@@ -66,6 +70,7 @@ from .init import (
     GOAL_ANCHOR_HEADINGS,
     WHY_NOW_MIN_CHARS,
 )
+from .json_extract import extract_rightmost_json_object
 from .verify import parse_verification_section
 
 
@@ -1101,14 +1106,756 @@ def _validate_no_fenced_paths_in_scope_check(
     return _validate_no_fenced_paths_in_scope(ctx.text)
 
 
-# TB-316: canonical core-validator list. The five deterministic
+# ---------------------------------------------------------------------------
+# TB-235 / TB-247 / TB-269 / TB-270 / TB-331 / TB-363 / TB-386:
+# LLM-driven dependency-coherence check (validator check #8).
+#
+# Hosts the Haiku-4.5-driven judge that identifies hard predecessors named
+# implicitly in a task briefing's prose (Scope / Design / Why-now /
+# description) and the dispatcher (`_check_dependency_coherence`) that turns
+# the judge's verdict into a queue-append-time gate. TB-316 had relocated
+# this surface into `ap2/components/validator_judge/`; TB-386 demoted it back
+# into the core briefing-validation runner — a judge invoked only as an
+# internal sub-step of `_validate_briefing_structure` is NOT a loop-level
+# component. The judge still resolves its backend via
+# `select_adapter("validator_judge", cfg)`; the operator off-switch
+# `AP2_VALIDATOR_JUDGE_DISABLED` and the timeout / max-turns knobs survive as
+# plain config knobs read via `cfg.get_component_value("validator_judge", …)`.
+# ---------------------------------------------------------------------------
+
+
+# TB-235: knob defaults for the LLM-driven dependency-coherence check.
+# TB-269: timeout bumped 15.0 → 60.0 (the TB-257 investigation artifact
+# measured `_judge_dep_coherence_default` at 17.6-46.8s wall-clock; the prior
+# 15s default + 5s grace sat below the median completion of even the smallest
+# measured briefing). 60s sits 1.5× the artifact's worst-case ~47s.
+_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT = 60.0
+# TB-249: the SDK budget primitive is `max_turns`. `max_turns=2` allows ONE
+# assistant message (the JSON verdict) + ONE optional tool call.
+_VALIDATOR_JUDGE_MAX_TURNS_DEFAULT = 2
+# TB-249 deprecated-alias ceiling: a stale `AP2_VALIDATOR_JUDGE_MAX_TOKENS`
+# value is accepted as a `max_turns` override but capped so the old default
+# (`500`) doesn't translate into a 500-turn runaway.
+_VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL = 5
+# TB-235: legacy default kept ONLY for backward-compatibility lookups.
+_VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT = 500
+# TB-249: process-once flag so the deprecated-knob warning event fires
+# exactly once per process, not once per `ap2 add` invocation.
+_VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED: set[str] = set()
+# Haiku-4.5 is the cost-target floor for the check (≤$0.005 per briefing at
+# typical token volumes). Intentionally NOT exposed as an env knob yet.
+_VALIDATOR_JUDGE_MODEL = "claude-haiku-4-5"
+
+
+class _DepJudgeTimeout(Exception):
+    """Sentinel raised by a `dep_judge_fn` (or the default SDK call) when the
+    judge exceeded `AP2_VALIDATOR_JUDGE_TIMEOUT_S`. `_check_dependency_coherence`
+    distinguishes this from generic failures so the emitted event type is
+    `validator_judge_timeout` vs `validator_judge_fail`.
+    """
+
+
+# TB-247: parse-failure categorization labels surfaced as `parse_error` on
+# `validator_judge_fail` events. Mirrors TB-236's `PARSE_ERROR_CATEGORIES`
+# in `ap2/verify.py`:
+#   - `empty_text`    — SDK returned no last-assistant-text at all.
+#   - `no_braces`     — text exists but has no `{` / `}` to anchor extraction.
+#   - `json_decode`   — `{...}` candidate parse-failed (JSONDecodeError).
+#   - `non_dict`      — parsed cleanly but the value isn't a dict.
+#   - `sdk_exception` — the SDK call itself raised before any text came back.
+_DEP_JUDGE_PARSE_ERRORS: tuple[str, ...] = (
+    "empty_text",
+    "no_braces",
+    "json_decode",
+    "non_dict",
+    "sdk_exception",
+)
+
+
+class _DepJudgeOutcome(NamedTuple):
+    """TB-247: result + diagnostics from the dependency-coherence judge.
+
+    Mirrors `ap2/verify.py::_ParseOutcome`. Carries the parsed judge data
+    plus optional diagnostic fields so `_check_dependency_coherence` can
+    enrich `validator_judge_fail` events with the dump-file path and a
+    parse-error category.
+
+    Fields:
+      - `data` — parsed `{"hard_predecessors": [...], "reasoning": ...}` dict
+        on a clean parse; `None` on every parse-failure branch.
+      - `parse_error` — one of `_DEP_JUDGE_PARSE_ERRORS` on every parse-
+        failure path, `None` on success.
+      - `dump_path` — per-call debug file at
+        `<events_file.parent>/debug/<UTC-ts>-validator-judge-response.txt`
+        when a parse failure landed AND the diagnostic write succeeded.
+
+    The dispatcher also accepts a legacy `dict | None` return value from
+    existing test stubs that pre-date TB-247 — those are wrapped as
+    `_DepJudgeOutcome(data=..., parse_error=None, dump_path=None)`.
+    """
+
+    data: dict | None
+    parse_error: str | None
+    dump_path: "Path | None"
+
+
+def _parse_dep_judge_response(
+    text: str,
+    *,
+    events_file: "Path | None",
+) -> _DepJudgeOutcome:
+    """TB-247: parse the dep-judge SDK response into a `_DepJudgeOutcome`.
+
+    On parse failure it writes the FULL raw `text` to
+    `<events_file.parent>/debug/<UTC-ts>-validator-judge-response.txt` so the
+    operator can diagnose WHY the judge returned the shape it did. Successful
+    parses leave NOTHING on disk. Best-effort write: any OSError on `debug/`
+    mkdir or file write is swallowed and `dump_path` stays None.
+
+    `events_file=None` suppresses the dump entirely; the outcome still
+    carries `data` + `parse_error` so the caller's fail-open path works.
+    """
+    parse_error: str | None = None
+    data: dict | None = None
+
+    if not text:
+        parse_error = "empty_text"
+    else:
+        # TB-247: two-pass parse. Try whole-text JSON first; on parse
+        # failure, fall back to substring extraction so preamble/trailing-
+        # prose responses still get extracted cleanly.
+        #
+        # TB-261: the substring extraction is centralized in
+        # ``ap2.json_extract.extract_rightmost_json_object`` — the
+        # rightmost-balanced-object semantics close the preamble-brace-
+        # shadowing bug the pre-TB-261 first-`{` / last-`}` boundary-finding
+        # had at all four call sites.
+        stripped = text.strip()
+        try:
+            whole = json.loads(stripped)
+        except json.JSONDecodeError:
+            whole_parsed = False
+        else:
+            whole_parsed = True
+            if isinstance(whole, dict):
+                data = whole
+            else:
+                parse_error = "non_dict"
+
+        if not whole_parsed:
+            extracted = extract_rightmost_json_object(text)
+            if extracted is None:
+                # No parseable JSON OBJECT anywhere. Distinguish "no braces"
+                # from "braces present but every candidate `{` fails decode".
+                if "{" not in text:
+                    parse_error = "no_braces"
+                else:
+                    parse_error = "json_decode"
+            else:
+                parsed, _, _ = extracted
+                if not isinstance(parsed, dict):
+                    parse_error = "non_dict"
+                else:
+                    data = parsed
+
+    dump_path: "Path | None" = None
+    if parse_error is not None and events_file is not None:
+        try:
+            debug_dir = events_file.parent / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            ts = _dt.datetime.now(_dt.timezone.utc).strftime(
+                "%Y%m%dT%H%M%SZ",
+            )
+            candidate = debug_dir / f"{ts}-validator-judge-response.txt"
+            candidate.write_text(text or "")
+            dump_path = candidate
+        except OSError:
+            dump_path = None
+
+    return _DepJudgeOutcome(
+        data=data, parse_error=parse_error, dump_path=dump_path,
+    )
+
+
+# TB-270: canonical briefing headings that bound the dep-coherence judge's
+# input. Hard-predecessor detection is answered from the briefing's
+# narrative-intent sections (Goal: why; Scope: what), NOT from Verification /
+# Out-of-scope / Design. Slicing to these two sections is a faithful
+# narrowing of input and shrinks the SDK call's input token count by
+# ~50-70% on typical operator-curated briefings.
+_BRIEFING_SLICE_HEADINGS: tuple[str, ...] = ("## Goal", "## Scope")
+
+
+def _slice_briefing_for_dep_judge(briefing_text: str) -> str:
+    """TB-270: return the substring covering `## Goal` and `## Scope` sections
+    only, terminating each section at the next `## ` heading or EOF.
+
+    Defensive fallback: if either canonical heading is missing, or if the
+    resulting slice is empty after whitespace-stripping, return the full
+    `briefing_text` unchanged — slicing must not turn a parseable briefing
+    into a zero-token payload.
+
+    Both sections are concatenated in SOURCE order (Goal before Scope).
+    """
+    sections: list[tuple[int, str, str]] = []  # (start_offset, slice, body)
+    for heading in _BRIEFING_SLICE_HEADINGS:
+        # `\b` after the heading ensures `## Scope` doesn't accidentally match
+        # `## ScopeAndExtras`.
+        pattern = rf"^{re.escape(heading)}\b"
+        m = re.search(pattern, briefing_text, flags=re.MULTILINE)
+        if m is None:
+            # Missing heading → defensive fallback (don't blind the judge).
+            return briefing_text
+        section_start = m.start()
+        rest = briefing_text[m.end():]
+        next_heading = re.search(r"^## ", rest, flags=re.MULTILINE)
+        section_end = (
+            m.end() + next_heading.start()
+            if next_heading is not None
+            else len(briefing_text)
+        )
+        section_slice = briefing_text[section_start:section_end]
+        body = briefing_text[m.end():section_end]
+        sections.append((section_start, section_slice, body))
+
+    # Both headings present but each section's body is empty (e.g. a stub
+    # briefing with headings and no prose between them). Fall back to the
+    # full text — same defensive posture as the missing-heading branch.
+    if all(not body.strip() for _, _, body in sections):
+        return briefing_text
+
+    # Preserve SOURCE order — Goal-then-Scope on canonical briefings.
+    sections.sort(key=lambda triple: triple[0])
+    return "".join(section_slice for _, section_slice, _ in sections)
+
+
+def _resolve_validator_judge_adapter(*, sdk=None, cfg: "Config | None" = None):
+    """Resolve the `AgentAdapter` backing the `validator_judge` kind (TB-363).
+
+    The backend is chosen per agent kind by `select_adapter` reading the
+    merged `[agent_backends]` config for the `validator_judge` kind
+    (`AP2_AGENT_BACKEND_VALIDATOR_JUDGE` env override > `[agent_backends]`
+    table > the all-`claude` default). With the default map the resolved
+    adapter is a `ClaudeCodeAdapter` and the judge's verdict is identical to
+    the pre-migration direct `sdk.query` path; an operator can set
+    `validator_judge=codex` to route just this judge to the Codex backend.
+
+    The resolved adapter wraps the injected `sdk` handle so the judge's
+    hermetic unit tests stay deterministic. `cfg=None` is the seam
+    `_judge_dep_coherence_default` hits — it carries no `Config`, so it falls
+    back to a default `ClaudeCodeAdapter`, matching the all-`claude` default.
+    """
+    from .adapters.claude_code import ClaudeCodeAdapter
+
+    if cfg is not None:
+        from .adapters.select import select_adapter
+
+        adapter = select_adapter("validator_judge", cfg)
+    else:
+        adapter = ClaudeCodeAdapter()
+    if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+        adapter._sdk = sdk
+    return adapter
+
+
+def _judge_dep_coherence_default(
+    *,
+    briefing_text: str,
+    description: str,
+    blocked_tokens: list[str],
+    timeout_s: float,
+    max_turns: int,
+    events_file: "Path | None" = None,
+) -> _DepJudgeOutcome:
+    """Real-SDK implementation of the TB-235 dependency-coherence judge.
+
+    Returns a `_DepJudgeOutcome` carrying the parsed JSON dict (when the judge
+    produced one) plus optional diagnostic fields. Returns
+    `_DepJudgeOutcome(data=None, ...)` on any non-timeout failure (network,
+    parse error, non-dict response). Raises `_DepJudgeTimeout` when the SDK
+    call exceeds `timeout_s`.
+
+    TB-249: budget control is `max_turns` (the SDK-native primitive). The
+    judge gets a strict-JSON system prompt + a user payload naming the
+    briefing (Goal+Scope slice), the post-em-dash description prose, and the
+    task's current `@blocked:` codespan tokens; the response shape is
+    `{"hard_predecessors": ["TB-N", ...], "reasoning": "<str>"}`.
+    """
+    import asyncio
+
+    # TB-366: source the (possibly test-injected) SDK module through the
+    # adapter layer (`ap2.adapters.load_claude_sdk`) so `claude_agent_sdk` is
+    # imported only inside `ap2/adapters/`. The injected fake-SDK seam is
+    # preserved: `load_claude_sdk` resolves the import against `sys.modules`.
+    from .adapters import load_claude_sdk
+
+    try:
+        sdk = load_claude_sdk()
+    except Exception:
+        return _DepJudgeOutcome(data=None, parse_error=None, dump_path=None)
+
+    # TB-363: resolve the AgentAdapter for the `validator_judge` kind and
+    # dispatch through it. `_judge_dep_coherence_default` carries no `cfg`, so
+    # this hits the `cfg=None` seam → a default `ClaudeCodeAdapter` wrapping
+    # the `sdk` handle imported above.
+    adapter = _resolve_validator_judge_adapter(sdk=sdk, cfg=None)
+
+    # TB-247: tightened final-message contract (mirrors TB-236's prose-judge
+    # prompt). Shorter `reasoning` = smaller surface area for JSON-escape bugs.
+    system_text = (
+        "You are validating a task briefing for hard-predecessor "
+        "dependency coherence. A hard predecessor is another task "
+        "whose work must be on disk (committed) before this task's "
+        "agent can do its own work — code modules, schema, env knobs, "
+        "or other artifacts the new task depends on. Soft references "
+        "(historical context, sibling tasks doing parallel work, "
+        "references to docstrings or prior commits for "
+        "reading-comprehension only) are NOT hard predecessors.\n\n"
+        "OUTPUT CONTRACT — your FINAL message must be a JSON object "
+        "only:\n"
+        '  {"hard_predecessors": ["TB-217"], '
+        '"reasoning": "TB-217 created ap2/_shared.py which this '
+        'briefing imports"}\n'
+        "Rules for the FINAL message:\n"
+        "  - It is a JSON object only. No markdown code fences (no "
+        "```json or ``` wrapping). No leading prose (no 'Here is the "
+        "verdict:' preamble). No trailing commentary after the closing "
+        "brace.\n"
+        "  - `hard_predecessors` is a (possibly empty) list of strings,"
+        " each of the form 'TB-N'.\n"
+        "  - `reasoning` is a single short paragraph, MAXIMUM 200 "
+        "characters. Cite the briefing file:section or symbol "
+        "triggering the dep claim; do NOT quote long briefing excerpts "
+        "or paste prose blocks.\n"
+        "  - If the reasoning would naturally exceed 200 characters, "
+        "summarize: name the strongest single piece of evidence and "
+        "stop.\n"
+    )
+    # TB-270: slice the briefing to Goal+Scope sections only.
+    user_payload = {
+        "briefing_markdown": _slice_briefing_for_dep_judge(briefing_text),
+        "task_description": description,
+        "blocked_codespan_tokens": list(blocked_tokens),
+    }
+    prompt = (
+        f"{system_text}\n\n"
+        f"Input:\n```json\n{json.dumps(user_payload, indent=2)}\n```"
+    )
+
+    async def _ask() -> str:
+        # TB-363: build a backend-neutral `AgentOptions` / `AgentTools` and
+        # dispatch through the resolved `adapter`. The outer
+        # `asyncio.wait_for(..., timeout=timeout_s)` owns the timeout; a
+        # backend fault surfaces as a non-`complete` `AgentResult.status`,
+        # re-raised here so the worker maps it onto the SDK-exception
+        # fail-open branch.
+        from .adapters.base import AgentOptions, AgentTools
+
+        options = AgentOptions(
+            permission_mode="bypassPermissions",
+            max_turns=max_turns,
+            model=_VALIDATOR_JUDGE_MODEL,
+        )
+        result = await adapter.run_to_result(prompt, AgentTools(), options)
+        if result.status != "complete":
+            raise RuntimeError(
+                result.error or f"validator judge adapter {result.status}"
+            )
+        return (result.text or "").strip()
+
+    # If we're already inside a running event loop (the daemon's tick is async
+    # and calls sync MCP-tool handlers), `asyncio.run` raises. Run the
+    # coroutine in a fresh thread with its own loop so the sync caller
+    # composes correctly in both contexts.
+    import threading
+
+    result: dict[str, "str | Exception | None"] = {"text": None, "exc": None}
+
+    def _worker() -> None:
+        try:
+            result["text"] = asyncio.run(
+                asyncio.wait_for(_ask(), timeout=timeout_s),
+            )
+        except asyncio.TimeoutError as exc:
+            result["exc"] = _DepJudgeTimeout(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            result["exc"] = exc
+
+    worker = threading.Thread(target=_worker, daemon=True)
+    # TB-269: stopwatch around the worker join so the `validator_judge_passed`
+    # event below carries an honest wall-clock duration.
+    _t0 = time.monotonic()
+    worker.start()
+    worker.join(timeout=timeout_s + 5)
+    if worker.is_alive():
+        # Worker overran the inner timeout — treat as timeout. The thread
+        # leaks (daemon=True so it dies at interpreter shutdown).
+        raise _DepJudgeTimeout(
+            f"validator judge worker exceeded {timeout_s + 5:.0f}s"
+        )
+    if isinstance(result["exc"], _DepJudgeTimeout):
+        raise result["exc"]
+    if result["exc"] is not None:
+        # Non-timeout SDK exception. No raw text to dump.
+        return _DepJudgeOutcome(
+            data=None, parse_error=None, dump_path=None,
+        )
+    text = result["text"] or ""
+    duration_s = time.monotonic() - _t0
+
+    # TB-269: emit `validator_judge_passed` for every successful worker return
+    # (SDK call completed without timeout / SDK exception). Fires BEFORE the
+    # JSON parse so the `validator_judge_timeout_audit` doctor surface sees
+    # every real-world wall-clock duration the judge paid. Best-effort write.
+    if events_file is not None:
+        try:
+            events.append(
+                events_file,
+                "validator_judge_passed",
+                duration_s=round(duration_s, 3),
+                briefing_bytes=len(briefing_text.encode("utf-8")),
+                max_turns=max_turns,
+                timeout_s=timeout_s,
+            )
+        except OSError:
+            pass
+
+    # TB-247: delegate parse + dump to the testable helper.
+    return _parse_dep_judge_response(text, events_file=events_file)
+
+
+def _validator_judge_disabled(cfg: Config) -> bool:
+    """TB-331 / TB-386: True iff the validator-judge kill switch is set.
+
+    Routes through `cfg.get_component_value("validator_judge", "disabled")`,
+    which evaluates sectioned env > flat env (`AP2_VALIDATOR_JUDGE_DISABLED`
+    via the `FLAT_TO_SECTIONED` reverse-lookup) > `cfg.components_config`
+    snapshot > default at call time. Same truthy enumeration as the registry's
+    pre-TB-386 polarity rule (`1` / `true` / `yes`, case-insensitive). Default
+    unset → False (judge enabled). The component is gone (TB-386) but the
+    `validator_judge` config namespace survives as a plain knob namespace.
+    """
+    raw = cfg.get_component_value("validator_judge", "disabled")
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in {"1", "true", "yes"}
+
+
+def _validator_judge_timeout_s(cfg: Config) -> float:
+    """TB-331: effective per-call timeout (seconds) for the dep-coherence SDK
+    invocation. Routes through
+    `cfg.get_component_value("validator_judge", "timeout_s")`. Permissive
+    parse: empty / non-float / whitespace-only values fall back to
+    `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` (60.0).
+    """
+    raw = cfg.get_component_value("validator_judge", "timeout_s")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT
+
+
+def _validator_judge_max_turns(cfg: Config) -> int | None:
+    """TB-331: effective `max_turns` budget from the canonical knob, or `None`
+    when unset/invalid so the caller can fall through to the deprecated-alias
+    resolution. Routes through
+    `cfg.get_component_value("validator_judge", "max_turns")`.
+
+    Returns `None` (NOT the default) when the resolved value is None / empty /
+    non-int / `<= 0`, so the caller distinguishes the unset-canonical-knob
+    case from a positive override.
+    """
+    raw = cfg.get_component_value("validator_judge", "max_turns")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _validator_judge_max_tokens_legacy(cfg: Config) -> int:
+    """TB-331: deprecated-alias resolution for `AP2_VALIDATOR_JUDGE_MAX_TOKENS`
+    (the pre-TB-249 knob name). Routes through
+    `cfg.get_component_value("validator_judge", "max_tokens")`. Returns `0`
+    when the layer is empty / non-int / non-positive — the sentinel the caller
+    treats as "alias not set" before falling through to
+    `_VALIDATOR_JUDGE_MAX_TURNS_DEFAULT`.
+    """
+    raw = cfg.get_component_value("validator_judge", "max_tokens")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return 0
+    try:
+        legacy_val = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return legacy_val if legacy_val > 0 else 0
+
+
+def _check_dependency_coherence(
+    cfg: Config,
+    *,
+    briefing_text: str,
+    description: str,
+    blocked_csv: str,
+    events_file: "Path | None",
+    judge_fn=None,
+) -> str | None:
+    """TB-235 dep-coherence check. See `_validate_briefing_structure`'s
+    docstring for the contract.
+
+    Returns an error-string when the LLM judge identifies any TB-N as a hard
+    predecessor that is not present in the task's `@blocked:` codespan
+    (`blocked_csv`). Returns `None` when the briefing is consistent, the judge
+    returns an empty `hard_predecessors` list, the off-switch
+    `AP2_VALIDATOR_JUDGE_DISABLED=1` is set (resolved via
+    `_validator_judge_disabled(cfg)`), or the judge SDK call fails for any
+    reason (fail-open; emits a `validator_judge_{timeout,fail}` event when
+    `events_file` is supplied).
+
+    `judge_fn`: callable matching `_judge_dep_coherence_default`'s signature.
+    Test paths inject a stub; the production path uses the real SDK. TB-247
+    added an optional `events_file` kwarg used by the production path; stubs
+    that don't accept it fall through a `TypeError` retry.
+    """
+    if _validator_judge_disabled(cfg):
+        return None
+    timeout_s = _validator_judge_timeout_s(cfg)
+    # TB-249 / TB-331: resolve `max_turns` with a layered preference:
+    #   (1) AP2_VALIDATOR_JUDGE_MAX_TURNS — canonical knob, default 2.
+    #   (2) AP2_VALIDATOR_JUDGE_MAX_TOKENS — deprecated alias; if set AND (1)
+    #       is unset, used as `max_turns` capped at the ceiling. A
+    #       `validator_judge_deprecated_knob` event fires once per process.
+    #   (3) module default — _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT.
+    canonical_turns = _validator_judge_max_turns(cfg)
+    max_turns = _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT
+    if canonical_turns is not None:
+        max_turns = canonical_turns
+    else:
+        legacy_val = _validator_judge_max_tokens_legacy(cfg)
+        if legacy_val > 0:
+            capped = min(legacy_val, _VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL)
+            max_turns = capped
+            if (
+                events_file is not None
+                and "AP2_VALIDATOR_JUDGE_MAX_TOKENS"
+                not in _VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED
+            ):
+                try:
+                    events.append(
+                        events_file,
+                        "validator_judge_deprecated_knob",
+                        knob="AP2_VALIDATOR_JUDGE_MAX_TOKENS",
+                        replacement="AP2_VALIDATOR_JUDGE_MAX_TURNS",
+                        legacy_value=legacy_val,
+                        applied_max_turns=capped,
+                        ceiling=_VALIDATOR_JUDGE_DEPRECATED_KNOB_CEIL,
+                    )
+                except OSError:
+                    pass
+                _VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED.add(
+                    "AP2_VALIDATOR_JUDGE_MAX_TOKENS"
+                )
+    blocked_tokens = [
+        tok.strip()
+        for tok in (blocked_csv or "").split(",")
+        if tok.strip()
+    ]
+
+    fn = judge_fn or _judge_dep_coherence_default
+    try:
+        raw_ret = fn(
+            briefing_text=briefing_text,
+            description=description or "",
+            blocked_tokens=blocked_tokens,
+            timeout_s=timeout_s,
+            max_turns=max_turns,
+            events_file=events_file,
+        )
+    except _DepJudgeTimeout as exc:
+        if events_file is not None:
+            try:
+                events.append(
+                    events_file,
+                    "validator_judge_timeout",
+                    timeout_s=timeout_s,
+                    error=str(exc),
+                )
+            except OSError:
+                pass
+        return None
+    except TypeError:
+        # TB-247: pre-TB-247 test stubs don't accept the new `events_file`
+        # kwarg. Retry without it so legacy stubs stay green.
+        try:
+            raw_ret = fn(
+                briefing_text=briefing_text,
+                description=description or "",
+                blocked_tokens=blocked_tokens,
+                timeout_s=timeout_s,
+                max_turns=max_turns,
+            )
+        except _DepJudgeTimeout as exc:
+            if events_file is not None:
+                try:
+                    events.append(
+                        events_file,
+                        "validator_judge_timeout",
+                        timeout_s=timeout_s,
+                        error=str(exc),
+                    )
+                except OSError:
+                    pass
+            return None
+        except Exception as exc:  # noqa: BLE001
+            if events_file is not None:
+                try:
+                    events.append(
+                        events_file,
+                        "validator_judge_fail",
+                        error=f"{type(exc).__name__}: {exc}",
+                        parse_error="sdk_exception",
+                    )
+                except OSError:
+                    pass
+            return None
+    except Exception as exc:  # noqa: BLE001
+        if events_file is not None:
+            try:
+                events.append(
+                    events_file,
+                    "validator_judge_fail",
+                    error=f"{type(exc).__name__}: {exc}",
+                    parse_error="sdk_exception",
+                )
+            except OSError:
+                pass
+        return None
+
+    # TB-247: normalize the judge return value into a `_DepJudgeOutcome`.
+    if isinstance(raw_ret, _DepJudgeOutcome):
+        outcome = raw_ret
+    else:
+        outcome = _DepJudgeOutcome(
+            data=raw_ret if isinstance(raw_ret, dict) else None,
+            parse_error=None,
+            dump_path=None,
+        )
+
+    if not isinstance(outcome.data, dict):
+        # Malformed JSON / non-object response. Treat as fail-open so a single
+        # judge hiccup can't block every `ap2 add`. Emit `validator_judge_fail`.
+        if events_file is not None:
+            try:
+                payload: dict[str, Any] = {
+                    "error": "non-dict judge response",
+                }
+                if outcome.parse_error is not None:
+                    payload["parse_error"] = outcome.parse_error
+                if outcome.dump_path is not None:
+                    payload["debug_path"] = str(outcome.dump_path)
+                events.append(
+                    events_file,
+                    "validator_judge_fail",
+                    **payload,
+                )
+            except OSError:
+                pass
+        return None
+
+    data = outcome.data
+    hard_preds = data.get("hard_predecessors")
+    reasoning = str(data.get("reasoning") or "").strip()
+    if not isinstance(hard_preds, list) or not hard_preds:
+        # Empty list (or missing field) → no dependency claim → no @blocked
+        # requirement. Common path.
+        return None
+    declared_lower = {t.lower() for t in blocked_tokens}
+    for raw in hard_preds:
+        if not isinstance(raw, str):
+            continue
+        tok = raw.strip()
+        if not tok or not tok.upper().startswith("TB-"):
+            continue
+        if tok.lower() in declared_lower:
+            continue
+        # First missing dependency wins — same shape as the deterministic
+        # checks (return on first offender so the operator's error message is
+        # specific rather than a multi-line aggregate).
+        return (
+            f"briefing structure invalid: judge identified {tok} as a "
+            f"hard predecessor (reasoning: \"{reasoning}\"). Either "
+            f"add @blocked:{tok} to the task's codespan, or rephrase "
+            f"the briefing to not claim {tok} as a hard predecessor "
+            "(TB-235)."
+        )
+    return None
+
+
+def _empty_cfg_for_back_compat() -> Config:
+    """TB-331: synthetic empty `Config` for legacy test paths that exercise
+    the dep-coherence judge without constructing a real one.
+
+    `test_dep_validator_judge.py` and the TB-247 / TB-316 sibling modules
+    call `_validate_briefing_structure(...)` with `events_file` + `dep_judge_fn`
+    but no `cfg`. The component body's `cfg.get_component_value(...)` calls
+    require a Config-shaped object, so this helper synthesizes one via
+    `Config.__new__(Config)` and sets only the `components_config` attribute
+    the resolver consults (the empty dict means the snapshot branch is a
+    no-op; the env-first precedence inside `get_component_value` still walks
+    sectioned-env + flat-env before falling through to the default).
+
+    NOT a new production path — every queue-append / board-edit caller
+    supplies a real `cfg` via `BriefingContext.cfg`.
+    """
+    cfg = Config.__new__(Config)
+    cfg.components_config = {}
+    return cfg
+
+
+def _briefing_validator(ctx: "BriefingContext") -> str | None:
+    """Adapter from `BriefingContext` to `_check_dependency_coherence`.
+
+    Matches the canonical `BriefingValidator = Callable[[BriefingContext],
+    str | None]` shape so `_validate_briefing_structure` can append it to the
+    pipeline and dispatch it uniformly with the deterministic core validators.
+
+    Preserves the opt-in contract: the dep-coherence check only fires when the
+    caller supplied either an `events_file` (real queue-append / board-edit
+    surface) or a `dep_judge_fn` (test injection seam). Unit tests that
+    exercise only the deterministic checks omit both kwargs and this adapter
+    short-circuits with `None`.
+
+    TB-331: threads `ctx.cfg` into `_check_dependency_coherence` so the four
+    cfg-routed knob reads resolve against the same `Config` the surrounding
+    board-edit / operator-queue surface already has. Legacy test paths that
+    don't populate `ctx.cfg` get a synthetic empty Config via
+    `_empty_cfg_for_back_compat()`.
+    """
+    if ctx.events_file is None and ctx.dep_judge_fn is None:
+        return None
+    cfg = ctx.cfg if ctx.cfg is not None else _empty_cfg_for_back_compat()
+    return _check_dependency_coherence(
+        cfg,
+        briefing_text=ctx.text,
+        description=ctx.description or "",
+        blocked_csv=ctx.blocked_csv or "",
+        events_file=ctx.events_file,
+        judge_fn=ctx.dep_judge_fn,
+    )
+
+
+# TB-316 / TB-386: canonical core-validator list. The five deterministic
 # structural checks in the order the pre-TB-316 inline chain ran them.
-# Components register additional validators via
-# `manifest.hook_points["briefing_validator"]` and the orchestrator
-# appends `registry.briefing_validators()` after this list — so the
-# core checks always fire first (cheaper, and a malformed briefing has
-# a clearer rejection reason than a downstream SDK-judge fail-open
-# event would surface).
+# `_validate_briefing_structure` appends the dep-coherence judge
+# (`_briefing_validator`) after this list — so the core checks always fire
+# first (cheaper, and a malformed briefing has a clearer rejection reason
+# than a downstream SDK-judge fail-open event would surface).
 _CORE_VALIDATORS: tuple[BriefingValidator, ...] = (
     _validate_required_sections,
     _validate_goal_anchor,
@@ -1290,19 +2037,19 @@ def _validate_briefing_structure(
         # back-compat).
         cfg=cfg,
     )
-    # TB-316: the canonical pipeline is the five core checks (always
-    # run, deterministic structural gates) followed by the registry-
-    # walked `briefing_validator` hooks (today: the validator_judge
-    # component's dep-coherence wrapper). Sorting is by component-name
-    # inside the registry's `briefing_validators()` accessor, so the
-    # chain stays deterministic across daemon restarts. Local import
-    # of `default_registry` keeps `ap2.briefing_validators` cheap to
-    # import for paths that don't trigger validation (e.g. the per-
-    # proposal record helpers below).
-    from .registry import default_registry
-
+    # TB-316 / TB-386: the canonical pipeline is the five deterministic core
+    # checks (always run) followed by the dep-coherence LLM judge
+    # (`_briefing_validator`). TB-316 had resolved that final validator
+    # through a registry walk of a `validator_judge` component; TB-386 demoted
+    # the judge back into core — a judge invoked only as an internal sub-step
+    # of this runner is not a loop-level participant — so it is appended and
+    # called directly here. The adapter short-circuits when neither
+    # `events_file` nor `dep_judge_fn` is supplied (unit-test paths exercising
+    # only the deterministic checks); the `AP2_VALIDATOR_JUDGE_DISABLED`
+    # off-switch is honored inside `_check_dependency_coherence`, and the
+    # judge resolves its backend via `select_adapter("validator_judge", cfg)`.
     pipeline: list[BriefingValidator] = list(_CORE_VALIDATORS)
-    pipeline.extend(default_registry().briefing_validators())
+    pipeline.append(_briefing_validator)
     for validator in pipeline:
         err = validator(ctx)
         if err:

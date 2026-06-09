@@ -164,7 +164,9 @@ ap2/
 ├── board_edits.py        # do_board_edit (TB-262 split out of tools.py): the MCP write-path handler for
 │                         # TASKS.md mutations — add/move/update/delete rows with the board lock held
 ├── briefing_validators.py # _validate_briefing_structure (TB-262 split out of tools.py — the TB-154 / TB-161 /
-│                         # TB-164 / TB-171 deterministic checks plus the TB-235 LLM-judge dispatch),
+│                         # TB-164 / TB-171 deterministic checks plus the TB-235 dep-coherence LLM judge
+│                         # body itself: _check_dependency_coherence / _judge_dep_coherence_default /
+│                         # _parse_dep_judge_response, demoted here from the validator_judge component by TB-386),
 │                         # IMPACT_VERDICTS (TB-189 single source of truth), _briefing_section_names,
 │                         # extract_goal_anchor, extract_why_now, write_ideation_proposal_record
 ├── check.py              # ap2 check — pre-flight diagnostic on a project tree
@@ -225,10 +227,9 @@ ap2/
 │                         # re-exports the moved symbols (do_board_edit, do_operator_queue_append,
 │                         # IMPACT_VERDICTS, _validate_briefing_structure, …) so pre-TB-262 callers
 │                         # continue to resolve `from ap2.tools import …`.
-├── validator_judge.py    # _judge_dep_coherence_default, _parse_dep_judge_response (TB-235 — the
-│                         # LLM-driven dependency-coherence judge dispatched from
-│                         # briefing_validators._validate_briefing_structure check #7)
 ├── verify.py             # parse_verification_section, verify_task (per-task gate), _judge_prose_bullet
+│                         # (the optional LLM prose-bullet judge — a core sub-step of verify_task; TB-382
+│                         # had modeled it as a verifier_judge component, TB-386 demoted it back here)
 ├── verify_harness.py     # _maybe_per_task_verify, _run_verify, VerifyResult (the run_task →
 │                         # per-task verify → project-wide verify orchestration shim)
 ├── watchdog.py           # _maybe_auto_diagnose (TB-263 split out of daemon.py — daemon-silent-for-Nh
@@ -412,7 +413,7 @@ The stoch daemon runs continuously and exercises every code path against real br
 2. This file — why it's shaped this way.
 3. `ap2/daemon.py` — `_tick` is the entry point; everything fans out from there.
 4. `ap2/board.py` — the `Board` model and `locked_board` are the core data structure.
-5. `ap2/tools.py` (plus the TB-262 siblings `board_edits.py` / `operator_queue.py` / `briefing_validators.py` / `validator_judge.py`) — the MCP tools are the only mutation surface; reading them tells you the system's full state-change vocabulary. `tools.py` registers the server + hosts the remaining handlers and re-exports the siblings, so it's still the entry point.
+5. `ap2/tools.py` (plus the TB-262 siblings `board_edits.py` / `operator_queue.py` / `briefing_validators.py` — the last of which also hosts the TB-235 dep-coherence LLM judge after TB-386 demoted it out of the `validator_judge` component) — the MCP tools are the only mutation surface; reading them tells you the system's full state-change vocabulary. `tools.py` registers the server + hosts the remaining handlers and re-exports the siblings, so it's still the entry point.
 6. `ap2/ideation.default.md` — the load-bearing prompt that drives the only path that creates new work.
 
 The `.cc-autopilot/tasks/*.md` briefings are per-task historical records of design decisions; reach for them when you want to understand why a specific feature exists, not how it works today.

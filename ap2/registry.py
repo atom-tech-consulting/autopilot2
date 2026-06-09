@@ -410,75 +410,14 @@ class Registry:
             out.append(adapter)
         return out
 
-    def briefing_validators(self, cfg=None) -> list[Callable]:
-        """Ordered list of `BriefingValidator` callables registered on
-        enabled components (TB-316 axis 4).
-
-        Walks every enabled manifest's
-        `hook_points["briefing_validator"]` and returns the resulting
-        callables in deterministic component-name-sorted order. Mirrors
-        the structural shape of `tick_hooks(phase)` and
-        `channel_adapters(cfg)`: name-sorted walk over enabled
-        manifests, skip entries that don't carry the named hook point.
-
-        Determinism is load-bearing for
-        `_validate_briefing_structure`'s pipeline-as-list orchestrator
-        (TB-316). The five deterministic structural checks (sections,
-        goal-anchor, why-now, no-manual-bullets, no-fenced-paths-in-
-        scope) live in core and always run first; the registry-walked
-        list is appended after them, so a future component that
-        registers an additional `briefing_validator` hook (validator-
-        chain extension is the explicit forward-compatibility point of
-        the refactor) slots in at the end without rewriting core.
-
-        Empty list is a legitimate return — when no enabled component
-        declares a `briefing_validator` hook point, the validator's
-        orchestrator simply walks the core list. This is the path
-        unit tests take when the entire components surface is shielded
-        via env flag.
-
-        `cfg` is accepted for forward compatibility (a validator
-        callable may want per-cfg knobs); unused today — validators
-        that read env do so lazily inside their own body so a hot-
-        reloaded env (TB-271) applies on the next call.
-        """
-        out: list[Callable] = []
-        for manifest in self.enabled_components(cfg):
-            validator = manifest.hook_points.get("briefing_validator")
-            if validator is None:
-                continue
-            out.append(validator)
-        return out
-
-    def verifier_judge(self, cfg=None) -> Optional[Callable]:
-        """The prose-bullet judge hook from the enabled `verifier_judge`
-        component, or `None` when the component is disabled (TB-382 axis 5).
-
-        Walks `enabled_components(cfg)` in name-sorted order and returns the
-        first `hook_points["prose_judge"]` callable found. Mirrors the
-        structural shape of `briefing_validators(cfg)` / `channel_adapters(cfg)`
-        — name-sorted walk over enabled manifests, skip entries that don't
-        carry the named hook point — but returns a single optional callable
-        because there is logically one prose judge.
-
-        `None` is a legitimate return: when the `verifier_judge` component is
-        dropped by its `AP2_VERIFY_JUDGE_DISABLED` env_flag (or no enabled
-        component registers a `prose_judge` hook), the core verify runner
-        (`verify.py::verify_task`) treats prose bullets via its existing
-        non-judged `unverified` path while the deterministic shell-bullet
-        path still gates. This is the cleavage that lets a deployment verify
-        with shell bullets alone, prose-judge disabled.
-
-        `cfg` is accepted for forward compatibility (the hook may want
-        per-cfg knobs) but is unused for resolution today — the component's
-        enabled state reads from `os.environ` via `Manifest.is_enabled` so a
-        hot-reloaded env (TB-271) applies on the next call.
-        """
-        for manifest in self.enabled_components(cfg):
-            judge = manifest.hook_points.get("prose_judge")
-            if judge is not None:
-                return judge
-        return None
+    # TB-386 (axis 5a): the per-kind `briefing_validators()` and
+    # `verifier_judge()` accessors were removed. Both LLM judges they
+    # resolved (the dep-coherence briefing judge and the prose-bullet verify
+    # judge) are internal sub-steps of core runners, not loop-level
+    # participants, so TB-386 demoted them out of `ap2/components/` back into
+    # core (`ap2/briefing_validators.py` / `ap2/verify.py`), each still
+    # resolving its backend via `select_adapter(<kind>, cfg)`. With them gone
+    # the registry has no remaining per-kind accessor for either judge.
 
     def tick_hooks(self, phase: Phase) -> list[TickHook]:
         """Ordered list of tick hooks registered on `phase` (TB-310 axis 2).

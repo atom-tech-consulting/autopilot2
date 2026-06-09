@@ -93,9 +93,9 @@ import re
 
 import pytest
 
-from ap2.briefing_validators import BriefingContext
-from ap2.components import validator_judge as vj
-from ap2.components.validator_judge.manifest import (
+from ap2 import briefing_validators as vj
+from ap2.briefing_validators import (
+    BriefingContext,
     _briefing_validator,
     _empty_cfg_for_back_compat,
 )
@@ -170,88 +170,50 @@ def _load_toml_cfg(tmp_path, body: str) -> Config:
 
 
 # ---------------------------------------------------------------------------
-# (1) Grep-shape — zero remaining `os.environ.get("AP2_VALIDATOR_JUDGE_*")`
-#     call sites in the component body.
+# (1) Grep-shape — zero `os.environ.get("AP2_VALIDATOR_JUDGE_*")` reads in the
+#     dep-coherence judge helpers (they route through cfg.get_component_value).
+#     TB-386 demoted the judge into `ap2/briefing_validators.py`.
 # ---------------------------------------------------------------------------
 
 
-def test_no_direct_env_reads_in_validator_judge_component():
-    """The grep-shape Verification bullet, pinned to source so a refactor
-    that re-introduces a direct env read inside the component body
+def test_no_direct_env_reads_for_validator_judge_knobs():
+    """The grep-shape pin: the four operator-tunable validator-judge knobs
+    are resolved via `cfg.get_component_value(...)`, never a direct
+    `os.environ.get("AP2_VALIDATOR_JUDGE_*")` call. Pinned to the core
+    briefing-validation runner (`ap2/briefing_validators.py`) where TB-386
+    relocated the judge — a refactor that re-introduces a direct env read
     surfaces here instead of only via the briefing-level grep gate.
-
-    The component package is `ap2/components/validator_judge/` (both
-    `__init__.py` and `manifest.py`); the test reads each `.py` file in
-    the package and rejects any literal
-    `os.environ.get("AP2_VALIDATOR_JUDGE_*"` fragment. Comments /
-    docstrings that QUOTE the old call sites for historical context are
-    allowed iff they DON'T form a valid call statement — the pattern
-    below matches only the bare call shape (the briefing-level grep's
-    own anchor), so a backticked-in-docstring mention that breaks the
-    literal does NOT match.
     """
     pattern = re.compile(
         r"os\.environ\.get\([\"']AP2_VALIDATOR_JUDGE_"
     )
-    component_dir = _REPO_ROOT / "ap2/components/validator_judge"
+    src_path = _REPO_ROOT / "ap2/briefing_validators.py"
+    src = src_path.read_text(encoding="utf-8")
     violations: list[str] = []
-    for py_path in sorted(component_dir.rglob("*.py")):
-        src = py_path.read_text(encoding="utf-8")
-        for lineno, line in enumerate(src.splitlines(), start=1):
-            if pattern.search(line):
-                rel = py_path.relative_to(_REPO_ROOT).as_posix()
-                violations.append(f"{rel}:L{lineno}: {line.strip()}")
+    for lineno, line in enumerate(src.splitlines(), start=1):
+        if pattern.search(line):
+            violations.append(f"briefing_validators.py:L{lineno}: {line.strip()}")
     assert not violations, (
-        "TB-331: the validator_judge component body must read its four "
-        "operator-tunable knobs via `cfg.get_component_value(...)`, "
-        "not via direct `os.environ.get('AP2_VALIDATOR_JUDGE_…')` "
-        f"calls. Found {len(violations)} violation(s):\n"
-        + "\n".join(violations)
+        "TB-386: the dep-coherence judge body must read its four "
+        "operator-tunable knobs via `cfg.get_component_value(...)`, not via "
+        f"direct `os.environ.get('AP2_VALIDATOR_JUDGE_…')` calls. Found "
+        f"{len(violations)} violation(s):\n" + "\n".join(violations)
     )
 
 
-def test_cfg_get_component_value_path_present_in_component_body():
-    """Positive form of the grep-shape pin: the component body
-    documents+uses the chosen `cfg.get_component_value` resolved-
-    config access shape. A refactor that swaps the helper out for
-    something else (e.g. inlining `cfg.components_config[...]`)
-    surfaces here so the documented TB-326 pilot pattern stays the
-    canonical template for the cluster.
+def test_cfg_get_component_value_path_present_in_judge_body():
+    """Positive form of the grep-shape pin: the dep-coherence judge body
+    documents+uses the chosen `cfg.get_component_value` resolved-config
+    access shape. A refactor that swaps the helper out (e.g. inlining
+    `cfg.components_config[...]`) surfaces here.
     """
-    # TB-343: the body (with its cfg.get_component_value calls) moved to impl.py.
-    init_src = (
-        _REPO_ROOT / "ap2/components/validator_judge/impl.py"
-    ).read_text(encoding="utf-8")
-    assert "cfg.get_component_value" in init_src, (
-        "TB-331: the validator_judge component body should use "
-        "`cfg.get_component_value(...)` to resolve the four migrated "
-        "knobs (per the TB-326 pilot's chosen access shape — see "
-        "the auto_approve manifest docstring and the validator_judge "
-        "manifest's TB-331 doc block)."
-    )
-
-
-def test_validator_judge_no_os_import_in_init():
-    """TB-331: `import os` should no longer appear in the component
-    body's `__init__.py` — the four env reads (`DISABLED` /
-    `TIMEOUT_S` / `MAX_TURNS` / `MAX_TOKENS`) were the only `os` use,
-    so dropping the import is a defensive check that no other env read
-    has snuck in.
-    """
-    # TB-343: the body moved to impl.py; the `import os` absence pin tracks
-    # the body, so read impl.py (the __init__.py shim is re-export-only).
     src = (
-        _REPO_ROOT / "ap2/components/validator_judge/impl.py"
+        _REPO_ROOT / "ap2/briefing_validators.py"
     ).read_text(encoding="utf-8")
-    # Look for line-anchored bare `import os` (not `from os import …`
-    # which is a separate path we'd want to flag too).
-    pattern = re.compile(r"^import os\b", re.MULTILINE)
-    assert not pattern.search(src), (
-        "TB-331: the validator_judge component body should not import "
-        "`os` post-migration; the four env reads route through "
-        "`cfg.get_component_value(...)` instead. A re-introduced "
-        "`import os` is a leading indicator that an env-read crept "
-        "back in."
+    assert 'cfg.get_component_value("validator_judge"' in src, (
+        "TB-386: the dep-coherence judge body should resolve the four "
+        "migrated validator-judge knobs via "
+        "`cfg.get_component_value('validator_judge', …)`."
     )
 
 
@@ -471,26 +433,25 @@ def test_max_tokens_legacy_garbage_returns_zero(cfg, clean_env, emit_reset):
 # ---------------------------------------------------------------------------
 
 
-def test_manifest_documents_chosen_access_shape():
-    """The validator_judge manifest documents (top-of-file docstring)
-    the chosen resolved-config access shape so the cluster migration
-    arc reads the same pattern from one more place. Looks for the
-    `cfg.get_component_value` call shape + a TB-331 reference. Loose
-    enough that a docstring rewrite doesn't false-positive; strict
-    enough that an accidental documentation drop fires.
+def test_judge_body_documents_chosen_access_shape():
+    """The dep-coherence judge body (relocated into the core briefing-
+    validation runner by TB-386) documents the chosen resolved-config access
+    shape so the cluster migration arc reads the same pattern from one more
+    place. Looks for the `cfg.get_component_value` call shape + a TB-331
+    reference. Loose enough that a docstring rewrite doesn't false-positive;
+    strict enough that an accidental documentation drop fires.
     """
-    manifest_src = (
-        _REPO_ROOT / "ap2/components/validator_judge/manifest.py"
+    src = (
+        _REPO_ROOT / "ap2/briefing_validators.py"
     ).read_text(encoding="utf-8")
-    assert "TB-331" in manifest_src, (
-        "TB-331: the validator_judge manifest must cite the TB-331 "
-        "axis-5 cluster anchor so the cluster migration arc is fully "
-        "auditable from one place."
+    assert "TB-331" in src, (
+        "TB-331: the dep-coherence judge body must cite the TB-331 axis-5 "
+        "cluster anchor so the cluster migration arc is fully auditable."
     )
-    assert "cfg.get_component_value" in manifest_src, (
-        "TB-331: the validator_judge manifest must name the chosen "
-        "resolved-config access shape (`cfg.get_component_value`) so "
-        "the cluster migration arc adopts the same pattern verbatim."
+    assert "cfg.get_component_value" in src, (
+        "TB-331: the dep-coherence judge body must name the chosen "
+        "resolved-config access shape (`cfg.get_component_value`) so the "
+        "cluster migration arc adopts the same pattern verbatim."
     )
 
 
@@ -548,56 +509,12 @@ def test_flat_to_sectioned_pins_the_five_validator_judge_knobs(
 
 
 # ---------------------------------------------------------------------------
-# Sanity: the four migrated keys are declared in the manifest's
-# config_schema (TB-322 schema pre-declared them; TB-331 keeps them
-# pinned so a future revert doesn't silently weaken the back-compat
-# surface).
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "schema_key, expected_type, expected_default",
-    [
-        ("disabled", bool, False),
-        ("timeout_s", float, 60.0),
-        ("max_turns", int, 2),
-        ("max_tokens", int, 500),
-    ],
-)
-def test_manifest_config_schema_declares_each_migrated_knob(
-    schema_key: str, expected_type: type, expected_default,
-):
-    """The validator_judge manifest's `config_schema` (TB-322) declares
-    all four operator-tunable knobs the component body reads, so a
-    TOML-opted operator can write `[components.validator_judge] <key>
-    = <value>` for any of them without tripping `validate_config`'s
-    reject-unknown-key path. Defaults + types match the in-source
-    `_VALIDATOR_JUDGE_*_DEFAULT` sentinels.
-    """
-    from ap2.components.validator_judge.manifest import MANIFEST
-
-    spec = MANIFEST.config_schema.get(schema_key)
-    assert spec is not None, (
-        f"TB-331: validator_judge manifest must declare `{schema_key}` "
-        f"in config_schema; got: {sorted(MANIFEST.config_schema)}"
-    )
-    assert spec.type is expected_type, (
-        f"TB-331: validator_judge.{schema_key}.type expected "
-        f"{expected_type.__name__}, got {spec.type.__name__}"
-    )
-    assert spec.default == expected_default, (
-        f"TB-331: validator_judge.{schema_key}.default expected "
-        f"{expected_default!r}, got {spec.default!r}"
-    )
-    assert spec.description.strip(), (
-        f"TB-331: validator_judge.{schema_key}.description must be "
-        f"non-empty for axis-4 `ap2 config list` rendering."
-    )
-
-
-# ---------------------------------------------------------------------------
 # BriefingContext.cfg threading — TB-331 added the cfg field so the
-# manifest adapter resolves component knobs against the live Config.
+# dep-coherence adapter resolves the knobs against the live Config.
+# (TB-386 removed the validator_judge manifest's config_schema along with the
+# component; the four knobs survive as plain config-namespace keys resolved
+# via `cfg.get_component_value`, and the TOML-read path tests above already
+# pin that `[components.validator_judge] <key>` values reach the helpers.)
 # ---------------------------------------------------------------------------
 
 

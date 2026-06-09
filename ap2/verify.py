@@ -467,16 +467,246 @@ def _run_shell_bullet(
 JUDGE_REPO_READ_TOOLS = ["Read", "Glob", "Grep"]
 
 
-# TB-382 (axis 5): the optional LLM prose-bullet judge was extracted into
-# the `verifier_judge` component (`ap2/components/verifier_judge/impl.py`).
-# `verify_task` below reaches it through `Registry.verifier_judge(cfg)` so a
-# deployment can verify with shell bullets alone (set
-# `AP2_VERIFY_JUDGE_DISABLED=1`). The deterministic shell-bullet execution,
-# the `_parse_judge_response` / parse-error categorization surface below,
-# `JUDGE_REPO_READ_TOOLS`, and verdict aggregation stay in core (verification
-# is gating). A back-compat module `__getattr__` at the bottom of this file
-# still resolves `verify._judge_prose_bullet` (legacy test / smoke importers)
-# through the registry, so core never statically imports `ap2.components`.
+# TB-386 (axis 5a): the optional LLM prose-bullet judge lives in the core
+# verify runner — `verify_task` below calls `_judge_prose_bullet` directly,
+# gated by the plain `AP2_VERIFY_JUDGE_DISABLED` knob. A judge invoked only as
+# an internal sub-step of the core verify runner is NOT a loop-level
+# participant, so it is core code, not a component (TB-382 had briefly modeled
+# it as `ap2/components/verifier_judge/`; TB-386 demoted it back). The judge
+# still resolves its backend via `select_adapter("verifier_judge", cfg)` — the
+# adapter seam stays; only the redundant component wrapper is gone.
+
+
+async def _judge_prose_bullet(
+    bullet: VerifyBullet,
+    *,
+    project_root: Path,
+    sdk,
+    diff_text: str,
+    events_file: Path | None = None,
+    task_id: str | None = None,
+    bullet_idx: int | None = None,
+    cfg: "Config | None" = None,
+) -> CriterionResult:
+    """Ask the SDK whether `bullet.text` is satisfied by `diff_text` plus the
+    working tree at HEAD.
+
+    The judge gets two evidence sources:
+
+      1. ``diff_text`` — the cumulative diff across all task-id commits
+         (TB-136). Reasoning over a diff is fast and catches most cases.
+      2. ``Read``/``Glob``/``Grep`` tools scoped to ``project_root`` — the
+         judge can confirm a test/symbol actually exists in HEAD before
+         declaring it missing. This is the authoritative check when the
+         diff is ambiguous (file moved, symbol renamed, or the diff was
+         truncated). TB-136.
+
+    Asks for a structured one-line JSON response; falls back to ``unverified``
+    on parse failure rather than failing the whole verification (the prose
+    judge is best-effort).
+
+    TB-157: when ``events_file`` is provided, the per-bullet debug-dump on
+    parse failure is keyed off it. TB-385 folded the per-bullet `judge_call`
+    event into the daemon's single terminal `task_verify` event, so this
+    function no longer emits its own event — only the on-disk dump survives
+    as the operator's parse-failure diagnostic surface.
+    """
+    prompt = (
+        "You are evaluating ONE acceptance bullet from a task's verification "
+        "section against the agent's CUMULATIVE diff (every code commit "
+        "across any retries of this task, with daemon state-file noise "
+        "filtered out) AND the project's working tree at HEAD.\n\n"
+        # TB-236: tightened final-message contract. The pre-TB-236 prompt
+        # asked for "ONE LINE of JSON" but did not cap rationale length,
+        # did not forbid markdown code fences, and did not show an
+        # explicit example. Observed failure (TB-228 bullet 7) was a
+        # 1100-token response with a long rationale containing unescaped
+        # JSON-breaking characters; bullet 6 from the same task succeeded
+        # at ~510 tokens with a short rationale. The shorter the
+        # rationale, the smaller the surface area for JSON-escape bugs.
+        # The constraint applies ONLY to the FINAL message — intermediate
+        # Read/Grep tool calls (legal via JUDGE_REPO_READ_TOOLS) are
+        # unconstrained.
+        "OUTPUT CONTRACT — your FINAL message must be a JSON object only:\n"
+        '  {"status": "pass", "rationale": "X exists per L42"}\n'
+        "Rules for the FINAL message:\n"
+        "  - It is a JSON object only. No markdown code fences (no ```json"
+        " or ``` wrapping). No leading prose (no 'Here is the verdict:'"
+        " preamble). No trailing commentary after the closing brace.\n"
+        "  - `status` is exactly `\"pass\"` or `\"fail\"` (lowercase).\n"
+        "  - `rationale` is a single short sentence, MAXIMUM 200 characters."
+        " Cite a file:line or symbol name when possible; do NOT quote long"
+        " code blocks or paste diff hunks into the rationale.\n"
+        "  - If the rationale would naturally exceed 200 characters,"
+        " summarize: cite the strongest single piece of evidence and"
+        " stop.\n"
+        "  - Intermediate tool calls (Read, Glob, Grep) during reasoning"
+        " are unconstrained — only the FINAL message must satisfy this"
+        " contract.\n\n"
+        "Evidence priority — when the diff and the working tree disagree, "
+        "the working tree at HEAD is AUTHORITATIVE. The diff can be "
+        "truncated, span renames, or simply not show what's actually on "
+        "disk after a multi-retry sequence. You have Read, Glob, and Grep "
+        "tools scoped to the project root; before declaring a test or "
+        "symbol or file missing, USE Grep/Glob to confirm it isn't present "
+        "in HEAD under a different name or path. If you can find the "
+        "asserted test/symbol/file in the working tree (Read it to verify "
+        "shape if needed), the bullet PASSES regardless of whether the "
+        "diff makes that obvious.\n\n"
+        f"Bullet:\n  {bullet.text}\n\n"
+        # TB-156: diff cap lowered from 100KB → 30KB. Most cumulative
+        # diffs land in the 5-30KB range; the prior 100KB worst-case-
+        # defensive cap was paying ~70KB of judge tokens per bullet for
+        # padding. The judge has Read/Glob/Grep (TB-136) and the prompt
+        # tells it the working tree at HEAD is authoritative — when the
+        # truncated tail matters, it can pull what it needs directly. So
+        # the cap is now a soft hint rather than a hard wall, traded
+        # against ~50% judge-token savings on average. Operators wanting
+        # a different cap can edit the source.
+        f"Cumulative diff:\n```\n{diff_text[:30_000]}\n```\n"
+    )
+    # TB-334 (axis 5 core cluster): `cfg` lets us resolve the
+    # agent-runtime core knobs (`agent_model`, `agent_effort`,
+    # `verify_judge_max_turns`) through `Config.get_core_value`'s
+    # sectioned-env > flat-env > TOML > default precedence chain
+    # rather than direct `os.environ.get`. Callers that don't thread
+    # `cfg` (pre-TB-334 tests, harness paths without a project root)
+    # synthesize one via `Config.load(project_root)` — the same
+    # back-compat shape pre-migration env-reads gave them. The
+    # synthesized cfg's env-first precedence preserves the
+    # `monkeypatch.setenv(...)` idiom every existing test uses.
+    if cfg is None:
+        from .config import Config as _Config
+        cfg = _Config.load(project_root)
+    try:
+        # TB-156: per-call-site effort knob. The judge's job — read a diff,
+        # optionally Grep/Read for confirmation, emit a one-line JSON
+        # verdict — doesn't need the multi-step reasoning budget that
+        # `xhigh` is sized for. Default to `high` here so the judge runs
+        # cheaper than task agents (which stay on the global default,
+        # `xhigh`); operators can still pin a specific value via
+        # `AP2_VERIFY_JUDGE_EFFORT`, or globally via `AP2_AGENT_EFFORT`.
+        # Precedence: per-site env > global env > per-site default.
+        # TB-339 (axis-5 cleanup): the per-site `verify_judge_effort`
+        # layer is now resolved through `cfg.get_core_value(...)` too —
+        # the `or`-chain collapses the empty-string default to the
+        # global `agent_effort` fallback, preserving the original
+        # `per-site env > global env > per-site default` precedence
+        # exactly (sectioned env > flat env > TOML > "" > sectioned
+        # env > flat env > TOML > "high"). FLAT_TO_SECTIONED already
+        # maps `AP2_VERIFY_JUDGE_EFFORT` → `core.verify_judge_effort`.
+        effort = cfg.get_core_value("verify_judge_effort", default="") \
+            or cfg.get_core_value("agent_effort", default="high")
+        # The judge can take a few tool roundtrips (Grep → Read) before
+        # emitting its final verdict, so allow a handful of turns. The
+        # tools are read-only and scoped to project_root via cwd.
+        #
+        # TB-362 (axis-6 migration): the judge no longer constructs
+        # `sdk.ClaudeAgentOptions` / consumes the SDK stream directly — it
+        # builds a backend-neutral `AgentOptions` / `AgentTools` and dispatches
+        # through the `AgentAdapter` resolved for the `verifier_judge` kind
+        # (`select_adapter("verifier_judge", cfg)`). Under the default
+        # all-`claude` `[agent_backends]` map the resolved adapter is a
+        # `ClaudeCodeAdapter` wrapping the injected `sdk` handle, so this stays
+        # hermetic on the unit-test seam and bit-for-bit on Claude; an operator
+        # can set `verifier_judge=codex` to route just this judge to the Codex
+        # backend while every other kind stays on Claude. Late-import the
+        # adapters package so `verify.py`'s import path stays light. The shape
+        # mirrors `ideation_scrub._resolve_scrub_adapter` / `_run_scrub` (the
+        # axis-6 canary).
+        from .adapters.base import AgentOptions, AgentTools
+        from .adapters.claude_code import ClaudeCodeAdapter
+
+        if cfg is not None:
+            from .adapters.select import select_adapter
+
+            adapter = select_adapter("verifier_judge", cfg)
+        else:
+            # cfg=None seam (kept for parity with the canary): default to the
+            # Claude adapter the all-`claude` map would resolve anyway, so the
+            # existing hermetic unit tests stay deterministic.
+            adapter = ClaudeCodeAdapter()
+        # The resolved Claude adapter wraps the injected `sdk` handle so the
+        # hermetic prose-judge unit tests stay deterministic (they pass a stub
+        # `sdk` exposing `ClaudeAgentOptions` + `query`); the daemon passes its
+        # already-imported `claude_agent_sdk` module. Only the Claude backend
+        # carries an injectable handle — any other backend ignores it.
+        if sdk is not None and isinstance(adapter, ClaudeCodeAdapter):
+            adapter._sdk = sdk
+
+        options = AgentOptions(
+            cwd=str(project_root),
+            permission_mode="bypassPermissions",
+            max_turns=int(cfg.get_core_value("verify_judge_max_turns", default=20)),
+            setting_sources=["project"],
+            # TB-344: schema is the single source of truth for the
+            # agent_model default (see CORE_CONFIG_SCHEMA).
+            model=cfg.get_core_value("agent_model"),
+            effort=effort,
+        )
+        tools = AgentTools(allowed=list(JUDGE_REPO_READ_TOOLS))
+
+        # TB-362: the result comes off the adapter's normalized
+        # `AgentResult`. TB-385 dropped the per-bullet `judge_call` event,
+        # so only the final-message `text` is needed to parse the verdict.
+        result = await adapter.run_to_result(prompt, tools, options)
+
+        # A backend error / timeout surfaces as a non-`complete` status with
+        # the `"<Type>: <msg>"` string on `.error` (`run_to_result` folds in
+        # the `asyncio.wait_for` error handling the direct consume loop used to
+        # get from the surrounding `try`/`except`). Preserve the pre-migration
+        # `unverified` fallback so a judge fault never fails the whole
+        # verification.
+        if result.status in ("error", "timeout"):
+            return CriterionResult(
+                bullet=bullet.text, kind="prose", status="unverified",
+                notes=f"judge error: {result.error or result.status}",
+            )
+
+        text = (result.text or "").strip()
+    except Exception as e:  # noqa: BLE001
+        return CriterionResult(
+            bullet=bullet.text, kind="prose", status="unverified",
+            notes=f"judge error: {type(e).__name__}: {e}",
+        )
+
+    outcome = _parse_judge_response(bullet.text, text)
+    verdict = outcome.verdict
+
+    # TB-236: when the response can't be parsed into a verdict, dump the
+    # FULL raw last-assistant-text to a per-bullet debug file so the
+    # operator can diagnose WHY without being limited to the 200-char
+    # truncated preview the verifier carries in `notes`. Dumps are written
+    # ONLY on parse failure — a successful judge call leaves no trace on
+    # disk.
+    #
+    # TB-385: the per-bullet `judge_call` event that used to carry the
+    # `parse_error` / `response_length` / `rationale_length` categorization
+    # is gone (folded — for the verdict only — into the daemon's terminal
+    # `task_verify` event). The on-disk dump is retained as the operator's
+    # parse-failure diagnostic surface, keyed by the same
+    # `<run_ts>-<task>-judge-bullet<idx>-response.txt` convention so the
+    # existing `ap2 logs` / debug-dir grep workflow is unaffected.
+    if outcome.parse_error is not None and events_file is not None:
+        try:
+            import datetime as _dt
+            debug_dir = events_file.parent / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            ts = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            bullet_label = (
+                bullet_idx if bullet_idx is not None else -1
+            )
+            task_label = task_id or "unknown"
+            dump_path = (
+                debug_dir
+                / f"{ts}-{task_label}-judge-bullet{bullet_label}-response.txt"
+            )
+            dump_path.write_text(text or "")
+        except Exception:  # noqa: BLE001
+            # Diagnostic write must never break verification.
+            pass
+
+    return verdict
 
 
 #: TB-236: parse-failure categorization labels. When the judge's final
@@ -915,16 +1145,18 @@ async def verify_task(
     if not bullets:
         return None
 
-    # TB-382 (axis 5): resolve the prose-judge through the component registry
-    # rather than calling a welded-in function. An empty walk — the
-    # `verifier_judge` component dropped by its `AP2_VERIFY_JUDGE_DISABLED`
-    # env_flag — leaves `prose_judge` None, and prose bullets fall through to
-    # the existing non-judged `unverified` path while shell bullets still
-    # gate. The deterministic shell-bullet execution + verdict aggregation
-    # below stay in core (verification is gating). Registry-mediated so core
-    # never statically imports `ap2.components` (the TB-311 import gate).
-    from .registry import default_registry
-    prose_judge = default_registry().verifier_judge(cfg)
+    # TB-386 (axis 5a): the prose-bullet judge is a core sub-step of the
+    # verify runner, gated by the plain `AP2_VERIFY_JUDGE_DISABLED` knob —
+    # NOT a loop-level component. A truthy value disables the LLM judge so a
+    # deployment can verify with shell bullets alone; prose bullets then fall
+    # through to the non-judged `unverified` path while shell bullets still
+    # gate. The off-switch is consulted directly here (env-only knob, per
+    # `config_compat._KNOBS_STAYING_ENV_ONLY`) rather than via a manifest
+    # env_flag / registry walk. Truthy enumeration matches the registry's
+    # pre-TB-386 polarity rule (`1` / `true` / `yes`, case-insensitive).
+    verify_judge_disabled = os.environ.get(
+        "AP2_VERIFY_JUDGE_DISABLED", "",
+    ).strip().lower() in {"1", "true", "yes"}
 
     t0 = time.monotonic()
     results: list[CriterionResult] = []
@@ -949,14 +1181,14 @@ async def verify_task(
                 notes=b.command_error or "malformed bullet",
             ))
         else:
-            if prose_judge is None:
-                # TB-382: verifier_judge component disabled — skip the LLM
-                # judge but keep the bullet visible as `unverified` (soft,
+            if verify_judge_disabled:
+                # TB-386: AP2_VERIFY_JUDGE_DISABLED set — skip the LLM judge
+                # but keep the bullet visible as `unverified` (soft,
                 # non-gating) so the deterministic shell bullets still
                 # decide pass/fail. No silent pass that bypasses a shell gate.
                 results.append(CriterionResult(
                     bullet=b.text, kind="prose", status="unverified",
-                    notes="verifier_judge component disabled; "
+                    notes="verify judge disabled (AP2_VERIFY_JUDGE_DISABLED); "
                           "prose bullet not judged",
                 ))
                 continue
@@ -968,7 +1200,7 @@ async def verify_task(
                 continue
             if diff_text is None:
                 diff_text = _cumulative_task_diff(project_root, task_id)
-            results.append(await prose_judge(
+            results.append(await _judge_prose_bullet(
                 b, project_root=project_root, sdk=sdk, diff_text=diff_text,
                 events_file=events_file, task_id=task_id, bullet_idx=idx,
                 cfg=cfg,
@@ -979,29 +1211,3 @@ async def verify_task(
         criteria=results,
         duration_s=time.monotonic() - t0,
     )
-
-
-def __getattr__(name: str):
-    """TB-382 back-compat shim for the relocated prose judge.
-
-    `_judge_prose_bullet` was extracted into the `verifier_judge`
-    component (`ap2/components/verifier_judge/impl.py`). Legacy importers
-    that still reference `verify._judge_prose_bullet` (the unit tests in
-    `ap2/tests/test_verify_retry_diff.py` / `test_judge_parse_observability.py`
-    / `e2e/test_verify_per_task.py`, the source-pin in `test_env_knobs.py`,
-    and the real-SDK smoke harness) resolve it here through the registry —
-    so core never statically imports `ap2.components` (the TB-311
-    import-direction gate). The hook lives on the manifest regardless of
-    the component's enabled state, so this returns the live function object
-    even when `AP2_VERIFY_JUDGE_DISABLED` is set; the disable behavior is
-    enforced by `verify_task` via `Registry.verifier_judge(cfg)`, not by
-    hiding the symbol.
-
-    PEP 562 module `__getattr__` is consulted for both attribute access
-    (`verify._judge_prose_bullet`) and `from ap2.verify import
-    _judge_prose_bullet`, so both legacy spellings keep working.
-    """
-    if name == "_judge_prose_bullet":
-        from .registry import default_registry
-        return default_registry().get("verifier_judge").hook_points["prose_judge"]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

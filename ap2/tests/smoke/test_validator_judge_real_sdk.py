@@ -130,7 +130,7 @@ def _hard_predecessors(
     `select_adapter("validator_judge", cfg)` for `backend` and return the parsed
     `hard_predecessors` list (production parser)."""
     from ap2.adapters import AgentTools, select_adapter
-    from ap2.components.validator_judge.impl import _parse_dep_judge_response
+    from ap2.briefing_validators import _parse_dep_judge_response
 
     cfg = bootstrap_judge_cfg(tmp_path)
     adapter = select_adapter("validator_judge", cfg)

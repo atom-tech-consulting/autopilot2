@@ -204,21 +204,19 @@ FLAT_TO_SECTIONED: dict[str, str] = {
 #     an env-only knob keeps it out of the TOML migration's hot-reload
 #     story and avoids the "operator edits config.toml; daemon doesn't
 #     pick up the channel change" footgun.
-#   - Component kill switches with no structured-config schema:
-#     `AP2_CRON_DISABLED` (TB-381, cron scheduler) and
-#     `AP2_VERIFY_JUDGE_DISABLED` (TB-382, the prose-judge component) are
-#     each a minimal component's on/off lever. Unlike the `janitor` /
-#     `auto_unfreeze` kill switches (which graduated to
-#     `[components.<name>] disabled` because those components carry a
-#     `config_schema`), these components declare no schema — the knob is
-#     consulted purely via `Manifest.is_enabled()`'s `env_flag` mechanism,
-#     never read via a component-body `os.environ.get` or mapped to a
-#     sectioned TOML key. (verifier_judge's verify-judge tunables —
+#   - Kill switches with no structured-config schema:
+#     `AP2_CRON_DISABLED` (TB-381, cron scheduler component) and
+#     `AP2_VERIFY_JUDGE_DISABLED` (the prose-bullet verify judge). The cron
+#     knob is a minimal component's on/off lever consulted via
+#     `Manifest.is_enabled()`'s `env_flag`; the verify-judge knob is read
+#     directly by `verify.verify_task` via `os.environ.get` (TB-386 demoted
+#     the prose judge out of `ap2/components/` — a judge invoked only as an
+#     internal sub-step of the verify runner is not a loop-level component).
+#     Neither declares a `[components.<name>]` schema or maps to a sectioned
+#     TOML key. (verifier_judge's verify-judge tunables —
 #     AP2_VERIFY_JUDGE_EFFORT / AP2_VERIFY_JUDGE_MAX_TURNS — are core
 #     knobs, read via `cfg.get_core_value`, not component keys.)
-#     They stay env-only until a future TB introduces a
-#     `[components.<name>]` schema (at which point the flag would move to
-#     `FLAT_TO_SECTIONED`).
+#     They stay env-only until a future TB introduces a structured schema.
 #   - Future placeholders (`AP2_DIR`, `AP2_REAL_SDK`) named in goal.md
 #     L358 are listed for forward-compatibility — neither is currently
 #     read in source, but the goal.md cut-line documents them as
@@ -242,12 +240,15 @@ _KNOBS_STAYING_ENV_ONLY: frozenset[str] = frozenset({
     # with no `config_schema`; consulted via `Manifest.is_enabled()`,
     # not a sectioned TOML key. Stays env-only.
     "AP2_CRON_DISABLED",
-    # verifier_judge component kill switch (TB-382) — same shape as
-    # AP2_CRON_DISABLED: the prose-judge component declares no
-    # `config_schema` (its verify-judge tunables are core knobs read via
-    # `cfg.get_core_value`), so the disable flag is consulted purely via
-    # `Manifest.is_enabled()`'s `env_flag` mechanism, never read via a
-    # component-body `os.environ.get` or mapped to a sectioned TOML key.
+    # Prose-bullet verify-judge kill switch. TB-382 had modeled the prose
+    # judge as a component whose `env_flag` consulted this knob; TB-386
+    # demoted the judge back into the core verify runner, so the flag is now
+    # a plain env-only knob read directly by `verify.verify_task` via
+    # `os.environ.get`. It has no `[components.<name>]` schema and isn't
+    # mapped to a sectioned TOML key — same env-only shape as
+    # AP2_CRON_DISABLED. (verifier_judge's verify-judge tunables —
+    # AP2_VERIFY_JUDGE_EFFORT / AP2_VERIFY_JUDGE_MAX_TURNS — remain core
+    # knobs read via `cfg.get_core_value`.)
     "AP2_VERIFY_JUDGE_DISABLED",
     # Forward-compatibility placeholders per goal.md L358 (sandbox user
     # identity + SDK-mode escape hatch). Not currently read in source;

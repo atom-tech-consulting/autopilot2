@@ -210,11 +210,11 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     Pins (TB-320 expanded — newly-flagged components join the
     original three; TB-345 merged the former focus_advance component
     into the core `ap2/ideation_halt.py` module, so its kill switch is
-    no longer a component env flag):
+    no longer a component env flag; TB-386 demoted the validator_judge
+    component into the core briefing-validation runner, so its kill
+    switch is no longer a component env flag either):
       - `AP2_JANITOR_DISABLED` → `"1"` (kill switch; janitor default-on).
       - `AP2_MM_CHANNELS` → `""` (opt-in; mattermost default-off).
-      - `AP2_VALIDATOR_JUDGE_DISABLED` → `"1"` (kill switch;
-        validator_judge default-on).
       - `AP2_AUTO_APPROVE` → `""` (opt-in; auto_approve default-off,
         TB-320 wiring of TB-223's require-polarity gate).
       - `AP2_AUTO_UNFREEZE_DISABLED` → `"1"` (kill switch;
@@ -230,11 +230,14 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
 
     # Suppress-style kill switches map to truthy "1".
     assert flags.get("AP2_JANITOR_DISABLED") == "1", flags
-    assert flags.get("AP2_VALIDATOR_JUDGE_DISABLED") == "1", flags
     assert flags.get("AP2_AUTO_UNFREEZE_DISABLED") == "1", flags
     # TB-345: focus_advance is no longer a component, so its former
     # kill switch must NOT appear in the disabled-env-flag dict.
     assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" not in flags, flags
+    # TB-386: validator_judge is no longer a component either, so its
+    # kill switch must NOT appear in the disabled-env-flag dict (it is a
+    # plain config knob read by the core briefing-validation runner).
+    assert "AP2_VALIDATOR_JUDGE_DISABLED" not in flags, flags
 
     # Opt-in toggles map to empty string (clear from env).
     assert flags.get("AP2_MM_CHANNELS") == "", flags
@@ -382,12 +385,13 @@ def test_disabled_config_board_parse_render_roundtrip(
 
 def test_disabled_config_briefing_validators_accept_canonical(disabled_env):
     """(briefing scope (b)) `_validate_briefing_structure` accepts the
-    canonical briefing fixture even with validator_judge disabled.
+    canonical briefing fixture under the every-component-disabled config.
 
-    The five deterministic core checks (`_CORE_VALIDATORS`) always run
-    in core; the registry-walked validators are empty in the disabled
-    config because `validator_judge` is the only component that
-    currently registers a `briefing_validator` hook. The chain still
+    The five deterministic core checks (`_CORE_VALIDATORS`) always run in
+    core. TB-386 demoted the dep-coherence LLM judge out of the
+    `validator_judge` component back into this core runner; the orchestrator
+    appends it directly, but it short-circuits when neither `events_file` nor
+    `dep_judge_fn` is supplied (the path this test takes). The chain still
     accepts a structurally-valid briefing.
     """
     body = canonical_briefing("TB-CANON", title="canonical")
@@ -397,12 +401,6 @@ def test_disabled_config_briefing_validators_accept_canonical(disabled_env):
     # all-placeholder); the rest of the chain still runs.
     err = _validate_briefing_structure(body, goal_md_path=None)
     assert err is None, err
-
-    # With validator_judge disabled, the registry-walked validators list
-    # is empty — only the five core checks run. The chain order matches
-    # the pre-TB-316 inline-chain shape byte-for-byte.
-    pipeline_extension = default_registry().briefing_validators()
-    assert pipeline_extension == [], pipeline_extension
 
     # The five core validators are still callable on the BriefingContext.
     assert len(_CORE_VALIDATORS) == 5
@@ -705,12 +703,14 @@ def test_disabled_env_fixture_restores_default_registry_on_teardown(
     # The fixture's yield value matches the helper's output.
     assert "AP2_JANITOR_DISABLED" in disabled_env
     assert "AP2_MM_CHANNELS" in disabled_env
-    assert "AP2_VALIDATOR_JUDGE_DISABLED" in disabled_env
     assert "AP2_AUTO_APPROVE" in disabled_env
     assert "AP2_AUTO_UNFREEZE_DISABLED" in disabled_env
     # TB-345: focus_advance's former kill switch is no longer a
     # component env flag, so it must NOT appear in the dict.
     assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" not in disabled_env
+    # TB-386: validator_judge's kill switch is no longer a component env
+    # flag, so it must NOT appear in the dict.
+    assert "AP2_VALIDATOR_JUDGE_DISABLED" not in disabled_env
 
 
 # ---------------------------------------------------------------------------

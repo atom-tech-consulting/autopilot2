@@ -38,11 +38,11 @@ from pathlib import Path
 
 import pytest
 
-# TB-316: the flat module `ap2/validator_judge.py` moved to
-# `ap2/components/validator_judge/`. Tests are exempt from the TB-311
-# import-direction gate; the alias name (`vj`) is preserved so the rest
-# of this module's bodies keep reading byte-identically.
-from ap2.components import validator_judge as vj
+# TB-386: the dep-coherence judge surface was demoted out of
+# `ap2/components/validator_judge/` back into the core briefing-validation
+# runner (`ap2/briefing_validators.py`). The alias name (`vj`) is preserved
+# so the rest of this module's bodies keep reading byte-identically.
+from ap2 import briefing_validators as vj
 
 
 # A canonical-shaped briefing that covers all five sections the

@@ -804,25 +804,21 @@ def validator_judge_timeout_audit(
     this helper read `os.environ["AP2_VALIDATOR_JUDGE_TIMEOUT_S"]`
     directly; back-compat preserved via the flat-env reverse-lookup
     in `cfg.get_component_value`. The module-level
-    `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` (resolved via the component
-    registry's `hook_points` dict per TB-316) is still the fallback
-    when both the env knob and the TOML snapshot are unset, so the
-    value the audit compares against stays byte-identical to what
-    the validator will actually use at runtime.
+    `_VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT` (imported from
+    `ap2.briefing_validators` per TB-386, where the dep-coherence judge
+    now lives) is still the fallback when both the env knob and the TOML
+    snapshot are unset, so the value the audit compares against stays
+    byte-identical to what the validator will actually use at runtime.
     """
-    # TB-316: resolve the validator-judge timeout default via the
-    # component registry's `hook_points` dict — the flat module
-    # `ap2/validator_judge.py` was relocated to
-    # `ap2/components/validator_judge/` and core may not statically
-    # import from `ap2/components/` (the TB-311 import-direction gate).
-    # The local-scope import of `default_registry` keeps the doctor
-    # module cheap to import and parallels the pre-TB-316 lazy-import
-    # pattern that dodged the `validator_judge → events → …` cycle.
-    from .registry import default_registry
-
-    _vj_default = default_registry().get(
-        "validator_judge",
-    ).hook_points["VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT"]
+    # TB-386 (axis 5a): the validator-judge dep-coherence surface was demoted
+    # out of `ap2/components/validator_judge/` back into the core briefing-
+    # validation runner. Resolve the timeout default via a plain import from
+    # `ap2.briefing_validators`. The local-scope import keeps the doctor
+    # module cheap to import and parallels the pre-TB-386 lazy-import pattern
+    # that dodged the `validator_judge → events → …` cycle.
+    from .briefing_validators import (
+        _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT as _vj_default,
+    )
 
     res = AuditResult()
     events_file = state_dir / EVENTS_FILE
