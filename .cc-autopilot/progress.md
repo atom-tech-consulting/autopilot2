@@ -1545,3 +1545,9 @@
 - **Summary:** Documented the agent-backend layer: added "## Agent backends" to architecture.md (AgentAdapter, ClaudeCodeAdapter/CodexAdapter, select_adapter resolution order, stdio-MCP bridge) + updated agent-kinds/SDK-plumbing/task-lifecycle/MCP-tools sections for adapter indirection; added [agent_backends]/AP2_AGENT_BACKEND_<KIND> selection + resolution-order docs to howto.md plus a Config-keys-TOML entry; added a pluggable-backend blurb to README.md and ap2/README.md. Docs only; full suite (3057) + docs-drift gate pass.
 - **Files:** ap2/architecture.md, ap2/howto.md, README.md, ap2/README.md
 - **Tests:** pass
+
+## [2026-06-09] TB-391: Ideation component (axis 4) — extract the proposal engine behind Phase.IDEATION
+- **Commit:** `dabf269`
+- **Summary:** Extracted the ideation proposal engine (trigger gate + force run + roadmap-exhaustion halt + AP2_IDEATION_* knob readers) into ap2/components/ideation/ behind Phase.IDEATION + a PRE_DISPATCH halt hook with env_flag=AP2_IDEATION_DISABLED; daemon now drives ideation purely via the registry (no inline ideation/ideation_halt import or call), with ap2/ideation.py & ap2/ideation_halt.py kept as back-compat __getattr__ shims; full suite green (3079 passed).
+- **Files:** ap2/components/ideation/__init__.py, ap2/components/ideation/impl.py, ap2/components/ideation/manifest.py, ap2/daemon.py, ap2/ideation.py, ap2/ideation_halt.py, ap2/tests/test_tb391_ideation_component.py, ap2/tests/test_components_disabled.py, ap2/tests/test_ideation_halt.py, ap2/tests/test_roadmap_complete_no_bullet_append.py, ap2/tests/test_tb246_ideation_roadmap_complete_gate.py, ap2/tests/test_tb335_ideation_cfg_reads.py, ap2/tests/test_tb336_axis5_tail_cfg_reads.py, ap2/tests/test_tb381_cron_component.py
+- **Tests:** pass
