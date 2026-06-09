@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-383,TB-387",
   "briefing_path": ".cc-autopilot/tasks/ideation-component-axis-4-extract-the-pr.md",
   "focus_anchor": "current focus get the component boundary right loop level participants only",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-09T17:17:51Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-09T07:38:27Z",
   "tb_id": "TB-391",
   "why_now": "cron (TB-381) and communication (TB-389) already proved the tick-phase extraction shape, and the recent boundary work removed the cross-boundary knots (auto-approve in board_edit, judge components, symbol-pull blocks) that previously made ideation inextractable \u2014 this is the cheapest moment to finish the boundary before new features recouple the kernel to the proposal engine."
