@@ -1557,3 +1557,9 @@
 - **Summary:** Added ap2/tests/e2e/test_minimal_kernel_tick.py — a registry-driven (enumerate_disabled_env_flags + explicit AP2_IDEATION_DISABLED) e2e that runs one daemon._tick with a stubbed artifact-writing agent and asserts a Ready task dispatches, shell-verifies, and lands in Complete with a task_verify verdict=pass event; new test and full suite (3073) pass.
 - **Files:** ap2/tests/e2e/test_minimal_kernel_tick.py
 - **Tests:** pass
+
+## [2026-06-09] TB-394: Docs: refresh architecture.md to the current component model (registry + ap2/components layout + tick phases + contributions(point) + communication + judges-as-adapters)
+- **Commit:** `475224f`
+- **Summary:** Refreshed architecture.md to the current component model: phase-walked daemon tick (PRE_DISPATCH/ATTENTION_EMISSION/CRON_DISPATCH/IDEATION/COMMUNICATION, POST_DISPATCH removed), new "## Component model" section (registry/Manifest/Phase, env_flag polarity, import-direction CI gate, generic contributions(point) fan-out, loop-level boundary, cron scheduler+job-handler / communication / judges-as-adapters), and a module map showing the ap2/components/<name>/ subtree plus the non-components; docs-only, full suite green (3042 passed). Note: howto.md still has stale registry.channel_adapters/inbound_poll references (pre-TB-389) worth a follow-up, but that's out of this task's architecture.md-only scope.
+- **Files:** ap2/architecture.md
+- **Tests:** pass
