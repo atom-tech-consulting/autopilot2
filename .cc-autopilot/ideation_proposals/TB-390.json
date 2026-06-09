@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-390",
+  "briefing_path": ".cc-autopilot/tasks/minimal-kernel-e2e-dispatch-verify-shell.md",
+  "focus_anchor": "current focus get the component boundary right loop level participants only",
+  "proposed_at": "2026-06-09T07:36:11Z",
+  "tb_id": "TB-390",
+  "why_now": "with axes 1\u20135 landed (incl. TB-390's ideation extraction), the kernel is finally minimal; this is the moment to lock a regression-pin proving the dispatch-verify-report loop still works with zero components, so a future refactor can't silently break the walk-away promise in the minimal config."
+}
