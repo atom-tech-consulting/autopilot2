@@ -1551,3 +1551,9 @@
 - **Summary:** Extracted the ideation proposal engine (trigger gate + force run + roadmap-exhaustion halt + AP2_IDEATION_* knob readers) into ap2/components/ideation/ behind Phase.IDEATION + a PRE_DISPATCH halt hook with env_flag=AP2_IDEATION_DISABLED; daemon now drives ideation purely via the registry (no inline ideation/ideation_halt import or call), with ap2/ideation.py & ap2/ideation_halt.py kept as back-compat __getattr__ shims; full suite green (3079 passed).
 - **Files:** ap2/components/ideation/__init__.py, ap2/components/ideation/impl.py, ap2/components/ideation/manifest.py, ap2/daemon.py, ap2/ideation.py, ap2/ideation_halt.py, ap2/tests/test_tb391_ideation_component.py, ap2/tests/test_components_disabled.py, ap2/tests/test_ideation_halt.py, ap2/tests/test_roadmap_complete_no_bullet_append.py, ap2/tests/test_tb246_ideation_roadmap_complete_gate.py, ap2/tests/test_tb335_ideation_cfg_reads.py, ap2/tests/test_tb336_axis5_tail_cfg_reads.py, ap2/tests/test_tb381_cron_component.py
 - **Tests:** pass
+
+## [2026-06-09] TB-392: Minimal-kernel e2e: dispatch → verify (shell) → report with every component disabled
+- **Commit:** `cd60af4`
+- **Summary:** Added ap2/tests/e2e/test_minimal_kernel_tick.py — a registry-driven (enumerate_disabled_env_flags + explicit AP2_IDEATION_DISABLED) e2e that runs one daemon._tick with a stubbed artifact-writing agent and asserts a Ready task dispatches, shell-verifies, and lands in Complete with a task_verify verdict=pass event; new test and full suite (3073) pass.
+- **Files:** ap2/tests/e2e/test_minimal_kernel_tick.py
+- **Tests:** pass
