@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-396** **Provider-neutral default model: agent_model default → None (both backends self-default), + make the codex smoke exercise the real resolution** `#autopilot` `#codex` `#backend` `#model` `#config` `#smoke` `#bug` [→ brief](.cc-autopilot/tasks/provider-neutral-default-model-agent-mod.md)
 
 ## Pipeline Pending
 
@@ -279,5 +278,6 @@
 - [x] **TB-392** **Minimal-kernel e2e: dispatch → verify (shell) → report with every component disabled** `#autopilot` `#components` `#tests` `#e2e` `#regression-pin` `#minimal-kernel` `@blocked:TB-391` — Add an e2e that disables every env-flag-bearing component (incl. AP2_IDEATION_DISABLED) via the shared enumerate_disabled_env_flags() helper, runs one daemon tick with a stubbed agent, and asserts a Ready task dispatches, passes shell-bullet verification, and lands in Complete with a task_verify verdict=pass event — pinning the focus's last unproven Progress signal (minimal-kernel dispatch→verify→report). [→ brief](.cc-autopilot/tasks/minimal-kernel-e2e-dispatch-verify-shell-2.md)
 - [x] **TB-394** **Docs: refresh architecture.md to the current component model (registry + ap2/components layout + tick phases + contributions(point) + communication + judges-as-adapters)** `#autopilot` `#docs` `#architecture` `#components` `#registry` `@blocked:TB-393,TB-391` [→ brief](.cc-autopilot/tasks/docs-refresh-architecture-md-to-the-curr.md)
 - [x] **TB-395** **Docs sync: update the ap2 skill + howto.md to the TB-385 event vocabulary (task_solve / task_verify)** `#autopilot` `#docs` `#skill` `#howto` `#events` `#sync` `@blocked:TB-385` [→ brief](.cc-autopilot/tasks/docs-sync-update-the-ap2-skill-howto-md.md)
+- [x] **TB-396** **Provider-neutral default model: agent_model default → None (both backends self-default), + make the codex smoke exercise the real resolution** `#autopilot` `#codex` `#backend` `#model` `#config` `#smoke` `#bug` [→ brief](.cc-autopilot/tasks/provider-neutral-default-model-agent-mod.md)
 
 ## Frozen

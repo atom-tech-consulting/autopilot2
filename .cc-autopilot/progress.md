@@ -1569,3 +1569,9 @@
 - **Summary:** Synced skills/ap2/SKILL.md (interesting-event-types list + worked example now use task_solve/task_verify, with a legacy-name parenthetical) and ap2/howto.md (prose-judge diagnostics attribute per-bullet results to terminal task_verify; stuck-detector keys on task_solve w/ task_start fallback; judges relabeled adapter-routed agent-kind calls) to the TB-385 vocab; docs-only, all 3042 tests pass. Note: briefing's "validator/janitor/ideation-scrub" parenthetical was narrowed to the janitor's per-finding judge to match the source of truth (only janitor emits judge_call; validator/scrub emit their own typed events) and stay consistent with the howto Event schema.
 - **Files:** skills/ap2/SKILL.md, ap2/howto.md
 - **Tests:** pass
+
+## [2026-06-10] TB-396: Provider-neutral default model: agent_model default → None (both backends self-default), + make the codex smoke exercise the real resolution
+- **Commit:** `c2597f1`
+- **Summary:** Made agent_model's default provider-neutral (None, both backends self-default), added empty->None coercion at the four dispatch sites, routed the codex smokes' model through the production config path under a default config, added a gate-runnable regression test, and documented the single-global-model pin caveat; full gate suite 3048 passed.
+- **Files:** ap2/core_config_schema.py, ap2/daemon.py, ap2/verify.py, ap2/components/janitor/impl.py, ap2/init.py, ap2/tests/smoke/_adapter.py, ap2/tests/test_env_knobs.py, ap2/tests/test_tb324_cli_config.py, ap2/tests/test_tb396_provider_neutral_model.py, ap2/howto.md
+- **Tests:** pass
