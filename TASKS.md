@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-395** **Docs sync: update the ap2 skill + howto.md to the TB-385 event vocabulary (task_solve / task_verify)** `#autopilot` `#docs` `#skill` `#howto` `#events` `#sync` `@blocked:TB-385` [→ brief](.cc-autopilot/tasks/docs-sync-update-the-ap2-skill-howto-md.md)
 
 ## Pipeline Pending
 
