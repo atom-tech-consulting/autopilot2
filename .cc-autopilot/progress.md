@@ -1563,3 +1563,9 @@
 - **Summary:** Refreshed architecture.md to the current component model: phase-walked daemon tick (PRE_DISPATCH/ATTENTION_EMISSION/CRON_DISPATCH/IDEATION/COMMUNICATION, POST_DISPATCH removed), new "## Component model" section (registry/Manifest/Phase, env_flag polarity, import-direction CI gate, generic contributions(point) fan-out, loop-level boundary, cron scheduler+job-handler / communication / judges-as-adapters), and a module map showing the ap2/components/<name>/ subtree plus the non-components; docs-only, full suite green (3042 passed). Note: howto.md still has stale registry.channel_adapters/inbound_poll references (pre-TB-389) worth a follow-up, but that's out of this task's architecture.md-only scope.
 - **Files:** ap2/architecture.md
 - **Tests:** pass
+
+## [2026-06-10] TB-395: Docs sync: update the ap2 skill + howto.md to the TB-385 event vocabulary (task_solve / task_verify)
+- **Commit:** `64e9af2`
+- **Summary:** Synced skills/ap2/SKILL.md (interesting-event-types list + worked example now use task_solve/task_verify, with a legacy-name parenthetical) and ap2/howto.md (prose-judge diagnostics attribute per-bullet results to terminal task_verify; stuck-detector keys on task_solve w/ task_start fallback; judges relabeled adapter-routed agent-kind calls) to the TB-385 vocab; docs-only, all 3042 tests pass. Note: briefing's "validator/janitor/ideation-scrub" parenthetical was narrowed to the janitor's per-finding judge to match the source of truth (only janitor emits judge_call; validator/scrub emit their own typed events) and stay consistent with the howto Event schema.
+- **Files:** skills/ap2/SKILL.md, ap2/howto.md
+- **Tests:** pass

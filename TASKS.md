@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-395** **Docs sync: update the ap2 skill + howto.md to the TB-385 event vocabulary (task_solve / task_verify)** `#autopilot` `#docs` `#skill` `#howto` `#events` `#sync` `@blocked:TB-385` [→ brief](.cc-autopilot/tasks/docs-sync-update-the-ap2-skill-howto-md.md)
 
 ## Pipeline Pending
 
@@ -278,5 +277,6 @@
 - [x] **TB-391** **Ideation component (axis 4) — extract the proposal engine behind Phase.IDEATION** `#autopilot` `#components` `#ideation` `#registry` `#tick-phase` `#axis-4` `#refactor` `@blocked:TB-383,TB-387` — Extract ap2/ideation.py (_maybe_ideate trigger gate, roadmap-exhaustion halt, proposal records, scrub coordination) into ap2/components/ideation/ behind the reserved Phase.IDEATION tick hook + the halt hook, owning the AP2_IDEATION_* knob cluster, all ideation_* events, and AP2_IDEATION_DISABLED as its env_flag — removing the last inline ideation/ideation_halt import and direct call from daemon.py. [→ brief](.cc-autopilot/tasks/ideation-component-axis-4-extract-the-pr.md)
 - [x] **TB-392** **Minimal-kernel e2e: dispatch → verify (shell) → report with every component disabled** `#autopilot` `#components` `#tests` `#e2e` `#regression-pin` `#minimal-kernel` `@blocked:TB-391` — Add an e2e that disables every env-flag-bearing component (incl. AP2_IDEATION_DISABLED) via the shared enumerate_disabled_env_flags() helper, runs one daemon tick with a stubbed agent, and asserts a Ready task dispatches, passes shell-bullet verification, and lands in Complete with a task_verify verdict=pass event — pinning the focus's last unproven Progress signal (minimal-kernel dispatch→verify→report). [→ brief](.cc-autopilot/tasks/minimal-kernel-e2e-dispatch-verify-shell-2.md)
 - [x] **TB-394** **Docs: refresh architecture.md to the current component model (registry + ap2/components layout + tick phases + contributions(point) + communication + judges-as-adapters)** `#autopilot` `#docs` `#architecture` `#components` `#registry` `@blocked:TB-393,TB-391` [→ brief](.cc-autopilot/tasks/docs-refresh-architecture-md-to-the-curr.md)
+- [x] **TB-395** **Docs sync: update the ap2 skill + howto.md to the TB-385 event vocabulary (task_solve / task_verify)** `#autopilot` `#docs` `#skill` `#howto` `#events` `#sync` `@blocked:TB-385` [→ brief](.cc-autopilot/tasks/docs-sync-update-the-ap2-skill-howto-md.md)
 
 ## Frozen
