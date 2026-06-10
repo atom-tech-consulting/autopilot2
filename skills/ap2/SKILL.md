@@ -50,7 +50,7 @@ daemon:   running (pid <N>, up <ETIME>)  OR  stopped (stale pid file / no pid fi
 
 ### 3. Recent events — tail `.cc-autopilot/events.jsonl`
 
-Show the last 10 events of interesting types (`task_start`, `task_complete`, `task_error`, `task_timeout`, `retry_exhausted`, `backlog_auto_promoted`, `cron_complete`, `ideation_empty_board`, `ideation_complete`, `ideation_error`, `ideation_timeout`, `daemon_start`, `daemon_stop`, `daemon_pause`, `daemon_resume`, `task_unfrozen`, `task_deleted`, `operator_queue_append`, `operator_queue_drained`, `mattermost*`). Skip noisy `cron_start`. Format one line per event:
+Show the last 10 events of interesting types (`task_solve`, `task_verify`, `task_complete`, `task_error`, `task_timeout`, `retry_exhausted`, `backlog_auto_promoted`, `cron_complete`, `ideation_empty_board`, `ideation_complete`, `ideation_error`, `ideation_timeout`, `daemon_start`, `daemon_stop`, `daemon_pause`, `daemon_resume`, `task_unfrozen`, `task_deleted`, `operator_queue_append`, `operator_queue_drained`, `mattermost*`). Skip noisy `cron_start`. (TB-385 renamed the per-task lifecycle verbs to `task_solve` → `task_verify` → `task_complete`; pre-TB-385 history still carries the old `task_start` / `verify_passed` / `judge_call` names, which readers accept alongside the new ones — don't read them as malformed in older `ap2 events` output.) Format one line per event:
 
 ```
 <ts>  <type>  <key=val key=val...>
@@ -108,7 +108,8 @@ pending:  0 operator ops
 
 recent events:
   2026-04-21T20:39:05Z  task_complete    task=TB-11 commit=eb75288 summary=TB-11 CLI + run-config landed...
-  2026-04-21T20:29:49Z  task_start       task=TB-11 title=CLI entrypoint + run config
+  2026-04-21T20:39:01Z  task_verify      task=TB-11 verdict=pass shell=2/2 prose=1/1
+  2026-04-21T20:29:49Z  task_solve       task=TB-11 title=CLI entrypoint + run config
   2026-04-21T20:29:49Z  backlog_auto_promoted  task=TB-11
   2026-04-21T20:28:49Z  task_complete    task=TB-10 commit=2d5474a summary=Added stoch/io/...
   ...

@@ -396,25 +396,39 @@ specific tasks out (e.g. docs-only changes).
 
 ### Prose-judge diagnostics
 
-The prose judge (`ap2/verify.py::_judge_prose_bullet`) emits a
-`judge_call` event for every call (TB-157) carrying usage / cost /
-verdict. TB-236 extended that event with prevention- and observability-
-fields so silently-skipped prose bullets under `AP2_AUTO_APPROVE=1` are
-no longer invisible:
+The prose judge (`ap2/verify.py::_judge_prose_bullet`, dispatched as the
+`verifier_judge` agent-kind) turns each `## Verification` prose bullet
+into a pass / fail / unverified verdict. As of TB-385 it no longer emits
+a per-bullet `judge_call` event — the per-bullet verdict is folded into
+the daemon's single terminal `task_verify` event (`bullets[]`, one
+`{idx, kind, verdict}` per bullet), so prose verdicts are read off
+`task_verify`, not a stream of `judge_call` events. The `judge_call`
+event itself still exists, but post-TB-385 it is emitted only by the
+still-streaming judge kind — the janitor's per-finding judge (see
+`## Event schema`) — so the `judge_call`-keyed queries below apply to
+those calls and to pre-TB-385 history, NOT to current prose verification
+bullets. TB-236's prose-judge prevention + parse-failure observability
+survive the fold, just on different surfaces (the prompt constraint is
+unchanged; the parse-failure detail now lives in the on-disk dump rather
+than an event field), so silently-skipped prose bullets under
+`AP2_AUTO_APPROVE=1` stay diagnosable:
 
 - **Prompt constraint (prevention).** The judge prompt now caps the
   rationale at ≤200 characters and is explicit that the FINAL message
   must be a JSON object only (no markdown fences, no preamble, no
   trailing prose). Intermediate `Read` / `Grep` / `Glob` tool calls are
   unconstrained — only the last message is.
-- **`response_length`** (always present on every `judge_call`). Length
-  in characters of the judge's final assistant text. Lets operators
-  watch the prompt-tightening effect over time.
-- **`rationale_length`** (present on successful parse). Length of the
-  extracted `rationale` field. If this drifts above ~200 over a week
-  the prompt constraint is slipping and either the model is ignoring it
-  or the prompt rewrite lost the cap.
-- **`parse_error`** (present on parse failure). One of:
+- **`response_length`** / **`rationale_length`** (length signals).
+  `response_length` is the character length of the judge's final
+  assistant text; `rationale_length` is the length of the extracted
+  `rationale` field on a successful parse. They let operators watch the
+  prompt-tightening effect / rationale-cap creep over time (if
+  `rationale_length` drifts above ~200 over a week the prompt constraint
+  is slipping). Pre-TB-385 these rode on the per-bullet `judge_call`
+  event; post-TB-385 the prose judge emits no such event, so for prose
+  verdicts the signal lives in the on-disk dump (below) rather than an
+  event field.
+- **`parse_error`** (parse-failure category). One of:
   - `no_json_object` — response had no `{` / `}` at all.
   - `trailing_prose_after_json` — `{...}` parses cleanly but non-
     whitespace follows the closing brace (judge added commentary).
@@ -423,16 +437,21 @@ no longer invisible:
   - `json_truncated` — response cut off mid-string-value.
   - `parse_error_other` — catch-all.
   The full enum lives in `ap2/verify.py::PARSE_ERROR_CATEGORIES`.
-- **`judge_response_dump`** (present on parse failure). Absolute path to
+- **On-disk dump** (the surviving prose parse-failure surface). On a
+  parse failure the verifier writes the FULL raw last-assistant-text to
   the per-bullet dump file at
-  `.cc-autopilot/debug/<run_ts>-<task>-judge-bullet<idx>-response.txt`.
-  The file holds the FULL raw last-assistant-text — not the 200-char
-  preview the event's `notes` field carries. Open it when you need to
-  see what the judge actually emitted (unescaped backticks, prose
-  preamble, etc.). Successful judge parses leave no dump on disk; the
-  field is absent on those events.
+  `.cc-autopilot/debug/<run_ts>-<task>-judge-bullet<idx>-response.txt` —
+  not the 200-char preview the verifier keeps in the bullet's `notes`.
+  Open it when you need to see what the judge actually emitted (unescaped
+  backticks, prose preamble, etc.). Successful parses leave no dump on
+  disk. Pre-TB-385 this path was also surfaced as a `judge_response_dump`
+  field on the per-bullet `judge_call` event; post-TB-385 that event is
+  gone for prose, so locate dumps by listing the debug dir directly.
 
-Pattern-detection workflow:
+Pattern-detection workflow. The `judge_call`-keyed queries below resolve
+against pre-TB-385 history (where the prose judge still streamed a
+per-bullet `judge_call` carrying `parse_error` / `judge_response_dump`);
+for current prose parse failures, scan the debug dir directly instead.
 
 ```
 ap2 events tail -n 500 | jq 'select(.type=="judge_call" and .parse_error)'
@@ -448,6 +467,13 @@ Open the worst-offender dump:
 
 ```
 ap2 events tail -n 500 | jq -r 'select(.type=="judge_call" and .judge_response_dump) | .judge_response_dump' | tail -1 | xargs cat
+```
+
+For current (post-TB-385) prose parse failures there is no `judge_call`
+event to key on — list the surviving on-disk dumps in the debug dir:
+
+```
+ls -t .cc-autopilot/debug/*-judge-bullet*-response.txt | head
 ```
 
 Failure recovery for prose-judge parse failures stays soft-pass:
@@ -1263,8 +1289,10 @@ window.
 `attention_raised` is the distinct push-surface event for conditions
 that warrant immediate operator attention. Detector inventory:
 `task_stuck` (TB-282) flags an Active task whose most recent
-`task_start` is older than `AP2_TASK_STUCK_THRESHOLD_S` — default
-14400s / 4h — and has no intervening terminal event;
+`task_solve` (with a legacy `task_start` fallback, so pre-TB-385 runs
+still in the tail are caught) is older than
+`AP2_TASK_STUCK_THRESHOLD_S` — default 14400s / 4h — and has no
+intervening terminal event;
 `task_frozen` (TB-287) flags a Frozen task whose most recent
 freeze-entry event (`retry_exhausted` / `task_failed`) is within
 `AP2_TASK_FROZEN_RECENCY_S` — default 86400s / 24h — and has no
@@ -2279,7 +2307,8 @@ backend via `Config.get_agent_backend(kind)`, precedence high → low:
 
 Selectable kinds (`ap2.adapters.select.AGENT_KINDS`): `task`, `ideation`,
 `status_report`, `cron`, `mattermost`, plus the `verifier_judge`,
-`ideation_scrub`, `validator_judge`, `janitor_judge` component calls — each
+`ideation_scrub`, `validator_judge`, `janitor_judge` adapter-routed
+agent-kind calls — each
 independently routable. An unknown / typo'd backend id degrades to claude
 rather than crashing dispatch. Whichever backends the resolved map references
 must have their credentials present at daemon start (next).
