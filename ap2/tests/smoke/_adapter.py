@@ -159,19 +159,63 @@ def bootstrap_judge_cfg(root: Any):
     return cfg
 
 
-def run_judge_to_result(adapter, backend: str, prompt: str, tools, *, cwd: Any):
+def resolve_default_config_model(cfg: Any) -> Any:
+    """Resolve `agent_model` through the PRODUCTION config resolver
+    (`cfg.get_core_value`) under a DEFAULT config, returning the model id (or
+    `None`) the smoke should pass to `AgentOptions.model`.
+
+    TB-396: the smokes used to hardcode `model=None` to side-step the fact that
+    the production resolution handed codex a Claude `agent_model`. That made the
+    codex variants test "codex with its own default" — a configuration
+    production never uses — so a default regression to a `claude-*` string went
+    uncaught. This routes through the SAME `cfg.get_core_value("agent_model") or
+    None` path the four production dispatch sites use, so the codex smoke
+    exercises the REAL model resolution: under the provider-neutral default
+    (`None`) both backends self-default exactly as before, but if the default
+    ever regresses to a `claude-*` id the codex variant receives it and the live
+    codex turn fails loudly.
+
+    Why "under a default config": the smoke subprocess inherits the daemon env,
+    and a project may PIN `AP2_AGENT_MODEL` to a `claude-*` id for its (all
+    Claude-backed) kinds — this very repo pins `claude-opus-4-8[1m]`. Reading
+    that pin would hand the codex variant a Claude model on every run, a
+    permanent false failure unrelated to the DEFAULT this smoke guards. So the
+    operator's global pin is stripped for the resolution (and restored
+    immediately after), leaving the schema default to govern — the exact
+    fresh-install resolution a default regression would corrupt. The `or None`
+    coercion mirrors the production dispatch sites (empty-string → `None`).
+    """
+    import os
+
+    saved = {
+        name: os.environ.pop(name)
+        for name in ("AP2_AGENT_MODEL", "AP2_CORE_AGENT_MODEL")
+        if name in os.environ
+    }
+    try:
+        return cfg.get_core_value("agent_model") or None
+    finally:
+        os.environ.update(saved)
+
+
+def run_judge_to_result(
+    adapter, backend: str, prompt: str, tools, *, cfg: Any, cwd: Any,
+):
     """Dispatch a judge `prompt` through `adapter.run_to_result` and return the
     terminal `AgentResult`.
 
-    Builds a backend-neutral `AgentOptions` that intentionally pins NO model:
-    the production judge paths resolve a Claude model (`agent_model`'s
-    `claude-opus-4-7` default for the verifier / janitor judges, the validator
-    judge's hardcoded `claude-haiku-4-5`), which a live codex turn would reject.
-    Leaving `model=None` lets each backend use its own default (claude's CLI
-    default, codex's native default) — exactly as the tool-round-trip smokes do.
-    The codex variant additionally gets `effort="low"` + a read-only sandbox to
-    bound cost and stay side-effect-free, mirroring `test_report_result_real_sdk`
-    / `test_codex_real_sdk`.
+    Builds a backend-neutral `AgentOptions` whose `model` is resolved through
+    the PRODUCTION config path under a default config
+    (`resolve_default_config_model(cfg)`), NOT a hardcoded `model=None` (TB-396).
+    Under the provider-neutral default that resolves to `None` — so each backend
+    self-defaults (claude's CLI default, codex's native default), behaviorally
+    identical to the old hardcoded `None` — but if the `agent_model` default
+    ever regresses to a `claude-*` string the codex variant receives it and the
+    live codex turn fails loudly, which is the regression this smoke now guards
+    (the production judge paths resolve `agent_model`, which a codex turn would
+    reject). The codex variant additionally gets `effort="low"` + a read-only
+    sandbox to bound cost and stay side-effect-free, mirroring
+    `test_report_result_real_sdk` / `test_codex_real_sdk`.
     """
     import asyncio
 
@@ -182,6 +226,7 @@ def run_judge_to_result(adapter, backend: str, prompt: str, tools, *, cwd: Any):
         permission_mode="bypassPermissions",
         max_turns=4,
         setting_sources=["project"],
+        model=resolve_default_config_model(cfg),
     )
     if backend == "codex":
         options.effort = "low"
@@ -247,12 +292,15 @@ def run_control_to_tool_calls(
     mis-wired per-kind override fails loudly.
 
     `allowed_tools` is the kind's production tool policy (e.g. `IDEATION_TOOLS`,
-    `CONTROL_AGENT_TOOLS`, `MM_HANDLER_TOOLS`). `model` is intentionally left
-    unset (None) so each backend uses its own default — a production control
-    dispatch resolves a Claude model (`agent_model`) a live codex turn would
-    reject, the same reason `run_judge_to_result` pins no model. The codex
-    variant additionally gets `effort="low"` + a read-only sandbox to bound cost
-    and stay side-effect-free.
+    `CONTROL_AGENT_TOOLS`, `MM_HANDLER_TOOLS`). `model` is resolved through the
+    PRODUCTION config path under a default config
+    (`resolve_default_config_model(cfg)`), NOT a hardcoded `model=None` (TB-396):
+    under the provider-neutral default it resolves to `None` so each backend
+    self-defaults, but a default regression to a `claude-*` id would flow to the
+    codex variant and make the live codex turn fail loudly — the production
+    control dispatch resolves `agent_model` the same way. The codex variant
+    additionally gets `effort="low"` + a read-only sandbox to bound cost and
+    stay side-effect-free.
 
     A transient SDK transport/service error is *raised* out of the adapter drain
     — wrap the call in `call_with_transient_retry` so the smoke skips (not
@@ -278,6 +326,7 @@ def run_control_to_tool_calls(
         permission_mode="bypassPermissions",
         max_turns=5,
         setting_sources=["project"],
+        model=resolve_default_config_model(cfg),
     )
     if backend == "codex":
         options.effort = "low"

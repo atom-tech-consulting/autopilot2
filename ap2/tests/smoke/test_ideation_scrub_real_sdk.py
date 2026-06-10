@@ -17,13 +17,15 @@ survives. That is the scrub kind's structured-result contract — a smoke that
 asserted only "non-empty" would pass a model that returned the input verbatim
 (scrubbed nothing), the failure mode that matters.
 
-Dispatch reuses `run_judge_to_result` (the shared `adapter.run_to_result` helper
-that pins `model=None`): the scrub kind returns assistant TEXT, not a tool call,
-so it routes through `run_to_result` rather than `run_control_to_tool_calls`.
-`model=None` is load-bearing for the codex variant — the production scrub path
-resolves a Claude model (`claude-haiku-4-5`) a live codex turn would reject, so
-the smoke lets each backend use its own default (same rationale as the judge
-smokes). A non-`complete` adapter result (transport / service error / timeout)
+Dispatch reuses `run_judge_to_result` (the shared `adapter.run_to_result`
+helper): the scrub kind returns assistant TEXT, not a tool call, so it routes
+through `run_to_result` rather than `run_control_to_tool_calls`. TB-396: that
+helper resolves `model` through the production config path under a default
+config (`resolve_default_config_model(cfg)`) rather than a hardcoded
+`model=None` — under the provider-neutral `agent_model` default it resolves to
+`None` so each backend self-defaults, but a default regression to a `claude-*`
+id would reach the codex variant and make the live codex turn fail loudly. A
+non-`complete` adapter result (transport / service error / timeout)
 is classified transient by `agent_result_transient` → skip after one retry; a
 `complete` result flows to the verdict-removed / breadcrumb-kept assertions, so a
 backend that scrubs WRONGLY still fails.
@@ -92,7 +94,7 @@ def test_ideation_scrub_output_shape_via_adapter(backend, monkeypatch, tmp_path)
 
     result = call_with_transient_retry(
         lambda: run_judge_to_result(
-            adapter, backend, prompt, AgentTools(), cwd=tmp_path,
+            adapter, backend, prompt, AgentTools(), cfg=cfg, cwd=tmp_path,
         ),
         describe=f"ideation_scrub output-shape smoke [{backend}]",
         transient_of=agent_result_transient,

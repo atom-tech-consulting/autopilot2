@@ -140,7 +140,7 @@ def _hard_predecessors(
 
     def _run() -> object:
         return run_judge_to_result(
-            adapter, backend, prompt, AgentTools(), cwd=tmp_path
+            adapter, backend, prompt, AgentTools(), cfg=cfg, cwd=tmp_path,
         )
 
     result = call_with_transient_retry(

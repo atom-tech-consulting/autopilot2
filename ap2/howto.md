@@ -2313,6 +2313,17 @@ independently routable. An unknown / typo'd backend id degrades to claude
 rather than crashing dispatch. Whichever backends the resolved map references
 must have their credentials present at daemon start (next).
 
+**Model pin caveat (`AP2_AGENT_MODEL` / `[core] agent_model`, TB-396).**
+`agent_model` is a SINGLE global model applied to whichever backend a kind
+resolves to — there is no per-backend model knob (yet; deferred). Its default is
+provider-neutral (unset → resolves to `None`), so each backend self-defaults
+(Claude's CLI default, codex's native default) and a codex-routed kind isn't
+handed a Claude model out of the box. If you PIN it, the pinned value must be
+valid for EVERY backend in your `[agent_backends]` map: a `claude-*` id pinned
+via `AP2_AGENT_MODEL` will fail a codex-routed kind (the live codex turn rejects
+the unknown model). So either leave it unset, or — if you mix backends — set a
+model each backend accepts (or repoint the affected kind back to claude).
+
 **Daemon-start auth gate (`_require_oauth_token`, TB-79 → TB-358 →
 TB-370).** Before forking, the daemon walks the resolved per-kind
 backend map and requires exactly the credentials that set implies:
@@ -2707,12 +2718,17 @@ start`; everything else propagates on the next tick after a
   options. Per-job sub-knobs (`AP2_STATUS_REPORT_EFFORT`,
   `AP2_VERIFY_JUDGE_EFFORT`, `AP2_JANITOR_JUDGE_EFFORT`) override for
   their respective agents. Mirrors `AP2_AGENT_EFFORT`.
-- `core.agent_model` — str, default `""` (hot-reloadable). Model
-  name passed to `ClaudeAgentOptions` for task / control / verifier /
-  janitor agents. Empty default falls through to the SDK's own
-  default; project convention is `claude-opus-4-7`. Mirrors
-  `AP2_AGENT_MODEL`; read fresh from `os.environ` at each SDK
-  invocation so hot-reload propagates immediately.
+- `core.agent_model` — str, default provider-neutral / unset (resolves to
+  `None`, hot-reloadable). Model name passed to the agent backend for task /
+  control / verifier / janitor agents. The default is unset, so each backend
+  self-defaults (Claude's CLI default, codex's native default) and a
+  codex-routed kind isn't handed a Claude id (TB-396). The dispatch sites build
+  `cfg.get_core_value("agent_model") or None`, so an empty-string env coerces to
+  `None` too. Pin a model via `AP2_AGENT_MODEL` / this key — it applies to
+  whichever backend a kind resolves to, so it must be valid for every backend in
+  your `[agent_backends]` map (see the **Model pin caveat** under **Agent
+  backend selection**). Read fresh from `os.environ` at each SDK invocation so
+  hot-reload propagates immediately.
 - `core.auto_diagnose_cooldown_s` — int, default `21600` (hot-reloadable).
   Idle-watchdog re-fire cooldown in seconds (TB-71). After an
   `auto_diagnose_fired` post, `_maybe_auto_diagnose` suppresses further

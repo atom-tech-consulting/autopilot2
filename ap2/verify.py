@@ -640,8 +640,11 @@ async def _judge_prose_bullet(
             max_turns=int(cfg.get_core_value("verify_judge_max_turns", default=20)),
             setting_sources=["project"],
             # TB-344: schema is the single source of truth for the
-            # agent_model default (see CORE_CONFIG_SCHEMA).
-            model=cfg.get_core_value("agent_model"),
+            # agent_model default (see CORE_CONFIG_SCHEMA). TB-396: that
+            # default is provider-neutral (`None`); `or None` also folds an
+            # empty-string env to `None` so the adapter omits the kwarg and
+            # the backend self-defaults (no Claude id leaks to a codex judge).
+            model=cfg.get_core_value("agent_model") or None,
             effort=effort,
         )
         tools = AgentTools(allowed=list(JUDGE_REPO_READ_TOOLS))

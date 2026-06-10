@@ -484,6 +484,13 @@ def _toml_value_repr(value: Any) -> str:
     intentional duplication — neither is the canonical source for the
     other, both are scoped to their own caller's needs).
     """
+    if value is None:
+        # TB-396: a provider-neutral `None` default (e.g. `agent_model`)
+        # means "unset — let each backend self-default". Render the commented
+        # scaffold line with an empty value (`# agent_model =`) so an operator
+        # who uncomments it to pin a model types the value themselves, rather
+        # than the bare `repr(None)` → `None`, which is not valid TOML.
+        return ""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (int, float)):

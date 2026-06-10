@@ -108,7 +108,9 @@ def _judge_finding_verdict(
     tools = AgentTools(allowed=list(JUDGE_REPO_READ_TOOLS))
 
     def _run() -> object:
-        return run_judge_to_result(adapter, backend, prompt, tools, cwd=tmp_path)
+        return run_judge_to_result(
+            adapter, backend, prompt, tools, cfg=cfg, cwd=tmp_path,
+        )
 
     result = call_with_transient_retry(
         _run,

@@ -379,13 +379,16 @@ def test_control_max_turns_wins_on_mm_handler_path_when_both_set(
 
 
 # ===========================================================================
-# (4) AP2_AGENT_MODEL — model passed to `ClaudeAgentOptions`.
+# (4) AP2_AGENT_MODEL — model passed to the agent backend.
 #
-# Read sites: `ap2/daemon.py` line 211 (run_task) + 870 (_run_control_agent),
-# `ap2/verify.py` line 368 (_judge_prose_bullet), `ap2/janitor.py` line 726.
-# Plain `os.environ.get("AP2_AGENT_MODEL", "claude-opus-4-7")` with no
-# normalization — empty-string env DOES propagate (only an ABSENT key falls
-# through to the default).
+# Read sites: `ap2/daemon.py` (run_task + _run_control_agent), `ap2/verify.py`
+# (_judge_prose_bullet), `ap2/components/janitor/impl.py`. Each builds
+# `model=cfg.get_core_value("agent_model") or None`. TB-396 made the schema
+# default provider-neutral (`None`) and added the `or None` coercion: an unset
+# OR empty-string env resolves to `None`, so the adapter's
+# `if options.model is not None` guard OMITS the `model` kwarg and each backend
+# self-defaults (a codex-routed kind is no longer handed a Claude id). Only a
+# non-empty env / TOML value flows through verbatim.
 # ===========================================================================
 
 
@@ -410,16 +413,22 @@ def _run_control_agent_capturing_options(tmp_path, monkeypatch):
     return sdk.options_kw
 
 
-def test_agent_model_default_is_claude_opus_4_7_when_env_unset(
+def test_agent_model_default_is_provider_neutral_none_when_env_unset(
     tmp_path, monkeypatch,
 ):
-    """Happy path: env unset → SDK options carry the in-source default
-    `claude-opus-4-7`. A regression that flips the default literal (e.g.
-    a maintainer accidentally bumps it to `claude-sonnet-4-5` without
-    a CHANGELOG entry) trips this test."""
+    """Happy path: env unset → the provider-neutral schema default (`None`)
+    resolves, so the adapter OMITS the `model` kwarg entirely and each backend
+    self-defaults (TB-396). A regression that reintroduces a `claude-*` default
+    (the pre-TB-396 `claude-opus-4-7`) would make `model` reappear in the
+    captured options — and hand a Claude id to a codex-routed kind — so this
+    test trips."""
     monkeypatch.delenv("AP2_AGENT_MODEL", raising=False)
+    monkeypatch.delenv("AP2_CORE_AGENT_MODEL", raising=False)
     opts = _run_control_agent_capturing_options(tmp_path, monkeypatch)
-    assert opts["model"] == "claude-opus-4-7"
+    assert "model" not in opts, (
+        f"expected the provider-neutral `None` default to omit the `model` "
+        f"kwarg, but it was set to {opts.get('model')!r}"
+    )
 
 
 def test_agent_model_env_override_flows_through_to_sdk(tmp_path, monkeypatch):
@@ -431,27 +440,26 @@ def test_agent_model_env_override_flows_through_to_sdk(tmp_path, monkeypatch):
     assert opts["model"] == "claude-haiku-4-5-20251001"
 
 
-def test_agent_model_empty_string_propagates_through_no_silent_default(
+def test_agent_model_empty_string_env_coerces_to_none(
     tmp_path, monkeypatch,
 ):
-    """Pin CURRENT behavior on empty / whitespace-only env: `os.environ.get(
-    key, default)` returns the literal value (`""` / `"   "`) when the key
-    is set, NOT the default — the default kicks in only when the key is
-    ABSENT. So `AP2_AGENT_MODEL=""` propagates the empty string straight
-    to `ClaudeAgentOptions.model`.
+    """TB-396: `AP2_AGENT_MODEL=""` coerces to `None`, NOT a forwarded empty
+    string. The dispatch sites build `cfg.get_core_value("agent_model") or
+    None`, so an empty-string env (which `get_core_value` returns verbatim)
+    folds to `None` and the adapter OMITS the `model` kwarg — each backend
+    self-defaults. This is the load-bearing distinction the schema-default
+    comment calls out: `"" is not None` is `True`, so without the `or None`
+    coercion a bare empty string would forward `model=""` and a codex turn
+    would reject it.
 
-    The test is pinning a contract, not endorsing it: if a future refactor
-    adds normalization (e.g. `.strip() or default`), this test's
-    expectation flips and that's a deliberate, visible change. The point
-    is to make the surface testable so the contract is no longer
-    silent."""
+    (Pre-TB-396 this test pinned the OPPOSITE contract — empty-string
+    propagated verbatim to `ClaudeAgentOptions.model`. The TB-396 `or None`
+    coercion is the deliberate, visible flip that docstring anticipated.)"""
     monkeypatch.setenv("AP2_AGENT_MODEL", "")
     opts = _run_control_agent_capturing_options(tmp_path, monkeypatch)
-    assert opts["model"] == "", (
-        "current contract: empty-string env propagates through verbatim. "
-        "If this test fails after a refactor that adds .strip()-or-default "
-        "normalization, update the assertion (and the docstring) to "
-        "match the new contract."
+    assert "model" not in opts, (
+        f"TB-396: empty-string env must coerce to `None` (kwarg omitted), "
+        f"not forward `model=''`; got {opts.get('model')!r}"
     )
 
 

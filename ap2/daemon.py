@@ -315,8 +315,12 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         stderr=_stderr_sink,
         # TB-344: no inline `default=` — the schema
         # (`CORE_CONFIG_SCHEMA["agent_model"]`) is the single source of truth
-        # for the `claude-opus-4-7` default.
-        model=cfg.get_core_value("agent_model"),
+        # for the default. TB-396: that default is now provider-neutral
+        # (`None`), and the trailing `or None` folds an explicit empty-string
+        # env (`AP2_AGENT_MODEL=""`) to `None` too, so the adapter's
+        # `if options.model is not None` guard omits the kwarg and each
+        # backend self-defaults — a codex-routed kind isn't handed a Claude id.
+        model=cfg.get_core_value("agent_model") or None,
         # TB-356: graceful degradation — resolves the base `agent_effort`
         # stepped down by this task's per-task downshift level (bumped only on
         # the thinking-block-immutability 400 failure class). Level 0 / kill
@@ -1348,8 +1352,11 @@ async def _run_control_agent(
         setting_sources=["project"],
         stderr=stderr_sink,
         # TB-344: schema is the single source of truth for the
-        # agent_model default (see CORE_CONFIG_SCHEMA).
-        model=cfg.get_core_value("agent_model"),
+        # agent_model default (see CORE_CONFIG_SCHEMA). TB-396: that default
+        # is provider-neutral (`None`); `or None` also folds an empty-string
+        # env to `None` so the adapter omits the kwarg and the backend
+        # self-defaults (no Claude id leaks to a codex-routed kind).
+        model=cfg.get_core_value("agent_model") or None,
         effort=resolved_effort,
     )
 

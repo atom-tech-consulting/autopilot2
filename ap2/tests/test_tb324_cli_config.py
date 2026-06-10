@@ -216,23 +216,21 @@ def test_collect_rows_resolves_agent_model_env_override(
     )
 
 
-def test_collect_rows_resolves_agent_model_schema_default_when_unset(
+def test_collect_rows_resolves_agent_model_provider_neutral_default_when_unset(
     tmp_path, clean_env
 ):
-    """TB-344: with sectioned-env / flat-env / TOML all absent,
-    `collect_rows` resolves `core.agent_model` to the canonical schema
-    default `claude-opus-4-7` (TB-337's single-source-of-truth), NOT
-    `None`/`(unset)`/`""`. `clean_env` strips every `AP2_*` knob and
-    `_project` scaffolds a config.toml with all keys commented out, so
-    only the schema default remains."""
+    """TB-396: with sectioned-env / flat-env / TOML all absent,
+    `collect_rows` resolves `core.agent_model` to the provider-neutral schema
+    default `None` (each backend self-defaults), which the renderer shows as
+    `(unset)`. `clean_env` strips every `AP2_*` knob and `_project` scaffolds a
+    config.toml with all keys commented out, so only the schema default
+    remains. (Pre-TB-396 the default was the canonical `claude-opus-4-7`
+    string; making it provider-neutral is the deliberate flip here.)"""
     cfg = _project(tmp_path)
     row = _core_row(collect_rows(cfg, default_registry()), "agent_model")
-    assert row.value == "claude-opus-4-7", (
-        f"expected schema default `claude-opus-4-7`, got {row.value!r}"
+    assert row.value is None, (
+        f"expected provider-neutral `None` default, got {row.value!r}"
     )
-    # The whole point of the bug fix: a key with a non-empty default
-    # never displays the `(unset)` sentinel.
-    assert row.value not in (None, "")
 
 
 def test_collect_rows_preserves_unset_for_keyless_default(

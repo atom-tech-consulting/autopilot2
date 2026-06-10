@@ -241,23 +241,31 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
     "agent_model": ConfigKey(
         name="agent_model",
         type=str,
-        # TB-344: canonical call-site default (`claude-opus-4-7`), not
-        # `""`. The four dispatch sites (daemon task/control, verify
-        # prose judge, janitor) previously hardcoded
-        # `default="claude-opus-4-7"` inline while the schema said `""`
-        # — a drift that made `ap2 config get core.agent_model` display
-        # `""` for a truly-unset key instead of the real default. Per
-        # TB-337's contract the schema is the single source of truth for
-        # defaults, so the value lives here and the call sites drop their
-        # redundant inline `default=`.
-        default="claude-opus-4-7",
+        # TB-396: provider-neutral default (`None`), NOT a `claude-*`
+        # string. The four dispatch sites (daemon task/control, verify
+        # prose judge, janitor) build `model=cfg.get_core_value("agent_model")
+        # or None`, so a `None` here flows through to `AgentOptions.model`
+        # and BOTH adapters' `if options.model is not None` guards OMIT the
+        # `model` kwarg — each backend self-defaults (Claude's CLI default,
+        # codex's native default). Pinning a `claude-*` value here (the
+        # pre-TB-396 `claude-opus-4-7`) handed that Claude id to whatever
+        # backend a kind resolved to, so a codex-routed kind errored. The
+        # `or None` coercion at the call sites also folds an explicit
+        # empty-string env (`AP2_AGENT_MODEL=""`) to `None` — note `"" is
+        # not None` is `True`, so a bare `""` default would otherwise
+        # forward `model=""`. Operators who want a specific model pin it via
+        # `AP2_AGENT_MODEL` / `[core] agent_model` (this project does).
+        default=None,
         description=(
-            "Model name passed to `ClaudeAgentOptions` for task / "
-            "control / verifier / janitor agents. Defaults to the "
-            "project convention `claude-opus-4-7` for heavy work; "
-            "per-agent overrides (`AP2_STATUS_REPORT_EFFORT`, etc.) "
-            "tune effort separately. Mirrors the flat env "
-            "`AP2_AGENT_MODEL`; hot-reloadable (read fresh from "
+            "Model name passed to the agent backend for task / control / "
+            "verifier / janitor agents. Provider-neutral default: unset "
+            "(resolves to `None`), so each backend self-defaults (Claude's "
+            "CLI default, codex's native default) and a codex-routed kind "
+            "isn't handed a Claude model. Set `AP2_AGENT_MODEL` / the "
+            "`[core] agent_model` key to pin one — it applies to whichever "
+            "backend a kind resolves to, so a pinned value must be valid "
+            "for every backend in your `[agent_backends]` map. Mirrors the "
+            "flat env `AP2_AGENT_MODEL`; hot-reloadable (read fresh from "
             "os.environ at each SDK invocation)."
         ),
         hot_reloadable=True,
