@@ -93,147 +93,93 @@ For the structured-config focus specifically:
   one full release cycle (back-compat shim emits a one-shot
   `env_deprecated` event per process on first use of a
   deprecated name).
-- A TB-305-style docs-drift gate enforces "every config schema
-  key is mentioned in `ap2/howto.md`'s `## Configuration knobs`
-  section."
+- A docs-drift gate enforces that every config schema key is
+  documented in the operator-facing reference (the config/knobs
+  operator skill — formerly `ap2/howto.md`'s `## Configuration
+  knobs` section, retired into skills).
 
-## Current focus: get the component boundary right — loop-level participants only
+## Current focus: consolidate the operator manual into auto-triggered, cross-runtime skills
 
-The 2026-05-27 refactor extracted the opt-in autonomous behaviors behind
-the registry. The follow-on work exposed that the *component boundary
-itself* was drawn loosely. Three problems: genuine loop subsystems (cron,
-ideation) were still welded into `daemon._tick`; other things were modeled
-as components that aren't loop participants at all (the LLM judges, invoked
-deep inside core runners); and the registry grew a bespoke registration
-method per extension kind (`channel_adapters()`, `briefing_validators()`,
-`cron_job_handlers()`) plus blocks where core reaches *backwards* into
-component internals via `hook_points[...]` symbol lookups.
+ap2's operator-facing knowledge is split across two surfaces with mismatched
+ergonomics: a ~184 KB `ap2/howto.md` (the operation manual — CLI verbs, env
+knobs, event schema, fix-shapes) that an agent reads only when pointed at it
+via a hand-maintained `~/.claude/CLAUDE.md` pointer, and a handful of
+auto-discovered skills (`/ap2`, `/ap2-task`). Now that the agentskills.io
+`SKILL.md` standard — `name`/`description` frontmatter, progressive
+disclosure, **description-based implicit (auto) invocation** — is supported by
+**both Claude Code and Codex**, the monolithic howto is the weaker form: a
+skill surfaces the right slice on a task match and is portable across runtimes;
+howto cannot.
 
-This focus draws one clean boundary and makes the registry contract
-uniform. It is structural — no behavior change, env-knob names preserved.
+This focus retires `ap2/howto.md` as a separate surface, consolidates the
+operator manual into a set of **domain skills**, retargets the docs guards and
+the deploy onto those skills, and makes the deploy **cross-runtime** (Claude +
+Codex). It is a docs/tooling restructure — no daemon behavior change.
 
-**The boundary: a component is a top-level participant in the core loop**
-— it registers on a tick phase or a coarse loop-level surface. Anything
-invoked only as an internal sub-step of a core operation (an LLM judge
-inside a verify/validation runner) is NOT a component; it's a swappable
-adapter the runner calls. So the work runs *both* directions: extract
-genuine loop subsystems *in*, and demote mis-modeled leaves *out*.
+The split it preserves:
+- **`architecture.md` stays the standalone design doc** — contributor-facing
+  "why it's shaped this way," read on a deep-dive, NOT operational. It is not
+  merged into skills (that would put design prose into the operator's
+  always-loaded skill budget).
+- **Skills are operator-session tooling only.** The daemon's task/ideation
+  agents run with `setting_sources=["project"]` + inlined prompts and do not
+  read skills or howto. So nothing a *daemon* agent relies on moves into a
+  skill — briefing-authoring conventions the **ideation** agent follows stay
+  canonical in `ideation.default.md` (an operator authoring skill may mirror
+  them, but the daemon's copy is the source of truth).
+- **Group by operator task/domain, not per CLI subcommand.** Skill summaries
+  are always loaded up front (~8 KB each under progressive disclosure), so
+  over-fragmentation bloats the always-on budget and blurs trigger boundaries.
+  Aim for ~6–9 coherent domain skills with tight descriptions.
 
-Two things stay in core, unchanged: the **pipeline subsystem** (its tool
-is a task-agent/core tool; it drives core board sections + post-agent
-disposition) and the **deterministic baseline runners** — shell-bullet
-verification, briefing-structure validation, and status-report
-composition (verification/validation are gating; reporting is baseline).
+Axes (coarse — ideation decomposes):
 
-Why now: cron just landed as the canary (axis 1), proving the tick-phase
-+ two-layer job-handler shape; the core is otherwise stable post-codex.
-This is the cheapest moment to finish the boundary before more features
-compound the coupling — and a clean, minimal kernel with a uniform
-registry is the prerequisite for any OSS distribution shape.
+(1) **Carve `howto.md` into domain skills.** Break the operation manual into
+~6–9 task/domain `SKILL.md` skills (e.g. monitoring/status, task + briefing /
+verification-bullet authoring, board ops, ideation + goal/focus management,
+event-schema / observability / diagnostics, config knobs + backend (codex)
+setup, failure-recovery / operator-playbook), each with a tight auto-trigger
+`description` and its reference material in the body. Retire `ap2/howto.md` as
+a separate file. Delete-test: if `howto.md` survives as the canonical
+operation manual, the consolidation didn't happen.
 
-Axes (each has its failure mode):
+(2) **Retarget the docs guards + deploy.** Repoint the `test_docs_drift.py`
+config-knob-coverage gate from `ap2/howto.md` to the skills; drop the
+`ap2-howto.md` target from `sandbox.sync-assets`; fix the skills'
+cross-references to resolve at their deployed paths (not repo-relative
+`ap2/howto.md`). Delete-test: if the drift gate still asserts coverage in
+`howto.md`, or `sync-assets` still deploys it, the surface wasn't retired.
 
-(1) **Cron component — LANDED (the canary).** The cron scheduler now runs
-as a `Phase.CRON_DISPATCH` tick-hook component (`ap2/components/cron/`);
-the `if job.name == …` switch is replaced by job handlers contributed
-through the registry and keyed *cron-locally* — the `janitor` handler is
-the janitor component's; status-report/smoke/LLM-cron are core-registered.
-This pinned the new tick-phase vocabulary (`CRON_DISPATCH`, reserved
-`IDEATION`) and the two-layer pattern (scheduler ≠ jobs) the rest of the
-focus reuses. Residual: its bespoke `cron_job_handlers()` registry method
-folds into the generic accessor in axis 5.
+(3) **Cross-runtime deploy + managed pointer.** `sync-assets` gains a
+Codex/standard target (`~/.agents/skills`) alongside `~/.claude/skills`, so the
+same skills serve a Codex operator session; add the `AGENTS.md` analog of the
+operator `CLAUDE.md`, and have the deploy *manage* the discovery pointer
+(closing the current gap where the file is deployed but the `CLAUDE.md` pointer
+is hand-maintained). Delete-test: if deploying the skills still leaves an
+operator runtime unable to discover them without a manual edit, the deploy
+story isn't done.
 
-(2) **Communication component (inbound + outbound) wrapping the channel
-adapters.** Today the channel surface is split across a bespoke
-`registry.channel_adapters()` (outbound) and a one-off
-`hook_points["inbound_poll"]` (inbound), with `mattermost` as a top-level
-component. Introduce a single `communication` component that owns both
-directions as tick-phase work and holds its channel adapters (mattermost,
-future slack/email) in an *internal* registry — invisible to core. There
-may be multiple channels; that multiplicity is the component's concern,
-not the kernel's. Outbound becomes event-driven (the component delivers
-undelivered notification events on its tick pass; the synchronous
-`_deliver` call goes away). `mattermost` demotes to a channel adapter
-under it; `AP2_MM_CHANNELS` becomes channel-level config. Delete-test: if
-core still walks `channel_adapters()` or `inbound_poll`, channel
-multiplicity has leaked into the kernel.
-
-(3) **Decouple auto-approve from `board_edit` into a loop pass; remove the
-dead `POST_DISPATCH` phase.** Today the auto-approve strip is evaluated
-*inside* `board_edit`'s `add_backlog` branch (approval policy embedded in a
-mutation tool, mid-agent-run), and the tags policy (`should_auto_approve`)
-squats in `ideation.py` and is reached from core — the cross-boundary knot
-that blocks axis 4. Make `board_edit` policy-free (proposals always born
-`@blocked:review`) and move the gate chain + tags policy into the
-`auto_approve` component as a discrete `PRE_DISPATCH` loop pass that runs
-after ideation and before dispatch, stripping `@blocked:review` from
-Backlog tasks that clear the gates. While here, delete the `POST_DISPATCH`
-phase — its only registrant is auto_approve's no-op placeholder, and
-auto-approve's real pass runs at `PRE_DISPATCH`. Delete-test: if the strip
-stays in `board_edit`, ideation can't be extracted without core→component
-import violations; if `POST_DISPATCH` survives, a dead phase is still
-walked every tick.
-
-(4) **Ideation component.** Extract `ap2/ideation.py` (the `_maybe_ideate`
-trigger gate, the roadmap-exhaustion halt, proposal records, scrub
-coordination) behind the reserved `Phase.IDEATION` tick hook + the halt
-hook; owns the `AP2_IDEATION_*` knob cluster, all `ideation_*` events, and
-`AP2_IDEATION_DISABLED` as its `env_flag`. Sequenced after axis 3 unties
-the auto-approve coupling (largest blast radius). Delete-test: if ideation
-stays in core, the kernel still hard-depends on the proposal engine.
-
-(5) **Judges are adapters, not components; one generic registry verb.**
-Two moves sharing a thesis — stop modeling sub-step leaves as components,
-and stop growing a bespoke registration method per extension kind:
-  - **Both LLM judges become adapter layers, not components.**
-    `verifier_judge` stays the `select_adapter("verifier_judge")` kind it
-    already is (revert any extraction of it into a component).
-    `validator_judge` demotes from a component to a
-    `select_adapter("validator_judge")` layer the core briefing-validation
-    runner calls — dissolving `ap2/components/validator_judge/`, deleting
-    `registry.briefing_validators()` (it has no other contributor) and the
-    component's `hook_points` symbol-exposure block. Both runners keep a
-    config off-switch (shell-only / structural-only);
-    `AP2_VALIDATOR_JUDGE_DISABLED` survives as a plain knob.
-  - **One generic `contributions(point)` registry accessor subsuming
-    `Phase`.** Collapse the bespoke `channel_adapters()` /
-    `cron_job_handlers()` methods into a single typed-extension-point
-    accessor (fan-out only; keying stays consumer-local — the registry
-    never does keyed dispatch). Delete the core→component `hook_points[...]`
-    symbol-pull blocks (auto_approve, attention, validator_judge) — those
-    are wrong-direction imports, not extension points.
-  Delete-test: if a judge is still a component, or the registry still
-  carries a per-kind registration method or a symbol-pull block, the
-  boundary/contract isn't clean.
-
-Sequencing: cron (1) landed. (5) judge-demotion + registry-verb is largely
-independent and can go early (it removes the most clutter). (2)
-communication is independent. (3) decouples auto-approve and removes
-`POST_DISPATCH`, unblocking (4); ideation (4) lands last (largest blast
-radius).
-
-The delete-test for any work in this focus: does it move a genuine loop
-subsystem behind the registry, demote a non-loop leaf out of
-component-hood, make the registry contract uniform (one accessor, no
-symbol-pull), or wrap internal multiplicity inside its owning component?
-Polishing internals while the boundary stays wrong is not paying focus
-rent.
+The delete-test for the focus: does the work move operator-operation knowledge
+into an auto-triggered domain skill (retiring the howto surface), retarget a
+guard/deploy from howto to skills, or make the skills cross-runtime? Polishing
+`ap2/howto.md` in place is anti-work — it's being retired.
 
 Progress signals:
-- `daemon.py` carries no cron loop or ideation gate inline; each is a
-  registry-walked `ap2/components/<name>/` subpackage.
-- A single `communication` component owns inbound + outbound; core never
-  references channels; `channel_adapters()` and `inbound_poll` are gone.
-- `board_edit` carries no auto-approve policy; the `POST_DISPATCH` phase is
-  removed.
-- Neither LLM judge is a component; both are `select_adapter` layers over
-  core runners; `registry.briefing_validators()` is gone.
-- The registry exposes one generic `contributions(point)` accessor; no
-  per-kind registration methods; no `hook_points[...]` symbol-pull blocks
-  in core.
-- The import-direction CI gate still passes; the full suite passes with
-  every component disabled, and a task dispatches → verifies (shell) →
-  reports in that minimal-kernel config.
+- `ap2/howto.md` no longer exists as a separate operation manual; its content
+  lives in ~6–9 domain `SKILL.md` skills under `skills/`.
+- `architecture.md` remains the standalone design doc.
+- The docs-drift gate enforces config-knob coverage in the skills, not howto.
+- `sync-assets` deploys the skills to both `~/.claude/skills` and
+  `~/.agents/skills` (+ an `AGENTS.md`) and manages the discovery pointer;
+  nothing references `ap2/howto.md`.
+- Daemon-agent-relied conventions (ideation briefing authoring) remain in the
+  daemon prompts, not skills.
+
+Why now: the agentskills.io standard just converged across Claude + Codex
+(implicit invocation + progressive disclosure), and the codex backend just
+shipped — so consolidating into portable skills both fixes the howto-discovery
+gaps and delivers a clean, cross-runtime operator-onboarding surface, a
+prerequisite for the OSS cut.
 
 ## Shipped focus
 
@@ -241,6 +187,16 @@ Completed focus arcs (newest first). Durable criteria live on in "## Done
 when" (component model, structured config) and "## Constraints" (pluggable
 backend, per-backend auth); the entries below are provenance.
 
+- **Component boundary = loop-level participants only (2026-06-09)** —
+  finished the component model: extracted cron + ideation into
+  `ap2/components/` behind registry tick phases, introduced a single generic
+  `contributions(point)` accessor (retiring the bespoke `channel_adapters()` /
+  `cron_job_handlers()` / `briefing_validators()` methods and the
+  `hook_points[...]` symbol-pull blocks), folded the channel surface into a
+  `communication` component, decoupled auto-approve from `board_edit` (removing
+  the dead `POST_DISPATCH` phase), and demoted both LLM judges
+  (verifier / validator) out of component-hood into `select_adapter` layers.
+  Minimal-kernel e2e green with every component disabled.
 - **Codex support via an agent adaptor layer (2026-06-06)** — every agent
   dispatch flows through a backend-agnostic `AgentAdapter`; a
   `ClaudeCodeAdapter` (default) and a `CodexAdapter` (OpenAI `openai-codex`
@@ -257,9 +213,9 @@ backend, per-backend auth); the entries below are provenance.
   autonomous behavior (auto-approve, auto-unfreeze, attention, focus-advance,
   janitor, validator-judge, mattermost) lives under `ap2/components/<name>/`
   behind the registry; core never imports components (CI import-direction
-  gate); each is env-togglable. The current focus refines this boundary —
-  finishing the genuine loop subsystems (cron, ideation, communication) and
-  demoting the LLM judges back out to adapters.
+  gate); each is env-togglable. The 2026-06-09 boundary focus refined this —
+  finishing the loop subsystems (cron, ideation, communication) and demoting
+  the LLM judges back out to adapters.
 
 ## Non-goals
 
