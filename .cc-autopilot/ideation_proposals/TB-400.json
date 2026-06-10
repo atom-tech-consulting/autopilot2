@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-397",
+  "briefing_path": ".cc-autopilot/tasks/fold-howto-md-task-agent-contract-verifi.md",
+  "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "proposed_at": "2026-06-10T23:25:00Z",
+  "tb_id": "TB-400",
+  "why_now": "howto and the existing `ap2-task` skill already overlap on briefing authoring; folding the howto reference into `ap2-task` removes a duplicate operator surface and prevents a 4th overlapping authoring skill, while keeping `ideation.default.md` the single source of truth for the daemon's agents."
+}

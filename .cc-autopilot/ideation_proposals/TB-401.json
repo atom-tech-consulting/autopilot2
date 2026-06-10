@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/cross-runtime-skills-deploy-add-agents-s.md",
+  "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "proposed_at": "2026-06-10T23:26:07Z",
+  "tb_id": "TB-401",
+  "why_now": "the agentskills.io standard just converged across Claude + Codex and the codex backend just shipped, but today's deploy only targets the Claude skills directory and leaves the discovery pointer hand-edited \u2014 so a Codex operator session cannot discover the skills at all; this closes that gap and delivers the cross-runtime onboarding surface the OSS cut needs."
+}
