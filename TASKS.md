@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-396** **Provider-neutral default model: agent_model default → None (both backends self-default), + make the codex smoke exercise the real resolution** `#autopilot` `#codex` `#backend` `#model` `#config` `#smoke` `#bug` [→ brief](.cc-autopilot/tasks/provider-neutral-default-model-agent-mod.md)
 
 ## Pipeline Pending
 
