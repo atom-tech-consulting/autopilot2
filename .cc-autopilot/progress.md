@@ -1593,3 +1593,9 @@
 - **Summary:** Carved howto.md's Custom MCP tools + Operator CLI verbs references into skills/ap2-board-ops/SKILL.md (with a self-contained board-section model), retargeted the CLI-verb gate onto the skill and extended the MCP-tool gate to accept the skill alongside architecture.md, replaced the moved howto sections with a pointer stub, and fixed the dangling ap2-config test; full suite green (3048 passed).
 - **Files:** skills/ap2-board-ops/SKILL.md, ap2/howto.md, ap2/tests/test_docs_drift.py, ap2/tests/test_tb324_cli_config.py
 - **Tests:** pass
+
+## [2026-06-11] TB-400: Fold howto.md task-agent contract + verification-bullet authoring into the existing skills/ap2-task/ skill
+- **Commit:** `2c87c16`
+- **Summary:** Folded howto's task-agent contract + Verification-bullet authoring (Prose prefix + four shell-bullet pitfalls + worked example) + classify-verdicts reference into skills/ap2-task/SKILL.md (which now states ap2/ideation.default.md stays canonical), left stubs in howto, repointed the test_tb273 pitfall-sync gate at the skill; full suite 3048 passed.
+- **Files:** ap2/howto.md, skills/ap2-task/SKILL.md, ap2/tests/test_tb273_ideation_pitfalls_sync.py, ap2/tests/test_verify_classifier.py
+- **Tests:** pass
