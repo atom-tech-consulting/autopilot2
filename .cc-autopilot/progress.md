@@ -1587,3 +1587,9 @@
 - **Summary:** Carved howto.md's Configuration knobs + Config keys (TOML) + Codex backend setup into skills/ap2-config/SKILL.md, retargeted the env-knob & config-key drift gates (plus the displaced TB-336/TB-229/TB-287-290 docs-location pins) onto it, and left a pointer in howto; full suite green (3048 passed).
 - **Files:** skills/ap2-config/SKILL.md, ap2/howto.md, ap2/init.py, ap2/tests/test_docs_drift.py, ap2/tests/test_tb229_briefing_fix_teaching.py, ap2/tests/test_tb287_attention_task_frozen.py, ap2/tests/test_tb288_attention_validator_judge_noisy.py, ap2/tests/test_tb289_attention_auto_approve_paused.py, ap2/tests/test_tb290_attention_cost_cap_approach.py, ap2/tests/test_tb336_axis5_tail_cfg_reads.py, skills/ap2-observability/SKILL.md
 - **Tests:** pass
+
+## [2026-06-11] TB-399: Carve howto.md operator CLI-verb + MCP-tool references into skills/ap2-board-ops/ + retarget those drift gates
+- **Commit:** `ec52162`
+- **Summary:** Carved howto.md's Custom MCP tools + Operator CLI verbs references into skills/ap2-board-ops/SKILL.md (with a self-contained board-section model), retargeted the CLI-verb gate onto the skill and extended the MCP-tool gate to accept the skill alongside architecture.md, replaced the moved howto sections with a pointer stub, and fixed the dangling ap2-config test; full suite green (3048 passed).
+- **Files:** skills/ap2-board-ops/SKILL.md, ap2/howto.md, ap2/tests/test_docs_drift.py, ap2/tests/test_tb324_cli_config.py
+- **Tests:** pass
