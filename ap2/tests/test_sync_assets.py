@@ -40,6 +40,14 @@ from ap2 import cli, sandbox
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SKILLS_SRC = REPO_ROOT / "skills"
 HOWTO_SRC = REPO_ROOT / "ap2" / "howto.md"
+# TB-401: the Codex / agentskills.io operator-reference source, deployed to
+# `~/.agents/AGENTS.md` alongside the Claude-side howto.
+AGENTS_SRC = REPO_ROOT / "AGENTS.md"
+
+# TB-401: the discovery-pointer stanza markers `sync_assets` manages in the
+# runtime global-instruction files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`).
+POINTER_BEGIN = "<!-- BEGIN ap2-managed: skills-discovery -->"
+POINTER_END = "<!-- END ap2-managed: skills-discovery -->"
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +226,137 @@ def test_sync_assets_sbuser_apply_propagates_skill_deletions(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# TB-401 — cross-runtime deploy: Codex `~/.agents/skills/` target, the
+# `AGENTS.md` reference, and idempotent discovery-pointer management.
+# ---------------------------------------------------------------------------
+
+
+def test_replace_delimited_stanza_is_idempotent():
+    """The pure stanza-rewrite primitive `sync_assets` uses for pointer
+    management converges: a second call with the same body reproduces its
+    own output byte-for-byte (no duplicate stanza), and surrounding content
+    is preserved, not duplicated. This is the engine behind the idempotent
+    discovery-pointer contract."""
+    body = "pointer body line 1\npointer body line 2"
+    once = sandbox._replace_delimited_stanza("", POINTER_BEGIN, POINTER_END, body)
+    twice = sandbox._replace_delimited_stanza(once, POINTER_BEGIN, POINTER_END, body)
+    assert once == twice
+    assert once.count(POINTER_BEGIN) == 1
+    # Surrounding operator content survives and the stanza stays single.
+    with_prefix = sandbox._replace_delimited_stanza(
+        "keep me\n" + once, POINTER_BEGIN, POINTER_END, body,
+    )
+    assert "keep me" in with_prefix
+    assert with_prefix.count(POINTER_BEGIN) == 1
+
+
+def test_sync_assets_sbuser_apply_lands_codex_target_and_pointer(tmp_path):
+    """THE TB-401 regression-pin: a `--sbuser apply` deploys the
+    cross-runtime surface end-to-end (real subprocess, no sudo) —
+
+      1. skills mirror into the Codex `~/.agents/skills/` target (additive,
+         alongside the retained Claude `~/.claude/skills/` mirror);
+      2. the repo `AGENTS.md` reference lands at `~/.agents/AGENTS.md`;
+      3. a managed `skills-discovery` pointer stanza is written into BOTH
+         runtimes' global instruction files (`~/.claude/CLAUDE.md`,
+         `~/.codex/AGENTS.md`), each pointing at that runtime's skills root;
+
+    and a SECOND apply is idempotent — every pointer file still carries
+    exactly one stanza (no duplication)."""
+    claude_dir = tmp_path / ".claude"
+    rc = sandbox.sync_assets(sbuser=True, apply=True, dest=claude_dir)
+    assert rc == 0
+
+    # (1) Skills mirrored into the Codex ~/.agents/skills/ target ...
+    agents_skills = tmp_path / ".agents" / "skills"
+    assert (agents_skills / "ap2" / "SKILL.md").is_file()
+    assert (agents_skills / "ap2-task" / "SKILL.md").is_file()
+    assert (agents_skills / "migrate-to-ap2" / "SKILL.md").is_file()
+    # ... and STILL into the Claude target (additive, not a move).
+    assert (claude_dir / "skills" / "ap2" / "SKILL.md").is_file()
+    # The Claude howto reference is retained (out-of-scope to drop here).
+    assert (claude_dir / "ap2-howto.md").read_text() == HOWTO_SRC.read_text()
+
+    # (2) Codex operator reference (repo AGENTS.md) deployed verbatim.
+    agents_md = tmp_path / ".agents" / "AGENTS.md"
+    assert agents_md.is_file()
+    assert agents_md.read_text() == AGENTS_SRC.read_text()
+
+    # (3) Discovery-pointer stanza in BOTH runtimes' global instructions,
+    # each pointing at that runtime's skills root.
+    claude_pointer = claude_dir / "CLAUDE.md"
+    codex_pointer = tmp_path / ".codex" / "AGENTS.md"
+    for ptr, skills_path in (
+        (claude_pointer, "~/.claude/skills/"),
+        (codex_pointer, "~/.agents/skills/"),
+    ):
+        assert ptr.is_file(), f"missing discovery pointer: {ptr}"
+        text = ptr.read_text()
+        assert POINTER_BEGIN in text and POINTER_END in text
+        assert skills_path in text
+        assert text.count(POINTER_BEGIN) == 1
+
+    # Idempotency: a SECOND apply must not duplicate the stanza nor change
+    # the pointer files byte-for-byte.
+    before_claude = claude_pointer.read_text()
+    before_codex = codex_pointer.read_text()
+    assert sandbox.sync_assets(sbuser=True, apply=True, dest=claude_dir) == 0
+    assert claude_pointer.read_text() == before_claude
+    assert codex_pointer.read_text() == before_codex
+    assert claude_pointer.read_text().count(POINTER_BEGIN) == 1
+    assert codex_pointer.read_text().count(POINTER_BEGIN) == 1
+
+
+def test_sync_assets_pointer_preserves_existing_content_and_converges(tmp_path):
+    """The discovery-pointer manager rewrites ONLY its delimited stanza,
+    preserving pre-existing operator content in the global instructions
+    file, and converges — a re-run is a byte-for-byte no-op (no second
+    stanza appended)."""
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    pointer = claude_dir / "CLAUDE.md"
+    pointer.write_text("# My notes\n\nhand-written operator prefs\n")
+
+    assert sandbox.sync_assets(sbuser=True, apply=True, dest=claude_dir) == 0
+    text = pointer.read_text()
+    assert "hand-written operator prefs" in text  # surrounding content kept
+    assert POINTER_BEGIN in text
+    assert text.count(POINTER_BEGIN) == 1
+
+    # A second apply leaves the pointer file identical.
+    snapshot = pointer.read_text()
+    assert sandbox.sync_assets(sbuser=True, apply=True, dest=claude_dir) == 0
+    assert pointer.read_text() == snapshot
+
+
+def test_sync_assets_sbuser_second_run_reports_all_in_sync(tmp_path, capsys):
+    """After a cross-runtime apply, a follow-up dry-run reports EVERY asset
+    (both skills roots, both reference files, both pointers) in sync — the
+    overall drift is zero and nothing prints 'drift'. Pins that the new
+    Codex target + pointers participate in the idempotency accounting, not
+    just the Claude assets."""
+    claude_dir = tmp_path / ".claude"
+    assert sandbox.sync_assets(sbuser=True, apply=True, dest=claude_dir) == 0
+    capsys.readouterr()  # drain first-run output
+    assert sandbox.sync_assets(sbuser=True, apply=False, dest=claude_dir) == 0
+    out = capsys.readouterr().out
+    assert "all assets in sync" in out
+    assert "drift" not in out
+
+
+def test_sync_assets_missing_agents_md_source_errors(monkeypatch, tmp_path, capsys):
+    """If the repo `AGENTS.md` source is missing, default mode aborts with
+    rc=1 and a clear stderr surface — mirroring the skills/howto source
+    prechecks. Pin so a packaging slip that drops `AGENTS.md` fails loudly
+    rather than silently skipping the Codex reference."""
+    _wire_user_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(sandbox, "_agents_md_source", lambda: tmp_path / "nope" / "AGENTS.md")
+    rc = sandbox.sync_assets("claude-agent", sbuser=False, apply=False)
+    assert rc == 1
+    assert "AGENTS.md source missing" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
 # Regression-pin: default sudo mode (subprocess stubs)
 #
 # We can't run a real `sudo -u <other-user>` from the test harness, so we
@@ -293,12 +432,12 @@ def test_sync_assets_default_mode_issues_sudo_prefix(monkeypatch, tmp_path, caps
     assert tee_body == HOWTO_SRC.read_text()
 
 
-def test_sync_assets_default_mode_targets_users_claude_dir(monkeypatch, tmp_path):
-    """When no `dest` override is passed, default mode resolves the
-    target to `~<user>/.claude/` via `_user_home(user)`. Pin so a
-    refactor that hard-codes a path or skips the home-dir lookup
-    surfaces (would break cross-user deploys against non-default
-    homes)."""
+def test_sync_assets_default_mode_targets_users_home_dirs(monkeypatch, tmp_path):
+    """When no `dest` override is passed, default mode resolves all runtime
+    targets under `~<user>/` via `_user_home(user)` — skills mirror into
+    BOTH `~<user>/.claude/skills/` AND `~<user>/.agents/skills/` (TB-401).
+    Pin so a refactor that hard-codes a path, skips the home-dir lookup, or
+    drops the Codex target surfaces (would break cross-user deploys)."""
     home = _wire_user_home(monkeypatch, tmp_path)
     captures: list[tuple[str, ...]] = []
 
@@ -317,17 +456,22 @@ def test_sync_assets_default_mode_targets_users_claude_dir(monkeypatch, tmp_path
     rc = sandbox.sync_assets("claude-agent", sbuser=False, apply=False)
     assert rc == 0
 
-    # The expected target paths all live under <home>/.claude/.
-    target_prefix = str(home / ".claude")
+    # Every rsync destination must resolve under the resolved user home.
     rsync_calls = [argv for argv in captures if "rsync" in argv]
     assert rsync_calls, "expected rsync calls"
-    for argv in rsync_calls:
-        # Last positional in each rsync call is the destination dir with
-        # a trailing slash.
-        dst_arg = argv[-1]
-        assert dst_arg.startswith(target_prefix), (
-            f"rsync dest didn't resolve under ~user/.claude/: {dst_arg}"
+    dsts = [argv[-1] for argv in rsync_calls]
+    for dst_arg in dsts:
+        assert dst_arg.startswith(str(home)), (
+            f"rsync dest didn't resolve under ~user home: {dst_arg}"
         )
+    # Both runtime skills roots must appear among the destinations — the
+    # Claude target AND the additive Codex `~/.agents/skills/` target.
+    assert any(str(home / ".claude" / "skills") in d for d in dsts), (
+        "no rsync into ~user/.claude/skills/"
+    )
+    assert any(str(home / ".agents" / "skills") in d for d in dsts), (
+        "no rsync into the Codex ~user/.agents/skills/ target"
+    )
 
 
 def test_sync_assets_default_mode_skips_unchanged_howto(monkeypatch, tmp_path):
@@ -342,13 +486,17 @@ def test_sync_assets_default_mode_skips_unchanged_howto(monkeypatch, tmp_path):
 
     def fake_run(argv, *a, **kw):
         captures.append(tuple(argv))
+        joined = " ".join(argv)
         if "rsync" in argv and "-an" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if "sh" in argv:
-            # Existing howto matches source.
-            return subprocess.CompletedProcess(
-                argv, 0, stdout=HOWTO_SRC.read_text(), stderr="",
-            )
+            # Only the howto drift-probe sees a matching file; the AGENTS.md
+            # reference + pointer reads (TB-401) see an absent file (empty).
+            if "ap2-howto.md" in joined:
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout=HOWTO_SRC.read_text(), stderr="",
+                )
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -356,8 +504,14 @@ def test_sync_assets_default_mode_skips_unchanged_howto(monkeypatch, tmp_path):
         "claude-agent", sbuser=False, apply=True, dest=tmp_path / "claude",
     )
     assert rc == 0
-    # No tee write should have fired — howto is already in sync.
-    assert not any("tee" in argv for argv in captures), (
+    # No tee write should have fired for the howto — it's already in sync.
+    # (Other targets — AGENTS.md / pointers — may legitimately tee; this
+    # test pins ONLY the howto idempotency contract.)
+    howto_tees = [
+        argv for argv in captures
+        if "tee" in argv and any("ap2-howto.md" in part for part in argv)
+    ]
+    assert not howto_tees, (
         "expected no tee write when howto matches source byte-for-byte"
     )
 

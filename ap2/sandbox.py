@@ -476,15 +476,21 @@ def _prompt_install_token(user: str) -> None:
     install_oauth_token(user, token)
 
 
-def _replace_sentinel_block(existing: str, label: str, body: str) -> str:
-    """Return `existing` with the `# BEGIN/END ap2-managed: <label>` block
-    replaced by `body` (no trailing newline on body). If the block is absent,
-    the new block is appended.
+def _replace_delimited_stanza(
+    existing: str, begin: str, end: str, body: str,
+) -> str:
+    """Return `existing` with the lines between the `begin` and `end` marker
+    lines (inclusive) replaced by `begin` + `body` + `end`. If the markers
+    are absent, the stanza is appended after the existing content.
 
-    Pure string op — no I/O — so it's unit-testable without sudo.
+    Pure string op — no I/O — and idempotent: a second call with the same
+    `body` reproduces its own output byte-for-byte, so repeated deploys
+    converge instead of duplicating the stanza. Shared by the shell
+    sentinel-block writer (`# BEGIN ap2-managed: <label>` markers in
+    `.zshenv` / env files) and `sync_assets`'s markdown discovery-pointer
+    management (`<!-- BEGIN ap2-managed: ... -->` markers in CLAUDE.md /
+    AGENTS.md), which differ only in the marker syntax (TB-401).
     """
-    begin = f"# BEGIN ap2-managed: {label}"
-    end = f"# END ap2-managed: {label}"
     cleaned: list[str] = []
     skipping = False
     for line in existing.splitlines():
@@ -497,8 +503,27 @@ def _replace_sentinel_block(existing: str, label: str, body: str) -> str:
             continue
         cleaned.append(line)
     prefix = "\n".join(cleaned).rstrip()
-    block = f"{begin}\n{body}\n{end}\n"
-    return (prefix + "\n\n" if prefix else "") + block
+    stanza = f"{begin}\n{body}\n{end}\n"
+    return (prefix + "\n\n" if prefix else "") + stanza
+
+
+def _replace_sentinel_block(existing: str, label: str, body: str) -> str:
+    """Return `existing` with the `# BEGIN/END ap2-managed: <label>` block
+    replaced by `body` (no trailing newline on body). If the block is absent,
+    the new block is appended.
+
+    Thin wrapper over `_replace_delimited_stanza` with the shell-comment
+    marker syntax — kept as a named entry point because the secrets-writing
+    callers (`install_oauth_token`, `install_mm_credentials`,
+    `install_project_channel`) read more clearly with a `label` than with
+    raw begin/end markers. Pure string op — unit-testable without sudo.
+    """
+    return _replace_delimited_stanza(
+        existing,
+        f"# BEGIN ap2-managed: {label}",
+        f"# END ap2-managed: {label}",
+        body,
+    )
 
 
 def _write_sentinel_block(
@@ -589,117 +614,75 @@ def _skills_source() -> Path:
     return Path(__file__).resolve().parent.parent / "skills"
 
 
-def sync_assets(
-    user: str | None = None,
+def _agents_md_source() -> Path:
+    """Path to the repo-root `AGENTS.md` (TB-401) — the agentskills.io /
+    Codex analog of the Claude-side operator quick-reference
+    (`ap2/howto.md`). Shipped with the package so re-installing the
+    editable tool keeps the deployed `~/.agents/AGENTS.md` copy fresh.
+    `__file__` is `ap2/sandbox.py`; `parent.parent` is the repo root."""
+    return Path(__file__).resolve().parent.parent / "AGENTS.md"
+
+
+# ---------------------------------------------------------------------------
+# Cross-runtime asset deploy (TB-276, TB-401)
+#
+# `sync_assets` mirrors `<repo>/skills/*` into BOTH runtime skills roots —
+# Claude Code's `~/.claude/skills/` and the agentskills.io / Codex standard
+# `~/.agents/skills/` — deploys each runtime's operator reference
+# (`ap2/howto.md` → `~/.claude/ap2-howto.md`, repo `AGENTS.md` →
+# `~/.agents/AGENTS.md`), and MANAGES a discovery-pointer stanza in each
+# runtime's global instructions file so a fresh session finds the deployed
+# skills without a hand-edit. Additive: the `ap2-howto.md` target stays
+# until the later howto-retirement task.
+
+# Markdown discovery-pointer stanza markers — HTML comments so they render
+# cleanly in CLAUDE.md / AGENTS.md and never inject a stray heading. Shared
+# begin/end label across both runtimes; only the body (skills root +
+# reference paths) differs per runtime.
+_POINTER_BEGIN = "<!-- BEGIN ap2-managed: skills-discovery -->"
+_POINTER_END = "<!-- END ap2-managed: skills-discovery -->"
+
+_CLAUDE_POINTER_BODY = (
+    "## ap2 operator skills (auto-managed by `ap2 sandbox sync-assets`)\n"
+    "\n"
+    "ap2's operator manual ships as agentskills.io `SKILL.md` bundles,\n"
+    "deployed under `~/.claude/skills/`. Read the relevant\n"
+    "`~/.claude/skills/<skill>/SKILL.md` before driving the board; the\n"
+    "operator quick-reference lives at `~/.claude/ap2-howto.md`."
+)
+
+_CODEX_POINTER_BODY = (
+    "## ap2 operator skills (auto-managed by `ap2 sandbox sync-assets`)\n"
+    "\n"
+    "ap2's operator manual ships as agentskills.io `SKILL.md` bundles,\n"
+    "deployed under `~/.agents/skills/`. Read the relevant\n"
+    "`~/.agents/skills/<skill>/SKILL.md` before driving the board; the\n"
+    "Codex operator reference lives at `~/.agents/AGENTS.md`."
+)
+
+
+def _sync_skill_tree(
+    sudo_prefix: list[str],
+    skill_subdirs: list[Path],
+    dest_root: Path,
     *,
-    sbuser: bool = False,
-    apply: bool = False,
-    dest: Path | None = None,
-) -> int:
-    """Deploy both `<repo>/skills/*` and `ap2/howto.md` into a target
-    `~/.claude/` directory in one invocation (TB-276).
+    apply: bool,
+    label_prefix: str,
+) -> int | None:
+    """rsync each skill subdir into `dest_root/<name>` with `--delete` so
+    renames/deletions propagate. Returns the total drift count across the
+    tree, or None on a hard rsync failure (caller aborts with rc=1).
 
-    Replaces the two pre-TB-276 verbs (`sync_skills` writing to the
-    operator's home with no sudo, `install_howto` writing to a target
-    user's home via sudo) with one unified path that handles both
-    assets and both write models.
-
-    Two modes:
-      - `sbuser=True` (with `user=None`): write to the CURRENT user's
-        `$HOME/.claude/` directly, NO sudo. Use when a Claude session
-        already running AS the sandbox user (which lacks sudoer
-        privileges) wants to refresh its own assets.
-      - `sbuser=False` (with `user=<sandbox-user>`): write to
-        `~<user>/.claude/` via `sudo -u <user>`. The default operator
-        path — the operator user has sudo, the sandbox user owns the
-        target home.
-
-    `--sbuser` and a positional `user` are mutually exclusive — sbuser
-    means "current user is the target, skip sudo," so naming a
-    different user there is a contradiction.
-
-    `dest` overrides the .claude root entirely (used by tests to write
-    into a tmp dir bypassing the real home-dir lookup).
-
-    Default is dry-run with a per-asset drift summary; pass
-    `apply=True` to actually mutate. Skills use per-skill `rsync
-    --delete` so renames/deletions propagate; the howto is a single
-    overwrite via `tee`.
+    Shared by the Claude (`~/.claude/skills/`) and Codex (`~/.agents/skills/`)
+    targets so both roots get identical per-skill mirror semantics (TB-401).
     """
-    if sbuser and user:
-        print(
-            "sync-assets: --sbuser and a positional user arg are mutually "
-            "exclusive (sbuser → current user is the target, no sudo)",
-            file=sys.stderr,
-        )
-        return 2
-    if not sbuser and not user:
-        print(
-            "sync-assets: either --sbuser or a positional user arg is required",
-            file=sys.stderr,
-        )
-        return 2
-
-    # Resolve the .claude/ root + the sudo prefix.
-    if sbuser:
-        sudo_prefix: list[str] = []
-        if dest is not None:
-            claude_dir = dest
-        else:
-            claude_dir = Path.home() / ".claude"
-        target_label = "current user"
-    else:
-        if not _user_exists(user):
-            print(f"sync-assets: user {user!r} does not exist", file=sys.stderr)
-            return 1
-        home = _user_home(user)
-        if home is None:
-            print(f"sync-assets: cannot resolve home for {user!r}", file=sys.stderr)
-            return 1
-        sudo_prefix = ["sudo", "-u", user]
-        claude_dir = dest if dest is not None else home / ".claude"
-        target_label = f"~{user}"
-
-    skills_src = _skills_source()
-    howto_src = _howto_source()
-    if not skills_src.is_dir():
-        print(f"sync-assets: skills source missing: {skills_src}", file=sys.stderr)
-        return 1
-    if not howto_src.is_file():
-        print(f"sync-assets: howto source missing: {howto_src}", file=sys.stderr)
-        return 1
-
-    mode_label = "apply" if apply else "dry-run"
-    print(f"sync-assets: {mode_label} → {target_label}")
-    print(f"  skills source: {skills_src}")
-    print(f"  howto source:  {howto_src}")
-    print(f"  dest:          {claude_dir}")
-    print()
-
-    skills_dest_root = claude_dir / "skills"
-    howto_dest = claude_dir / "ap2-howto.md"
-
-    # On apply, ensure parent dirs exist (owned by the target user).
-    if apply:
-        rc = subprocess.run(
-            sudo_prefix + ["mkdir", "-p", str(skills_dest_root)],
-        ).returncode
-        if rc != 0:
-            print(
-                f"sync-assets: failed to mkdir {skills_dest_root}",
-                file=sys.stderr,
-            )
-            return 1
-
-    overall_drift = 0
-
-    # ----- skills (per-skill rsync --delete) -----
-    skill_subdirs = sorted(d for d in skills_src.iterdir() if d.is_dir())
     if not skill_subdirs:
-        print("  skills/         (none under source — nothing to sync)")
+        print(f"  {label_prefix}/  (none under source — nothing to sync)")
+        return 0
+    drift = 0
     for src in skill_subdirs:
         name = src.name
-        dst = skills_dest_root / name
+        dst = dest_root / name
         # Per-skill drift summary via rsync --dry-run --itemize-changes.
         diff = subprocess.run(
             sudo_prefix + [
@@ -715,12 +698,12 @@ def sync_assets(
         ]
         sent = sum(1 for line in lines if line[0] in "<>c")
         deleted = sum(1 for line in lines if line.startswith("*deleting"))
-        drift = sent + deleted
-        label = f"skills/{name}"
-        if drift == 0:
-            print(f"  {label:<24} in sync")
+        d = sent + deleted
+        label = f"{label_prefix}/{name}"
+        if d == 0:
+            print(f"  {label:<28} in sync")
             continue
-        overall_drift += drift
+        drift += d
         if apply:
             r = subprocess.run(
                 sudo_prefix + [
@@ -729,46 +712,270 @@ def sync_assets(
                 ],
             )
             if r.returncode != 0:
-                print(f"sync-assets: rsync failed for {name}", file=sys.stderr)
-                return 1
-            print(f"  {label:<24} synced ({sent} updated, {deleted} deleted)")
+                print(f"sync-assets: rsync failed for {label}", file=sys.stderr)
+                return None
+            print(f"  {label:<28} synced ({sent} updated, {deleted} deleted)")
         else:
             print(
-                f"  {label:<24} drift ({sent} would update, "
+                f"  {label:<28} drift ({sent} would update, "
                 f"{deleted} would delete)"
             )
+    return drift
 
-    # ----- howto (single overwrite via tee, with drift detection) -----
-    howto_body = howto_src.read_text()
+
+def _sync_overwrite_file(
+    sudo_prefix: list[str],
+    body: str,
+    dest: Path,
+    *,
+    apply: bool,
+    label: str,
+) -> int | None:
+    """Deploy `body` to `dest` as a single overwrite via `tee`, skipping the
+    write when the destination already matches byte-for-byte. Returns 1 on
+    drift (applied / would-apply), 0 if in sync, or None on a hard write
+    failure. Used for the per-runtime operator reference files
+    (`~/.claude/ap2-howto.md`, `~/.agents/AGENTS.md`); parent dirs are
+    pre-created by the caller's mkdir pass."""
     existing = subprocess.run(
         sudo_prefix + [
-            "sh", "-c",
-            f"test -f {howto_dest} && cat {howto_dest} || true",
+            "sh", "-c", f"test -f {dest} && cat {dest} || true",
         ],
         capture_output=True, text=True,
     ).stdout
-    label = "ap2-howto.md"
-    if existing == howto_body:
-        print(f"  {label:<24} in sync")
-    else:
-        overall_drift += 1
-        if apply:
-            w = subprocess.run(
-                sudo_prefix + ["tee", str(howto_dest)],
-                input=howto_body, text=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-            )
-            if w.returncode != 0:
-                print(
-                    f"sync-assets: failed to write {howto_dest}: {w.stderr}",
-                    file=sys.stderr,
-                )
-                return 1
-            print(f"  {label:<24} synced ({len(howto_body):,} chars)")
-        else:
+    if existing == body:
+        print(f"  {label:<28} in sync")
+        return 0
+    if apply:
+        w = subprocess.run(
+            sudo_prefix + ["tee", str(dest)],
+            input=body, text=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        if w.returncode != 0:
             print(
-                f"  {label:<24} drift ({len(howto_body):,} chars would write)"
+                f"sync-assets: failed to write {dest}: {w.stderr}",
+                file=sys.stderr,
             )
+            return None
+        print(f"  {label:<28} synced ({len(body):,} chars)")
+    else:
+        print(f"  {label:<28} drift ({len(body):,} chars would write)")
+    return 1
+
+
+def _sync_pointer_stanza(
+    sudo_prefix: list[str],
+    dest: Path,
+    body: str,
+    *,
+    apply: bool,
+    label: str,
+) -> int | None:
+    """Idempotently write/update the `skills-discovery` stanza in a runtime's
+    global instructions file (`~/.claude/CLAUDE.md` or `~/.codex/AGENTS.md`).
+    Reads the current file, rewrites just the delimited stanza in place
+    (preserving any surrounding operator content), and writes back only on
+    drift. Returns 1 on drift, 0 if already current, None on a hard write
+    failure.
+
+    Idempotent by construction: `_replace_delimited_stanza` reproduces its
+    own output, so a repeated `sync-assets` converges (no duplicate
+    stanza). Parent dirs are pre-created by the caller's mkdir pass."""
+    existing = subprocess.run(
+        sudo_prefix + [
+            "sh", "-c", f"test -f {dest} && cat {dest} || true",
+        ],
+        capture_output=True, text=True,
+    ).stdout
+    desired = _replace_delimited_stanza(
+        existing, _POINTER_BEGIN, _POINTER_END, body,
+    )
+    if existing == desired:
+        print(f"  {label:<28} in sync")
+        return 0
+    if apply:
+        w = subprocess.run(
+            sudo_prefix + ["tee", str(dest)],
+            input=desired, text=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        if w.returncode != 0:
+            print(
+                f"sync-assets: failed to write {dest}: {w.stderr}",
+                file=sys.stderr,
+            )
+            return None
+        print(f"  {label:<28} pointer updated")
+    else:
+        print(f"  {label:<28} drift (pointer stanza would update)")
+    return 1
+
+
+def sync_assets(
+    user: str | None = None,
+    *,
+    sbuser: bool = False,
+    apply: bool = False,
+    dest: Path | None = None,
+) -> int:
+    """Deploy ap2's operator assets into BOTH runtime homes in one
+    invocation (TB-276, TB-401): the Claude Code tree (`~/.claude/`) and
+    the agentskills.io / Codex tree (`~/.agents/` + `~/.codex/`).
+
+    Per runtime, `sync_assets`:
+      - mirrors `<repo>/skills/*` into the runtime's skills root
+        (`~/.claude/skills/` and `~/.agents/skills/`) via per-skill
+        `rsync --delete` (shared `_sync_skill_tree` helper) so
+        renames/deletions propagate to both roots;
+      - deploys the runtime's operator reference (`ap2/howto.md` →
+        `~/.claude/ap2-howto.md`; repo `AGENTS.md` → `~/.agents/AGENTS.md`);
+      - manages an idempotent `skills-discovery` pointer stanza in the
+        runtime's global instructions file (`~/.claude/CLAUDE.md` and
+        `~/.codex/AGENTS.md`) so a fresh session discovers the deployed
+        skills without a hand-edit.
+
+    Two write models:
+      - `sbuser=True` (with `user=None`): write to the CURRENT user's
+        `$HOME` directly, NO sudo. Use when a Claude/Codex session
+        already running AS the sandbox user (which lacks sudoer
+        privileges) wants to refresh its own assets.
+      - `sbuser=False` (with `user=<sandbox-user>`): write to `~<user>/`
+        via `sudo -u <user>`. The default operator path — the operator
+        user has sudo, the sandbox user owns the target home.
+
+    `--sbuser` and a positional `user` are mutually exclusive — sbuser
+    means "current user is the target, skip sudo," so naming a
+    different user there is a contradiction.
+
+    `dest` overrides the `.claude` root (used by tests to write into a tmp
+    dir bypassing the real home-dir lookup); the sibling `.agents` /
+    `.codex` roots are then resolved relative to `dest.parent`, so a
+    single tmp home holds every runtime target.
+
+    Default is dry-run with a per-asset drift summary; pass `apply=True`
+    to actually mutate. The deploy is ADDITIVE — the `ap2-howto.md`
+    target stays until the later howto-retirement task.
+    """
+    if sbuser and user:
+        print(
+            "sync-assets: --sbuser and a positional user arg are mutually "
+            "exclusive (sbuser → current user is the target, no sudo)",
+            file=sys.stderr,
+        )
+        return 2
+    if not sbuser and not user:
+        print(
+            "sync-assets: either --sbuser or a positional user arg is required",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Resolve the home base + the sudo prefix.
+    if sbuser:
+        sudo_prefix: list[str] = []
+        home_base = Path.home()
+        target_label = "current user"
+    else:
+        if not _user_exists(user):
+            print(f"sync-assets: user {user!r} does not exist", file=sys.stderr)
+            return 1
+        home_base = _user_home(user)
+        if home_base is None:
+            print(f"sync-assets: cannot resolve home for {user!r}", file=sys.stderr)
+            return 1
+        sudo_prefix = ["sudo", "-u", user]
+        target_label = f"~{user}"
+
+    # `dest` overrides the .claude root; the sibling .agents / .codex roots
+    # resolve under its parent so a single tmp dir can hold every runtime
+    # target in tests. In real deploys (`dest is None`) all roots hang off
+    # the resolved home.
+    if dest is not None:
+        claude_dir = dest
+        home_base = dest.parent
+    else:
+        claude_dir = home_base / ".claude"
+    agents_dir = home_base / ".agents"
+
+    skills_src = _skills_source()
+    howto_src = _howto_source()
+    agents_md_src = _agents_md_source()
+    if not skills_src.is_dir():
+        print(f"sync-assets: skills source missing: {skills_src}", file=sys.stderr)
+        return 1
+    if not howto_src.is_file():
+        print(f"sync-assets: howto source missing: {howto_src}", file=sys.stderr)
+        return 1
+    if not agents_md_src.is_file():
+        print(
+            f"sync-assets: AGENTS.md source missing: {agents_md_src}",
+            file=sys.stderr,
+        )
+        return 1
+
+    claude_skills_root = claude_dir / "skills"
+    agents_skills_root = agents_dir / "skills"
+    howto_dest = claude_dir / "ap2-howto.md"
+    agents_md_dest = agents_dir / "AGENTS.md"
+    claude_pointer = claude_dir / "CLAUDE.md"
+    codex_pointer = home_base / ".codex" / "AGENTS.md"
+
+    mode_label = "apply" if apply else "dry-run"
+    print(f"sync-assets: {mode_label} → {target_label}")
+    print(f"  skills source: {skills_src}")
+    print(f"  howto source:  {howto_src}")
+    print(f"  agents source: {agents_md_src}")
+    print(f"  claude dest:   {claude_dir}")
+    print(f"  agents dest:   {agents_dir}")
+    print()
+
+    # On apply, ensure parent dirs exist (owned by the target user). The
+    # skills-root mkdirs also create `claude_dir` / `agents_dir` (parents of
+    # the howto / AGENTS.md / CLAUDE.md targets); the `.codex` mkdir covers
+    # the Codex pointer.
+    if apply:
+        for d in (claude_skills_root, agents_skills_root, codex_pointer.parent):
+            rc = subprocess.run(sudo_prefix + ["mkdir", "-p", str(d)]).returncode
+            if rc != 0:
+                print(f"sync-assets: failed to mkdir {d}", file=sys.stderr)
+                return 1
+
+    overall_drift = 0
+    skill_subdirs = sorted(d for d in skills_src.iterdir() if d.is_dir())
+
+    # ----- skills: mirror into BOTH runtime roots (shared rsync helper) -----
+    for dest_root, prefix in (
+        (claude_skills_root, "skills"),
+        (agents_skills_root, "agents-skills"),
+    ):
+        d = _sync_skill_tree(
+            sudo_prefix, skill_subdirs, dest_root,
+            apply=apply, label_prefix=prefix,
+        )
+        if d is None:
+            return 1
+        overall_drift += d
+
+    # ----- per-runtime operator reference files (single overwrite) -----
+    for body, fdest, label in (
+        (howto_src.read_text(), howto_dest, "ap2-howto.md"),
+        (agents_md_src.read_text(), agents_md_dest, "AGENTS.md"),
+    ):
+        d = _sync_overwrite_file(sudo_prefix, body, fdest, apply=apply, label=label)
+        if d is None:
+            return 1
+        overall_drift += d
+
+    # ----- runtime discovery-pointer stanzas (idempotent) -----
+    for pdest, pbody, label in (
+        (claude_pointer, _CLAUDE_POINTER_BODY, "CLAUDE.md"),
+        (codex_pointer, _CODEX_POINTER_BODY, "AGENTS.md (pointer)"),
+    ):
+        d = _sync_pointer_stanza(sudo_prefix, pdest, pbody, apply=apply, label=label)
+        if d is None:
+            return 1
+        overall_drift += d
 
     print()
     if apply:
