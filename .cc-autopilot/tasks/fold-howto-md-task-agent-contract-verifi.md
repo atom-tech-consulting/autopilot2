@@ -20,7 +20,7 @@ Why now: howto and the existing `ap2-task` skill already overlap on briefing aut
 - `! grep -q '## The task agent contract' ap2/howto.md` — task-agent contract section retired from howto.
 - `grep -q 'Prose:' skills/ap2-task/SKILL.md` — the prose-prefix authoring convention is mirrored into the skill.
 - `skills/ap2-task/SKILL.md` Prose: the skill now carries the task-agent contract, the four shell-bullet authoring pitfalls, and the classify-verdict reference, and explicitly states that `ap2/ideation.default.md` remains the canonical daemon source for briefing-authoring rules; judge confirms via Read.
-- `uv run pytest -q ap2/tests/` — full suite green (including any repointed pitfall-sync gate).
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — full suite green (including any repointed pitfall-sync gate).
 
 ## Out of scope
 

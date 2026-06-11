@@ -373,3 +373,5 @@ ideation won't re-propose decisions logged here._
 - 2026-06-11T04:36:07Z — applied operator-queued update → TB-397
 - 2026-06-11T04:36:18Z — applied operator-queued update → TB-398
 - 2026-06-11T04:36:34Z — applied operator-queued update → TB-399
+- 2026-06-11T04:36:49Z — applied operator-queued update → TB-400
+- 2026-06-11T04:37:15Z — applied operator-queued update → TB-401

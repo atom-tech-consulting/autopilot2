@@ -24,7 +24,7 @@ Why now: the agentskills.io standard just converged across Claude + Codex and th
 - `find . -name 'AGENTS.md' -not -path './.git/*' | grep -q .` — an `AGENTS.md` source exists in the repo.
 - `grep -q 'AGENTS' ap2/sandbox.py` — the deploy references/manages the `AGENTS.md` pointer.
 - `ap2/tests/test_sync_assets.py` Prose: a new test asserts `sync_assets` mirrors skills into the `~/.agents/skills` target and writes/updates the discovery pointer idempotently (a second run produces no duplicate stanza); judge confirms via Read.
-- `uv run pytest -q ap2/tests/` — full suite green.
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — full suite green.
 
 ## Out of scope
 
