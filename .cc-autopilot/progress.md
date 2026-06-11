@@ -1605,3 +1605,9 @@
 - **Summary:** Extended sync_assets for cross-runtime deploy: mirror skills into Codex ~/.agents/skills target, deploy new repo AGENTS.md to ~/.agents/AGENTS.md, and idempotently manage skills-discovery pointer stanzas in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md (additive; ap2-howto.md retained). Full suite 3053 passed.
 - **Files:** ap2/sandbox.py, ap2/tests/test_sync_assets.py, AGENTS.md
 - **Tests:** pass
+
+## [2026-06-11] TB-402: Carve howto.md failure-modes + operator-question playbook into skills/ap2-failure-recovery/ + retarget displaced gates
+- **Commit:** `e0b9789`
+- **Summary:** Carved howto's `## Failure modes the daemon recovers from` + `## Operator-question playbook` into skills/ap2-failure-recovery/SKILL.md (name/description auto-trigger frontmatter), left one-line pointers in howto; neither carved section had a HOWTO_PATH-keyed coverage gate to retarget (both prose/table), so registered a FAILURE_RECOVERY_SKILL constant + a docs-location pin asserting no duplication; full suite 3054 passed.
+- **Files:** skills/ap2-failure-recovery/SKILL.md, ap2/howto.md, ap2/tests/test_docs_drift.py
+- **Tests:** pass
