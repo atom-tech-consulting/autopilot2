@@ -6,8 +6,8 @@ description: "Use when operating an ap2 board — running an `ap2 <verb>` operat
 # ap2 board operations — operator CLI verbs & custom MCP tools
 
 The operator-action reference for an ap2 daemon: the two surfaces that
-move tasks across the board. An operator should never have to grep
-`ap2/howto.md` to learn what an `ap2 <verb>` does or which MCP tool an
+move tasks across the board. An operator should never have to hunt through
+the ap2 source to learn what an `ap2 <verb>` does or which MCP tool an
 agent reaches for. Two self-contained surfaces:
 
 - **Custom MCP tools** — the `autopilot` MCP server's tool catalogue,
@@ -135,7 +135,7 @@ never the operator.
 |---|---|---|
 | `ap2 start [--foreground]` | Boot the daemon for a project (backgrounded by default). | Pre-flight refuses if `CLAUDE_CODE_OAUTH_TOKEN` isn't in env (TB-79); `--foreground` is the debugging hook when `daemon.log` doesn't show why the loop died. |
 | `ap2 stop [-f]` | Politely shut the daemon down (SIGTERM; `-f` escalates to SIGKILL). | The clean stop drains the operator queue before exiting, so an `ap2 update` queued just before `ap2 stop` doesn't get lost. |
-| `ap2 status [--json]` | One-screen snapshot — daemon pid, board section counts, cron jobs, decisions-needed nudges. | The "first thing to run" verb at the top of every operator session; pair `--json` with `jq` for tooling. TB-319 appends a `## Components` block listing every component the registry discovered (text-mode) and a top-level `components` list in `--json` — see `ap2/howto.md`'s `## Components enumeration (`ap2 status`)` for the on/off polarity rules. |
+| `ap2 status [--json]` | One-screen snapshot — daemon pid, board section counts, cron jobs, decisions-needed nudges. | The "first thing to run" verb at the top of every operator session; pair `--json` with `jq` for tooling. TB-319 appends a `## Components` block listing every component the registry discovered (text-mode) and a top-level `components` list in `--json` — see the **ap2-observability** skill's `## Components enumeration (`ap2 status`)` for the on/off polarity rules. |
 | `ap2 init` | Idempotent scaffold of `.gitignore` + `.cc-autopilot/tasks/` skeleton in a fresh project. | Run once when bringing a repo under ap2; no-op if the structure already exists. |
 | `ap2 doctor [--user U]` | Sanity-check that the project is ready to boot — skeleton present, sandbox user installed, OAuth token reachable. | Run before `ap2 start` on an unfamiliar machine to diagnose the "daemon won't start" silent-fail modes (TB-79's token-missing path is the most common hit). |
 | `ap2 check [--json]` | Validate on-disk state-file integrity — TASKS.md shape, briefing-link resolution, cron.yaml schema, JSON state parseability, insights front matter (TB-108). | Exits 1 on errors; warnings (stale brief links, missing goal.md) don't fail. Run after any manual edit to a fenced file. |

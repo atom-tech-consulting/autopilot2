@@ -222,8 +222,8 @@ first surfaced — if a future shape gets added, follow the same
   ```
 
 For the full operator-side knob set (per-task / per-day caps, audit
-event names, the trust-contract rationale for the allowlist) see
-`ap2/howto.md`'s `## Operator-in-the-loop relaxations` →
+event names, the trust-contract rationale for the allowlist) see the
+**ap2-config** skill's `## Operator-in-the-loop relaxations` →
 auto-unfreeze (TB-225) section.
 
 ## Default section

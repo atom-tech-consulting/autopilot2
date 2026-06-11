@@ -4,11 +4,14 @@ Every operator-facing surface — MCP tool names registered in
 `CONTROL_AGENT_TOOLS` / `TASK_AGENT_TOOLS` / `MM_HANDLER_TOOLS`, every
 `AP2_*` env knob referenced in `ap2/*.py`, every event-type string passed
 to `events.append(...)`, every non-suppressed `ap2 <verb>` subcommand in
-`build_parser()` — must be referenced (by exact name) in `ap2/howto.md`
-(and/or `ap2/architecture.md` for the MCP-tools enumeration). A future
-source addition (new env knob, new MCP tool, new event type, new CLI
-verb) trips one of these tests until docs catch up, so the
-operator-facing surface can't silently drift past the reference.
+`build_parser()` — must be referenced (by exact name) in the owning
+operator skill under `skills/ap2-*/SKILL.md` (and/or `ap2/architecture.md`
+for the MCP-tools enumeration). A future source addition (new env knob, new
+MCP tool, new event type, new CLI verb) trips one of these tests until docs
+catch up, so the operator-facing surface can't silently drift past the
+reference. (TB-397–406 carved every operator domain out of the old
+`ap2/howto.md` into per-domain skills and retired the file; each gate below
+now reads the skill that owns its surface.)
 
 The five tests share a tiny module-local set of constants but otherwise
 stay independent — a future single-surface addition fails exactly one
@@ -25,15 +28,14 @@ from ap2.tools import CONTROL_AGENT_TOOLS, MM_HANDLER_TOOLS, TASK_AGENT_TOOLS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AP2_DIR = REPO_ROOT / "ap2"
-HOWTO_PATH = AP2_DIR / "howto.md"
 ARCHITECTURE_PATH = AP2_DIR / "architecture.md"
 
 # TB-397 — the observability domain (event schema + prose-judge diagnostics
-# + `ap2 logs` / stats) was carved out of `howto.md` into the first domain
-# skill as the canary that establishes the carve-plus-gate-retarget pattern.
-# The event-type drift gate reads its coverage surface from here instead of
-# `HOWTO_PATH`; the remaining gates stay on `HOWTO_PATH` for the follow-up
-# carves (TB-399/400) to move one domain + one gate at a time.
+# + `ap2 logs` / stats) was carved out of the old `howto.md` into the first
+# domain skill as the canary that established the carve-plus-gate-retarget
+# pattern. The event-type drift gate reads its coverage surface from here.
+# (TB-406 retired `howto.md` entirely; every gate below now reads its owning
+# skill — there is no `HOWTO_PATH` fallback left.)
 OBSERVABILITY_SKILL = REPO_ROOT / "skills/ap2-observability/SKILL.md"
 
 # TB-398 — the configuration domain (the `## Configuration knobs` flat
@@ -560,12 +562,12 @@ def test_every_event_type_documented():
     is that an operator grepping the observability skill for the event
     type they just saw in events.jsonl finds a hit.
 
-    TB-397 retargeted this gate from `HOWTO_PATH` to `OBSERVABILITY_SKILL`
-    when the event-schema domain was carved into the canary skill — the
-    skill is now the canonical home of the event timeline, so it is the
-    surface a source-side event-type addition must keep in sync. The
-    remaining docs-drift gates still read `HOWTO_PATH`; the follow-up
-    carves move one domain + one gate each.
+    TB-397 retargeted this gate from the old `HOWTO_PATH` to
+    `OBSERVABILITY_SKILL` when the event-schema domain was carved into the
+    canary skill — the skill is now the canonical home of the event timeline,
+    so it is the surface a source-side event-type addition must keep in sync.
+    (TB-406 finished the carve sweep and retired `howto.md`; every sibling
+    gate now reads its owning skill, so no gate has a `HOWTO_PATH` fallback.)
     """
     skill = OBSERVABILITY_SKILL.read_text()
     types = _collect_event_types()
@@ -653,16 +655,12 @@ def test_failure_recovery_domain_carved_to_skill():
     """TB-402 docs-location pin: the failure-recovery domain — the
     `## Failure modes the daemon recovers from` auto-recovery catalogue and
     the `## Operator-question playbook` lookup table — lives in
-    `skills/ap2-failure-recovery/SKILL.md`, NOT duplicated back in
-    `ap2/howto.md`. Mirrors TB-245's
-    `test_howto_validator_judge_section_names_push_surface` shape: when a
-    domain is carved out of the howto into an auto-triggered skill, the
-    content moves wholesale and howto retains only a one-line pointer, so
-    an operator (and the prose judge) finds the reference on exactly one
-    surface.
+    `skills/ap2-failure-recovery/SKILL.md`. TB-406 retired `ap2/howto.md`
+    entirely, so the old no-duplication-in-howto half of this pin is moot
+    (there is no howto to duplicate into); what remains is the pin that the
+    domain's content is present in its owning skill on exactly one surface.
     """
     skill = FAILURE_RECOVERY_SKILL.read_text()
-    howto = HOWTO_PATH.read_text()
 
     # (1) Skill carries agentskills.io frontmatter.
     assert skill.startswith("---"), "SKILL.md must open with a YAML frontmatter fence"
@@ -682,38 +680,23 @@ def test_failure_recovery_domain_carved_to_skill():
             f"failure-recovery skill is missing carved content anchor: {anchor!r}"
         )
 
-    # (3) howto retains a pointer but NOT the carved bodies (no duplication).
-    assert "ap2-failure-recovery" in howto, (
-        "howto.md must keep a pointer to the ap2-failure-recovery skill"
-    )
-    for moved in ("task_implicit_commit", "Daemon running?", "127.0.0.1:7820"):
-        assert moved not in howto, (
-            f"carved failure-recovery content {moved!r} still present in "
-            f"`ap2/howto.md` — it must live only in the ap2-failure-recovery "
-            f"skill (replace the howto section with the one-line pointer)."
-        )
-
 
 def test_ideation_goals_domain_carved_to_skill():
     """TB-403 docs-location pin: the ideation + goal/focus-management domain —
     the `## Authoring goal.md` operator-curated five-section reference and the
     `## Retrospective audit workflow` `ap2 audit` review surface — lives in
-    `skills/ap2-ideation-goals/SKILL.md`, NOT duplicated back in `ap2/howto.md`.
-    Mirrors the TB-402 `test_failure_recovery_domain_carved_to_skill` shape:
-    when a domain is carved out of the howto into an auto-triggered skill, the
-    content moves wholesale and howto retains only a one-line pointer, so an
-    operator (and the prose judge) finds the reference on exactly one surface.
+    `skills/ap2-ideation-goals/SKILL.md`. TB-406 retired `ap2/howto.md`
+    entirely, so the old no-duplication-in-howto half of this pin is moot;
+    what remains is the pin that the domain's content is present in its owning
+    skill on exactly one surface.
 
     The `## Authoring goal.md` section's structural-anchor + worked-example-
-    validator gates were retargeted onto this skill in `ap2/tests/test_docs.py`
-    in the same commit; this pin adds the carved-out / not-duplicated assertion
-    the howto-vs-skill split needs. `ideation.default.md` is deliberately NOT
-    asserted to move — it stays canonical for the daemon ideation agent's own
-    briefing-authoring conventions, which the skill references but does not
-    carry.
+    validator gates were retargeted onto this skill in `ap2/tests/test_docs.py`.
+    `ideation.default.md` is deliberately NOT asserted to move — it stays
+    canonical for the daemon ideation agent's own briefing-authoring
+    conventions, which the skill references but does not carry.
     """
     skill = IDEATION_GOALS_SKILL.read_text()
-    howto = HOWTO_PATH.read_text()
 
     # (1) Skill carries agentskills.io frontmatter.
     assert skill.startswith("---"), "SKILL.md must open with a YAML frontmatter fence"
@@ -735,17 +718,6 @@ def test_ideation_goals_domain_carved_to_skill():
             f"ap2-ideation-goals skill is missing carved content anchor: {anchor!r}"
         )
 
-    # (3) howto retains a pointer but NOT the carved bodies (no duplication).
-    assert "ap2-ideation-goals" in howto, (
-        "howto.md must keep a pointer to the ap2-ideation-goals skill"
-    )
-    for moved in ("### Mission", "webhook reliability", "audit_skip", "UnreviewedTask"):
-        assert moved not in howto, (
-            f"carved ideation-goals content {moved!r} still present in "
-            f"`ap2/howto.md` — it must live only in the ap2-ideation-goals "
-            f"skill (replace the howto section with the one-line pointer)."
-        )
-
 
 def test_components_enumeration_carved_to_observability_skill():
     """TB-405 docs-location pin (final domain carve): the
@@ -755,19 +727,17 @@ def test_components_enumeration_carved_to_observability_skill():
     rendering rules, and `--json` parity) — lives in
     `skills/ap2-observability/SKILL.md`, NOT duplicated back in `ap2/howto.md`.
 
-    Mirrors the TB-402 / TB-403 `test_*_domain_carved_to_skill` shape: when a
-    domain is carved out of the howto into an auto-triggered skill, the content
-    moves wholesale and howto retains only a one-line pointer, so an operator
-    (and the prose judge) finds the reference on exactly one surface. This
-    section is prose with no `HOWTO_PATH`-keyed coverage gate to retarget (the
-    `ap2 status` CLI verb is gated against `BOARD_OPS_SKILL`, the `AP2_*` env
-    flags against `CONFIG_SKILL`), so a no-duplication location pin is the
-    correct shape, not a gate flip. The `## Components` render BEHAVIOR stays
-    pinned by `ap2/tests/test_tb379_effective_config_snapshot.py` /
+    Mirrors the TB-402 / TB-403 `test_*_domain_carved_to_skill` shape: the
+    content lives wholesale in its owning skill. This section is prose with no
+    `HOWTO_PATH`-keyed coverage gate to retarget (the `ap2 status` CLI verb is
+    gated against `BOARD_OPS_SKILL`, the `AP2_*` env flags against
+    `CONFIG_SKILL`), so a location pin is the correct shape, not a gate flip.
+    TB-406 retired `ap2/howto.md` entirely, so the old no-duplication-in-howto
+    half is moot. The `## Components` render BEHAVIOR stays pinned by
+    `ap2/tests/test_tb379_effective_config_snapshot.py` /
     `ap2/tests/test_tb319_status_components.py` — this is a docs-only move.
     """
     skill = OBSERVABILITY_SKILL.read_text()
-    howto = HOWTO_PATH.read_text()
 
     # (1) Skill carries agentskills.io frontmatter.
     assert skill.startswith("---"), "SKILL.md must open with a YAML frontmatter fence"
@@ -807,14 +777,3 @@ def test_components_enumeration_carved_to_observability_skill():
         "the carved components section must cross-reference the ap2-board-ops "
         "skill for the `ap2 status` verb instead of re-listing it"
     )
-
-    # (3) howto retains a pointer but NOT the carved bodies (no duplication).
-    assert "ap2-observability skill" in howto, (
-        "howto.md must keep a pointer to the ap2-observability skill"
-    )
-    for moved in ("default_registry().components", "env_flag=None"):
-        assert moved not in howto, (
-            f"carved components-enumeration content {moved!r} still present in "
-            f"`ap2/howto.md` — it must live only in the ap2-observability skill "
-            f"(replace the howto section with the one-line pointer)."
-        )

@@ -418,12 +418,12 @@ def user_setup(
         print(f"\nSkipped statusline install (--skip-statusline). Run later with:")
         print(f"  ap2 sandbox install-statusline {user}")
 
-    # ap2 assets (TB-276) — deploy both `<repo>/skills/*` and `ap2/howto.md`
-    # into the sandbox user's ~/.claude/ via the unified `sync-assets` path.
-    # Replaces the TB-105 `install_howto`-only call so a fresh sandbox user
-    # gets BOTH operator slash-commands AND the howto quick-reference in one
-    # shot — they're the same kind of Claude-Code wiring asset and were
-    # inconsistently split (sync-skills + install-howto) before TB-276.
+    # ap2 assets (TB-276, TB-406) — deploy `<repo>/skills/*` into the
+    # sandbox user's runtime skills roots via the unified `sync-assets`
+    # path so a fresh sandbox user gets the operator skill bundles in one
+    # shot. (TB-105's `install_howto` step was folded in by TB-276, then
+    # retired entirely by TB-406 when the operator manual became wholly
+    # the skill bundles.)
     print()
     sync_assets(user, sbuser=False, apply=True)
 
@@ -598,14 +598,6 @@ def _statusline_source() -> Path:
     return Path(__file__).resolve().parent.parent / "hooks" / "statusline-command.sh"
 
 
-def _howto_source() -> Path:
-    """Path to `ap2/howto.md` — the operator-side quick-reference for
-    Claude sessions running as the sandbox user. Shipped with the
-    package so re-installing the editable tool keeps the deployed copy
-    fresh."""
-    return Path(__file__).resolve().parent / "howto.md"
-
-
 def _skills_source() -> Path:
     """Path to `<repo>/skills/` — the canonical copies of `/ap2`,
     `/ap2-task`, and `/migrate-to-ap2` (TB-140). Live slash commands
@@ -616,24 +608,25 @@ def _skills_source() -> Path:
 
 def _agents_md_source() -> Path:
     """Path to the repo-root `AGENTS.md` (TB-401) — the agentskills.io /
-    Codex analog of the Claude-side operator quick-reference
-    (`ap2/howto.md`). Shipped with the package so re-installing the
+    Codex operator reference that points a fresh agent session at the
+    operator skills. Shipped with the package so re-installing the
     editable tool keeps the deployed `~/.agents/AGENTS.md` copy fresh.
     `__file__` is `ap2/sandbox.py`; `parent.parent` is the repo root."""
     return Path(__file__).resolve().parent.parent / "AGENTS.md"
 
 
 # ---------------------------------------------------------------------------
-# Cross-runtime asset deploy (TB-276, TB-401)
+# Cross-runtime asset deploy (TB-276, TB-401, TB-406)
 #
 # `sync_assets` mirrors `<repo>/skills/*` into BOTH runtime skills roots —
 # Claude Code's `~/.claude/skills/` and the agentskills.io / Codex standard
-# `~/.agents/skills/` — deploys each runtime's operator reference
-# (`ap2/howto.md` → `~/.claude/ap2-howto.md`, repo `AGENTS.md` →
-# `~/.agents/AGENTS.md`), and MANAGES a discovery-pointer stanza in each
+# `~/.agents/skills/` — deploys the Codex operator reference (repo `AGENTS.md`
+# → `~/.agents/AGENTS.md`), and MANAGES a discovery-pointer stanza in each
 # runtime's global instructions file so a fresh session finds the deployed
-# skills without a hand-edit. Additive: the `ap2-howto.md` target stays
-# until the later howto-retirement task.
+# skills without a hand-edit. (TB-406 retired the former Claude-side
+# quick-reference deploy target: the operator manual is now wholly the
+# `skills/*` SKILL.md bundles, so there is no separate Claude-side
+# reference file to deploy.)
 
 # Markdown discovery-pointer stanza markers — HTML comments so they render
 # cleanly in CLAUDE.md / AGENTS.md and never inject a stray heading. Shared
@@ -647,8 +640,7 @@ _CLAUDE_POINTER_BODY = (
     "\n"
     "ap2's operator manual ships as agentskills.io `SKILL.md` bundles,\n"
     "deployed under `~/.claude/skills/`. Read the relevant\n"
-    "`~/.claude/skills/<skill>/SKILL.md` before driving the board; the\n"
-    "operator quick-reference lives at `~/.claude/ap2-howto.md`."
+    "`~/.claude/skills/<skill>/SKILL.md` before driving the board."
 )
 
 _CODEX_POINTER_BODY = (
@@ -734,9 +726,9 @@ def _sync_overwrite_file(
     """Deploy `body` to `dest` as a single overwrite via `tee`, skipping the
     write when the destination already matches byte-for-byte. Returns 1 on
     drift (applied / would-apply), 0 if in sync, or None on a hard write
-    failure. Used for the per-runtime operator reference files
-    (`~/.claude/ap2-howto.md`, `~/.agents/AGENTS.md`); parent dirs are
-    pre-created by the caller's mkdir pass."""
+    failure. Used for the Codex operator reference file
+    (`~/.agents/AGENTS.md`); parent dirs are pre-created by the caller's
+    mkdir pass."""
     existing = subprocess.run(
         sudo_prefix + [
             "sh", "-c", f"test -f {dest} && cat {dest} || true",
@@ -828,8 +820,10 @@ def sync_assets(
         (`~/.claude/skills/` and `~/.agents/skills/`) via per-skill
         `rsync --delete` (shared `_sync_skill_tree` helper) so
         renames/deletions propagate to both roots;
-      - deploys the runtime's operator reference (`ap2/howto.md` →
-        `~/.claude/ap2-howto.md`; repo `AGENTS.md` → `~/.agents/AGENTS.md`);
+      - deploys the Codex operator reference (repo `AGENTS.md` →
+        `~/.agents/AGENTS.md`) — the Claude side has no separate
+        reference file; its operator manual is the `skills/*` bundles
+        (TB-406 retired the former Claude-side quick-reference target);
       - manages an idempotent `skills-discovery` pointer stanza in the
         runtime's global instructions file (`~/.claude/CLAUDE.md` and
         `~/.codex/AGENTS.md`) so a fresh session discovers the deployed
@@ -854,8 +848,7 @@ def sync_assets(
     single tmp home holds every runtime target.
 
     Default is dry-run with a per-asset drift summary; pass `apply=True`
-    to actually mutate. The deploy is ADDITIVE — the `ap2-howto.md`
-    target stays until the later howto-retirement task.
+    to actually mutate.
     """
     if sbuser and user:
         print(
@@ -899,13 +892,9 @@ def sync_assets(
     agents_dir = home_base / ".agents"
 
     skills_src = _skills_source()
-    howto_src = _howto_source()
     agents_md_src = _agents_md_source()
     if not skills_src.is_dir():
         print(f"sync-assets: skills source missing: {skills_src}", file=sys.stderr)
-        return 1
-    if not howto_src.is_file():
-        print(f"sync-assets: howto source missing: {howto_src}", file=sys.stderr)
         return 1
     if not agents_md_src.is_file():
         print(
@@ -916,7 +905,6 @@ def sync_assets(
 
     claude_skills_root = claude_dir / "skills"
     agents_skills_root = agents_dir / "skills"
-    howto_dest = claude_dir / "ap2-howto.md"
     agents_md_dest = agents_dir / "AGENTS.md"
     claude_pointer = claude_dir / "CLAUDE.md"
     codex_pointer = home_base / ".codex" / "AGENTS.md"
@@ -924,7 +912,6 @@ def sync_assets(
     mode_label = "apply" if apply else "dry-run"
     print(f"sync-assets: {mode_label} → {target_label}")
     print(f"  skills source: {skills_src}")
-    print(f"  howto source:  {howto_src}")
     print(f"  agents source: {agents_md_src}")
     print(f"  claude dest:   {claude_dir}")
     print(f"  agents dest:   {agents_dir}")
@@ -932,7 +919,7 @@ def sync_assets(
 
     # On apply, ensure parent dirs exist (owned by the target user). The
     # skills-root mkdirs also create `claude_dir` / `agents_dir` (parents of
-    # the howto / AGENTS.md / CLAUDE.md targets); the `.codex` mkdir covers
+    # the AGENTS.md / CLAUDE.md targets); the `.codex` mkdir covers
     # the Codex pointer.
     if apply:
         for d in (claude_skills_root, agents_skills_root, codex_pointer.parent):
@@ -957,15 +944,17 @@ def sync_assets(
             return 1
         overall_drift += d
 
-    # ----- per-runtime operator reference files (single overwrite) -----
-    for body, fdest, label in (
-        (howto_src.read_text(), howto_dest, "ap2-howto.md"),
-        (agents_md_src.read_text(), agents_md_dest, "AGENTS.md"),
-    ):
-        d = _sync_overwrite_file(sudo_prefix, body, fdest, apply=apply, label=label)
-        if d is None:
-            return 1
-        overall_drift += d
+    # ----- Codex operator reference file (single overwrite) -----
+    # The Claude runtime has no separate reference file — its operator
+    # manual is the `skills/*` bundles (TB-406 retired the former
+    # Claude-side quick-reference deploy target).
+    d = _sync_overwrite_file(
+        sudo_prefix, agents_md_src.read_text(), agents_md_dest,
+        apply=apply, label="AGENTS.md",
+    )
+    if d is None:
+        return 1
+    overall_drift += d
 
     # ----- runtime discovery-pointer stanzas (idempotent) -----
     for pdest, pbody, label in (
@@ -1368,9 +1357,12 @@ def cmd_install_token(cfg, args) -> int:     # noqa: ARG001
 def cmd_sync_assets(cfg, args) -> int:        # noqa: ARG001
     """`ap2 sandbox sync-assets [USER] [--sbuser] [--apply] [--dest DIR]` (TB-276).
 
-    Deploys BOTH `<repo>/skills/*` and `ap2/howto.md` into a target
-    `~/.claude/` in one invocation — the unified replacement for the
-    old `sync-skills` + `install-howto` verbs.
+    Deploys `<repo>/skills/*` into both runtime skills roots (Claude
+    `~/.claude/skills/` and Codex `~/.agents/skills/`) plus the Codex
+    `AGENTS.md` reference in one invocation — the unified replacement for
+    the old `sync-skills` + `install-howto` verbs (TB-406 dropped the
+    Claude-side quick-reference deploy: the operator manual is wholly the
+    skill bundles).
 
     Modes:
       - default: positional `USER` selects the sandbox user; writes

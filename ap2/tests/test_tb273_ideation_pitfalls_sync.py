@@ -1,16 +1,17 @@
 """TB-273: Pin `ap2/ideation.default.md`'s "Shell-bullet pitfalls to
-AVOID" section to the howto's authoritative four-pitfall list.
+AVOID" section to the authoritative four-pitfall list.
 
-`ap2/howto.md` L462-505 is the single source of truth for shell-bullet
+`skills/ap2-task/SKILL.md`'s "Shell bullets — four authoring pitfalls"
+section is the single operator-facing source of truth for shell-bullet
 pitfalls — it carries all four pitfalls plus a worked example combining
 them. Pre-TB-273, `ap2/ideation.default.md`'s pitfalls section listed
 only three pitfalls (bare `python`, bare-path-as-command, multi-line
-bullets) — none of which named the four howto pitfalls and, critically,
+bullets) — none of which named the four pitfalls and, critically,
 none of which warned about the absence-check `!` exit-inversion prefix
 that caused the TB-270 retry storm on 2026-05-20T04:54-05:59Z (3
 retries → operator-manual unfreeze).
 
-This module is the regression pin for the prompt-vs-howto sync. The
+This module is the regression pin for the prompt-vs-skill sync. The
 assertions are pure file-pattern matches with no runtime path
 exercised; the value is preventing a future edit to the ideation prompt
 from silently dropping or rewording one of the four pitfall headings —
@@ -21,22 +22,20 @@ Pinned bullet-by-bullet per briefing §Scope §3:
 
   (a) all four pitfall-identifying substrings present in the section
       (`literal backtick`, `! grep`, `grep -r`, `Prose:`);
-  (b) cross-reference to `ap2/howto.md` L462-505 (worked example
-      stays in a single source of truth — the howto);
+  (b) cross-reference to `skills/ap2-task/SKILL.md`'s "Shell bullets —
+      four authoring pitfalls" section (worked example stays in a single
+      source of truth — the skill);
   (c) section heading still present AND the new `! grep` + `Prose:`
       strings are present in the same section (the absence of either
       would be the regression we're pinning against).
 
-TB-400 note: the four-pitfall worked example + section were consolidated
-out of `ap2/howto.md` into the operator-facing `ap2-task` skill
-(`skills/ap2-task/SKILL.md`), so the howto-side companion check
-(`test_skill_still_carries_all_four_pitfalls`) now reads the skill. The
-`ap2/ideation.default.md` content pins (the four `test_pitfall_*` checks +
-`test_section_cross_references_howto_worked_example`) are UNCHANGED — the
-canonical prompt still anchors its cross-reference at `ap2/howto.md`
-L462-505 because TB-400 left `ideation.default.md` untouched (it stays the
-daemon-canonical copy); repointing the prompt's own cross-reference at the
-skill is deferred to the later howto-retirement work.
+History: TB-400 consolidated the four-pitfall worked example + section
+out of the old `ap2/howto.md` into the operator-facing `ap2-task` skill
+(`skills/ap2-task/SKILL.md`), so the companion check
+(`test_skill_still_carries_all_four_pitfalls`) reads the skill. TB-406
+retired `ap2/howto.md` entirely and repointed the ideation prompt's own
+cross-reference (and the `test_section_cross_references_skill_worked_example`
+pin) off the dead howto anchor onto the skill section.
 """
 from __future__ import annotations
 
@@ -46,11 +45,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IDEATION_PROMPT = REPO_ROOT / "ap2" / "ideation.default.md"
-HOWTO = REPO_ROOT / "ap2" / "howto.md"
 # TB-400 — the four-pitfall worked example + section were consolidated out
-# of `ap2/howto.md` into the operator-facing `ap2-task` skill, which now
-# mirrors `ap2/ideation.default.md`'s canonical pitfalls section. The
-# howto-side companion check below reads the skill instead of the howto.
+# of the old `ap2/howto.md` into the operator-facing `ap2-task` skill, which
+# now mirrors `ap2/ideation.default.md`'s canonical pitfalls section. TB-406
+# retired `howto.md` entirely and repointed the ideation prompt's own
+# cross-reference here, so the companion check below + the cross-reference
+# pin both read the skill (the single surviving worked-example surface).
 TASK_SKILL = REPO_ROOT / "skills" / "ap2-task" / "SKILL.md"
 
 SECTION_HEADING = "## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)"
@@ -90,7 +90,8 @@ def _read_pitfalls_section() -> str:
 
 def test_pitfall_literal_backtick_present():
     """TB-207 pitfall #1: "No literal backticks in the command body."
-    Verbatim-aligned to `ap2/howto.md` L464. Absence here means the
+    Verbatim-aligned to the ap2-task skill's "Shell bullets — four
+    authoring pitfalls" section. Absence here means the
     ideation prompt lost the pitfall and a future ideation-authored
     briefing could ship a single-backtick codespan with an inner
     backtick — the kind/malformed surface TB-219 added as a backstop
@@ -101,7 +102,8 @@ def test_pitfall_literal_backtick_present():
     assert "literal backtick" in section, (
         "TB-273: 'literal backtick' (TB-207 pitfall #1) is missing "
         "from the ideation prompt's Shell-bullet pitfalls section. "
-        "Sync with ap2/howto.md L462-505."
+        "Sync with skills/ap2-task/SKILL.md's 'Shell bullets — four "
+        "authoring pitfalls' section."
     )
 
 
@@ -118,7 +120,8 @@ def test_pitfall_absence_check_bang_grep_present():
         "TB-273: '! grep' (TB-270 absence-`!` pitfall — the bullet "
         "whose miss caused the 2026-05-20 retry storm) is missing "
         "from the ideation prompt's Shell-bullet pitfalls section. "
-        "Sync with ap2/howto.md L479-484."
+        "Sync with skills/ap2-task/SKILL.md's 'Shell bullets — four "
+        "authoring pitfalls' section."
     )
 
 
@@ -133,7 +136,8 @@ def test_pitfall_directory_walk_grep_r_present():
     assert "grep -r" in section, (
         "TB-273: 'grep -r' (TB-204 directory-walk pitfall) is "
         "missing from the ideation prompt's Shell-bullet pitfalls "
-        "section. Sync with ap2/howto.md L485-488."
+        "section. Sync with skills/ap2-task/SKILL.md's 'Shell bullets "
+        "— four authoring pitfalls' section."
     )
 
 
@@ -150,40 +154,46 @@ def test_pitfall_prose_prefix_present():
     assert "Prose:" in section, (
         "TB-273: 'Prose:' (TB-219 prose-prefix pitfall) is missing "
         "from the ideation prompt's Shell-bullet pitfalls section. "
-        "Sync with ap2/howto.md L489-492."
+        "Sync with skills/ap2-task/SKILL.md's 'Shell bullets — four "
+        "authoring pitfalls' section."
     )
 
 
 # ---------------------------------------------------------------------------
-# Scope §3(b) — cross-reference to ap2/howto.md (worked example anchor)
+# Scope §3(b) — cross-reference to the ap2-task skill (worked example anchor)
 # ---------------------------------------------------------------------------
 
 
-def test_section_cross_references_howto_worked_example():
+def test_section_cross_references_skill_worked_example():
     """The worked example combining all four pitfalls lives in a
-    single source of truth — `ap2/howto.md` L462-505 — and the
-    ideation prompt's section must POINT to it rather than
-    duplicate it. Duplication is the future-drift surface this
-    proposal explicitly avoids (briefing §Design).
+    single source of truth — `skills/ap2-task/SKILL.md`'s "Shell
+    bullets — four authoring pitfalls" section — and the ideation
+    prompt's section must POINT to it rather than duplicate it.
+    Duplication is the future-drift surface this proposal explicitly
+    avoids (briefing §Design).
+
+    TB-406 repointed this cross-reference off the retired `ap2/howto.md`
+    L462-505 anchor onto the owning skill (which has no stable line
+    numbers, so the anchor is the named section instead of a line range).
 
     Pin both:
-      - the cross-reference path `ap2/howto.md` is named, AND
-      - the L462-505 line-range anchor is named (so a future
-        howto edit that shifts the example must update the
-        ideation prompt's pointer in lockstep).
+      - the cross-reference path `skills/ap2-task/SKILL.md` is named, AND
+      - the "Shell bullets — four authoring pitfalls" section-name anchor
+        is named (so a future skill edit that renames the section must
+        update the ideation prompt's pointer in lockstep).
     """
     section = _read_pitfalls_section()
-    assert "ap2/howto.md" in section, (
-        "TB-273: cross-reference to ap2/howto.md is missing from "
-        "the ideation prompt's Shell-bullet pitfalls section. The "
-        "worked example must live in a single source of truth; "
-        "the ideation prompt should reference it, not duplicate it."
+    assert "skills/ap2-task/SKILL.md" in section, (
+        "TB-273/TB-406: cross-reference to skills/ap2-task/SKILL.md is "
+        "missing from the ideation prompt's Shell-bullet pitfalls section. "
+        "The worked example must live in a single source of truth; the "
+        "ideation prompt should reference it, not duplicate it."
     )
-    assert "L462-505" in section, (
-        "TB-273: the L462-505 line-range anchor for ap2/howto.md's "
-        "worked example is missing from the ideation prompt's "
-        "Shell-bullet pitfalls section. The line-range anchor makes "
-        "future howto-vs-prompt drift greppable."
+    assert "Shell bullets — four authoring pitfalls" in section, (
+        "TB-273/TB-406: the 'Shell bullets — four authoring pitfalls' "
+        "section-name anchor for the ap2-task skill's worked example is "
+        "missing from the ideation prompt's Shell-bullet pitfalls section. "
+        "The section-name anchor makes future skill-vs-prompt drift greppable."
     )
 
 
@@ -220,7 +230,8 @@ def test_section_heading_still_present_with_new_bullets_co_located():
         "TB-273: the section heading exists but the new "
         "post-TB-273 bullets (`! grep`, `Prose:`) are not co-located "
         "in the same section. This is the legacy three-pitfall-only "
-        "shape regression — sync with ap2/howto.md L462-505."
+        "shape regression — sync with skills/ap2-task/SKILL.md's "
+        "'Shell bullets — four authoring pitfalls' section."
     )
 
 

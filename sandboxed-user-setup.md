@@ -55,7 +55,7 @@ ap2 sandbox install-token [user]                     # write CLAUDE_CODE_OAUTH_T
 ap2 sandbox install-statusline [user]                # install the statusline + wire ~user/.claude/settings.json
 ap2 sandbox install-mm [user]                        # write MATTERMOST_URL + MATTERMOST_TOKEN → ~user/.zshenv
 ap2 sandbox install-channel <project> <channel>      # resolve #channel → ID, write to <project>/.cc-autopilot/env
-ap2 sandbox sync-assets [user] [--sbuser] [--apply]  # deploy <repo>/skills/* AND ap2/howto.md into ~/.claude/
+ap2 sandbox sync-assets [user] [--sbuser] [--apply]  # deploy <repo>/skills/* into the runtime skills roots (+ Codex AGENTS.md)
 ap2 sandbox project-setup <source-repo> [--user u]   # clone the source repo into ~user/repos/
 ap2 sandbox project-audit <project-path> [--user u]  # verify a sandbox clone is correctly isolated
 ```

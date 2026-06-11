@@ -6,8 +6,8 @@ description: "Use when configuring an ap2 daemon — discovering or tuning an `A
 # ap2 configuration — env knobs, config.toml keys & backend setup
 
 The operator-facing configuration reference for an ap2 daemon. Discover or
-tune any tunable here — an operator should never have to grep `ap2/howto.md`
-for a knob. Two parallel surfaces describe the same tunable set:
+tune any tunable here — an operator should never have to hunt through the
+ap2 source for a knob. Two parallel surfaces describe the same tunable set:
 
 - **Configuration knobs** — the full flat `AP2_*` environment-variable
   catalogue (loop cadence + per-run timeouts, agent model/effort,

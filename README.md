@@ -73,13 +73,16 @@ home, keychain, or other repos.
 ```
 ap2/                          # the package — daemon, CLI, MCP tools, tests
 ├── README.md                 # operator reference + full CLI / event schema
-├── architecture.md           # design rationale, agent kinds, verification model
-└── howto.md                  # in-sandbox quick reference (deployed via
-                              #   `ap2 sandbox sync-assets`)
+└── architecture.md           # design rationale, agent kinds, verification model
 sandboxed-user-setup.md       # OS-level sandbox-user runbook (repo root)
-skills/                       # optional Claude Code slash commands
-├── ap2/                      # /ap2 <project> — daemon snapshot
-├── ap2-task/                 # /ap2-task <project> "<title>" — add to backlog
+skills/                       # the operator manual — auto-triggered SKILL.md bundles
+├── ap2/                      # /ap2 <project> — daemon snapshot + reading order
+├── ap2-task/                 # task-agent contract + briefing/verification authoring
+├── ap2-board-ops/            # operator CLI verbs + custom MCP tools
+├── ap2-config/               # configuration knobs + config keys
+├── ap2-observability/        # event schema, ap2 logs, ap2 status components, stats
+├── ap2-failure-recovery/     # how the daemon self-heals + operator triage
+├── ap2-ideation-goals/       # authoring goal.md + the ap2 audit walk
 └── migrate-to-ap2/           # /migrate-to-ap2 — convert legacy TODO.md → TASKS.md
 ```
 
@@ -91,8 +94,11 @@ skills/                       # optional Claude Code slash commands
   daemon loop, agent kinds, two-tier verification, sandbox model.
 - **[sandboxed-user-setup.md](sandboxed-user-setup.md)** — runbook for
   setting up the `claude-agent` sandbox user.
-- **[ap2/howto.md](ap2/howto.md)** — what the daemon-spawned agent sees when
-  it runs inside an ap2-managed project.
+- **[skills/](skills/)** — the operator manual, published as auto-triggered
+  agentskills.io `SKILL.md` bundles (CLI verbs, config knobs, event schema,
+  the task-agent contract, failure recovery, goal authoring). `ap2 sandbox
+  sync-assets` deploys them into the runtime skills roots so a session
+  running inside an ap2-managed project picks them up automatically.
 
 ## Tests
 

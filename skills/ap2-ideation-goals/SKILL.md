@@ -8,7 +8,7 @@ description: "Use when authoring or revising an ap2 project's `goal.md` (Mission
 The operator-facing reference for steering an ap2 loop's direction: how to
 write the `goal.md` that ideation reads every cycle, and how to review what
 the loop shipped once you come back from a window of unattended operation.
-An operator should never have to grep `ap2/howto.md` to learn what each
+An operator should never have to hunt through the ap2 source to learn what each
 goal.md section is for or how the retrospective `ap2 audit` walk works. Two
 self-contained surfaces:
 

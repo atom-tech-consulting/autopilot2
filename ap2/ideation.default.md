@@ -459,8 +459,8 @@ shapes:
      (TB-219). Example: `` `ap2/tests/test_x.py` Prose: the file
      includes the expected fixture; judge confirms via Read.`` Reach
      for the prefix first whenever a prose bullet starts with a
-     codespan; see `ap2/howto.md` "Prose bullets — use the `Prose:`
-     prefix" for the full convention.
+     codespan; see the ap2-task skill's "Prose bullets — use the
+     `Prose:` prefix" section for the full convention.
 
 **No `Manual:` bullets. No "operator runs X live and observes Y"
 steps.** TB-122 hit this on 2026-05-01: 5/6 bullets passed, but a
@@ -502,8 +502,8 @@ once the work has finished.
 ## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)
 The verifier runs each shell bullet via `/bin/sh -c <bullet>` in the
 project root. The four authoritative pitfalls — kept verbatim-aligned
-with `ap2/howto.md`'s "Shell bullets — four authoring pitfalls"
-section so the ideation prompt and the howto can't drift:
+with the ap2-task skill's "Shell bullets — four authoring pitfalls"
+section so the ideation prompt and the skill can't drift:
   - **No literal backticks in the command body** (TB-207). Markdown's
     single-backtick codespan cannot represent a literal backtick —
     mistune truncates the codespan at the inner backtick and the rest
@@ -532,6 +532,7 @@ section so the ideation prompt and the howto can't drift:
     judge against the diff, lead the suffix with `Prose:` so the
     verifier routes the bullet to the judge instead of trying to
     `exec` the filename.
-See `ap2/howto.md` L462-505 for a worked example combining all four.
+See skills/ap2-task/SKILL.md's "Shell bullets — four authoring pitfalls"
+section for a worked example combining all four.
 Prefer running concrete project commands (e.g. `uv run pytest -q`,
 `uv run python -m stoch ...`) over inventing new ones.

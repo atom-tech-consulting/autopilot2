@@ -1,12 +1,17 @@
 """TB-276 regression-pin tests for `ap2 sandbox sync-assets`.
 
-The unified verb replaces the pre-TB-276 split between
+The unified verb replaced the pre-TB-276 split between
 `ap2 sandbox sync-skills` (rsynced repo/skills/* to the OPERATOR's
-~/.claude/skills/, no sudo) and `ap2 sandbox install-howto` (copied
-ap2/howto.md into a sandbox user's ~/.claude/ via `sudo -u <user> tee`).
+~/.claude/skills/, no sudo) and `ap2 sandbox install-howto` (copied the
+old `ap2/howto.md` quick-reference into a sandbox user's ~/.claude/).
 The split was a footgun: one Claude session couldn't deploy both
 assets, the two verbs used different target-user semantics, and
 operators routinely forgot one or the other after a doc/skill edit.
+
+TB-406 retired the `ap2/howto.md` deploy entirely — the operator manual
+is now wholly the `skills/*` SKILL.md bundles — so `sync_assets` deploys
+the skill trees (into both runtime roots) plus the Codex `AGENTS.md`
+reference, and these tests pin that skills-only deploy shape.
 
 Coverage shape mirrors `test_tb214_sandbox_install_verbs.py` (handler-
 level happy + error paths) plus an end-to-end regression-pin against a
@@ -39,9 +44,9 @@ from ap2 import cli, sandbox
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SKILLS_SRC = REPO_ROOT / "skills"
-HOWTO_SRC = REPO_ROOT / "ap2" / "howto.md"
 # TB-401: the Codex / agentskills.io operator-reference source, deployed to
-# `~/.agents/AGENTS.md` alongside the Claude-side howto.
+# `~/.agents/AGENTS.md` (TB-406 retired the Claude-side howto reference, so
+# this is now the only single-file operator reference `sync_assets` deploys).
 AGENTS_SRC = REPO_ROOT / "AGENTS.md"
 
 # TB-401: the discovery-pointer stanza markers `sync_assets` manages in the
@@ -110,10 +115,10 @@ def test_cli_sandbox_sync_assets_help_surface():
     assert sandbox_parser is not None, "sandbox subparser not registered"
     help_text = sandbox_parser.format_help()
     assert "sync-assets" in help_text
-    # The help text also references the briefing's two assets so an
-    # operator reading the help sees BOTH skills and howto land.
+    # The help text references the deployed asset class so an operator
+    # reading the help sees the skills land (TB-406 dropped the howto
+    # quick-reference; the manual is wholly the skill bundles now).
     assert "skills" in help_text
-    assert "howto" in help_text
 
 
 # ---------------------------------------------------------------------------
@@ -156,13 +161,14 @@ def test_sync_assets_rejects_missing_user(monkeypatch, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_sync_assets_sbuser_apply_lands_both_assets(tmp_path):
-    """End-to-end `--sbuser apply` against a `--dest` tmp target writes
-    BOTH `skills/*` AND `ap2-howto.md` into the target .claude/ dir
-    with no sudo. This is THE regression-pin the briefing calls for:
-    the unified command deploys both assets in one invocation, and the
-    sandbox-user path writes directly to the current process's home
-    without any sudo intermediary."""
+def test_sync_assets_sbuser_apply_lands_skill_assets(tmp_path):
+    """End-to-end `--sbuser apply` against a `--dest` tmp target writes the
+    `skills/*` bundles into the target .claude/skills/ dir with no sudo.
+    This is THE regression-pin the briefing calls for: the unified command
+    deploys the operator skills in one invocation, and the sandbox-user path
+    writes directly to the current process's home without any sudo
+    intermediary. (TB-406 retired the separate `ap2-howto.md` target; the
+    Codex `~/.agents/...` targets are pinned in the TB-401 test below.)"""
     dest = tmp_path / "claude"
     rc = sandbox.sync_assets(sbuser=True, apply=True, dest=dest)
     assert rc == 0
@@ -170,10 +176,8 @@ def test_sync_assets_sbuser_apply_lands_both_assets(tmp_path):
     assert (dest / "skills" / "ap2" / "SKILL.md").is_file()
     assert (dest / "skills" / "ap2-task" / "SKILL.md").is_file()
     assert (dest / "skills" / "migrate-to-ap2" / "SKILL.md").is_file()
-    # Howto landed with the source body.
-    howto = dest / "ap2-howto.md"
-    assert howto.is_file()
-    assert howto.read_text() == HOWTO_SRC.read_text()
+    # No separate Claude-side quick-reference file is deployed (TB-406).
+    assert not (dest / "ap2-howto.md").exists()
 
 
 def test_sync_assets_sbuser_dry_run_does_not_mutate(tmp_path, capsys):
@@ -189,9 +193,8 @@ def test_sync_assets_sbuser_dry_run_does_not_mutate(tmp_path, capsys):
     assert not (dest / "ap2-howto.md").exists()
     out = capsys.readouterr().out
     assert "dry-run" in out
-    # Per-asset summary mentions both classes.
+    # Per-asset summary mentions the skills class.
     assert "skills/ap2" in out
-    assert "ap2-howto.md" in out
 
 
 def test_sync_assets_sbuser_apply_is_idempotent(tmp_path, capsys):
@@ -274,8 +277,8 @@ def test_sync_assets_sbuser_apply_lands_codex_target_and_pointer(tmp_path):
     assert (agents_skills / "migrate-to-ap2" / "SKILL.md").is_file()
     # ... and STILL into the Claude target (additive, not a move).
     assert (claude_dir / "skills" / "ap2" / "SKILL.md").is_file()
-    # The Claude howto reference is retained (out-of-scope to drop here).
-    assert (claude_dir / "ap2-howto.md").read_text() == HOWTO_SRC.read_text()
+    # No separate Claude-side quick-reference file is deployed (TB-406).
+    assert not (claude_dir / "ap2-howto.md").exists()
 
     # (2) Codex operator reference (repo AGENTS.md) deployed verbatim.
     agents_md = tmp_path / ".agents" / "AGENTS.md"
@@ -399,8 +402,9 @@ def test_sync_assets_default_mode_issues_sudo_prefix(monkeypatch, tmp_path, caps
             return subprocess.CompletedProcess(
                 argv, 0, stdout=">f+++++++++ SKILL.md\n", stderr="",
             )
-        # The howto drift probe (sh -c 'test -f ... && cat ... || true')
-        # returns empty stdout, signalling the howto is absent in dest.
+        # The reference-file / pointer drift probes (sh -c 'test -f ...
+        # && cat ... || true') return empty stdout, signalling the target
+        # is absent in dest so the function proceeds to tee.
         if "sh" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -418,18 +422,23 @@ def test_sync_assets_default_mode_issues_sudo_prefix(monkeypatch, tmp_path, caps
         )
 
     # At least one rsync apply (real, not dry-run) was issued per skill,
-    # and at least one tee write to the howto target.
+    # and at least one tee write to the AGENTS.md reference target.
     rsync_apply_calls = [
         argv for argv, _ in captures
         if "rsync" in argv and "-a" in argv and "-an" not in argv
     ]
     assert rsync_apply_calls, "expected at least one `rsync -a --delete` apply"
 
-    tee_calls = [(argv, body) for argv, body in captures if "tee" in argv]
-    assert tee_calls, "expected a tee write for ap2-howto.md"
-    tee_argv, tee_body = tee_calls[0]
-    assert tee_argv[tee_argv.index("tee") + 1] == str(dest / "ap2-howto.md")
-    assert tee_body == HOWTO_SRC.read_text()
+    # A tee write to the Codex AGENTS.md reference target (TB-406 dropped
+    # the howto tee; AGENTS.md is now the single single-file reference).
+    agents_md_dest = dest.parent / ".agents" / "AGENTS.md"
+    agents_tees = [
+        (argv, body) for argv, body in captures
+        if "tee" in argv and str(agents_md_dest) in argv
+    ]
+    assert agents_tees, "expected a tee write for the AGENTS.md reference"
+    _agents_argv, agents_body = agents_tees[0]
+    assert agents_body == AGENTS_SRC.read_text()
 
 
 def test_sync_assets_default_mode_targets_users_home_dirs(monkeypatch, tmp_path):
@@ -446,10 +455,9 @@ def test_sync_assets_default_mode_targets_users_home_dirs(monkeypatch, tmp_path)
         if "rsync" in argv and "-an" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if "sh" in argv:
-            # Pretend the howto already matches so we skip the tee write.
-            return subprocess.CompletedProcess(
-                argv, 0, stdout=HOWTO_SRC.read_text(), stderr="",
-            )
+            # Reference-file / pointer drift probes return empty stdout;
+            # this test only asserts the rsync destinations (dry-run).
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -474,14 +482,17 @@ def test_sync_assets_default_mode_targets_users_home_dirs(monkeypatch, tmp_path)
     )
 
 
-def test_sync_assets_default_mode_skips_unchanged_howto(monkeypatch, tmp_path):
-    """If the destination howto matches the source byte-for-byte, the
-    function skips the tee write (idempotency). Pin so a refactor that
-    drops the drift comparison and always re-writes surfaces here —
-    that'd be a regression both for performance (unnecessary sudo
-    writes on a no-op refresh) and for `ap2-howto.md`'s mtime
-    stability."""
+def test_sync_assets_default_mode_skips_unchanged_agents_md(monkeypatch, tmp_path):
+    """If the destination AGENTS.md reference matches the source
+    byte-for-byte, the function skips the tee write (idempotency). Pin so a
+    refactor that drops the drift comparison and always re-writes surfaces
+    here — that'd be a regression both for performance (unnecessary sudo
+    writes on a no-op refresh) and for the reference file's mtime stability.
+    (TB-406 retired the howto target; AGENTS.md is now the single single-file
+    reference this contract guards.)"""
     _wire_user_home(monkeypatch, tmp_path)
+    dest = tmp_path / "claude"
+    agents_md_dest = dest.parent / ".agents" / "AGENTS.md"
     captures: list[tuple[str, ...]] = []
 
     def fake_run(argv, *a, **kw):
@@ -490,29 +501,31 @@ def test_sync_assets_default_mode_skips_unchanged_howto(monkeypatch, tmp_path):
         if "rsync" in argv and "-an" in argv:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if "sh" in argv:
-            # Only the howto drift-probe sees a matching file; the AGENTS.md
-            # reference + pointer reads (TB-401) see an absent file (empty).
-            if "ap2-howto.md" in joined:
+            # Only the AGENTS.md reference drift-probe sees a matching file;
+            # the pointer-stanza reads (`.codex/AGENTS.md`, `.claude/CLAUDE.md`)
+            # see an absent file (empty stdout). The reference dest lives under
+            # `.agents/`, distinct from the `.codex/` pointer path.
+            if str(agents_md_dest) in joined:
                 return subprocess.CompletedProcess(
-                    argv, 0, stdout=HOWTO_SRC.read_text(), stderr="",
+                    argv, 0, stdout=AGENTS_SRC.read_text(), stderr="",
                 )
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     rc = sandbox.sync_assets(
-        "claude-agent", sbuser=False, apply=True, dest=tmp_path / "claude",
+        "claude-agent", sbuser=False, apply=True, dest=dest,
     )
     assert rc == 0
-    # No tee write should have fired for the howto — it's already in sync.
-    # (Other targets — AGENTS.md / pointers — may legitimately tee; this
-    # test pins ONLY the howto idempotency contract.)
-    howto_tees = [
+    # No tee write should have fired for AGENTS.md — it's already in sync.
+    # (Other targets — the pointer stanzas — may legitimately tee; this test
+    # pins ONLY the AGENTS.md reference idempotency contract.)
+    agents_tees = [
         argv for argv in captures
-        if "tee" in argv and any("ap2-howto.md" in part for part in argv)
+        if "tee" in argv and str(agents_md_dest) in argv
     ]
-    assert not howto_tees, (
-        "expected no tee write when howto matches source byte-for-byte"
+    assert not agents_tees, (
+        "expected no tee write when AGENTS.md matches source byte-for-byte"
     )
 
 

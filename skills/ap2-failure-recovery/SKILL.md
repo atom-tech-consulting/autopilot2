@@ -8,7 +8,7 @@ description: "Use when an ap2 daemon hit trouble — a task failed / froze / ret
 The recovery / escalation manual for an ap2 daemon: what the daemon
 heals on its own, and where the operator looks (and which verb the
 operator runs) when something has gone wrong. An operator should never
-have to grep `ap2/howto.md` to learn how a crash is salvaged or how to
+have to hunt through the ap2 source to learn how a crash is salvaged or how to
 triage a Frozen task. Two self-contained surfaces:
 
 - **Failure modes the daemon recovers from** — the auto-recovery

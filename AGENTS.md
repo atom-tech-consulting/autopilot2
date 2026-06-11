@@ -1,9 +1,10 @@
 # AGENTS.md — ap2 operator guide (Codex / agentskills.io runtimes)
 
 This repository ships **autopilot v2 (ap2)**, a self-driving task daemon.
-This file is the Codex / standard-runtime analog of the Claude-side operator
-quick-reference (`ap2/howto.md`): it points a fresh agent session at the
-operator skills so it can drive the board.
+This file is the Codex / standard-runtime operator reference: it points a
+fresh agent session at the operator skills so it can drive the board. (On
+the Claude side the equivalent entry point is the top-level `ap2` skill;
+both runtimes share the same `skills/*` operator manual.)
 
 ## Operator skills
 

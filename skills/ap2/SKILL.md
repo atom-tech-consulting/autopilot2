@@ -147,3 +147,30 @@ next tick:
 
 Do **not** invoke any of these from this skill — surfacing the command is
 fine, executing it isn't.
+
+## Reading order — where to look for depth
+
+ap2 keeps no long-lived session: it is a Python daemon that drives a project
+through a task list, running each unit of work (task / cron / ideation /
+mattermost reply) as a fresh SDK `query()` with shared awareness living on
+disk. When you need more than this status snapshot, read in this order:
+
+1. **This snapshot** — what's on the board, is the daemon alive, what did it
+   do lately (the steps above).
+2. **`.cc-autopilot/progress.md`** (tail) — recent task outcomes in
+   operator-readable prose.
+3. **`.cc-autopilot/events.jsonl`** (tail) — the structured timeline (the
+   canonical record; see the **ap2-observability** skill for the event
+   schema).
+4. **`git log --oneline -30`** — what code actually shipped (daemon commits
+   carry the `TB-N` task id in the subject).
+5. **The full ap2 docs** — `ap2/README.md` (operator quickstart) and
+   `ap2/architecture.md` (design rationale, agent kinds, the daemon tick, the
+   sandbox + convergence models, the on-disk layout). The operator manual —
+   CLI verbs, env knobs, event schema, briefing-fix shapes — lives in the
+   auto-triggered domain skills: **ap2-board-ops** (verbs + MCP tools),
+   **ap2-config** (knobs + config keys), **ap2-task** (the task-agent
+   contract + `## Verification` bullet authoring), **ap2-observability**
+   (events + `ap2 status` components), **ap2-failure-recovery** (how the
+   daemon self-heals + where to look when it doesn't), and
+   **ap2-ideation-goals** (authoring `goal.md` + the `ap2 audit` walk).

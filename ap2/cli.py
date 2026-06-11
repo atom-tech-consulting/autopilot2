@@ -762,10 +762,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sc = sub_sbx.add_parser(
         "sync-assets",
-        help="deploy BOTH <repo>/skills/* AND ap2/howto.md into a target "
-             "~/.claude/ in one invocation (TB-276; default dry-run, "
-             "--apply to copy). Default: sudo into <user>'s home; "
-             "--sbuser: write to current user's $HOME, no sudo",
+        help="deploy <repo>/skills/* into a target's runtime skills roots "
+             "(+ the Codex AGENTS.md reference) in one invocation (TB-276; "
+             "default dry-run, --apply to copy). Default: sudo into "
+             "<user>'s home; --sbuser: write to current user's $HOME, no sudo",
     )
     sc.add_argument("user", nargs="?", default=sandbox.DEFAULT_USER,
                     help="target sandbox user (ignored when --sbuser is "

@@ -190,7 +190,8 @@ across backends.
 The daemon-start auth gate walks the resolved backend set and refuses to start
 unless every referenced backend's credentials are present (Claude:
 `CLAUDE_CODE_OAUTH_TOKEN`; Codex: `OPENAI_API_KEY` or a `~/.codex/auth.json`
-ChatGPT-login session). See `howto.md` for the operational config (the
+ChatGPT-login session). See the **ap2-config** skill
+(`skills/ap2-config/SKILL.md`) for the operational config (the
 `[agent_backends]` table, the `AP2_AGENT_BACKEND_<KIND>` override, per-backend
 auth, and the daemon-start gate).
 
@@ -384,8 +385,9 @@ ap2/
 ├── ideation.default.md   # the ideation prompt body (load-bearing)
 ├── cron.default.yaml     # bootstrapped cron jobs (status-report)
 ├── README.md             # operator quickstart + CLI reference
-├── howto.md              # operator + agent reference: CLI verbs, env knobs, event schema, fix-shapes
 └── architecture.md       # this file
+# (the operator + agent manual — CLI verbs, env knobs, event schema, fix-shapes —
+#  lives in the auto-triggered skills/ap2-*/SKILL.md bundles, not an ap2/*.md file)
 ```
 
 Cycles to watch out for:
