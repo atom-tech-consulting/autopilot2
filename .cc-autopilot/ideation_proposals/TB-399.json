@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-397",
   "briefing_path": ".cc-autopilot/tasks/carve-howto-md-operator-cli-verb-mcp-too.md",
   "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-11T04:37:55Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-10T23:24:39Z",
   "tb_id": "TB-399",
   "why_now": "the CLI-verb and MCP-tool references are pure operator-action lookup content that belongs on a task-matched board-ops skill, not buried in a 3,100-line manual; carving them retargets two more drift gates off howto and shrinks the surface the eventual howto-retirement task must clear."

@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/canary-carve-howto-md-observability-doma.md",
   "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-11T04:37:55Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-10T23:23:51Z",
   "tb_id": "TB-397",
   "why_now": "`ap2/howto.md` is discoverable only via a hand-maintained pointer and cannot auto-surface on a task match; without a canary that nails the SKILL.md shape and the carve-plus-gate-retarget pattern, the parallel carves would each re-invent conventions and drift."
