@@ -1581,3 +1581,9 @@
 - **Summary:** Carved the observability domain (event schema, prose-judge diagnostics, ap2 logs live-tail, stats dashboard) out of ap2/howto.md into skills/ap2-observability/SKILL.md canary; retargeted event-type drift gate onto OBSERVABILITY_SKILL (other gates stay on HOWTO_PATH); followed displaced TB-245/TB-259 docs-location gates to the skill; full suite 3048 passed.
 - **Files:** skills/ap2-observability/SKILL.md, ap2/howto.md, ap2/tests/test_docs_drift.py, ap2/tests/test_tb245_status_report_validator_judge_digest.py, ap2/tests/test_tb259_status_report_stats_window.py
 - **Tests:** pass
+
+## [2026-06-11] TB-398: Carve howto.md config reference into skills/ap2-config/ + retarget env-knob & config-key drift gates
+- **Commit:** `40b1db5`
+- **Summary:** Carved howto.md's Configuration knobs + Config keys (TOML) + Codex backend setup into skills/ap2-config/SKILL.md, retargeted the env-knob & config-key drift gates (plus the displaced TB-336/TB-229/TB-287-290 docs-location pins) onto it, and left a pointer in howto; full suite green (3048 passed).
+- **Files:** skills/ap2-config/SKILL.md, ap2/howto.md, ap2/init.py, ap2/tests/test_docs_drift.py, ap2/tests/test_tb229_briefing_fix_teaching.py, ap2/tests/test_tb287_attention_task_frozen.py, ap2/tests/test_tb288_attention_validator_judge_noisy.py, ap2/tests/test_tb289_attention_auto_approve_paused.py, ap2/tests/test_tb290_attention_cost_cap_approach.py, ap2/tests/test_tb336_axis5_tail_cfg_reads.py, skills/ap2-observability/SKILL.md
+- **Tests:** pass
