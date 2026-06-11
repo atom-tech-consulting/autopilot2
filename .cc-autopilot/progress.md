@@ -1611,3 +1611,9 @@
 - **Summary:** Carved howto's `## Failure modes the daemon recovers from` + `## Operator-question playbook` into skills/ap2-failure-recovery/SKILL.md (name/description auto-trigger frontmatter), left one-line pointers in howto; neither carved section had a HOWTO_PATH-keyed coverage gate to retarget (both prose/table), so registered a FAILURE_RECOVERY_SKILL constant + a docs-location pin asserting no duplication; full suite 3054 passed.
 - **Files:** skills/ap2-failure-recovery/SKILL.md, ap2/howto.md, ap2/tests/test_docs_drift.py
 - **Tests:** pass
+
+## [2026-06-11] TB-403: Carve howto.md goal/focus authoring + retrospective audit workflow into skills/ap2-ideation-goals/ + retarget displaced gates
+- **Commit:** `398a60e`
+- **Summary:** Carved howto's `## Authoring goal.md` + `## Retrospective audit workflow` into the new auto-triggered skills/ap2-ideation-goals/SKILL.md, replaced both howto sections with one-line pointers, and retargeted the displaced docs gates (test_docs.py onto IDEATION_GOALS_SKILL, a new test_ideation_goals_domain_carved_to_skill pin + constant in test_docs_drift.py, and the displaced TB-244 howto cross-reference pin onto the skill); ideation.default.md stays canonical for daemon briefing conventions; full suite 3055 passed.
+- **Files:** skills/ap2-ideation-goals/SKILL.md, ap2/howto.md, ap2/tests/test_docs.py, ap2/tests/test_docs_drift.py, ap2/tests/test_tb244_status_report_focus_rotation_digest.py
+- **Tests:** pass
