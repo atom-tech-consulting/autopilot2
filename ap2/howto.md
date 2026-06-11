@@ -270,83 +270,17 @@ shared ingestion bus and no polling fallback") so a briefing proposing
 "add a backup polling fetcher" can be vetoed unambiguously by the
 operator and called out by ideation's non-goal risk check.
 
-## The task agent contract
+## Task-agent contract — see the ap2-task skill
 
-If you (the Claude session) are dispatched as a **task agent**, your
-prompt is built from `_TASK_HEADER` + the briefing file + a tail of
-recent events + `_TASK_FOOTER`. You must:
-
-1. **Read the briefing first** at `.cc-autopilot/tasks/<task-slug>.md`.
-   It has `## Goal` / `## Scope` / `## Verification` (your gate) /
-   `## Out of scope`.
-2. **Check for prior work.** Before you start: `git log --grep="<TASK_ID>" --oneline`.
-   If a previous attempt committed but didn't report, decide whether to
-   extend or accept the existing work — don't redo from scratch.
-3. **Make code changes** with regular `Edit` / `Write` / `Bash`. **Do
-   NOT touch** these files (the SDK actively rejects writes via
-   `disallowed_tools`):
-   - `TASKS.md` — daemon owns the board
-   - `CLAUDE.md` — daemon bumps `Next task ID`
-   - `goal.md` — operator-curated mission; if you think it needs an
-     update, raise it in your `summary`, don't rewrite
-   - `.cc-autopilot/progress.md` / `events.jsonl` /
-     `ideation_state.md` / `cron.yaml`
-4. **Commit your work** with subject starting `<TASK_ID>: ...`. The
-   prefix is load-bearing — the daemon's HEAD-recovery path (TB-65)
-   uses it to salvage runs where you crashed before reporting.
-5. **Call `mcp__autopilot__report_result(...)` ONCE at the end.** This
-   is the only completion signal the daemon listens for.
-
-```python
-report_result(
-    status="complete",          # complete | incomplete | blocked | failed
-    commit="a1b2c3d4",          # 7-40 char SHA, or "" if no commit
-    summary="Added X to Y, all tests pass.",
-    files_changed="foo/bar.py, foo/bar_test.py",
-    tests_passed="true",        # "true" / "false"
-)
-```
-
-To surface "this should fire on a schedule" without bundling it into the
-result reporting, call the dedicated `cron_propose(name, schedule, prompt,
-rationale)` tool one or more times (TB-123 lifted the legacy `cron='...'`
-argument out of `report_result`). Proposals queue for operator review;
-they do NOT mutate `cron.yaml`.
-
-If you forget to call the tool, the daemon reads `git log -1`. If HEAD's
-subject starts with `<TASK_ID>:` it's salvaged as Complete; otherwise
-the task shelves to Backlog and retries up to `AP2_MAX_RETRIES` (default
-3), then Frozen.
-
-### Long-running work — use `pipeline_task_start`
-
-If your work would take >~5 minutes wall-clock (grid sweeps,
-full-history backtests, Polygon-class data fetches, ML training,
-anything with rate-limited APIs), don't run it inline. Call:
-
-```python
-pipeline_task_start(
-    name="my-sweep",
-    command="uv run python scripts/run_my_sweep.py",
-)
-```
-
-The tool spawns the command detached, captures the pid +
-`create_time()`, and emits a `pipeline_start` event. After your
-`report_result(status="complete", ...)` the daemon moves THIS task
-to a `Pipeline Pending` board section (TB-115). On every subsequent
-tick, the daemon checks whether all of your spawned pids are dead.
-Once they are, it re-runs your briefing's `## Verification`
-against the post-pipeline working tree — pass → Complete, fail →
-Backlog (with retry-counter bump) → Frozen on retry exhaustion.
-You can call `pipeline_task_start` multiple times in one turn for
-parallel pipelines (use distinct `name` values); the daemon waits
-for ALL of them.
-
-The briefing's `## Verification` IS the post-pipeline verification —
-write it to check output artifacts (`test -f reports/foo.csv`,
-JSON schema validation, etc.). Pre-TB-115's two-tier
-launch-task-and-validation-task split is retired.
+The task-agent contract — what a Claude session must do when the daemon
+dispatches it against a briefing (read the briefing first, check for prior
+work, the off-limits file list, the `<TASK_ID>:` commit-subject convention,
+the single `report_result(...)` completion signal, and the
+`pipeline_task_start` long-running-work path) — was consolidated into the
+auto-triggered **ap2-task** skill (`skills/ap2-task/SKILL.md`, TB-400)
+alongside the `ap2 add` briefing-authoring flow that produces those
+briefings. `ap2/ideation.default.md` remains the canonical daemon source
+for the briefing-authoring rules; the skill mirrors them for operators.
 
 ## What the daemon does each tick (~30s)
 
@@ -398,85 +332,18 @@ For prose-judge parse-failure diagnostics — length signals,
 `parse_error` categories, and the on-disk response dumps — see the
 **ap2-observability** skill (`skills/ap2-observability/SKILL.md`).
 
-## Authoring `## Verification` bullets (briefing convention)
+## Authoring `## Verification` bullets — see the ap2-task skill
 
-Bullets in a briefing's `## Verification` section are the per-task gate's
-input — the daemon parses them into one of three kinds and dispatches
-each: **shell** (run via subprocess; exit 0 = pass), **prose** (judged by
-SDK against the cumulative task diff + working tree), or **malformed**
-(classifier-detected unrecoverable shape; recorded as fail). The
-classifier in `ap2/verify.py::parse_verification_section` (TB-219) decides
-the kind from the bullet's markdown shape. Four pitfalls have caused
-n=4 retry cascades in the 2026-05-12 → 2026-05-13 window alone
-(TB-204/TB-206/TB-207/TB-209). The conventions below close every one.
-
-### Prose bullets — use the `Prose:` prefix for explicit classification
-
-Prose bullets that DON'T lead with a backtick-fenced token (e.g.
-`- the new feature is documented in CLAUDE.md`) classify as prose
-automatically. Prose bullets that DO lead with a backtick-fenced subject
-(e.g. `- ``ap2/tests/test_x.py`` exists with the expected fixture`)
-would otherwise classify as shell — and the verifier would try to exec
-the bare path. To force prose classification, prefix the post-codespan
-text with the literal token `Prose:` (case-sensitive, single colon):
-
-> `` `ap2/tests/test_x.py` Prose: the file includes the expected
-> `_COVERAGE_DRIFT_EXEMPT_SURFACES` fixture; judge confirms via Read.``
-
-The `Prose:` prefix is a hard override — it wins over every other
-classifier signal. Operators have been writing the convention organically
-since the TB-206/207/209 fix briefings; TB-219 codified it.
-
-A heuristic fallback also routes codespan-leading bullets to prose if the
-bullet text contains any of the phrases in
-`ap2/verify.py::JUDGE_INDICATOR_PHRASES` (e.g. `Judge confirms`,
-`judged via`). It's a safety net for briefings that don't use the
-`Prose:` prefix; the prefix is the canonical signal — reach for it first.
-
-### Shell bullets — four authoring pitfalls
-
-1. **No literal backticks in the command body.** Markdown's
-   single-backtick codespan cannot represent a literal backtick — mistune
-   truncates the codespan at the inner backtick and the rest of the
-   command leaks into the bullet's prose body. Workarounds:
-   - If the literal backtick is part of a regex pattern, replace it with
-     the regex any-char `.` (e.g. `'^\| .pat'` instead of
-     `'^\| `pat'`). This is the simplest fix and what TB-207's operator
-     post-mortem ships.
-   - If the literal backtick is genuinely required, wrap the codespan
-     with **double backticks**: `` `` `cmd-with-`backtick`-in-it` `` ``.
-     Mistune preserves the inner backtick under double-backtick wrapping.
-   - The TB-219 classifier detects the broken single-backtick shape and
-     emits `kind="malformed"` rather than silently exec'ing a truncated
-     half-command, so a slip-up here surfaces as a verification fail
-     with a rewrite suggestion in the event payload.
-2. **Absence-check shell bullets must use the `!` exit-inversion prefix.**
-   `grep "absent string" file` exits 1 when the string is absent, which
-   the verifier reads as a FAIL. The intent is the inverse: pass iff
-   absent. Use bash's exit-status negation: `! grep "absent string" file`
-   passes when `grep` exits non-zero (string not found) and fails when
-   `grep` exits 0 (string found — the absence claim is violated).
-3. **Directory-walking grep must use `-r`.** `grep -lE 'pat' dir/` exits
-   2 with "Is a directory" because plain `grep` is a file-only matcher.
-   The bullet looks correct but always fails at runtime. Use `grep -rlE
-   'pat' dir/` (or pre-list files via `find dir/ -type f`).
-4. **`Prose:` prefix for judge bullets.** Covered above — the
-   complement to the three shell pitfalls. If a bullet's grammatical
-   subject is a backtick-fenced filename / symbol and the rest is a
-   claim to judge against the diff, lead the suffix with `Prose:`.
-
-A worked example combining all four:
-
-```
-## Verification
-
-- `uv run pytest -q ap2/tests/` — full suite green (the canonical happy-path bullet).
-- `! grep "deprecated_symbol" ap2/` — the symbol is gone (absence check; `!` is required).
-- `grep -rlE 'pat' ap2/` — directory walk needs `-r` (file-only without it).
-- `[ "$(grep -rcE '^| .pat' ap2/cli.py)" -ge 1 ]` — regex pattern; `.` substitutes for a literal backtick the codespan couldn't represent.
-- `ap2/tests/test_new.py` Prose: the new test asserts on the documented fixture set; judge confirms via Read.
-- `ap2/howto.md` Prose: the new convention section names all four pitfalls. Judge confirms via Read.
-```
+The briefing `## Verification`-bullet authoring convention — the `Prose:`
+prefix for codespan-leading judge bullets and the four shell-bullet
+authoring pitfalls (literal backticks, the absence-check `!` prefix,
+directory-walking `grep -r`, and the `Prose:` complement) with the worked
+example combining all four — was consolidated into the **ap2-task** skill
+(`skills/ap2-task/SKILL.md`, TB-400). The
+`test_skill_still_carries_all_four_pitfalls` companion check in
+`ap2/tests/test_tb273_ideation_pitfalls_sync.py` now reads the skill.
+`ap2/ideation.default.md`'s `## Shell-bullet pitfalls to AVOID` section
+remains the canonical daemon copy; the skill mirrors it for operators.
 
 ## Failure modes the daemon recovers from
 
@@ -557,8 +424,8 @@ status + briefing path. Per-task prompt:
 - `c` — sub-prompt for `--impact <verdict>` (must be one of
   `advanced-goal` / `pro-forma` / `negative` / `unclear` per
   `IMPACT_VERDICTS`; TB-251 added `negative` as the actively-harmful
-  bucket distinct from `pro-forma`'s neutral-no-impact — see
-  `## Classify verdicts` below) + optional reason; queues
+  bucket distinct from `pro-forma`'s neutral-no-impact — see the
+  **ap2-task** skill's `## Classify verdicts` reference) + optional reason; queues
   `ap2 classify` through the operator queue. Reuses the existing
   TB-189 classify path so the per-proposal record's `impact` block
   lands alongside the operator_log line.
@@ -738,64 +605,18 @@ call so they can never disagree about a component's enabled state.
   the four `env_flag=None` manifests are the open ideation question
   named above.
 
-## Classify verdicts
+## Classify verdicts — see the ap2-task skill
 
-`ap2 classify TB-N --impact <verdict>` accepts one of four values from
-`IMPACT_VERDICTS` (single source of truth at `ap2/briefing_validators.py`; still importable via `ap2.tools.IMPACT_VERDICTS` thanks to TB-262's re-export). The four
-buckets form a gradient — substantive-positive → compliance-neutral →
-actively-harmful — with `unclear` as the explicit "can't tell yet"
-bucket. Pick the verdict by running two delete-tests in sequence:
-
-- **`advanced-goal`** — substantively advanced the goal (positive).
-  Passes the base delete-test: "if we deleted this task, would the
-  goal still ship?" Answer: no — the goal would be visibly worse off
-  without this work. Use when the task moved the active focus's
-  progress signals closer (or the top-level `## Done when` criteria,
-  if the work cuts across foci), unblocked a downstream task, or
-  shipped a user-visible capability the goal names.
-
-- **`pro-forma`** — goal-shaped but didn't advance — compliance signal
-  (no-impact + no-harm). Fails the base delete-test: deleting this
-  task would leave the goal in the same place. But also passes the
-  stronger delete-test below: deleting it wouldn't make the codebase
-  BETTER either — it just sat there, goal-shaped, satisfying
-  validators without moving the needle. Use when the task satisfied
-  its briefing on paper but the operator can't point to where the
-  goal moved (goal.md L66-76's named failure mode).
-
-- **`negative`** — actively regressed something OR made the codebase
-  worse (no-impact + harm). Fails BOTH the base delete-test AND the
-  stronger delete-test: "if we deleted this work, would the codebase
-  be BETTER, not just neutral?" Yes → `negative`. Use when a
-  regression slipped through, test coverage was inadvertently
-  weakened, a refactor landed but increased complexity beyond the
-  briefing's intent, or some other codebase-WORSE outcome — the kind
-  of shape ideation should strongly avoid proposing again. The load-
-  bearing distinction from `pro-forma` is the harm dimension:
-  `pro-forma` is "neutral, didn't help"; `negative` is "neutral on
-  the goal AND made the codebase worse."
-
-- **`unclear`** — impact not yet legible (uncertain — defer). Use
-  when the operator can't honestly answer either delete-test yet —
-  the work is too recent, depends on downstream behavior that hasn't
-  shipped, or surfaces a question rather than a verdict. Distinct
-  from skipping (`ap2 audit [s]kip`): `unclear` records that you
-  looked AND decided you can't decide; skip records that you didn't
-  decide. Re-classify later when the impact becomes legible.
-
-The `pro-forma` ↔ `negative` distinction (TB-251) is the load-bearing
-new signal: under `AP2_AUTO_APPROVE=1` the classify stream is the
-primary judgment surface for ideation prompt-tuning, and collapsing
-"neutral-but-low-value" and "actively-harmful" into one bucket loses
-the signal ideation needs to strongly avoid harmful shapes vs merely
-de-prioritize compliance-shaped ones. When in doubt between the two,
-ask: "after this shipped, was the codebase in a strictly worse state
-than before? (regressed test, weakened invariant, accreted
-complexity)" — if yes, `negative`; if no, `pro-forma`.
-
-Historical classifications stand — TB-251 did not backfill prior
-`pro-forma` records as `negative`. Future classifications use the
-richer vocabulary.
+The `ap2 classify TB-N --impact <verdict>` reference — the four
+`IMPACT_VERDICTS` buckets (`advanced-goal` / `pro-forma` / `negative` /
+`unclear`), the two delete-tests that pick the verdict, and the
+load-bearing `pro-forma` ↔ `negative` harm-dimension distinction (TB-251)
+— was consolidated into the **ap2-task** skill
+(`skills/ap2-task/SKILL.md`, TB-400). `IMPACT_VERDICTS` stays the source
+of truth at `ap2/briefing_validators.py` (re-exported via
+`ap2.tools.IMPACT_VERDICTS`); the `## Retrospective audit workflow`
+section above and `ap2 audit --interactive`'s `[c]lassify` action both
+reference that verdict vocabulary.
 
 ## Operator-question playbook
 

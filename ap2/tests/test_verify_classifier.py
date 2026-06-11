@@ -12,9 +12,10 @@ Each test names the motivating TB-N in a docstring or comment so future
 debuggers can map "this test failed" → "this is the n=Nth re-occurrence
 of the shape; here's the original incident."
 
-See `ap2/verify.py` for the classifier rules and
-`ap2/howto.md`'s "Authoring `## Verification` bullets" section for the
-operator-facing convention these tests pin.
+See `ap2/verify.py` for the classifier rules and the **ap2-task** skill's
+"Authoring `## Verification` bullets" section (`skills/ap2-task/SKILL.md`,
+consolidated out of `ap2/howto.md` in TB-400) for the operator-facing
+convention these tests pin.
 """
 from __future__ import annotations
 

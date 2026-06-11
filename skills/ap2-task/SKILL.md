@@ -1,6 +1,6 @@
 ---
 name: ap2-task
-description: "Add a task to an ap2 sandbox project's Backlog by authoring a briefing markdown file and passing it to `ap2 add --briefing-file` (locks TASKS.md, issues a fresh TB-N, no ID collisions). Auto-detects whether to run as the sandbox user directly or escalate via sudo from the main user."
+description: "Add a task to an ap2 sandbox project's Backlog by authoring a briefing markdown file and passing it to `ap2 add --briefing-file` (locks TASKS.md, issues a fresh TB-N, no ID collisions). Auto-detects whether to run as the sandbox user directly or escalate via sudo from the main user. Also the operator-facing reference for the task-agent contract, authoring `## Verification` bullets (the `Prose:` prefix + the four shell-bullet pitfalls), and `ap2 classify` impact verdicts — mirroring the daemon-canonical authoring rules in `ap2/ideation.default.md`."
 user_invocable: true
 ---
 
@@ -77,7 +77,7 @@ Conventions:
 - **Title (H1)**: `# Title` — the first H1 is parsed as the task title. Keep under ~70 chars, imperative verb preferred ("Add X", "Write Y"). Do NOT prefix with `TB-N`; the daemon allocates the ID. (If you copy from a daemon-prepped briefing where the H1 is already `TB-N — Title`, the parser strips `TB-N — ` for you.)
 - **Tags line**: optional `Tags: #cli #helpers` (case-insensitive prefix). Tokens are `#`-prefixed words OR comma-separated bare words; both shapes round-trip onto the rendered task line. If you also pass `-t #extra` to `ap2 add`, those are appended (deduped) on top of the briefing's tags.
 - **Verification**: at least one bullet beyond the project-wide pytest gate. Shell bullets (backtick-prefixed) run automatically; prose bullets are judged by an SDK call against the diff. Empty `## Verification` means the verifier scores nothing scope-specific.
-  - **`Prose:` prefix for codespan-leading prose bullets (TB-219).** When a prose bullet's grammatical subject is a backtick-fenced filename or symbol (e.g. `` `ap2/tests/test_x.py` ``), the classifier would otherwise route it to shell and try to exec the bare path. Lead the post-codespan text with the literal token `Prose:` (case-sensitive, single colon) to force prose classification — it is the canonical hard-override signal and wins over every other classifier signal. Example: `` - `ap2/tests/test_x.py` Prose: the file includes the expected fixture; judge confirms via Read.`` Reach for the prefix first whenever a prose bullet starts with a codespan; see `ap2/howto.md` "Prose bullets — use the `Prose:` prefix" for the full convention.
+  - **`Prose:` prefix for codespan-leading prose bullets (TB-219).** When a prose bullet's grammatical subject is a backtick-fenced filename or symbol (e.g. `` `ap2/tests/test_x.py` ``), the classifier would otherwise route it to shell and try to exec the bare path. Lead the post-codespan text with the literal token `Prose:` (case-sensitive, single colon) to force prose classification — it is the canonical hard-override signal and wins over every other classifier signal. Example: `` - `ap2/tests/test_x.py` Prose: the file includes the expected fixture; judge confirms via Read.`` Reach for the prefix first whenever a prose bullet starts with a codespan; see the **Authoring `## Verification` bullets** reference section at the end of this skill for the full convention (incl. the four shell-bullet pitfalls + a worked example).
   - **Auto-verifiable bullets only (TB-138).** Every `## Verification` bullet must be auto-verifiable — one of: (1) a backticked shell command the verifier can `/bin/sh -c`, (2) a unit/e2e test name the regression gate covers, or (3) a prose claim that names a concrete file/symbol an SDK judge can `Read`/`Grep` against the diff. **No `Manual:` bullets.** No "operator runs X live and observes Y" — the verifier runs unattended and cannot observe out-of-band actions. The queue-append validator rejects `Manual:` bullets outright (TB-171) before TB-N allocation, so don't bother trying.
   - Canonical conversion (TB-122): the briefing originally had `- Manual: kick a long-running task on stoch, mention @claude-bot status → handler replies in <30s`. The verifier (correctly) couldn't evaluate it; 5/6 bullets passed but the manual one kept failing → `retry_exhausted` and the task got re-frozen despite the implementation being complete. The fix: stub a slow SDK reply in an e2e test, enqueue a Mattermost mention, assert the handler's `mattermost_reply` event lands within 30s of the mention timestamp — pins the same responsiveness claim end-to-end.
   - If a behavior genuinely cannot be auto-verified (rare), put it in `## Out of scope`. Do **not** invent a separate "manual checklist" section — if the daemon can't gate on it, it's out of scope.
@@ -277,3 +277,231 @@ A pre-TB-132 transition fallback still parses `(blocked on: ...)` from descripti
 - **Single line for tags / titles / blocked.** Tag tokens, the H1 itself, and `--blocked` values must be single-line — embedded newlines break the line-oriented parser (TB-134). For richer prose, put it inside the briefing's `## Goal` / `## Scope` sections.
 - **Blockers go in `--blocked`, not in the description (TB-132).** Pass `--blocked TB-5,TB-7` to declare structured blockers; the CLI emits a `@blocked:TB-5,TB-7` codespan on the task line. Don't write `(blocked on: ...)` into the briefing prose — TB-132 ended that path because it collided with descriptive text (TB-121 self-blocked on the literal phrase).
 - **Run sudo directly when invoking from the main user.** Call it through Bash like any other command. Only fall back to handing the `! sudo …` form to the user if sudo prompts for a password and the call fails.
+
+---
+
+# Reference: task-agent contract + verification-bullet authoring + classify verdicts
+
+The three reference sections below were consolidated out of `ap2/howto.md`
+(TB-400) so the operator-facing briefing-authoring reference lives next to
+the `ap2 add` flow that produces briefings. **`ap2/ideation.default.md`
+remains the canonical daemon source for the briefing-authoring rules the
+ideation agent follows; this skill MIRRORS those rules for operators.**
+When the two drift, reconcile against `ap2/ideation.default.md`.
+
+## The task agent contract
+
+If you (the Claude session) are dispatched as a **task agent**, your
+prompt is built from `_TASK_HEADER` + the briefing file + a tail of
+recent events + `_TASK_FOOTER`. You must:
+
+1. **Read the briefing first** at `.cc-autopilot/tasks/<task-slug>.md`.
+   It has `## Goal` / `## Scope` / `## Verification` (your gate) /
+   `## Out of scope`.
+2. **Check for prior work.** Before you start: `git log --grep="<TASK_ID>" --oneline`.
+   If a previous attempt committed but didn't report, decide whether to
+   extend or accept the existing work — don't redo from scratch.
+3. **Make code changes** with regular `Edit` / `Write` / `Bash`. **Do
+   NOT touch** these files (the SDK actively rejects writes via
+   `disallowed_tools`):
+   - `TASKS.md` — daemon owns the board
+   - `CLAUDE.md` — daemon bumps `Next task ID`
+   - `goal.md` — operator-curated mission; if you think it needs an
+     update, raise it in your `summary`, don't rewrite
+   - `.cc-autopilot/progress.md` / `events.jsonl` /
+     `ideation_state.md` / `cron.yaml`
+4. **Commit your work** with subject starting `<TASK_ID>: ...`. The
+   prefix is load-bearing — the daemon's HEAD-recovery path (TB-65)
+   uses it to salvage runs where you crashed before reporting.
+5. **Call `mcp__autopilot__report_result(...)` ONCE at the end.** This
+   is the only completion signal the daemon listens for.
+
+```python
+report_result(
+    status="complete",          # complete | incomplete | blocked | failed
+    commit="a1b2c3d4",          # 7-40 char SHA, or "" if no commit
+    summary="Added X to Y, all tests pass.",
+    files_changed="foo/bar.py, foo/bar_test.py",
+    tests_passed="true",        # "true" / "false"
+)
+```
+
+To surface "this should fire on a schedule" without bundling it into the
+result reporting, call the dedicated `cron_propose(name, schedule, prompt,
+rationale)` tool one or more times (TB-123 lifted the legacy `cron='...'`
+argument out of `report_result`). Proposals queue for operator review;
+they do NOT mutate `cron.yaml`.
+
+If you forget to call the tool, the daemon reads `git log -1`. If HEAD's
+subject starts with `<TASK_ID>:` it's salvaged as Complete; otherwise
+the task shelves to Backlog and retries up to `AP2_MAX_RETRIES` (default
+3), then Frozen.
+
+### Long-running work — use `pipeline_task_start`
+
+If your work would take >~5 minutes wall-clock (grid sweeps,
+full-history backtests, Polygon-class data fetches, ML training,
+anything with rate-limited APIs), don't run it inline. Call:
+
+```python
+pipeline_task_start(
+    name="my-sweep",
+    command="uv run python scripts/run_my_sweep.py",
+)
+```
+
+The tool spawns the command detached, captures the pid +
+`create_time()`, and emits a `pipeline_start` event. After your
+`report_result(status="complete", ...)` the daemon moves THIS task
+to a `Pipeline Pending` board section (TB-115). On every subsequent
+tick, the daemon checks whether all of your spawned pids are dead.
+Once they are, it re-runs your briefing's `## Verification`
+against the post-pipeline working tree — pass → Complete, fail →
+Backlog (with retry-counter bump) → Frozen on retry exhaustion.
+You can call `pipeline_task_start` multiple times in one turn for
+parallel pipelines (use distinct `name` values); the daemon waits
+for ALL of them.
+
+The briefing's `## Verification` IS the post-pipeline verification —
+write it to check output artifacts (`test -f reports/foo.csv`,
+JSON schema validation, etc.). Pre-TB-115's two-tier
+launch-task-and-validation-task split is retired.
+
+## Authoring `## Verification` bullets (briefing convention)
+
+Bullets in a briefing's `## Verification` section are the per-task gate's
+input — the daemon parses them into one of three kinds and dispatches
+each: **shell** (run via subprocess; exit 0 = pass), **prose** (judged by
+SDK against the cumulative task diff + working tree), or **malformed**
+(classifier-detected unrecoverable shape; recorded as fail). The
+classifier in `ap2/verify.py::parse_verification_section` (TB-219) decides
+the kind from the bullet's markdown shape. Four pitfalls have caused
+n=4 retry cascades in the 2026-05-12 → 2026-05-13 window alone
+(TB-204/TB-206/TB-207/TB-209). The conventions below close every one.
+
+### Prose bullets — use the `Prose:` prefix for explicit classification
+
+Prose bullets that DON'T lead with a backtick-fenced token (e.g.
+`- the new feature is documented in CLAUDE.md`) classify as prose
+automatically. Prose bullets that DO lead with a backtick-fenced subject
+(e.g. `- ``ap2/tests/test_x.py`` exists with the expected fixture`)
+would otherwise classify as shell — and the verifier would try to exec
+the bare path. To force prose classification, prefix the post-codespan
+text with the literal token `Prose:` (case-sensitive, single colon):
+
+> `` `ap2/tests/test_x.py` Prose: the file includes the expected
+> `_COVERAGE_DRIFT_EXEMPT_SURFACES` fixture; judge confirms via Read.``
+
+The `Prose:` prefix is a hard override — it wins over every other
+classifier signal. Operators have been writing the convention organically
+since the TB-206/207/209 fix briefings; TB-219 codified it.
+
+A heuristic fallback also routes codespan-leading bullets to prose if the
+bullet text contains any of the phrases in
+`ap2/verify.py::JUDGE_INDICATOR_PHRASES` (e.g. `Judge confirms`,
+`judged via`). It's a safety net for briefings that don't use the
+`Prose:` prefix; the prefix is the canonical signal — reach for it first.
+
+### Shell bullets — four authoring pitfalls
+
+1. **No literal backticks in the command body.** Markdown's
+   single-backtick codespan cannot represent a literal backtick — mistune
+   truncates the codespan at the inner backtick and the rest of the
+   command leaks into the bullet's prose body. Workarounds:
+   - If the literal backtick is part of a regex pattern, replace it with
+     the regex any-char `.` (e.g. `'^\| .pat'` instead of
+     `'^\| `pat'`). This is the simplest fix and what TB-207's operator
+     post-mortem ships.
+   - If the literal backtick is genuinely required, wrap the codespan
+     with **double backticks**: `` `` `cmd-with-`backtick`-in-it` `` ``.
+     Mistune preserves the inner backtick under double-backtick wrapping.
+   - The TB-219 classifier detects the broken single-backtick shape and
+     emits `kind="malformed"` rather than silently exec'ing a truncated
+     half-command, so a slip-up here surfaces as a verification fail
+     with a rewrite suggestion in the event payload.
+2. **Absence-check shell bullets must use the `!` exit-inversion prefix.**
+   `grep "absent string" file` exits 1 when the string is absent, which
+   the verifier reads as a FAIL. The intent is the inverse: pass iff
+   absent. Use bash's exit-status negation: `! grep "absent string" file`
+   passes when `grep` exits non-zero (string not found) and fails when
+   `grep` exits 0 (string found — the absence claim is violated).
+3. **Directory-walking grep must use `-r`.** `grep -lE 'pat' dir/` exits
+   2 with "Is a directory" because plain `grep` is a file-only matcher.
+   The bullet looks correct but always fails at runtime. Use `grep -rlE
+   'pat' dir/` (or pre-list files via `find dir/ -type f`).
+4. **`Prose:` prefix for judge bullets.** Covered above — the
+   complement to the three shell pitfalls. If a bullet's grammatical
+   subject is a backtick-fenced filename / symbol and the rest is a
+   claim to judge against the diff, lead the suffix with `Prose:`.
+
+A worked example combining all four:
+
+```
+## Verification
+
+- `uv run pytest -q ap2/tests/` — full suite green (the canonical happy-path bullet).
+- `! grep "deprecated_symbol" ap2/` — the symbol is gone (absence check; `!` is required).
+- `grep -rlE 'pat' ap2/` — directory walk needs `-r` (file-only without it).
+- `[ "$(grep -rcE '^| .pat' ap2/cli.py)" -ge 1 ]` — regex pattern; `.` substitutes for a literal backtick the codespan couldn't represent.
+- `ap2/tests/test_new.py` Prose: the new test asserts on the documented fixture set; judge confirms via Read.
+- `skills/ap2-task/SKILL.md` Prose: the new convention section names all four pitfalls. Judge confirms via Read.
+```
+
+## Classify verdicts
+
+`ap2 classify TB-N --impact <verdict>` accepts one of four values from
+`IMPACT_VERDICTS` (single source of truth at `ap2/briefing_validators.py`; still importable via `ap2.tools.IMPACT_VERDICTS` thanks to TB-262's re-export). The four
+buckets form a gradient — substantive-positive → compliance-neutral →
+actively-harmful — with `unclear` as the explicit "can't tell yet"
+bucket. Pick the verdict by running two delete-tests in sequence:
+
+- **`advanced-goal`** — substantively advanced the goal (positive).
+  Passes the base delete-test: "if we deleted this task, would the
+  goal still ship?" Answer: no — the goal would be visibly worse off
+  without this work. Use when the task moved the active focus's
+  progress signals closer (or the top-level `## Done when` criteria,
+  if the work cuts across foci), unblocked a downstream task, or
+  shipped a user-visible capability the goal names.
+
+- **`pro-forma`** — goal-shaped but didn't advance — compliance signal
+  (no-impact + no-harm). Fails the base delete-test: deleting this
+  task would leave the goal in the same place. But also passes the
+  stronger delete-test below: deleting it wouldn't make the codebase
+  BETTER either — it just sat there, goal-shaped, satisfying
+  validators without moving the needle. Use when the task satisfied
+  its briefing on paper but the operator can't point to where the
+  goal moved (goal.md L66-76's named failure mode).
+
+- **`negative`** — actively regressed something OR made the codebase
+  worse (no-impact + harm). Fails BOTH the base delete-test AND the
+  stronger delete-test: "if we deleted this work, would the codebase
+  be BETTER, not just neutral?" Yes → `negative`. Use when a
+  regression slipped through, test coverage was inadvertently
+  weakened, a refactor landed but increased complexity beyond the
+  briefing's intent, or some other codebase-WORSE outcome — the kind
+  of shape ideation should strongly avoid proposing again. The load-
+  bearing distinction from `pro-forma` is the harm dimension:
+  `pro-forma` is "neutral, didn't help"; `negative` is "neutral on
+  the goal AND made the codebase worse."
+
+- **`unclear`** — impact not yet legible (uncertain — defer). Use
+  when the operator can't honestly answer either delete-test yet —
+  the work is too recent, depends on downstream behavior that hasn't
+  shipped, or surfaces a question rather than a verdict. Distinct
+  from skipping (`ap2 audit [s]kip`): `unclear` records that you
+  looked AND decided you can't decide; skip records that you didn't
+  decide. Re-classify later when the impact becomes legible.
+
+The `pro-forma` ↔ `negative` distinction (TB-251) is the load-bearing
+new signal: under `AP2_AUTO_APPROVE=1` the classify stream is the
+primary judgment surface for ideation prompt-tuning, and collapsing
+"neutral-but-low-value" and "actively-harmful" into one bucket loses
+the signal ideation needs to strongly avoid harmful shapes vs merely
+de-prioritize compliance-shaped ones. When in doubt between the two,
+ask: "after this shipped, was the codebase in a strictly worse state
+than before? (regressed test, weakened invariant, accreted
+complexity)" — if yes, `negative`; if no, `pro-forma`.
+
+Historical classifications stand — TB-251 did not backfill prior
+`pro-forma` records as `negative`. Future classifications use the
+richer vocabulary.

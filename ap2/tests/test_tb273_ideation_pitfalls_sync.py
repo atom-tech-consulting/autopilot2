@@ -26,6 +26,17 @@ Pinned bullet-by-bullet per briefing §Scope §3:
   (c) section heading still present AND the new `! grep` + `Prose:`
       strings are present in the same section (the absence of either
       would be the regression we're pinning against).
+
+TB-400 note: the four-pitfall worked example + section were consolidated
+out of `ap2/howto.md` into the operator-facing `ap2-task` skill
+(`skills/ap2-task/SKILL.md`), so the howto-side companion check
+(`test_skill_still_carries_all_four_pitfalls`) now reads the skill. The
+`ap2/ideation.default.md` content pins (the four `test_pitfall_*` checks +
+`test_section_cross_references_howto_worked_example`) are UNCHANGED — the
+canonical prompt still anchors its cross-reference at `ap2/howto.md`
+L462-505 because TB-400 left `ideation.default.md` untouched (it stays the
+daemon-canonical copy); repointing the prompt's own cross-reference at the
+skill is deferred to the later howto-retirement work.
 """
 from __future__ import annotations
 
@@ -36,6 +47,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IDEATION_PROMPT = REPO_ROOT / "ap2" / "ideation.default.md"
 HOWTO = REPO_ROOT / "ap2" / "howto.md"
+# TB-400 — the four-pitfall worked example + section were consolidated out
+# of `ap2/howto.md` into the operator-facing `ap2-task` skill, which now
+# mirrors `ap2/ideation.default.md`'s canonical pitfalls section. The
+# howto-side companion check below reads the skill instead of the howto.
+TASK_SKILL = REPO_ROOT / "skills" / "ap2-task" / "SKILL.md"
 
 SECTION_HEADING = "## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)"
 
@@ -209,34 +225,44 @@ def test_section_heading_still_present_with_new_bullets_co_located():
 
 
 # ---------------------------------------------------------------------------
-# Sanity pin: the howto IS still the source of truth (companion check
-# so a future howto edit that drops one of the four pitfalls trips
-# this module and forces the operator to decide whether to retire the
-# pitfall from BOTH files in lockstep).
+# Sanity pin: the ap2-task skill carries the operator-facing mirror of the
+# four pitfalls (companion check so a future skill edit that drops one of
+# the four pitfalls trips this module and forces the operator to decide
+# whether to retire the pitfall from BOTH surfaces in lockstep).
+#
+# TB-400 repointed this from `ap2/howto.md` to `skills/ap2-task/SKILL.md`:
+# the four-pitfall worked example + section were consolidated out of the
+# howto into the operator-facing ap2-task skill. `ap2/ideation.default.md`
+# stays the canonical daemon copy (pinned by the four `test_pitfall_*`
+# checks above); the skill is now the operator-facing mirror.
 # ---------------------------------------------------------------------------
 
 
-def test_howto_still_carries_all_four_pitfalls():
-    """If the howto ever drops one of the four pitfalls, the
-    ideation prompt's verbatim-aligned bullets become orphaned and
-    the cross-reference points at a nonexistent example. Pin the
-    howto-side too so the sync-direction (howto → prompt) stays
-    enforced.
+def test_skill_still_carries_all_four_pitfalls():
+    """If the ap2-task skill ever drops one of the four pitfalls, the
+    ideation prompt's verbatim-aligned bullets lose their operator-facing
+    mirror. Pin the skill-side too so the sync-direction (canonical
+    prompt ↔ skill mirror) stays enforced.
+
+    TB-400 moved the four-pitfall section + worked example out of
+    `ap2/howto.md` into `skills/ap2-task/SKILL.md`; this check reads the
+    skill (was: the howto).
     """
-    howto_text = HOWTO.read_text(encoding="utf-8")
-    # Anchor on the howto's section heading so we don't false-positive
-    # on text that happens to appear elsewhere in the howto.
-    assert "Shell bullets — four authoring pitfalls" in howto_text, (
-        "TB-273: ap2/howto.md's 'Shell bullets — four authoring "
-        "pitfalls' section heading is missing. The howto is the "
-        "source of truth for the four-pitfall convention; if it's "
+    skill_text = TASK_SKILL.read_text(encoding="utf-8")
+    # Anchor on the section heading so we don't false-positive on text
+    # that happens to appear elsewhere in the skill.
+    assert "Shell bullets — four authoring pitfalls" in skill_text, (
+        "TB-400: skills/ap2-task/SKILL.md's 'Shell bullets — four "
+        "authoring pitfalls' section heading is missing. The skill "
+        "mirrors the four-pitfall convention for operators; if it's "
         "been retired, retire the ideation prompt's bullets in "
         "lockstep."
     )
     for substring in ("literal backtick", "! grep", "grep -r", "Prose:"):
-        assert substring in howto_text, (
-            f"TB-273: ap2/howto.md no longer carries {substring!r}. "
-            "The howto is the authoritative pitfall list; the "
-            "ideation prompt's bullets are mirrors. Reconcile both "
-            "files together — don't let the prompt out-pace howto."
+        assert substring in skill_text, (
+            f"TB-400: skills/ap2-task/SKILL.md no longer carries "
+            f"{substring!r}. The skill is the operator-facing mirror of "
+            "the authoritative pitfall list in ap2/ideation.default.md; "
+            "reconcile both together — don't let the prompt out-pace the "
+            "skill."
         )
