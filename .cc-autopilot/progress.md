@@ -1617,3 +1617,9 @@
 - **Summary:** Carved howto's `## Authoring goal.md` + `## Retrospective audit workflow` into the new auto-triggered skills/ap2-ideation-goals/SKILL.md, replaced both howto sections with one-line pointers, and retargeted the displaced docs gates (test_docs.py onto IDEATION_GOALS_SKILL, a new test_ideation_goals_domain_carved_to_skill pin + constant in test_docs_drift.py, and the displaced TB-244 howto cross-reference pin onto the skill); ideation.default.md stays canonical for daemon briefing conventions; full suite 3055 passed.
 - **Files:** skills/ap2-ideation-goals/SKILL.md, ap2/howto.md, ap2/tests/test_docs.py, ap2/tests/test_docs_drift.py, ap2/tests/test_tb244_status_report_focus_rotation_digest.py
 - **Tests:** pass
+
+## [2026-06-11] TB-405: Carve howto's `## Components enumeration (ap2 status)` into the ap2-observability skill (last domain carve)
+- **Commit:** `3a36932`
+- **Summary:** Carved howto's `## Components enumeration (ap2 status)` prose into skills/ap2-observability/SKILL.md (cross-referencing ap2-config for the AP2_* knob catalogue and ap2-board-ops for the status verb), left a one-line pointer stub in howto, widened the skill's frontmatter description + intro, and registered a no-duplication docs-location pin in test_docs_drift.py; all grep checks and pytest (test_docs_drift 18 + test_tb379 + test_tb319) pass.
+- **Files:** ap2/howto.md, skills/ap2-observability/SKILL.md, ap2/tests/test_docs_drift.py
+- **Tests:** pass
