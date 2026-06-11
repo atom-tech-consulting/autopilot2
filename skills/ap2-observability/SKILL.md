@@ -1,11 +1,11 @@
 ---
 name: ap2-observability
-description: "Use when inspecting ap2 event types, the events.jsonl timeline, prose-judge verification diagnostics, or `ap2 logs` / stats-dashboard output."
+description: "Use when inspecting ap2 event types, the events.jsonl timeline, prose-judge verification diagnostics, `ap2 logs` / stats-dashboard output, or the `ap2 status` components block (which subsystems are wired and their on/off state)."
 ---
 
-# ap2 observability — events, prose-judge diagnostics, logs & stats
+# ap2 observability — events, prose-judge diagnostics, logs, stats & the status components block
 
-How to read what an ap2 daemon is actually doing. Four self-contained
+How to read what an ap2 daemon is actually doing. Five self-contained
 surfaces:
 
 - **Event schema** — every `type` string the daemon can write to the
@@ -17,6 +17,8 @@ surfaces:
 - **Live event tail (`ap2 logs`)** — watch an active arc unfold instead of
   grepping the JSONL by hand.
 - **Stats dashboard** — multi-day trend aggregates for walk-away review.
+- **`ap2 status` components block** — which subsystems are wired into the
+  daemon and their on/off state (the registry walk `ap2 status` renders).
 
 Reach for the relevant section below; each stands on its own.
 
@@ -681,3 +683,86 @@ axis-parity tasks (TB-241 / TB-242 / TB-244 / TB-245 / TB-258).
 Pure read-layer composition over the existing `collect_stats`
 helper — no new aggregates, no new state file, no daemon-side
 changes, no new env knobs.
+
+## The `ap2 status` components block — which subsystems are wired
+
+TB-319 closes the goal.md L235-237 Progress signal that named
+`ap2 status` as the natural surface for discovering which components
+are wired into the daemon. Before TB-319 the only way to find out was
+to `ls ap2/components/` and read each manifest by hand; after, every
+`ap2 status` invocation appends a `## Components` block listing every
+discovered manifest with its on/off state and the env-flag string
+that controls it. (For the `ap2 status` verb itself — and the rest of
+the operator-CLI verb table — see the **ap2-board-ops** skill; this
+section covers only the components block it renders.)
+
+**Text-mode rendering.** After the operator-attention cluster +
+`auto-approve:` block + `next:` line, `ap2 status` prints:
+
+    ## Components
+      attention: on (env_flag=None)
+      auto_approve: on (env_flag=None)
+      auto_unfreeze: on (env_flag=None)
+      focus_advance: on (env_flag=None)
+      janitor: on (AP2_JANITOR_DISABLED unset)
+      mattermost: on (AP2_MM_CHANNELS=channel-id)
+
+Entries are alphabetic by manifest name (matching
+`default_registry().components` iteration so a reader's mental model
+of "in what order do hooks fire?" lines up with what they see in
+status). Always emitted — unlike the operator-attention cluster's
+omit-on-empty rule, the registry walk is deterministic and the same
+set of components ships on every project, so suppressing the section
+would itself be a regression worth surfacing.
+
+**`<state>` is `on` or `off`** — resolved via `Manifest.is_enabled()`
+against the live process env, so a hot-reloaded `.cc-autopilot/env`
+takes effect on the next invocation. The polarity convention
+(`Registry._is_enabled` since TB-309, now consolidated on
+`Manifest.is_enabled` by TB-319):
+
+- **`env_flag=None`** (attention, auto_approve, auto_unfreeze,
+  focus_advance) — always-on per `default_enabled=True`. There's no
+  master kill switch for these four; whether to add one is the
+  open ideation question logged at the `## Decisions needed` surface.
+- **Suppress polarity** (`*_DISABLED` env_flag, `default_enabled=True`
+  — janitor / `AP2_JANITOR_DISABLED`) — the env var is a kill switch:
+  truthy disables, unset/empty/falsy keeps the component on. (TB-386
+  demoted the validator_judge / verifier_judge LLM judges out of
+  `ap2/components/`; their `AP2_VALIDATOR_JUDGE_DISABLED` /
+  `AP2_VERIFY_JUDGE_DISABLED` off-switches survive as plain config knobs
+  read directly by the core briefing-validation / verify runners, NOT as
+  component env_flags, so they no longer appear in this list.)
+- **Require polarity** (opt-in env_flag, `default_enabled=False`
+  — mattermost / `AP2_MM_CHANNELS`) — the env var is an opt-in
+  toggle: unset/empty disables, non-empty enables.
+
+The env-flag *names* above are illustrative of each polarity; the
+canonical `AP2_*` knob catalogue — every flag's default, the
+hot-reloadable-vs-fixed split, and tuning notes — lives in the
+**ap2-config** skill's `## Configuration knobs` reference, which this
+section cross-references rather than re-listing.
+
+**`<env_flag_desc>`** renders the env-flag state in operator-legible
+form: `env_flag=None` for always-on manifests, `<NAME> unset` when
+the env var is absent or empty, or `<NAME>=<value>` when set
+(truncated at 32 chars with an ellipsis so a long channel-id list /
+opaque token doesn't blow up the status block width).
+
+**JSON parity (`--json`).** A top-level `components` key carries
+one entry per discovered manifest, each with the four documented
+keys (`name`, `enabled`, `env_flag`, `default_enabled`). ALWAYS
+present (parser-stability mirror of the `auto_approve` / `audit` /
+`attention` blocks), and the text + JSON branches walk the same
+`default_registry().components` snapshot inside one `cmd_status`
+call so they can never disagree about a component's enabled state.
+
+**Out of scope** (deferred to follow-up TBs if operator asks):
+
+- A `/components` web pull page parallel to TB-296's `/attention`.
+- Per-component diagnostic info (tick counts, last-fired timestamps,
+  recent events).
+- New env knobs to filter the enumeration; the walk shows every
+  discovered manifest unconditionally. Master kill-switch flags for
+  the four `env_flag=None` manifests are the open ideation question
+  named above.

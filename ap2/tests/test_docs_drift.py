@@ -745,3 +745,76 @@ def test_ideation_goals_domain_carved_to_skill():
             f"`ap2/howto.md` — it must live only in the ap2-ideation-goals "
             f"skill (replace the howto section with the one-line pointer)."
         )
+
+
+def test_components_enumeration_carved_to_observability_skill():
+    """TB-405 docs-location pin (final domain carve): the
+    `## Components enumeration (ap2 status)` domain — the registry-walk prose
+    describing the `## Components` block that `ap2 status` renders (text-mode
+    layout, the three env-flag polarity conventions, the `<env_flag_desc>`
+    rendering rules, and `--json` parity) — lives in
+    `skills/ap2-observability/SKILL.md`, NOT duplicated back in `ap2/howto.md`.
+
+    Mirrors the TB-402 / TB-403 `test_*_domain_carved_to_skill` shape: when a
+    domain is carved out of the howto into an auto-triggered skill, the content
+    moves wholesale and howto retains only a one-line pointer, so an operator
+    (and the prose judge) finds the reference on exactly one surface. This
+    section is prose with no `HOWTO_PATH`-keyed coverage gate to retarget (the
+    `ap2 status` CLI verb is gated against `BOARD_OPS_SKILL`, the `AP2_*` env
+    flags against `CONFIG_SKILL`), so a no-duplication location pin is the
+    correct shape, not a gate flip. The `## Components` render BEHAVIOR stays
+    pinned by `ap2/tests/test_tb379_effective_config_snapshot.py` /
+    `ap2/tests/test_tb319_status_components.py` — this is a docs-only move.
+    """
+    skill = OBSERVABILITY_SKILL.read_text()
+    howto = HOWTO_PATH.read_text()
+
+    # (1) Skill carries agentskills.io frontmatter.
+    assert skill.startswith("---"), "SKILL.md must open with a YAML frontmatter fence"
+    assert "\nname:" in skill, "SKILL.md must carry a `name:` frontmatter field"
+    assert "\ndescription:" in skill, (
+        "SKILL.md must carry a `description:` auto-trigger frontmatter field"
+    )
+
+    # (1b) The frontmatter description advertises the `ap2 status` components
+    # surface so the skill auto-triggers on a components-monitoring question.
+    desc_line = next(
+        (ln for ln in skill.splitlines() if ln.startswith("description:")), ""
+    )
+    assert "ap2 status" in desc_line, (
+        "ap2-observability SKILL.md frontmatter `description:` must mention the "
+        "`ap2 status` components surface so it auto-triggers on a "
+        "components-monitoring question"
+    )
+
+    # (2) The carved section + its content anchors landed in the skill.
+    for anchor in (
+        "default_registry().components",  # the registry-walk reference
+        "## Components",                  # the rendered block header
+        "env_flag=None",                  # the always-on polarity convention
+    ):
+        assert anchor in skill, (
+            f"ap2-observability skill is missing carved content anchor: {anchor!r}"
+        )
+
+    # (2b) The carved section cross-references the sibling skills for the
+    # env-flag knob catalogue and the status verb instead of re-listing them.
+    assert "ap2-config" in skill, (
+        "the carved components section must cross-reference the ap2-config skill "
+        "for the `AP2_*` env-flag knob catalogue instead of re-listing it"
+    )
+    assert "ap2-board-ops" in skill, (
+        "the carved components section must cross-reference the ap2-board-ops "
+        "skill for the `ap2 status` verb instead of re-listing it"
+    )
+
+    # (3) howto retains a pointer but NOT the carved bodies (no duplication).
+    assert "ap2-observability skill" in howto, (
+        "howto.md must keep a pointer to the ap2-observability skill"
+    )
+    for moved in ("default_registry().components", "env_flag=None"):
+        assert moved not in howto, (
+            f"carved components-enumeration content {moved!r} still present in "
+            f"`ap2/howto.md` — it must live only in the ap2-observability skill "
+            f"(replace the howto section with the one-line pointer)."
+        )
