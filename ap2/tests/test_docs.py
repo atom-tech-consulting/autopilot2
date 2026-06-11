@@ -1,10 +1,18 @@
-"""Tests for the `## Authoring goal.md` section in `ap2/howto.md` (TB-200, TB-206).
+"""Tests for the `## Authoring goal.md` section (TB-200, TB-206).
+
+TB-403 carved the `## Authoring goal.md` section out of `ap2/howto.md` into
+the auto-triggered `skills/ap2-ideation-goals/SKILL.md` (operator-facing
+goal/focus authoring + the retrospective-audit workflow); howto retains only
+a one-line pointer. These gates therefore read the goal-authoring reference
+from `IDEATION_GOALS_SKILL` now, not `HOWTO_PATH` — the same retarget shape
+the env-knob / config-key / CLI-verb gates took onto their carve skills in
+`ap2/tests/test_docs_drift.py`.
 
 Anti-drift gates after TB-206's structural decoupling:
 
 1. Heading + all five subsections + both validator TB-N references are present
-   in `ap2/howto.md`. These are stable structural anchors; a reader who greps
-   for them lands in a valid section.
+   in the ap2-ideation-goals skill. These are stable structural anchors; a
+   reader who greps for them lands in a valid section.
 2. The Current-focus worked example's `## Current focus: <theme>` heading is
    itself usable as a TB-161 anchor: a synthetic briefing whose `## Goal` body
    cites that heading text passes `_validate_briefing_structure` against a
@@ -22,24 +30,27 @@ from ap2.tools import _validate_briefing_structure
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HOWTO_PATH = REPO_ROOT / "ap2" / "howto.md"
+# TB-403: goal-authoring reference moved from howto.md into this skill.
+IDEATION_GOALS_SKILL = REPO_ROOT / "skills" / "ap2-ideation-goals" / "SKILL.md"
 
 
-def _current_focus_worked_example_heading(howto_text: str) -> str:
+def _current_focus_worked_example_heading(skill_text: str) -> str:
     """Return the blockquoted `## Current focus: <theme>` line from the
-    howto's `### Current focus` worked-example block.
+    skill's `### Current focus` worked-example block.
 
     The Current-focus worked example is the one block whose blockquoted
     content must carry a real `##`-level heading (the whole point of the
     block is to demonstrate the heading shape). We pull that line so the
     anchor-validator test can build its synthetic fixture from it, keeping
-    the test in sync with whatever fictional theme the howto names without
+    the test in sync with whatever fictional theme the skill names without
     hard-coding the string in two places.
     """
     start_marker = "### Current focus"
-    start = howto_text.find(start_marker)
-    assert start != -1, "missing `### Current focus` heading in howto.md"
-    rest = howto_text[start + len(start_marker):]
+    start = skill_text.find(start_marker)
+    assert start != -1, (
+        "missing `### Current focus` heading in skills/ap2-ideation-goals/SKILL.md"
+    )
+    rest = skill_text[start + len(start_marker):]
     # Stop at the next `###`-level (sibling subsection) or `##`-level heading.
     next_h3 = rest.find("\n### ")
     next_h2 = rest.find("\n## ")
@@ -58,13 +69,13 @@ def _current_focus_worked_example_heading(howto_text: str) -> str:
             return body.rstrip()
     raise AssertionError(
         "no `## Current focus:` line in `### Current focus` worked-example "
-        "blockquote of howto.md"
+        "blockquote of skills/ap2-ideation-goals/SKILL.md"
     )
 
 
 def test_authoring_section_present():
     """Heading + all five subsections + both validator TB-Ns are referenced."""
-    text = HOWTO_PATH.read_text()
+    text = IDEATION_GOALS_SKILL.read_text()
     assert "## Authoring goal.md" in text
     for sub in (
         "### Mission",
@@ -84,14 +95,14 @@ def test_worked_example_current_focus_satisfies_anchor_validator(tmp_path):
     anchor: a synthetic briefing whose `## Goal` body cites the worked-
     example's Current-focus heading text passes `_validate_briefing_structure`.
 
-    Self-contained: builds a tmp `goal.md` carrying ONLY the howto's quoted
+    Self-contained: builds a tmp `goal.md` carrying ONLY the skill's quoted
     Current-focus heading (so the validator can mine an anchor from it) and
     a synthetic briefing whose `## Goal` body cites that heading. Decoupled
     from this repo's live `goal.md` per TB-206 — the prior coupling fired
     on every operator focus rotation and cascaded into project-wide pytest
     failures despite the rotating content being legitimate.
     """
-    heading_line = _current_focus_worked_example_heading(HOWTO_PATH.read_text())
+    heading_line = _current_focus_worked_example_heading(IDEATION_GOALS_SKILL.read_text())
     # e.g. "## Current focus: webhook reliability" → "Current focus: webhook reliability"
     assert heading_line.startswith("## Current focus:"), (
         f"expected `## Current focus:` line; got {heading_line!r}"

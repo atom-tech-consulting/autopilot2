@@ -67,6 +67,22 @@ BOARD_OPS_SKILL = REPO_ROOT / "skills/ap2-board-ops/SKILL.md"
 # siblings and for any future failure-recovery coverage gate to read from.
 FAILURE_RECOVERY_SKILL = REPO_ROOT / "skills/ap2-failure-recovery/SKILL.md"
 
+# TB-403 — the ideation + goal/focus-management domain (the `## Authoring
+# goal.md` operator-curated five-section reference + the `## Retrospective
+# audit workflow` `ap2 audit` review surface) was carved out of `howto.md`
+# into `skills/ap2-ideation-goals/SKILL.md`, the fifth domain carve following
+# the TB-397 canary pattern. The `## Authoring goal.md` section's existing
+# docs-location gate lives in `ap2/tests/test_docs.py` and was retargeted onto
+# this skill in the same commit (the structural-anchor + worked-example-
+# validator pins); like the failure-recovery carve, the `## Retrospective
+# audit workflow` prose had no mechanical `HOWTO_PATH`-keyed coverage gate to
+# retarget (the `ap2 audit` CLI verb is gated against `BOARD_OPS_SKILL`).
+# `test_ideation_goals_domain_carved_to_skill` below uses this constant to pin
+# that the content moved to the skill and is not duplicated back in howto.
+# `ideation.default.md` stays canonical for the daemon ideation agent's own
+# briefing-authoring conventions — the skill references but does not move them.
+IDEATION_GOALS_SKILL = REPO_ROOT / "skills/ap2-ideation-goals/SKILL.md"
+
 
 # Claude built-ins are not autopilot MCP tools. They appear in agent
 # toolsets as "broad reads" / "task agent code edits" — same set the
@@ -674,5 +690,58 @@ def test_failure_recovery_domain_carved_to_skill():
         assert moved not in howto, (
             f"carved failure-recovery content {moved!r} still present in "
             f"`ap2/howto.md` — it must live only in the ap2-failure-recovery "
+            f"skill (replace the howto section with the one-line pointer)."
+        )
+
+
+def test_ideation_goals_domain_carved_to_skill():
+    """TB-403 docs-location pin: the ideation + goal/focus-management domain —
+    the `## Authoring goal.md` operator-curated five-section reference and the
+    `## Retrospective audit workflow` `ap2 audit` review surface — lives in
+    `skills/ap2-ideation-goals/SKILL.md`, NOT duplicated back in `ap2/howto.md`.
+    Mirrors the TB-402 `test_failure_recovery_domain_carved_to_skill` shape:
+    when a domain is carved out of the howto into an auto-triggered skill, the
+    content moves wholesale and howto retains only a one-line pointer, so an
+    operator (and the prose judge) finds the reference on exactly one surface.
+
+    The `## Authoring goal.md` section's structural-anchor + worked-example-
+    validator gates were retargeted onto this skill in `ap2/tests/test_docs.py`
+    in the same commit; this pin adds the carved-out / not-duplicated assertion
+    the howto-vs-skill split needs. `ideation.default.md` is deliberately NOT
+    asserted to move — it stays canonical for the daemon ideation agent's own
+    briefing-authoring conventions, which the skill references but does not
+    carry.
+    """
+    skill = IDEATION_GOALS_SKILL.read_text()
+    howto = HOWTO_PATH.read_text()
+
+    # (1) Skill carries agentskills.io frontmatter.
+    assert skill.startswith("---"), "SKILL.md must open with a YAML frontmatter fence"
+    assert "\nname:" in skill, "SKILL.md must carry a `name:` frontmatter field"
+    assert "\ndescription:" in skill, (
+        "SKILL.md must carry a `description:` auto-trigger frontmatter field"
+    )
+
+    # (2) Both carved sections + a content anchor from each landed in the skill.
+    for anchor in (
+        "## Authoring goal.md",            # goal-authoring section header
+        "### Done when",                   # ...one of its five subsections
+        "delete-test",                     # ...the Done-when honesty heuristic
+        "## Retrospective audit workflow",  # audit-workflow section header
+        "ap2 audit",                       # ...the verb it documents
+        "audit_skip",                      # ...its interactive-skip op-shape
+    ):
+        assert anchor in skill, (
+            f"ap2-ideation-goals skill is missing carved content anchor: {anchor!r}"
+        )
+
+    # (3) howto retains a pointer but NOT the carved bodies (no duplication).
+    assert "ap2-ideation-goals" in howto, (
+        "howto.md must keep a pointer to the ap2-ideation-goals skill"
+    )
+    for moved in ("### Mission", "webhook reliability", "audit_skip", "UnreviewedTask"):
+        assert moved not in howto, (
+            f"carved ideation-goals content {moved!r} still present in "
+            f"`ap2/howto.md` — it must live only in the ap2-ideation-goals "
             f"skill (replace the howto section with the one-line pointer)."
         )
