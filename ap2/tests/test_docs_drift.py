@@ -55,6 +55,18 @@ CONFIG_SKILL = REPO_ROOT / "skills/ap2-config/SKILL.md"
 # uncovered mid-migration.
 BOARD_OPS_SKILL = REPO_ROOT / "skills/ap2-board-ops/SKILL.md"
 
+# TB-402 — the failure-recovery domain (the `## Failure modes the daemon
+# recovers from` auto-recovery catalogue + the `## Operator-question
+# playbook` lookup table) was carved out of `howto.md` into
+# `skills/ap2-failure-recovery/SKILL.md`, the fourth domain carve following
+# the TB-397 canary pattern. Unlike the env-knob / config-key / event-type /
+# CLI-verb axes, neither carved section had a mechanical docs-drift gate
+# pinning its coverage (both are operator prose + a lookup table, not a
+# source-enumerated set), so there is no `HOWTO_PATH`-keyed gate to retarget
+# here — the constant registers the skill path for parity with its three
+# siblings and for any future failure-recovery coverage gate to read from.
+FAILURE_RECOVERY_SKILL = REPO_ROOT / "skills/ap2-failure-recovery/SKILL.md"
+
 
 # Claude built-ins are not autopilot MCP tools. They appear in agent
 # toolsets as "broad reads" / "task agent code edits" — same set the
@@ -618,4 +630,49 @@ def test_architecture_md_control_agent_tools_complete():
             f"python fenced block under `## Custom MCP tools` to enumerate "
             f"every entry — the literal is the operator-facing "
             f"source-of-truth proxy."
+        )
+
+
+def test_failure_recovery_domain_carved_to_skill():
+    """TB-402 docs-location pin: the failure-recovery domain — the
+    `## Failure modes the daemon recovers from` auto-recovery catalogue and
+    the `## Operator-question playbook` lookup table — lives in
+    `skills/ap2-failure-recovery/SKILL.md`, NOT duplicated back in
+    `ap2/howto.md`. Mirrors TB-245's
+    `test_howto_validator_judge_section_names_push_surface` shape: when a
+    domain is carved out of the howto into an auto-triggered skill, the
+    content moves wholesale and howto retains only a one-line pointer, so
+    an operator (and the prose judge) finds the reference on exactly one
+    surface.
+    """
+    skill = FAILURE_RECOVERY_SKILL.read_text()
+    howto = HOWTO_PATH.read_text()
+
+    # (1) Skill carries agentskills.io frontmatter.
+    assert skill.startswith("---"), "SKILL.md must open with a YAML frontmatter fence"
+    assert "\nname:" in skill, "SKILL.md must carry a `name:` frontmatter field"
+    assert "\ndescription:" in skill, (
+        "SKILL.md must carry a `description:` auto-trigger frontmatter field"
+    )
+
+    # (2) Both carved sections + a content anchor from each landed in the skill.
+    for anchor in (
+        "## Failure modes the daemon recovers from",  # auto-recovery catalogue header
+        "task_implicit_commit",                       # ...and its content
+        "## Operator-question playbook",              # lookup-table header
+        "Daemon running?",                            # ...and its content
+    ):
+        assert anchor in skill, (
+            f"failure-recovery skill is missing carved content anchor: {anchor!r}"
+        )
+
+    # (3) howto retains a pointer but NOT the carved bodies (no duplication).
+    assert "ap2-failure-recovery" in howto, (
+        "howto.md must keep a pointer to the ap2-failure-recovery skill"
+    )
+    for moved in ("task_implicit_commit", "Daemon running?", "127.0.0.1:7820"):
+        assert moved not in howto, (
+            f"carved failure-recovery content {moved!r} still present in "
+            f"`ap2/howto.md` — it must live only in the ap2-failure-recovery "
+            f"skill (replace the howto section with the one-line pointer)."
         )
