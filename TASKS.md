@@ -8,8 +8,8 @@
 
 ## Backlog
 
-- [ ] **TB-405** **Carve howto's `## Components enumeration (ap2 status)` into the ap2-observability skill (last domain carve)** `#autopilot` `#docs` `#skills` `#howto-retire` `#observability` `@blocked:review` — Final domain carve: move howto.md's `## Components enumeration (ap2 status)` into the ap2-observability skill, leave a pointer stub, register a docs-location pin; env-flag tuning stays in ap2-config and the status verb in ap2-board-ops. [→ brief](.cc-autopilot/tasks/carve-howto-s-components-enumeration-ap2.md)
-- [ ] **TB-406** **Retire `ap2/howto.md` as a file — relocate residual content, drop the sync-assets target, flip residual gates, delete it** `#autopilot` `#docs` `#skills` `#howto-retire` `#deploy` `@blocked:review,TB-405` — Retire ap2/howto.md as a file: relocate residual orientation/core sections to architecture.md/skills, drop the sync-assets ap2-howto.md deploy target, flip residual HOWTO_PATH test gates, delete the file. [→ brief](.cc-autopilot/tasks/retire-ap2-howto-md-as-a-file-relocate-r-2.md)
+- [ ] **TB-405** **Carve howto's `## Components enumeration (ap2 status)` into the ap2-observability skill (last domain carve)** `#autopilot` `#docs` `#skills` `#howto-retire` `#observability` — Final domain carve: move howto.md's `## Components enumeration (ap2 status)` into the ap2-observability skill, leave a pointer stub, register a docs-location pin; env-flag tuning stays in ap2-config and the status verb in ap2-board-ops. [→ brief](.cc-autopilot/tasks/carve-howto-s-components-enumeration-ap2.md)
+- [ ] **TB-406** **Retire `ap2/howto.md` as a file — relocate residual content, drop the sync-assets target, flip residual gates, delete it** `#autopilot` `#docs` `#skills` `#howto-retire` `#deploy` `@blocked:TB-405` — Retire ap2/howto.md as a file: relocate residual orientation/core sections to architecture.md/skills, drop the sync-assets ap2-howto.md deploy target, flip residual HOWTO_PATH test gates, delete the file. [→ brief](.cc-autopilot/tasks/retire-ap2-howto-md-as-a-file-relocate-r-2.md)
 
 ## Pipeline Pending
 

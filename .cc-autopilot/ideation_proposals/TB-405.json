@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/carve-howto-s-components-enumeration-ap2.md",
   "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-11T16:13:05Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-11T08:20:33Z",
   "tb_id": "TB-405",
   "why_now": "until this last operator-domain section moves, `ap2/howto.md` survives as a canonical operation manual surface \u2014 the focus's delete-test (\"if howto.md survives as the canonical operation manual, the consolidation didn't happen\") is not met, and the downstream file-retirement step cannot run while substantive content remains."
