@@ -1575,3 +1575,9 @@
 - **Summary:** Made agent_model's default provider-neutral (None, both backends self-default), added empty->None coercion at the four dispatch sites, routed the codex smokes' model through the production config path under a default config, added a gate-runnable regression test, and documented the single-global-model pin caveat; full gate suite 3048 passed.
 - **Files:** ap2/core_config_schema.py, ap2/daemon.py, ap2/verify.py, ap2/components/janitor/impl.py, ap2/init.py, ap2/tests/smoke/_adapter.py, ap2/tests/test_env_knobs.py, ap2/tests/test_tb324_cli_config.py, ap2/tests/test_tb396_provider_neutral_model.py, ap2/howto.md
 - **Tests:** pass
+
+## [2026-06-11] TB-397: Canary: carve howto.md observability domain into skills/ap2-observability/ (establish SKILL.md + gate-retarget conventions)
+- **Commit:** `d16a92c`
+- **Summary:** Carved the observability domain (event schema, prose-judge diagnostics, ap2 logs live-tail, stats dashboard) out of ap2/howto.md into skills/ap2-observability/SKILL.md canary; retargeted event-type drift gate onto OBSERVABILITY_SKILL (other gates stay on HOWTO_PATH); followed displaced TB-245/TB-259 docs-location gates to the skill; full suite 3048 passed.
+- **Files:** skills/ap2-observability/SKILL.md, ap2/howto.md, ap2/tests/test_docs_drift.py, ap2/tests/test_tb245_status_report_validator_judge_digest.py, ap2/tests/test_tb259_status_report_stats_window.py
+- **Tests:** pass
