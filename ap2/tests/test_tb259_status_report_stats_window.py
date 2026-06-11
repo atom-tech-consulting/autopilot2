@@ -414,13 +414,21 @@ def test_status_report_module_declares_render_stats_window_section():
 
 
 def test_howto_carries_tb259_cross_reference():
-    """The howto.md Stats dashboard section cross-references TB-259
-    so an operator reading the section sees that the aggregates also
-    surface on the cron status-report (push surface) — not just
-    `/stats` (pull surface). Mirrors TB-245's
-    `test_howto_carries_tb245_cross_reference` shape."""
-    howto = Path(__file__).resolve().parent.parent / "howto.md"
-    src = howto.read_text()
+    """The Stats dashboard section cross-references TB-259 so an
+    operator reading the section sees that the aggregates also surface
+    on the cron status-report (push surface) — not just `/stats` (pull
+    surface). Mirrors TB-245's `test_howto_carries_tb245_cross_reference`
+    shape.
+
+    TB-397 carved the Stats dashboard domain out of `howto.md` into
+    `skills/ap2-observability/SKILL.md` (the observability canary skill),
+    so this gate follows the content to the skill.
+    """
+    skill = (
+        Path(__file__).resolve().parent.parent.parent
+        / "skills/ap2-observability/SKILL.md"
+    )
+    src = skill.read_text()
     assert "TB-259" in src
     # The TB-259 paragraph lives within the `## Stats dashboard`
     # section, not somewhere structurally unrelated. Anchor on the

@@ -665,28 +665,38 @@ def test_cron_default_yaml_stub_mentions_validator_judge():
 
 
 def test_howto_carries_tb245_cross_reference():
-    """`grep -n TB-245 ap2/howto.md` (briefing verifier) must match:
-    the howto's existing TB-243 validator-judge block (TB-235
-    section) cross-references TB-245 so an operator reading howto
-    sees that the fail-open events also surface on the cron status-
-    report (push surface) — not just `ap2 status` (pull surface)."""
-    howto = (
-        Path(__file__).resolve().parent.parent / "howto.md"
+    """The TB-243 validator-judge block (TB-235 section) cross-references
+    TB-245 so an operator reading the docs sees that the fail-open events
+    also surface on the cron status-report (push surface) — not just
+    `ap2 status` (pull surface).
+
+    TB-397 carved the event-schema / validator-judge domain out of
+    `howto.md` into `skills/ap2-observability/SKILL.md` (the observability
+    canary skill), so this gate follows the content to the skill.
+    """
+    skill = (
+        Path(__file__).resolve().parent.parent.parent
+        / "skills/ap2-observability/SKILL.md"
     )
-    assert "TB-245" in howto.read_text()
+    assert "TB-245" in skill.read_text()
 
 
 def test_howto_validator_judge_section_names_push_surface():
-    """The howto section cross-referencing TB-245 names the push
-    surface (status-report / cron / Mattermost) so the operator
-    looking at the TB-235 validator-judge block sees both halves
-    of the observability story (pull surface via TB-243, push
-    surface via TB-245). Pin the cross-link prose so a trim that
-    drops the push-surface mention trips here."""
-    howto = (
-        Path(__file__).resolve().parent.parent / "howto.md"
+    """The section cross-referencing TB-245 names the push surface
+    (status-report / cron / Mattermost) so the operator looking at the
+    TB-235 validator-judge block sees both halves of the observability
+    story (pull surface via TB-243, push surface via TB-245). Pin the
+    cross-link prose so a trim that drops the push-surface mention trips
+    here.
+
+    TB-397 carved this block out of `howto.md` into
+    `skills/ap2-observability/SKILL.md`, so this gate reads the skill.
+    """
+    skill = (
+        Path(__file__).resolve().parent.parent.parent
+        / "skills/ap2-observability/SKILL.md"
     )
-    src = howto.read_text()
+    src = skill.read_text()
     # The TB-245 paragraph must live in the TB-235 validator-judge
     # block, not somewhere structurally unrelated. Find the TB-243
     # paragraph (existing) and check that TB-245 lives within a

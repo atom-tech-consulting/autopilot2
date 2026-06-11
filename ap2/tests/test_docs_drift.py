@@ -28,6 +28,14 @@ AP2_DIR = REPO_ROOT / "ap2"
 HOWTO_PATH = AP2_DIR / "howto.md"
 ARCHITECTURE_PATH = AP2_DIR / "architecture.md"
 
+# TB-397 — the observability domain (event schema + prose-judge diagnostics
+# + `ap2 logs` / stats) was carved out of `howto.md` into the first domain
+# skill as the canary that establishes the carve-plus-gate-retarget pattern.
+# The event-type drift gate reads its coverage surface from here instead of
+# `HOWTO_PATH`; the remaining gates stay on `HOWTO_PATH` for the follow-up
+# carves (TB-398/399/400) to move one domain + one gate at a time.
+OBSERVABILITY_SKILL = REPO_ROOT / "skills/ap2-observability/SKILL.md"
+
 
 # Claude built-ins are not autopilot MCP tools. They appear in agent
 # toolsets as "broad reads" / "task agent code edits" — same set the
@@ -474,20 +482,28 @@ def test_every_config_key_in_template():
 
 def test_every_event_type_documented():
     """Every event type emitted via `events.append(events_file, "<type>", ...)`
-    in ap2 source is mentioned in `ap2/howto.md`. Substring check (not
-    backtick-required) because event types appear both backtick-fenced
-    in the `## Event schema` enumeration AND inside descriptive prose
-    elsewhere — either flavor counts. The point is that an operator
-    grepping howto.md for the event type they just saw in events.jsonl
-    finds a hit.
+    in ap2 source is mentioned in `skills/ap2-observability/SKILL.md`.
+    Substring check (not backtick-required) because event types appear
+    both backtick-fenced in the skill's `## Event schema` enumeration AND
+    inside descriptive prose elsewhere — either flavor counts. The point
+    is that an operator grepping the observability skill for the event
+    type they just saw in events.jsonl finds a hit.
+
+    TB-397 retargeted this gate from `HOWTO_PATH` to `OBSERVABILITY_SKILL`
+    when the event-schema domain was carved into the canary skill — the
+    skill is now the canonical home of the event timeline, so it is the
+    surface a source-side event-type addition must keep in sync. The
+    remaining docs-drift gates still read `HOWTO_PATH`; the follow-up
+    carves move one domain + one gate each.
     """
-    howto = HOWTO_PATH.read_text()
+    skill = OBSERVABILITY_SKILL.read_text()
     types = _collect_event_types()
     assert types, "no event types found in source — regex or walk regressed"
-    missing = sorted(t for t in types if t not in howto)
+    missing = sorted(t for t in types if t not in skill)
     assert not missing, (
-        f"event type(s) emitted in source but missing from howto.md: "
-        f"{missing}. Add to `## Event schema` (Lifecycle / Failure / "
+        f"event type(s) emitted in source but missing from "
+        f"`skills/ap2-observability/SKILL.md`: {missing}. Add to the "
+        f"skill's `## Event schema` (Lifecycle / Failure / "
         f"State-observability) so operators reading events.jsonl can "
         f"map the type back to what code wrote it. Dynamic types "
         f"(emitted via `do_log_event`) opt out via "
