@@ -44,6 +44,17 @@ OBSERVABILITY_SKILL = REPO_ROOT / "skills/ap2-observability/SKILL.md"
 # their documentation surface from here instead of `HOWTO_PATH`.
 CONFIG_SKILL = REPO_ROOT / "skills/ap2-config/SKILL.md"
 
+# TB-399 — the board-ops domain (the `## Custom MCP tools (reference)` tool
+# catalogue + the `## Operator CLI verbs (reference)` table) was carved out
+# of `howto.md` into `skills/ap2-board-ops/SKILL.md`, the third domain carve
+# following the TB-397 canary pattern. The CLI-verb gate reads its coverage
+# surface from here instead of `HOWTO_PATH`; the MCP-tool gate adds the skill
+# to its accepted set alongside `architecture.md` (keeping the
+# howto-OR-architecture fallback semantics, just with the skill replacing
+# howto as the descriptive surface) so no MCP tool documented here becomes
+# uncovered mid-migration.
+BOARD_OPS_SKILL = REPO_ROOT / "skills/ap2-board-ops/SKILL.md"
+
 
 # Claude built-ins are not autopilot MCP tools. They appear in agent
 # toolsets as "broad reads" / "task agent code edits" — same set the
@@ -233,25 +244,35 @@ def _extract_python_block(text: str, decl: str) -> str:
 
 def test_every_mcp_tool_documented():
     """Every MCP tool reachable by any agent toolset is mentioned (by
-    exact short name) in `ap2/howto.md` OR `ap2/architecture.md`. The
-    OR-across-files split is load-bearing: `architecture.md`'s
-    `CONTROL_AGENT_TOOLS` literal is itself the enumeration, while
-    `howto.md`'s `## Custom MCP tools (reference)` carries the
-    descriptions — either surface satisfies the gate.
+    exact short name) in `skills/ap2-board-ops/SKILL.md` OR
+    `ap2/architecture.md`. The OR-across-files split is load-bearing:
+    `architecture.md`'s `CONTROL_AGENT_TOOLS` literal is itself the
+    enumeration, while the board-ops skill's `## Custom MCP tools
+    (reference)` carries the descriptions — either surface satisfies the
+    gate.
+
+    TB-399 retargeted the descriptive surface from `HOWTO_PATH` to
+    `BOARD_OPS_SKILL` when the board-ops domain (the MCP-tool catalogue +
+    the operator CLI-verb table) was carved into the `ap2-board-ops` skill.
+    `architecture.md` stays in the accepted set (its literal enumeration is
+    independently gated by `test_architecture_md_control_agent_tools_complete`),
+    so the skill replaces howto as the prose half of the howto-OR-architecture
+    fallback — no MCP tool documented in the moved section becomes uncovered
+    by the carve.
     """
-    howto = HOWTO_PATH.read_text()
+    skill = BOARD_OPS_SKILL.read_text()
     arch = ARCHITECTURE_PATH.read_text()
-    combined = howto + "\n" + arch
+    combined = skill + "\n" + arch
     missing = sorted(
         name for name in _all_agent_mcp_tool_short_names() if name not in combined
     )
     assert not missing, (
         f"MCP tool(s) reachable by an agent toolset but not mentioned in "
-        f"howto.md or architecture.md: {missing}. Add a reference (with "
-        f"a one-line description in `## Custom MCP tools (reference)`) "
-        f"so the operator surface stays discoverable. Source of truth: "
-        f"`ap2.tools.CONTROL_AGENT_TOOLS` / `TASK_AGENT_TOOLS` / "
-        f"`MM_HANDLER_TOOLS`."
+        f"`skills/ap2-board-ops/SKILL.md` or architecture.md: {missing}. Add "
+        f"a reference (with a one-line description in the skill's `## Custom "
+        f"MCP tools (reference)`) so the operator surface stays discoverable. "
+        f"Source of truth: `ap2.tools.CONTROL_AGENT_TOOLS` / `TASK_AGENT_TOOLS` "
+        f"/ `MM_HANDLER_TOOLS`."
     )
 
 
@@ -535,28 +556,34 @@ def test_every_event_type_documented():
 
 def test_every_cli_verb_documented():
     """Every non-suppressed `ap2 <verb>` subcommand in `build_parser()`
-    is mentioned (by exact `ap2 <verb>` substring) in `ap2/howto.md`'s
-    `## Operator CLI verbs (reference)` section. Substring check (not
-    backtick-required) so the verb can appear bare-quoted in a row's
-    `verb` cell or in surrounding prose; the point is the operator's
-    grep finds a hit when they read `ap2 <verb>` in a Mattermost
-    mention or a `--help` string and want a WHY/when-to-use companion.
+    is mentioned (by exact `ap2 <verb>` substring) in
+    `skills/ap2-board-ops/SKILL.md`'s `## Operator CLI verbs (reference)`
+    section. Substring check (not backtick-required) so the verb can appear
+    bare-quoted in a row's `verb` cell or in surrounding prose; the point is
+    the operator's grep finds a hit when they read `ap2 <verb>` in a
+    Mattermost mention or a `--help` string and want a WHY/when-to-use
+    companion.
+
+    TB-399 retargeted this gate from `HOWTO_PATH` to `BOARD_OPS_SKILL` when
+    the board-ops domain was carved into the `ap2-board-ops` skill — the
+    skill is now the canonical home of the operator CLI-verb table, so it is
+    the surface a new subparser must keep in sync.
 
     Hidden / dev-only subparsers (`help=argparse.SUPPRESS`, e.g.
     `ap2 _run`) are excluded by `_collect_cli_verbs` so the gate
-    matches the howto section's stated exclusion.
+    matches the skill section's stated exclusion.
     """
-    howto = HOWTO_PATH.read_text()
+    skill = BOARD_OPS_SKILL.read_text()
     verbs = _collect_cli_verbs()
     assert verbs, "no CLI verbs collected from build_parser() — walk regressed"
-    missing = sorted(v for v in verbs if v not in howto)
+    missing = sorted(v for v in verbs if v not in skill)
     assert not missing, (
         f"CLI verb(s) registered in `ap2/cli.py`'s `build_parser()` but "
-        f"missing from howto.md: {missing}. Add a row to `## Operator CLI "
-        f"verbs (reference)` describing why an operator reaches for the "
-        f"verb (purpose) and what failure mode / related verbs it sits "
-        f"alongside (notes). If the new subparser is dev-only and the "
-        f"operator shouldn't see it, mark it `help=argparse.SUPPRESS` "
+        f"missing from `skills/ap2-board-ops/SKILL.md`: {missing}. Add a row "
+        f"to `## Operator CLI verbs (reference)` describing why an operator "
+        f"reaches for the verb (purpose) and what failure mode / related "
+        f"verbs it sits alongside (notes). If the new subparser is dev-only "
+        f"and the operator shouldn't see it, mark it `help=argparse.SUPPRESS` "
         f"so `_collect_cli_verbs` drops it (mirroring `ap2 _run`)."
     )
 
