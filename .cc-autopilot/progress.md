@@ -1623,3 +1623,9 @@
 - **Summary:** Carved howto's `## Components enumeration (ap2 status)` prose into skills/ap2-observability/SKILL.md (cross-referencing ap2-config for the AP2_* knob catalogue and ap2-board-ops for the status verb), left a one-line pointer stub in howto, widened the skill's frontmatter description + intro, and registered a no-duplication docs-location pin in test_docs_drift.py; all grep checks and pytest (test_docs_drift 18 + test_tb379 + test_tb319) pass.
 - **Files:** ap2/howto.md, skills/ap2-observability/SKILL.md, ap2/tests/test_docs_drift.py
 - **Tests:** pass
+
+## [2026-06-11] TB-406: Retire `ap2/howto.md` as a file — relocate residual content, drop the sync-assets target, flip residual gates, delete it
+- **Commit:** `f2d5c50`
+- **Summary:** Retired ap2/howto.md: relocated residual sections (design prose already in architecture.md; reading-order folded into skills/ap2/SKILL.md), dropped the ap2-howto.md sync_assets deploy target + CLI help, flipped residual HOWTO_PATH/howto test gates onto owning skills, repointed every skill/doc cross-reference, deleted the file; full suite 3087 passed.
+- **Files:** ap2/howto.md, ap2/sandbox.py, ap2/cli.py, ap2/architecture.md, ap2/ideation.default.md, ap2/tests/test_docs_drift.py, ap2/tests/test_sync_assets.py, ap2/tests/test_tb273_ideation_pitfalls_sync.py, skills/ap2/SKILL.md, skills/ap2-board-ops/SKILL.md, skills/ap2-task/SKILL.md, skills/ap2-config/SKILL.md, skills/ap2-failure-recovery/SKILL.md, skills/ap2-ideation-goals/SKILL.md, README.md, ap2/README.md, AGENTS.md, sandboxed-user-setup.md
+- **Tests:** pass
