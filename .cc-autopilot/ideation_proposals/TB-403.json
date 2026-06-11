@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-397",
+  "briefing_path": ".cc-autopilot/tasks/carve-howto-md-goal-focus-authoring-retr.md",
+  "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "proposed_at": "2026-06-11T05:53:21Z",
+  "tb_id": "TB-403",
+  "why_now": "howto's goal-authoring + audit content is reachable only via the hand-maintained `~/.claude/CLAUDE.md` pointer, so an operator steering the loop (writing goal.md, classifying shipped proposals) never gets it surfaced on a task match \u2014 carving it into an auto-triggered skill closes that discovery gap and retires two more sections from the howto surface being dismantled."
+}

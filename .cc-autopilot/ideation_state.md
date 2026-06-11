@@ -1,110 +1,108 @@
-I'll process the input directly. Let me identify sentences to delete according to your criteria:
-
-**Sentences to DELETE:**
-1. "The first three close out the now-Shipped **component-boundary** focus (marked Shipped in goal.md 2026-06-09);" — names condition of exhaustion (closing out a focus)
-2. "This is why each carve MUST retarget its gate in-commit." — This is kept (factual instruction, not an exhaustion claim)
-3. Actually reviewing more carefully: "All still serve the Mission..." — This is kept (factual observation)
-
-Let me re-examine more carefully for the specific delete criteria:
-
-The sentence "The first three close out the now-Shipped **component-boundary** focus (marked Shipped in goal.md 2026-06-09);" asserts that work closes out a focus that is exhausted/Shipped.
-
----
-
 # Ideation State
 
-_Last updated: 2026-06-10T23:18Z by ideation cron_
+_Last updated: 2026-06-11T05:47Z by ideation cron_
 
 ## Mission alignment
 
-5 most recent Completes — TB-396 (agent_model default made provider-neutral
-`None`, both backends self-default, codex smokes route model through prod
-config, c2597f1); TB-395 (synced skills/ap2 SKILL.md + howto prose-judge
-diagnostics to the task_solve/task_verify event names, 64e9af2); TB-392
-(minimal-kernel dispatch→verify→report e2e green with every component
-disabled); TB-391 (ideation extracted into `ap2/components/ideation/` behind a
-registry tick phase); TB-389 (channel surface folded into an always-on
-`communication` component). All still serve the Mission's "small core + opt-in
-components, portable skills as the prerequisite for an OSS cut" — and TB-395
-already touched the skills surface this new focus consolidates.
+5 most recent Completes — TB-398 (carved howto's config knobs + config-keys +
+codex backend setup into `skills/ap2-config/SKILL.md`, retargeted env-knob &
+config-key drift gates, 40b1db5); TB-397 (canary: carved the observability
+domain into `skills/ap2-observability/SKILL.md`, retargeted the event-type
+drift gate, established SKILL.md + in-commit gate-retarget conventions,
+d16a92c); TB-396 (provider-neutral `agent_model` default → None, c2597f1);
+TB-395 (synced `skills/ap2/SKILL.md` + howto to the task_solve/task_verify
+event vocabulary, 64e9af2); TB-392 (minimal-kernel dispatch→verify→report e2e
+green with every component disabled). All serve the Mission's "portable skills
+as the prerequisite for an OSS cut" — TB-397/398 are the first two carves
+turning the howto monolith into auto-triggered domain skills.
 
 ## Current focus assessment
 
 - **Current focus: consolidate the operator manual into auto-triggered,
   cross-runtime skills** (goal.md L101)
-  - Progress so far: ZERO Complete TB-Ns under this focus — the operator set it
-    18 min ago (operator_log 2026-06-10T22:57:38Z update_goal + forced ideate)
-    and marked the component-boundary focus Shipped. Adjacent prior work: TB-395
-    refreshed `skills/ap2/SKILL.md`, so the 3 existing operator skills
-    (ap2, ap2-task, migrate-to-ap2) are current; `ap2/howto.md` is the ~3,100-line
-    manual still standing.
-  - Gaps (the three axes, all unaddressed):
-    (1) Carve `ap2/howto.md` into ~6–9 domain `SKILL.md` skills; today its
-    reference content (event schema, config knobs, CLI/MCP refs, task contract,
-    verification authoring, failure recovery) lives only in the monolith.
-    (2) Retarget the docs-drift gates: `ap2/tests/test_docs_drift.py` gates env
-    knobs / config keys / event types / CLI verbs / MCP tools against
-    `HOWTO_PATH` — each gate must move to the skill that absorbs its surface, in
-    the SAME commit, or the regression gate breaks.
-    (3) Cross-runtime deploy: `sync_assets` (ap2/sandbox.py) deploys skills only
-    to `~/.claude/skills` (+ `ap2-howto.md`); no `~/.agents/skills` target, no
-    `AGENTS.md`, discovery pointer hand-maintained.
+  - Progress so far: the canary settled and the convention is proven on two
+    carves — TB-397 carved the observability domain + retargeted the event-type
+    drift gate; TB-398 carved config knobs/keys/backend-setup + retargeted the
+    env-knob & config-key gates (plus displaced docs-location pins), both
+    leaving a one-line howto pointer. In flight (operator-approved, Backlog):
+    TB-399 (board-ops CLI-verb + MCP-tool reference + gate retarget), TB-400
+    (fold task-agent contract + verification-bullet authoring + classify-verdicts
+    into `skills/ap2-task/`), TB-401 (axis-3 cross-runtime `~/.agents/skills` +
+    AGENTS.md + managed pointer).
+  - Gaps:
+    (1) axis 1 — three howto domains still uncarved: **monitoring/status**
+    (`## Components enumeration (ap2 status)` howto L776), **ideation + goal/focus
+    management** (`## Authoring goal.md` L58 + `## Retrospective audit workflow`
+    L629), **failure-recovery / operator-playbook** (`## Failure modes the daemon
+    recovers from` L481 + `## Operator-question playbook` L910). This cycle
+    proposes ideation+goal/focus (TB-403) and failure-recovery (TB-402);
+    monitoring/status deferred (see below).
+    (2) axis 2 — drift gates are being retargeted carve-by-carve; residual gates
+    stay on `HOWTO_PATH` until the matching section is carved. No standalone
+    work — each carve owns its gate retarget in-commit.
+    (3) The final "retire `ap2/howto.md` as a file + drop the sync-assets howto
+    target + flip any residual gates" task depends on EVERY carve landing; not
+    yet rankable.
   - Status: `in-progress`
-  - Reasoning: no Completes yet — status is mechanically `in-progress`; the
-    three axes give a clear, sequenceable decomposition.
 
 ## Non-goal risk check
 
-The focus is a docs/tooling restructure with no daemon behavior change (focus
-L117), so the "Removing behavior during component extraction" and "API
-stability" non-goals don't bind. One real risk: spawning a 4th overlapping
-authoring surface (howto vs. existing `ap2-task` skill vs. `ideation.default.md`)
-— mitigated by folding the howto task-authoring reference INTO `ap2-task` and
-keeping `ideation.default.md` the canonical daemon copy (TB-400). No goal.md
-mutation, no cron change. none.
+Docs/tooling restructure with no daemon behavior change (focus L117), so
+"Removing behavior during component extraction" and "API stability" non-goals
+don't bind. Real risk: over-fragmentation — goal.md L130-133 caps at ~6-9
+coherent domain skills because summaries load up front. Mitigated by carving by
+operator domain (not per-subcommand) and deferring monitoring/status until
+TB-399's board-ops `ap2 status` reference lands, so its residual boundary is
+visible before carving. One content-boundary guard: the ideation-goals skill
+must NOT move the daemon ideation agent's briefing-authoring conventions — those
+stay canonical in `ideation.default.md` (goal.md L126-129); the briefing pins
+this. none otherwise.
 
 ## Considered & deferred this cycle
 
-- **Remaining domain skills (ap2-monitoring/status, ap2-ideation-goals,
-  ap2-failure-recovery + operator playbook)**: deferred to next cycle — the
-  canary (TB-397) must settle SKILL.md frontmatter + gate-retarget conventions
-  before the rest fan out; proposing all ~7 carves now is the TB-78 too-large /
-  over-proposing shape.
-- **Final "retire `ap2/howto.md` + drop its sync-assets target + flip residual
-  gates" task**: NOT proposed — it depends on EVERY carve landing first, so
-  proposing it now is exactly the out-of-sequence axis shape the operator
-  rejected in TB-384. Surfaces once the carves are done.
+- **ap2-monitoring/status skill** (`## Components enumeration (ap2 status)`):
+  deferred — its `ap2 status` surface overlaps both the already-carved
+  observability skill (TB-397 stats/logs) and TB-399's in-flight board-ops
+  CLI/MCP reference. Carving it now risks a boundary dispute / re-carve, the
+  duplicate-axis shape the operator rejected in TB-384. Wait for TB-399 to land,
+  then carve the residual status content.
+- **Final "retire howto.md + drop sync-assets howto target + flip residual
+  gates" task**: NOT proposed — depends on every carve landing first; proposing
+  it now is the out-of-sequence axis shape rejected in TB-384.
 - **Recurring operator-rejection pattern**: vetoes punish out-of-sequence /
   duplicate axis work (TB-384) and speculative enumerated-case validators
-  (TB-172, TB-240, TB-231). This wave mitigates the first by gating TB-398/399/400
-  behind the canary TB-397 (`@blocked:review,TB-397`), and proposes no new
-  enumerated-case lint.
+  (TB-172, TB-231, TB-240). Both proposals this cycle are in-sequence domain
+  carves (the canary settled via TB-397/398) and add no enumerated-case lint.
 
 ## Cycle observations
 
-- The docs-drift gates couple carve↔gate-retarget: moving a gated section out of
-  `howto.md` while the gate still reads `HOWTO_PATH` breaks `uv run pytest`, so
-  each carve MUST retarget its gate in-commit. This is why each carve briefing
-  bundles the gate retarget + uses the full suite as a verification bullet
-  (carried as the load-bearing reason for the wave's task shape).
+- Carve↔gate coupling is load-bearing for every carve briefing: moving a gated
+  howto section while its docs-drift gate still reads `HOWTO_PATH` breaks
+  `uv run pytest`, so each carve must retarget its gate in-commit (TB-397/398
+  both did). The briefing tells the agent to grep `ap2/tests/` for the displaced
+  gate and retarget it; the full-suite + `test_docs_drift.py` bullets gate it.
+  Carried because it dictates this wave's task shape.
+- Queue-append's hard-predecessor judge (TB-235) is non-deterministic on
+  identically-phrased carves: TB-403's briefing tripped the TB-397-predecessor
+  check (leans on the canary's on-disk artifacts as templates) while TB-402's
+  identical claim did not — resolved by gating TB-403 `@blocked:review,TB-397`
+  (TB-397 already Complete, so it's a satisfied no-op + review gate). One-time
+  note — not carried.
 
 ## Decisions needed from operator
 
-none this cycle — the proposed skill taxonomy is expressed AS the five
-review-gated proposals below; the operator steers boundaries by approving /
-rejecting / reordering them individually.
+none this cycle — the remaining skill taxonomy is expressed AS the review-gated
+proposals (TB-402, TB-403); the operator steers boundaries by approving /
+rejecting / reordering them. No unadopted `cron_proposed` events in the recent
+window to surface.
 
 ## Proposals this cycle
 
-- TB-397 — canary: carve the observability domain (event schema + prose-judge
-  diagnostics + logs/stats) into `skills/ap2-observability/`, establish SKILL.md
-  conventions, retarget the event-type drift gate.
-- TB-398 — `skills/ap2-config/` (config knobs + config keys + backend setup) +
-  retarget env-knob & config-key gates. `@blocked:review,TB-397`.
-- TB-399 — `skills/ap2-board-ops/` (CLI-verb + MCP-tool references) + retarget
-  those two gates. `@blocked:review,TB-397`.
-- TB-400 — fold howto's task-agent contract + verification-bullet authoring into
-  the existing `skills/ap2-task/` (mirror, keep `ideation.default.md`
-  canonical). `@blocked:review,TB-397`.
-- TB-401 — axis 3: cross-runtime deploy (`~/.agents/skills`) + `AGENTS.md` +
-  managed discovery pointer (additive; howto target kept until retirement).
+- TB-402 — carve howto's `## Failure modes the daemon recovers from` +
+  `## Operator-question playbook` into `skills/ap2-failure-recovery/` +
+  retarget displaced gates (auto-recovery + operator-intervention playbook).
+- TB-403 — carve howto's `## Authoring goal.md` + `## Retrospective audit
+  workflow` into `skills/ap2-ideation-goals/` + retarget displaced gates
+  (operator-facing goal/focus authoring + proposal-quality retrospective;
+  `ideation.default.md` stays canonical for daemon briefing conventions).
+  Gated `@blocked:review,TB-397`.
