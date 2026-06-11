@@ -380,3 +380,9 @@ ideation won't re-propose decisions logged here._
 - 2026-06-11T04:37:24Z — applied operator-queued approve → TB-399
 - 2026-06-11T04:37:24Z — applied operator-queued approve → TB-400
 - 2026-06-11T04:37:25Z — applied operator-queued approve → TB-401
+- 2026-06-11T06:24:44Z — Verification-bullet convention (recurring across TB-397..403): do NOT emit a bare `uv run pytest -q ap2/tests/` full-suite bullet in briefings. It is both wrong and redundant — wrong because it lacks `--extra dev` (a plain `uv run` prunes pytest from .venv → ImportError) and lacks `--ignore=ap2/tests/smoke` (with AP2_REAL_SDK=1 pinned it runs the flaky real-SDK smokes INSIDE per-task verification and false-fails → needless retry), and redundant because the project-wide gate (AP2_VERIFY_CMD) already runs the full suite in the canonical form after every task. Rule: DROP the redundant full-suite bullet entirely (preferred — the gate covers it); if a suite-level bullet is genuinely needed, write it EXACTLY as `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke`. Targeted bullets against specific files (e.g. `uv run --extra dev pytest -q ap2/tests/test_docs_drift.py`) are fine and encouraged.
+- 2026-06-11T06:20:38Z — applied operator-queued ack
+- 2026-06-11T06:22:42Z — applied operator-queued update → TB-403
+- 2026-06-11T06:22:42Z — applied operator-queued approve → TB-402
+- 2026-06-11T06:22:42Z — applied operator-queued approve → TB-403
+- 2026-06-11T06:24:19Z — applied operator-queued update → TB-402

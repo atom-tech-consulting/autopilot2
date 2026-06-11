@@ -22,8 +22,8 @@ Mirror the established two-carve pattern exactly. (1) Create `skills/ap2-failure
 - `grep -qi 'recover' skills/ap2-failure-recovery/SKILL.md` — the failure-modes auto-recovery reference content landed in the skill.
 - `grep -qi 'unfreeze' skills/ap2-failure-recovery/SKILL.md` — the operator-intervention playbook content (frozen-task unfreeze) landed in the skill.
 - `grep -qi 'ap2-failure-recovery' ap2/howto.md` — howto retains a pointer to the new skill where the sections were carved.
-- `uv run pytest -q ap2/tests/test_docs_drift.py` — the docs-drift gates pass after retargeting.
-- `uv run pytest -q ap2/tests/` — the full regression suite stays green.
+- `uv run --extra dev pytest -q ap2/tests/test_docs_drift.py` — the docs-drift gates pass after retargeting.
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — the full regression suite stays green.
 - `skills/ap2-failure-recovery/SKILL.md` Prose: the skill consolidates the failure-modes + operator-question-playbook reference into one coherent recovery domain with an auto-trigger description; judge confirms via Read that the moved howto sections are reduced to pointers (content not duplicated across both surfaces).
 
 ## Out of scope

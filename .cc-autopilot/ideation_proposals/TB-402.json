@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/carve-howto-md-failure-modes-operator-qu.md",
   "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-11T06:24:44Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-11T05:52:08Z",
   "tb_id": "TB-402",
   "why_now": "the recovery/escalation manual is precisely the content an operator reaches for when something has gone wrong, yet today it surfaces only via the hand-maintained `~/.claude/CLAUDE.md` pointer into a ~184 KB monolith \u2014 carving it into an auto-triggered skill means a failure-mode question surfaces the right slice on match, and retires two more sections from the howto surface being dismantled."

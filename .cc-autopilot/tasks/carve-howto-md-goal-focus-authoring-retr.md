@@ -23,8 +23,8 @@ Follow the docs-carve pattern already on disk in `skills/ap2-config/SKILL.md` + 
 - `grep -qi 'Done when' skills/ap2-ideation-goals/SKILL.md` — the goal-authoring reference content (Done-when guidance) landed in the skill.
 - `grep -qi 'delete-test' skills/ap2-ideation-goals/SKILL.md` — the retrospective-audit / delete-test reference content landed in the skill.
 - `grep -qi 'ap2-ideation-goals' ap2/howto.md` — howto retains a pointer to the new skill where the sections were carved.
-- `uv run pytest -q ap2/tests/test_docs_drift.py` — the docs-drift gates pass after retargeting (no gate still asserts the moved sections' coverage in HOWTO_PATH).
-- `uv run pytest -q ap2/tests/` — the full regression suite stays green.
+- `uv run --extra dev pytest -q ap2/tests/test_docs_drift.py` — the docs-drift gates pass after retargeting (no gate still asserts the moved sections' coverage in HOWTO_PATH).
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — the full regression suite stays green.
 - `skills/ap2-ideation-goals/SKILL.md` Prose: the skill carves operator-facing goal/focus authoring + proposal retrospective content and does NOT duplicate `ideation.default.md`'s daemon-internal briefing-authoring conventions; judge confirms via Read that `ideation.default.md` remains the canonical source for those conventions.
 
 ## Out of scope
