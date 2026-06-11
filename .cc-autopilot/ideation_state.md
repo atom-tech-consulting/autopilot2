@@ -1,6 +1,6 @@
 # Ideation State
 
-_Last updated: 2026-06-11T12:26Z by ideation cron_
+_Last updated: 2026-06-11T14:30Z by ideation cron_
 
 ## Mission alignment
 
@@ -41,6 +41,8 @@ deploy, with only one residual carve + the file-retirement step left.
     `HOWTO_PATH` gates, delete the file (TB-406, hard-sequenced
     `@blocked:review,TB-405`).
   - Status: `in-progress`
+  - Reasoning: both remaining steps are proposed and dependency-ordered in
+    Backlog; neither has a Complete TB-N yet, so the focus is unfinished.
 
 ## Non-goal risk check
 
@@ -64,31 +66,27 @@ otherwise.
   times (TB-172, TB-231, TB-240); no observed drift failure justifies it.
 - **Recurring operator-rejection pattern**: vetoes target out-of-sequence /
   duplicate-axis work (TB-384, the most-recent rejection) and speculative
-  enumerated-case validators/linters (TB-172, TB-231, TB-240). Both remaining
-  steps are already proposed in dependency order (TB-405 → TB-406); a third task
-  this cycle would land in one of those two vetoed shapes, so I propose none.
+  enumerated-case validators/linters (TB-172, TB-231, TB-240).
 
 ## Cycle observations
 
-- Focus is in wind-down: both remaining steps are the two pending-review tasks
-  (TB-405 carve, TB-406 retire), so there is no third high-leverage, in-sequence,
-  non-fragmenting proposal to rank — this is a 0-proposal cycle by design, not
-  slot starvation (N=3). (Carried from the prior cycle with re-justification: it
+- (Carried from the prior cycle with re-justification: it
   is still the operative reason this cycle produces no proposals, and no board
-  change since TB-403 completed at 08:08Z has altered it.)
+  change since the 12:26Z cycle has altered it.)
 - Orphan proposal record `ideation_proposals/TB-404.json` (self-referential
   `blocked_on: "review,TB-404"`, briefing `retire-...-r.md`) is a superseded
   duplicate of the retire-howto task; the live retire task is TB-406 (briefing
-  `retire-...-r-2.md`, `@blocked:review,TB-405`). Recorded so a future audit of
-  proposal-records-vs-board doesn't re-investigate the TB-404 mismatch.
+  `retire-...-r-2.md`, `@blocked:review,TB-405`). Carried once more with
+  re-justification: TB-406 has not yet landed, so a proposal-records-vs-board
+  audit run before then would re-surface the TB-404 mismatch as investigation
+  cost; drop this bullet once TB-406 completes.
 
 ## Decisions needed from operator
 
-none this cycle — there is nothing requiring operator narrative judgment to
-unblock the next ideation cycle. The two remaining steps are already expressed
+The two remaining steps are already expressed
 as review-gated proposals; advancing them is routine `ap2 approve`, surfaced
 mechanically by `ap2 status` / the cron status-report, not an ideation
-escalation. No unadopted `cron_proposed` events in the recent window to surface.
+escalation.
 
 ## Proposals this cycle
 
