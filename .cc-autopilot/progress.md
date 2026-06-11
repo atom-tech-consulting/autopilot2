@@ -1599,3 +1599,9 @@
 - **Summary:** Folded howto's task-agent contract + Verification-bullet authoring (Prose prefix + four shell-bullet pitfalls + worked example) + classify-verdicts reference into skills/ap2-task/SKILL.md (which now states ap2/ideation.default.md stays canonical), left stubs in howto, repointed the test_tb273 pitfall-sync gate at the skill; full suite 3048 passed.
 - **Files:** ap2/howto.md, skills/ap2-task/SKILL.md, ap2/tests/test_tb273_ideation_pitfalls_sync.py, ap2/tests/test_verify_classifier.py
 - **Tests:** pass
+
+## [2026-06-11] TB-401: Cross-runtime skills deploy: add ~/.agents/skills target + AGENTS.md + managed discovery pointer
+- **Commit:** `4cea878`
+- **Summary:** Extended sync_assets for cross-runtime deploy: mirror skills into Codex ~/.agents/skills target, deploy new repo AGENTS.md to ~/.agents/AGENTS.md, and idempotently manage skills-discovery pointer stanzas in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md (additive; ap2-howto.md retained). Full suite 3053 passed.
+- **Files:** ap2/sandbox.py, ap2/tests/test_sync_assets.py, AGENTS.md
+- **Tests:** pass
