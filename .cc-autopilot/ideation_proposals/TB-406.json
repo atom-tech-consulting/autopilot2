@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review,TB-405",
+  "briefing_path": ".cc-autopilot/tasks/retire-ap2-howto-md-as-a-file-relocate-r-2.md",
+  "focus_anchor": "current focus consolidate the operator manual into auto triggered cross runtime skills",
+  "proposed_at": "2026-06-11T08:21:32Z",
+  "tb_id": "TB-406",
+  "why_now": "`ap2/howto.md` surviving as the canonical operation manual is exactly the focus's delete-test failure (\"if howto.md survives as the canonical operation manual, the consolidation didn't happen\"); the deploy code already flags this step in-line (\"the `ap2-howto.md` target stays until the later howto-retirement task\", `ap2/sandbox.py`), so the surface is only half-retired until the file is gone."
+}
