@@ -33,8 +33,16 @@ ARCHITECTURE_PATH = AP2_DIR / "architecture.md"
 # skill as the canary that establishes the carve-plus-gate-retarget pattern.
 # The event-type drift gate reads its coverage surface from here instead of
 # `HOWTO_PATH`; the remaining gates stay on `HOWTO_PATH` for the follow-up
-# carves (TB-398/399/400) to move one domain + one gate at a time.
+# carves (TB-399/400) to move one domain + one gate at a time.
 OBSERVABILITY_SKILL = REPO_ROOT / "skills/ap2-observability/SKILL.md"
+
+# TB-398 — the configuration domain (the `## Configuration knobs` flat
+# `AP2_*` catalogue + the `## Config keys (TOML)` typed-schema reference +
+# the Codex backend setup) was carved out of `howto.md` into
+# `skills/ap2-config/SKILL.md`, the second domain carve following the
+# TB-397 canary pattern. The env-knob and config-key coverage gates read
+# their documentation surface from here instead of `HOWTO_PATH`.
+CONFIG_SKILL = REPO_ROOT / "skills/ap2-config/SKILL.md"
 
 
 # Claude built-ins are not autopilot MCP tools. They appear in agent
@@ -249,25 +257,30 @@ def test_every_mcp_tool_documented():
 
 def test_every_env_knob_documented():
     """Every `AP2_*` env knob referenced in ap2 source is mentioned in
-    `ap2/howto.md`, AND each mention is backtick-fenced (e.g.
+    `skills/ap2-config/SKILL.md`, AND each mention is backtick-fenced (e.g.
     `` `AP2_FOO` ``) so the rendered list shape stays uniform. A
     substring-only check would silently accept prose that referenced the
     knob without the rendered-list framing; the backtick fence is what
-    the operator's eye scans for in the `## Configuration knobs`
+    the operator's eye scans for in the skill's `## Configuration knobs`
     section.
+
+    TB-398 retargeted this gate from `HOWTO_PATH` to `CONFIG_SKILL` when
+    the configuration domain was carved into the `ap2-config` skill — the
+    skill is now the canonical home of the env-knob catalogue, so it is the
+    surface a source-side knob addition must keep in sync.
     """
-    howto = HOWTO_PATH.read_text()
+    skill = CONFIG_SKILL.read_text()
     knobs = _collect_env_knobs()
     assert knobs, "no env knobs found in source — regex or walk regressed"
     missing = sorted(
-        knob for knob in knobs if f"`{knob}`" not in howto
+        knob for knob in knobs if f"`{knob}`" not in skill
     )
     assert not missing, (
         f"env knob(s) referenced in source but missing a backtick-fenced "
-        f"mention in howto.md: {missing}. Add to `## Configuration "
-        f"knobs` so operators can discover them. If a hit is a private "
-        f"constant (e.g. `_AP2_FOO_DEFAULT`), add it to "
-        f"`_DOCS_DRIFT_EXEMPT_ENV_KNOBS` with a comment explaining why."
+        f"mention in `skills/ap2-config/SKILL.md`: {missing}. Add to the "
+        f"skill's `## Configuration knobs` so operators can discover them. "
+        f"If a hit is a private constant (e.g. `_AP2_FOO_DEFAULT`), add it "
+        f"to `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` with a comment explaining why."
     )
 
 
@@ -323,11 +336,18 @@ def test_every_env_knob_in_template_or_exempt():
 
 def test_every_config_key_documented():
     """Every config key declared in `aggregate_schemas(default_registry())`
-    is EITHER referenced verbatim in `ap2/howto.md`'s `## Config keys
-    (TOML)` block (the structurally-parallel sibling to `## Configuration
-    knobs`) OR listed in `ap2.init._CONFIG_TEMPLATE_EXEMPT_KEYS` with an
-    inline `# reason:` comment explaining why operators don't need it
-    surfaced (TB-325, axis 6 of the structured-config focus).
+    is EITHER referenced verbatim in `skills/ap2-config/SKILL.md`'s
+    `## Config keys (TOML)` block (the structurally-parallel sibling to
+    `## Configuration knobs`) OR listed in
+    `ap2.init._CONFIG_TEMPLATE_EXEMPT_KEYS` with an inline `# reason:`
+    comment explaining why operators don't need it surfaced (TB-325, axis 6
+    of the structured-config focus).
+
+    TB-398 retargeted this gate from `HOWTO_PATH` to `CONFIG_SKILL` when
+    the configuration domain (both `## Configuration knobs` and `## Config
+    keys (TOML)`) was carved into the `ap2-config` skill — the skill is now
+    the canonical home of the TOML key reference, so it is the surface a
+    new `ConfigKey` declaration must keep in sync.
 
     Parallel to `test_every_env_knob_documented` / `_in_template_or_exempt`
     (TB-305 — flat `AP2_*` env knob gate) but pinned against the new
@@ -357,11 +377,11 @@ def test_every_config_key_documented():
     from ap2.core_config_schema import CORE_CONFIG_SCHEMA
     from ap2.registry import default_registry
 
-    howto = HOWTO_PATH.read_text()
-    assert "## Config keys (TOML)" in howto, (
-        "howto.md is missing the `## Config keys (TOML)` heading — the "
-        "structured-config TOML surface (TB-321/322/325) needs a "
-        "dedicated reference block parallel to `## Configuration knobs`. "
+    skill = CONFIG_SKILL.read_text()
+    assert "## Config keys (TOML)" in skill, (
+        "skills/ap2-config/SKILL.md is missing the `## Config keys (TOML)` "
+        "heading — the structured-config TOML surface (TB-321/322/325) needs "
+        "a dedicated reference block parallel to `## Configuration knobs`. "
         "Add the section with a tree-rendered list of `components.<name>.<key>` "
         "paths sourced from the per-component manifest `config_schema` "
         "declarations."
@@ -389,17 +409,19 @@ def test_every_config_key_documented():
 
     missing = sorted(
         p for p in paths
-        if p not in howto and p not in _CONFIG_TEMPLATE_EXEMPT_KEYS
+        if p not in skill and p not in _CONFIG_TEMPLATE_EXEMPT_KEYS
     )
     assert not missing, (
         f"config key(s) declared on a component manifest "
-        f"`config_schema` but NEITHER documented in `ap2/howto.md`'s "
+        f"`config_schema` but NEITHER documented in "
+        f"`skills/ap2-config/SKILL.md`'s "
         f"`## Config keys (TOML)` block NOR listed in "
         f"`ap2.init._CONFIG_TEMPLATE_EXEMPT_KEYS`: {missing}.\n\n"
         f"To make the gate pass, EITHER:\n\n"
-        f"(1) Add a row to `## Config keys (TOML)` in howto.md naming the "
-        f"full `components.<name>.<key>` path, its default, and a one-line "
-        f"description (mirror the ConfigKey's `description` field). Use "
+        f"(1) Add a row to `## Config keys (TOML)` in the ap2-config skill "
+        f"naming the full `components.<name>.<key>` path, its default, and a "
+        f"one-line description (mirror the ConfigKey's `description` field). "
+        f"Use "
         f"this path when the knob is operator-facing — something a "
         f"fresh-project operator should discover from the reference "
         f"section alone.\n\n"

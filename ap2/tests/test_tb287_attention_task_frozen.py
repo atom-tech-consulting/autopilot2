@@ -389,7 +389,12 @@ def test_briefing_verification_greps_match():
     # TB-343: the attention body moved to the sibling impl.py.
     attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
     config_src = (repo_root / "config.py").read_text()
-    howto_src = (repo_root / "howto.md").read_text()
+    # TB-398 carved the attention-knob documentation out of `ap2/howto.md`'s
+    # `## Configuration knobs` section into `skills/ap2-config/SKILL.md`, so
+    # the operator-facing detector mention now lives in the config skill.
+    config_skill_src = (
+        repo_root.parent / "skills" / "ap2-config" / "SKILL.md"
+    ).read_text()
     architecture_src = (repo_root / "architecture.md").read_text()
 
     # `grep -q "_detect_task_frozen" ap2/attention.py`
@@ -398,8 +403,8 @@ def test_briefing_verification_greps_match():
     # `grep -q "AP2_TASK_FROZEN_RECENCY_S" ap2/config.py`
     assert "AP2_TASK_FROZEN_RECENCY_S" in config_src
 
-    # `grep -q "task_frozen" ap2/howto.md`
-    assert "task_frozen" in howto_src
+    # `grep -q "task_frozen" skills/ap2-config/SKILL.md`
+    assert "task_frozen" in config_skill_src
 
     # `grep -q "task_frozen" ap2/architecture.md`
     assert "task_frozen" in architecture_src

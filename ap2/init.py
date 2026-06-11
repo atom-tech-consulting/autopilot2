@@ -252,7 +252,7 @@ IDEATION_STATE_TEMPLATE = (
 # the next time a fresh project is init'd. AGENT_MODEL / AGENT_EFFORT /
 # MM_CHANNELS / IDEATION_TRIGGER_TASK_COUNT have non-constant or "(unset)"
 # defaults that are inlined as string literals (matching how `ap2/README.md`
-# and `ap2/howto.md`'s `## Configuration knobs` enumerate them).
+# and the `ap2-config` skill's `## Configuration knobs` enumerate them).
 #
 # Note: `.cc-autopilot/env` is gitignored (`NESTED_GITIGNORE_BLOCKS`
 # above), so the generated file is per-project local — the TEMPLATE
@@ -273,8 +273,9 @@ ENV_TEMPLATE = f"""\
 # only required for the lifecycle knobs (`AP2_WEB_PORT`,
 # `AP2_WEB_DISABLED`, `AP2_MM_CHANNELS`) that wire stateful resources.
 #
-# See `ap2/howto.md` `## Configuration knobs` for the full list with
-# descriptions, and `ap2/config.py` for the in-source DEFAULT_* constants.
+# See the `ap2-config` skill (`skills/ap2-config/SKILL.md`)
+# `## Configuration knobs` for the full list with descriptions, and
+# `ap2/config.py` for the in-source DEFAULT_* constants.
 
 # Project-wide regression gate. Runs after every successful task agent
 # commit; failure routes the task through retry like any other crash.
@@ -462,8 +463,9 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
 # rendered template the next `ap2 init` writes — no manual template edit
 # required. The `test_every_config_key_documented` gate in
 # `ap2/tests/test_docs_drift.py` pins the contract: every aggregated-
-# schema key path must be referenced in `ap2/howto.md`'s `## Config keys
-# (TOML)` block OR listed in `_CONFIG_TEMPLATE_EXEMPT_KEYS` below.
+# schema key path must be referenced in the `ap2-config` skill's
+# `## Config keys (TOML)` block OR listed in
+# `_CONFIG_TEMPLATE_EXEMPT_KEYS` below.
 #
 # The `[core.*]` section is NOT rendered today — TB-321's docstring
 # explicitly defers a typed core schema to a later axis (the existing
@@ -561,7 +563,8 @@ def _render_config_template() -> str:
     # `"core"` key in the returned dict; we pop it and render it as a
     # top-level `[core]` block before the component blocks so the file
     # follows the conventional `[core.*]` → `[components.<name>.*]`
-    # ordering the operator sees in `howto.md`'s `## Config keys (TOML)`.
+    # ordering the operator sees in the `ap2-config` skill's
+    # `## Config keys (TOML)`.
     schemas = aggregate_schemas(
         default_registry(), core_schema=CORE_CONFIG_SCHEMA,
     )
@@ -597,8 +600,9 @@ def _render_config_template() -> str:
         "#     > this TOML file\n"
         "#     > in-source defaults.\n"
         "#\n"
-        "# See `ap2/howto.md` `## Config keys (TOML)` for the full list with\n"
-        "# descriptions, the per-component `Manifest.config_schema`\n"
+        "# See the `ap2-config` skill (`skills/ap2-config/SKILL.md`)\n"
+        "# `## Config keys (TOML)` for the full list with descriptions, the\n"
+        "# per-component `Manifest.config_schema`\n"
         "# declarations under `ap2/components/<name>/manifest.py`, and\n"
         "# `ap2/core_config_schema.py` for the `[core.*]` schema — the\n"
         "# source-of-truth `ConfigKey` definitions (type, default,\n"
@@ -687,15 +691,15 @@ def __getattr__(name: str) -> str:
 # the template-vs-exempt decision a one-file edit for the schema-adder.
 #
 # Empty at launch: TB-322 populated descriptions for every key in the
-# schema union, so all 25 keys land in howto.md verbatim. Future
-# deprecations or test-only knobs land entries here rather than
-# stripping the howto.md row — keeps the audit trail.
+# schema union, so all 25 keys land in the `ap2-config` skill verbatim.
+# Future deprecations or test-only knobs land entries here rather than
+# stripping the skill's row — keeps the audit trail.
 _CONFIG_TEMPLATE_EXEMPT_KEYS: frozenset[str] = frozenset({
     # Empty by design — every current key declared via TB-322 carries a
-    # description and is rendered in `ap2/howto.md` `## Config keys (TOML)`.
-    # A future deprecation lands here with `# reason: deprecated alias for
-    # ...` rather than removing the howto.md row, so the audit trail is
-    # preserved.
+    # description and is rendered in the `ap2-config` skill's
+    # `## Config keys (TOML)`. A future deprecation lands here with
+    # `# reason: deprecated alias for ...` rather than removing the skill's
+    # row, so the audit trail is preserved.
 })
 
 

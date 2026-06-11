@@ -454,11 +454,16 @@ def test_briefing_verification_greps_match():
     repo_root = Path(__file__).resolve().parent.parent
     # TB-343: the attention body moved to the sibling impl.py.
     attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
-    howto_src = (repo_root / "howto.md").read_text()
+    # TB-398 carved the attention-knob documentation out of `ap2/howto.md`'s
+    # `## Configuration knobs` section into `skills/ap2-config/SKILL.md`, so
+    # the operator-facing detector mention now lives in the config skill.
+    config_skill_src = (
+        repo_root.parent / "skills" / "ap2-config" / "SKILL.md"
+    ).read_text()
     architecture_src = (repo_root / "architecture.md").read_text()
     this_test_src = Path(__file__).read_text()
 
     assert "_detect_validator_judge_noisy" in attention_src
-    assert "validator_judge_noisy" in howto_src
+    assert "validator_judge_noisy" in config_skill_src
     assert "validator_judge_noisy" in architecture_src
     assert "_detect_validator_judge_noisy" in this_test_src

@@ -737,7 +737,12 @@ def test_briefing_verification_greps_match():
     attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
     config_src = (repo_root / "config.py").read_text()
     env_reload_src = (repo_root / "env_reload.py").read_text()
-    howto_src = (repo_root / "howto.md").read_text()
+    # TB-398 carved the attention-knob documentation out of `ap2/howto.md`'s
+    # `## Configuration knobs` section into `skills/ap2-config/SKILL.md`, so
+    # the operator-facing detector mention now lives in the config skill.
+    config_skill_src = (
+        repo_root.parent / "skills" / "ap2-config" / "SKILL.md"
+    ).read_text()
     architecture_src = (repo_root / "architecture.md").read_text()
     # TB-318 (axis 5): `ap2/auto_approve.py` was relocated to
     # `ap2/components/auto_approve/__init__.py`. The absence-check below
@@ -753,7 +758,7 @@ def test_briefing_verification_greps_match():
     assert "AP2_AUTO_APPROVE_COST_APPROACH_PCT" in config_src
     assert "DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT" in config_src
     assert "AP2_AUTO_APPROVE_COST_APPROACH_PCT" in env_reload_src
-    assert "cost_cap_approach" in howto_src
+    assert "cost_cap_approach" in config_skill_src
     assert "cost_cap_approach" in architecture_src
     assert "_detect_cost_cap_approach" in this_test_src
     # Absence-check: the detector must NOT live in the auto_approve

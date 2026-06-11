@@ -83,8 +83,8 @@ at tick-top and detected at least one knob whose value changed; payload
 file-sourced keys while preserving "shell export wins" for keys never
 set by the file; removes the restart-to-apply-a-knob friction TB-260
 only warned about; mtime-gated so a static env file is a cheap no-op
-each tick — see the operator manual's `Configuration knobs` reference for
-the hot-reloadable vs fixed split).
+each tick — see the **ap2-config** skill's `Configuration knobs` reference
+for the hot-reloadable vs fixed split).
 Per-run cost/usage: `task_run_usage` (per task agent run, TB-180),
 `control_run_usage` (per cron / ideation / MM-handler run, TB-179),
 `judge_call` (TB-69 + TB-181 — **as of TB-385 emitted only by the
@@ -415,8 +415,8 @@ project doesn't spam the timeline).
 
 **Focus state (TB-226 axis 4; collapsed TB-342).** `roadmap_complete`
 tracks the daemon's ideation-exhaustion halt against goal.md's
-`## Current focus:` headings. The operator manual's `Focus state` reference
-carries the full design (which also covers the TB-342 collapse from the
+`## Current focus:` headings. The **ap2-config** skill's `Focus state`
+reference carries the full design (which also covers the TB-342 collapse from the
 pre-existing multi-focus rotation pointer walk into a single
 exhaustion detector).
 

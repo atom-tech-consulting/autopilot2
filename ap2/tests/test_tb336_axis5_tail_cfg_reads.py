@@ -504,13 +504,19 @@ def test_auto_approve_manifest_carries_cost_approach_pct():
 
 
 def test_howto_md_documents_cost_approach_pct():
-    """The howto.md `## Config keys (TOML)` block documents
+    """The `## Config keys (TOML)` block documents
     `components.auto_approve.cost_approach_pct` so the
     `test_every_config_key_documented` gate stays green when the
     schema entry above is consulted.
+
+    TB-398 carved the `## Config keys (TOML)` block out of `howto.md`
+    into `skills/ap2-config/SKILL.md`, so this gate follows the content
+    to the skill.
     """
-    howto = (_REPO_ROOT / "ap2/howto.md").read_text(encoding="utf-8")
-    assert "components.auto_approve.cost_approach_pct" in howto, (
-        "TB-336: howto.md `## Config keys (TOML)` block must reference "
-        "`components.auto_approve.cost_approach_pct`."
+    skill = (
+        _REPO_ROOT / "skills/ap2-config/SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "components.auto_approve.cost_approach_pct" in skill, (
+        "TB-336: the ap2-config skill's `## Config keys (TOML)` block must "
+        "reference `components.auto_approve.cost_approach_pct`."
     )

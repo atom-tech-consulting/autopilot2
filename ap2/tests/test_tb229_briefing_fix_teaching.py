@@ -50,7 +50,11 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SKILL_MD = _REPO_ROOT / "skills" / "ap2-task" / "SKILL.md"
 _PROMPTS_PY = _REPO_ROOT / "ap2" / "prompts.py"
-_HOWTO_MD = _REPO_ROOT / "ap2" / "howto.md"
+# TB-398 carved the TB-225 auto-unfreeze knob documentation (with the
+# forward link to `skills/ap2-task/SKILL.md`) out of `ap2/howto.md`'s
+# `## Configuration knobs` section into the `ap2-config` skill, so the
+# operator-facing half of the cross-reference now lives here.
+_CONFIG_SKILL_MD = _REPO_ROOT / "skills" / "ap2-config" / "SKILL.md"
 
 
 # Bootstrap shape tokens TB-225 ships in
@@ -267,20 +271,25 @@ def test_prompts_py_teaches_briefing_fix_near_blocked_status_enumeration():
 
 
 def test_howto_md_cross_references_skill_md_failure_reporting_section():
-    """The briefing's verification bullet
-    `grep -nE 'skills/ap2-task/SKILL.md' ap2/howto.md` expects at
-    least one cross-reference link from the failure-recovery /
-    TB-225 section. The forward link makes the operator surface
-    (`howto.md`) and the agent-author surface (SKILL.md) point at
-    each other so a future reader of either can trace the
-    convention's other half."""
-    body = _read(_HOWTO_MD)
+    """The operator-facing config reference carries at least one
+    cross-reference link to `skills/ap2-task/SKILL.md` from the
+    failure-recovery / TB-225 auto-unfreeze section. The forward link
+    makes the operator surface and the agent-author surface (SKILL.md)
+    point at each other so a future reader of either can trace the
+    convention's other half.
+
+    TB-398 carved the TB-225 auto-unfreeze knob documentation out of
+    `ap2/howto.md`'s `## Configuration knobs` section into
+    `skills/ap2-config/SKILL.md`, so this gate follows the cross-reference
+    to the skill — the config reference is now the operator-facing half of
+    the convention."""
+    body = _read(_CONFIG_SKILL_MD)
     n = body.count("skills/ap2-task/SKILL.md")
     assert n >= 1, (
-        f"`ap2/howto.md` must cross-reference "
+        f"`skills/ap2-config/SKILL.md` must cross-reference "
         f"`skills/ap2-task/SKILL.md` at least once (TB-229 added a "
-        f"forward link from the TB-225 auto-unfreeze section); "
-        f"found {n}"
+        f"forward link from the TB-225 auto-unfreeze section; TB-398 "
+        f"carried it into the config skill); found {n}"
     )
 
 
