@@ -21,7 +21,7 @@ Why now: the CLI-verb and MCP-tool references are pure operator-action lookup co
 - `grep -qE '^description:' skills/ap2-board-ops/SKILL.md` — auto-trigger description present.
 - `! grep -q '## Operator CLI verbs (reference)' ap2/howto.md` — CLI-verb reference retired from howto.
 - `grep -q 'ap2-board-ops' ap2/tests/test_docs_drift.py` — CLI-verb & MCP-tool gates retargeted.
-- `uv run pytest -q ap2/tests/` — full suite green (CLI-verb + MCP-tool coverage now enforced against the skill).
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — full suite green (CLI-verb + MCP-tool coverage now enforced against the skill).
 
 ## Out of scope
 

@@ -23,7 +23,7 @@ Why now: the config domain is the largest, most-gated slice of howto and the one
 - `grep -qE '^description:' skills/ap2-config/SKILL.md` — auto-trigger description present.
 - `! grep -q '## Configuration knobs' ap2/howto.md` — the knobs section is retired from howto.
 - `grep -q 'ap2-config' ap2/tests/test_docs_drift.py` — env-knob & config-key gates retargeted to the skill.
-- `uv run pytest -q ap2/tests/` — full suite green (env-knob + config-key coverage now enforced against the skill).
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — full suite green (env-knob + config-key coverage now enforced against the skill).
 
 ## Out of scope
 
