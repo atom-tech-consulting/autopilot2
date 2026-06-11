@@ -370,3 +370,4 @@ ideation won't re-propose decisions logged here._
 - 2026-06-10T22:57:38Z — applied operator-queued update_goal
 - 2026-06-10T22:57:38Z — operator updated goal.md (New focus: consolidate the operator manual into auto-triggered cross-runtime skills (retire howto.md → ~6-9 domain skills; retarget docs-drift gate + sync-assets; add Codex ~/.agents/skills target + AGENTS.md + managed pointer). Component-boundary focus → Shipped. architecture.md stays the design doc.)
 - 2026-06-10T22:57:39Z — applied operator-queued ideate → (forced)
+- 2026-06-11T04:36:07Z — applied operator-queued update → TB-397

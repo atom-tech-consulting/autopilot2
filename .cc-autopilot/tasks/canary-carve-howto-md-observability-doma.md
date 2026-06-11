@@ -25,7 +25,7 @@ Why now: `ap2/howto.md` is discoverable only via a hand-maintained pointer and c
 - `grep -qE '^description:' skills/ap2-observability/SKILL.md` — auto-trigger `description` present.
 - `! grep -q 'ap2/howto.md' skills/ap2-observability/SKILL.md` — no repo-relative howto cross-refs (links resolve at the deployed path).
 - `grep -q 'ap2-observability' ap2/tests/test_docs_drift.py` — event-type drift gate retargeted onto the skill.
-- `uv run pytest -q ap2/tests/` — full suite green (catches any cross-gate fallout from the section move).
+- `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` — full suite green (catches any cross-gate fallout from the section move).
 
 ## Out of scope
 
