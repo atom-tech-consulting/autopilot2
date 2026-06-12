@@ -441,8 +441,9 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     supplied trigger justification) so audit trails preserve the
     invocation cause distinct from the suppression cause.
 
-The full canonical list lives in `ap2/howto.md`'s `## Event schema`
-section — `test_every_event_type_documented` (`ap2/tests/test_docs_drift.py`)
+The full canonical list lives in `skills/ap2-observability/SKILL.md`'s
+`## Event schema` section — `test_every_event_type_documented`
+(`ap2/tests/test_docs_drift.py`)
 and `test_every_event_type_has_test_reference`
 (`ap2/tests/test_coverage_drift.py`) gate that emitted types stay
 documented and tested.

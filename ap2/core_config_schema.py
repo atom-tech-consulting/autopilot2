@@ -5,9 +5,9 @@ Axis (1) completion of the **structured config (env → TOML)** focus
 (goal.md L266-403). TB-321 shipped the per-component schema slice
 (`Manifest.config_schema` declared on every component manifest via
 TB-322) and explicitly deferred a typed core schema to a later axis
-— `howto.md` L2376-2379 ("schema deferred to a future axis; current
-round-trip is shape-only") + `config_loader.validate_config`'s
-docstring both flag the asymmetry. This module closes that gap.
+("schema deferred to a future axis; current round-trip is shape-only"
+— `config_loader.validate_config`'s docstring flags the asymmetry).
+This module closes that gap.
 
 The keys declared here are the non-component cluster — verifier,
 ideation, agent runtime, control / mattermost timeouts, tick

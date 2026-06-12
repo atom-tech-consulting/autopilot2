@@ -389,7 +389,7 @@ def test_aggregate_schemas_has_no_cross_component_key_collisions():
     # `auto_approve.cost_approach_pct` forced the owning manifest to
     # publish the key — the attention component's
     # `_cost_approach_pct(cfg)` reads it via `cfg.get_component_value`
-    # so the howto.md `test_every_config_key_documented` gate stays
+    # so the `test_every_config_key_documented` gate stays
     # green); post-TB-345 (the focus_advance component and its 2 schema
     # keys merged into the core `ap2/ideation_halt.py` module); post-TB-386
     # (the validator_judge component and its 4 schema keys demoted into

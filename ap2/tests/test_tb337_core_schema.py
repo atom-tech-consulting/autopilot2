@@ -22,8 +22,8 @@ Pins five cleavages around the new `ap2.core_config_schema` module:
       header followed by all 21 commented-out keys.
 
 Regression intent: pre-TB-337 the core schema sat as a deferred
-footnote (`howto.md` L2376-2379 — "schema deferred to a future axis;
-current round-trip is shape-only") and the validator only walked
+footnote ("schema deferred to a future axis; current round-trip is
+shape-only") and the validator only walked
 `[components.<name>.*]` sub-tables. A typo in a `[core.*]` key
 silently kept the env-path default and a non-numeric `tick_interval_s
 = "thirty"` would not fail daemon-start. This file holds the line

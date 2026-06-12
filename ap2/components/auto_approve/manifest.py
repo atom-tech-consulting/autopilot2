@@ -288,7 +288,8 @@ MANIFEST = Manifest(
         # via `cfg.get_component_value("auto_approve", "cost_approach_pct")`
         # (the migration moved the read from `os.environ.get` at the
         # detector to the cfg helper). Declared here so the schema +
-        # howto.md + `test_every_config_key_documented` gate all agree,
+        # the `ap2-config` skill's `## Config keys (TOML)` reference +
+        # the `test_every_config_key_documented` gate all agree,
         # mirroring how `freeze_threshold` / `per_task_token_cap` /
         # `window_token_cap` are owned by this manifest while their
         # actual reads happen in callsites that already have `cfg` in

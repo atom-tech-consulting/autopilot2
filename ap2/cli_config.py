@@ -5,7 +5,7 @@ L342-351). Ships four verb handlers — `list`, `get`, `set`,
 `validate` — so an operator can introspect every tunable knob with
 its current value + resolved source (`file` / `env-override` /
 `default`) without grepping `.cc-autopilot/config.toml` against
-`ap2/howto.md` by hand.
+`skills/ap2-config/SKILL.md`'s `## Config keys (TOML)` reference by hand.
 
 Verb shapes (each mirrors an existing operator-CLI surface):
 

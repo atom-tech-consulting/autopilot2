@@ -51,15 +51,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SKILL_MD = _REPO_ROOT / "skills" / "ap2-task" / "SKILL.md"
 _PROMPTS_PY = _REPO_ROOT / "ap2" / "prompts.py"
 # TB-398 carved the TB-225 auto-unfreeze knob documentation (with the
-# forward link to `skills/ap2-task/SKILL.md`) out of `ap2/howto.md`'s
-# `## Configuration knobs` section into the `ap2-config` skill, so the
+# forward link to `skills/ap2-task/SKILL.md`) into the `ap2-config`
+# skill's `## Configuration knobs` section, so the
 # operator-facing half of the cross-reference now lives here.
 _CONFIG_SKILL_MD = _REPO_ROOT / "skills" / "ap2-config" / "SKILL.md"
 
 
 # Bootstrap shape tokens TB-225 ships in
 # `AP2_AUTO_UNFREEZE_FIX_SHAPES`'s recommended list. Single source of
-# truth: the howto / `_shared.parse_blocked_summary_fix_shape`
+# truth: the `ap2-task` skill / `_shared.parse_blocked_summary_fix_shape`
 # docstring lists these four. If TB-225 adds or renames a shape, the
 # anti-drift test below catches the SKILL.md teaching falling out of
 # sync.
@@ -266,7 +266,7 @@ def test_prompts_py_teaches_briefing_fix_near_blocked_status_enumeration():
 
 
 # ---------------------------------------------------------------------------
-# (3) `ap2/howto.md` cross-references the SKILL.md teaching.
+# (3) `skills/ap2-config/SKILL.md` cross-references the `ap2-task` SKILL.md teaching.
 # ---------------------------------------------------------------------------
 
 
@@ -278,11 +278,10 @@ def test_howto_md_cross_references_skill_md_failure_reporting_section():
     point at each other so a future reader of either can trace the
     convention's other half.
 
-    TB-398 carved the TB-225 auto-unfreeze knob documentation out of
-    `ap2/howto.md`'s `## Configuration knobs` section into
-    `skills/ap2-config/SKILL.md`, so this gate follows the cross-reference
-    to the skill — the config reference is now the operator-facing half of
-    the convention."""
+    TB-398 carved the TB-225 auto-unfreeze knob documentation into
+    `skills/ap2-config/SKILL.md`'s `## Configuration knobs` section, so this
+    gate follows the cross-reference to the skill — the config reference is
+    now the operator-facing half of the convention."""
     body = _read(_CONFIG_SKILL_MD)
     n = body.count("skills/ap2-task/SKILL.md")
     assert n >= 1, (

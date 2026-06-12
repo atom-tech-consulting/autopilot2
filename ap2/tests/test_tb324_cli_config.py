@@ -508,8 +508,8 @@ def test_ap2_config_appears_in_board_ops_skill():
     """`ap2 config` documentation appears in the `ap2-board-ops` skill's
     operator-CLI reference table.
 
-    TB-399 carved the `## Operator CLI verbs (reference)` table out of
-    `ap2/howto.md` into `skills/ap2-board-ops/SKILL.md`, so the
+    TB-399 carved the `## Operator CLI verbs (reference)` table into
+    `skills/ap2-board-ops/SKILL.md`, so the
     `ap2 config` rows now live there (the `test_every_cli_verb_documented`
     docs-drift gate was retargeted alongside)."""
     skill = Path(__file__).resolve().parents[2] / "skills/ap2-board-ops/SKILL.md"

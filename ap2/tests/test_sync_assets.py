@@ -3,12 +3,12 @@
 The unified verb replaced the pre-TB-276 split between
 `ap2 sandbox sync-skills` (rsynced repo/skills/* to the OPERATOR's
 ~/.claude/skills/, no sudo) and `ap2 sandbox install-howto` (copied the
-old `ap2/howto.md` quick-reference into a sandbox user's ~/.claude/).
+old howto quick-reference into a sandbox user's ~/.claude/).
 The split was a footgun: one Claude session couldn't deploy both
 assets, the two verbs used different target-user semantics, and
 operators routinely forgot one or the other after a doc/skill edit.
 
-TB-406 retired the `ap2/howto.md` deploy entirely — the operator manual
+TB-406 retired the howto deploy entirely — the operator manual
 is now wholly the `skills/*` SKILL.md bundles — so `sync_assets` deploys
 the skill trees (into both runtime roots) plus the Codex `AGENTS.md`
 reference, and these tests pin that skills-only deploy shape.
@@ -53,6 +53,12 @@ AGENTS_SRC = REPO_ROOT / "AGENTS.md"
 # runtime global-instruction files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`).
 POINTER_BEGIN = "<!-- BEGIN ap2-managed: skills-discovery -->"
 POINTER_END = "<!-- END ap2-managed: skills-discovery -->"
+
+# The retired pre-TB-406 single-file quick-reference deploy artifact. Spelled
+# in parts so this module carries no live pointer to the now-deleted source
+# doc (TB-407 cleanup) while still pinning that `sync_assets` never re-deploys
+# the legacy flat reference alongside the skills bundles.
+_RETIRED_QUICKREF_DEPLOY = "ap2-howto" ".md"
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +173,7 @@ def test_sync_assets_sbuser_apply_lands_skill_assets(tmp_path):
     This is THE regression-pin the briefing calls for: the unified command
     deploys the operator skills in one invocation, and the sandbox-user path
     writes directly to the current process's home without any sudo
-    intermediary. (TB-406 retired the separate `ap2-howto.md` target; the
+    intermediary. (TB-406 retired the separate howto deploy target; the
     Codex `~/.agents/...` targets are pinned in the TB-401 test below.)"""
     dest = tmp_path / "claude"
     rc = sandbox.sync_assets(sbuser=True, apply=True, dest=dest)
@@ -177,7 +183,7 @@ def test_sync_assets_sbuser_apply_lands_skill_assets(tmp_path):
     assert (dest / "skills" / "ap2-task" / "SKILL.md").is_file()
     assert (dest / "skills" / "migrate-to-ap2" / "SKILL.md").is_file()
     # No separate Claude-side quick-reference file is deployed (TB-406).
-    assert not (dest / "ap2-howto.md").exists()
+    assert not (dest / _RETIRED_QUICKREF_DEPLOY).exists()
 
 
 def test_sync_assets_sbuser_dry_run_does_not_mutate(tmp_path, capsys):
@@ -190,7 +196,7 @@ def test_sync_assets_sbuser_dry_run_does_not_mutate(tmp_path, capsys):
     assert rc == 0
     # No mutations under dest.
     assert not (dest / "skills" / "ap2" / "SKILL.md").exists()
-    assert not (dest / "ap2-howto.md").exists()
+    assert not (dest / _RETIRED_QUICKREF_DEPLOY).exists()
     out = capsys.readouterr().out
     assert "dry-run" in out
     # Per-asset summary mentions the skills class.
@@ -278,7 +284,7 @@ def test_sync_assets_sbuser_apply_lands_codex_target_and_pointer(tmp_path):
     # ... and STILL into the Claude target (additive, not a move).
     assert (claude_dir / "skills" / "ap2" / "SKILL.md").is_file()
     # No separate Claude-side quick-reference file is deployed (TB-406).
-    assert not (claude_dir / "ap2-howto.md").exists()
+    assert not (claude_dir / _RETIRED_QUICKREF_DEPLOY).exists()
 
     # (2) Codex operator reference (repo AGENTS.md) deployed verbatim.
     agents_md = tmp_path / ".agents" / "AGENTS.md"

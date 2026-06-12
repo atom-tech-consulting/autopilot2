@@ -235,9 +235,9 @@ def _cost_approach_pct(cfg: Config) -> int:
     cluster knob `cost_approach_pct` now routes through
     `cfg.get_component_value("auto_approve", "cost_approach_pct",
     default="")`. The auto_approve manifest's `config_schema` carries
-    the matching `ConfigKey` declaration so the howto.md TOML
-    reference and the `test_every_config_key_documented` gate stay in
-    sync. Sectioned env
+    the matching `ConfigKey` declaration so the `ap2-config` skill's
+    `## Config keys (TOML)` reference and the
+    `test_every_config_key_documented` gate stay in sync. Sectioned env
     (`f"AP2_COMPONENTS_{component.upper()}_{key.upper()}"` shape built
     inside the helper) wins over flat env
     (`AP2_AUTO_APPROVE_COST_APPROACH_PCT`) wins over the

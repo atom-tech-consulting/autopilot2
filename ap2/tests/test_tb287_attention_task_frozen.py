@@ -389,8 +389,8 @@ def test_briefing_verification_greps_match():
     # TB-343: the attention body moved to the sibling impl.py.
     attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
     config_src = (repo_root / "config.py").read_text()
-    # TB-398 carved the attention-knob documentation out of `ap2/howto.md`'s
-    # `## Configuration knobs` section into `skills/ap2-config/SKILL.md`, so
+    # TB-398 carved the attention-knob documentation into
+    # `skills/ap2-config/SKILL.md`'s `## Configuration knobs` section, so
     # the operator-facing detector mention now lives in the config skill.
     config_skill_src = (
         repo_root.parent / "skills" / "ap2-config" / "SKILL.md"

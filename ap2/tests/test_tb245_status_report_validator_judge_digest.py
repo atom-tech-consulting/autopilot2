@@ -670,8 +670,8 @@ def test_howto_carries_tb245_cross_reference():
     also surface on the cron status-report (push surface) — not just
     `ap2 status` (pull surface).
 
-    TB-397 carved the event-schema / validator-judge domain out of
-    `howto.md` into `skills/ap2-observability/SKILL.md` (the observability
+    TB-397 carved the event-schema / validator-judge domain into
+    `skills/ap2-observability/SKILL.md` (the observability
     canary skill), so this gate follows the content to the skill.
     """
     skill = (
@@ -689,7 +689,7 @@ def test_howto_validator_judge_section_names_push_surface():
     cross-link prose so a trim that drops the push-surface mention trips
     here.
 
-    TB-397 carved this block out of `howto.md` into
+    TB-397 carved this block into
     `skills/ap2-observability/SKILL.md`, so this gate reads the skill.
     """
     skill = (

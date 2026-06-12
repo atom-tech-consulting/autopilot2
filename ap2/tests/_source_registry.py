@@ -3,10 +3,10 @@
 Three readers consume this module:
 
 1. `ap2/tests/test_docs_drift.py` — docs-axis gate (TB-203 / TB-207):
-   "every CLI verb is mentioned in `ap2/howto.md`."
+   "every CLI verb is mentioned in `skills/ap2-board-ops/SKILL.md`."
 2. `ap2/tests/test_coverage_drift.py` — testing-axis gate (TB-208 / TB-209):
    "every CLI verb has at least one substring reference under `ap2/tests/`."
-3. `ap2/howto.md`'s `## Operator CLI verbs (reference)` section (TB-207) —
+3. `skills/ap2-board-ops/SKILL.md`'s `## Operator CLI verbs (reference)` section (TB-207) —
    the table that the docs-axis gate matches against. Not an importer,
    but the third structural reader of the same walk semantics: the table
    was authored against this enumeration, and `## Operator CLI verbs
@@ -46,12 +46,12 @@ def _collect_cli_verbs() -> set[str]:
     `argparse.SUPPRESS` (rendered as the literal `"==SUPPRESS=="`); those
     entries are NOT operator-facing (e.g. `ap2 _run`, the backgrounded
     daemon entrypoint forked by `cmd_start`), so they're dropped here.
-    The howto-side wording in `## Operator CLI verbs (reference)` mirrors
+    The skill-side wording in `## Operator CLI verbs (reference)` mirrors
     the same exclusion explicitly so the table and the gate agree on
     what counts as a verb.
 
     Group nodes (`ap2 cron`, `ap2 sandbox`) themselves are skipped — the
-    operator-facing leaves are the nested sub-verbs, and the howto table
+    operator-facing leaves are the nested sub-verbs, and the skill table
     documents one row per leaf rather than a redundant row for the
     group root.
     """

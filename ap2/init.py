@@ -391,7 +391,7 @@ ENV_TEMPLATE = f"""\
 #
 # Pattern parallels `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` in
 # `ap2/tests/test_docs_drift.py` (which exempts private-constant
-# look-alikes from the howto-mention gate) and
+# look-alikes from the docs-mention gate) and
 # `HOT_RELOADABLE_KNOBS` / `FIXED_KNOBS` in `ap2/env_reload.py` (which
 # split the same source-of-truth knob universe along the
 # can-hot-reload axis). Living next to `ENV_TEMPLATE` keeps the
@@ -524,7 +524,7 @@ def _render_config_template() -> str:
     Generation at module-import time is load-bearing for the test
     contract: the docs-drift gate's "every key is referenced" check
     walks the same schema union as this renderer, so a missing-from-
-    template hit is the same shape as a missing-from-howto hit. Future
+    template hit is the same shape as a missing-from-docs hit. Future
     schema additions land in both surfaces by adding one ConfigKey on a
     manifest — no separate template edit.
 
@@ -676,13 +676,13 @@ def __getattr__(name: str) -> str:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# TB-325: config keys intentionally absent from `ap2/howto.md`'s `##
-# Config keys (TOML)` block. Each entry MUST carry an inline `# reason: ...`
+# TB-325: config keys intentionally absent from `skills/ap2-config/SKILL.md`'s
+# `## Config keys (TOML)` block. Each entry MUST carry an inline `# reason: ...`
 # comment categorizing why the key is exempt — deprecated, test-only,
 # integration-secret-style (covered elsewhere), etc. The
 # `test_every_config_key_documented` CI gate
 # (`ap2/tests/test_docs_drift.py`) asserts every aggregated-schema key
-# path is EITHER referenced verbatim in howto.md OR a member of this
+# path is EITHER referenced verbatim in `skills/ap2-config/SKILL.md` OR a member of this
 # set. The `# reason:` comment is the audit trail for a future reader
 # asking "should this graduate to documentation?"
 #

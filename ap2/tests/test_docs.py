@@ -1,9 +1,9 @@
 """Tests for the `## Authoring goal.md` section (TB-200, TB-206).
 
-TB-403 carved the `## Authoring goal.md` section out of `ap2/howto.md` into
-the auto-triggered `skills/ap2-ideation-goals/SKILL.md` (operator-facing
-goal/focus authoring + the retrospective-audit workflow); howto retains only
-a one-line pointer. These gates therefore read the goal-authoring reference
+TB-403 carved the `## Authoring goal.md` section into the auto-triggered
+`skills/ap2-ideation-goals/SKILL.md` (operator-facing goal/focus authoring +
+the retrospective-audit workflow); TB-406 then retired the legacy operator
+manual entirely. These gates therefore read the goal-authoring reference
 from `IDEATION_GOALS_SKILL` now, not `HOWTO_PATH` — the same retarget shape
 the env-knob / config-key / CLI-verb gates took onto their carve skills in
 `ap2/tests/test_docs_drift.py`.
@@ -30,7 +30,7 @@ from ap2.tools import _validate_briefing_structure
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# TB-403: goal-authoring reference moved from howto.md into this skill.
+# TB-403: goal-authoring reference now lives in this skill.
 IDEATION_GOALS_SKILL = REPO_ROOT / "skills" / "ap2-ideation-goals" / "SKILL.md"
 
 

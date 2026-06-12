@@ -14,7 +14,7 @@ of the shape; here's the original incident."
 
 See `ap2/verify.py` for the classifier rules and the **ap2-task** skill's
 "Authoring `## Verification` bullets" section (`skills/ap2-task/SKILL.md`,
-consolidated out of `ap2/howto.md` in TB-400) for the operator-facing
+consolidated there in TB-400) for the operator-facing
 convention these tests pin.
 """
 from __future__ import annotations
@@ -217,8 +217,8 @@ def test_well_formed_shell_bullets_still_shell(bullet_md, expect_command):
 
 
 def test_judge_indicator_phrases_constant_includes_documented_set():
-    """The briefing-authoring docs (`ap2/howto.md`) name the convention
-    by referencing the constant. This pins the contents so a docs reader
+    """The briefing-authoring docs (`skills/ap2-task/SKILL.md`) name the
+    convention by referencing the constant. This pins the contents so a docs reader
     can rely on the constant matching the listed phrases."""
     # Strict superset check: all documented phrases must be in the constant.
     documented = {

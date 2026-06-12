@@ -120,7 +120,7 @@ JUDGE_INDICATOR_PHRASES: tuple[str, ...] = (
 #: has organically appeared in operator-authored briefings (TB-206/207/209
 #: operator-fix briefings all use it); codifying it here closes the upstream
 #: design hole — operators get an unambiguous "do not exec this bullet"
-#: signal, and ideation will pick it up via `ap2/howto.md`'s authoring
+#: signal, and ideation will pick it up via `skills/ap2-task/SKILL.md`'s authoring
 #: guidance. Case-sensitive (matches the operator-authored shape exactly);
 #: the single colon and optional trailing whitespace are part of the literal
 #: token.

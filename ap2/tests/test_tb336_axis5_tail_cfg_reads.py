@@ -53,8 +53,8 @@ TB-332 / TB-333 / TB-334 templates applied to the tail's eight sites):
   (5) **auto_approve schema carries `cost_approach_pct`**: the
       attention component's cross-component read of the auto_approve
       knob depends on the auto_approve manifest's ``config_schema``
-      having a ``cost_approach_pct`` entry so the howto.md TOML
-      reference + the ``test_every_config_key_documented`` gate
+      having a ``cost_approach_pct`` entry so the ap2-config skill's
+      TOML reference + the ``test_every_config_key_documented`` gate
       stay aligned (TB-330 precedent).
 
 Out of scope (per the briefing): Mattermost-family + sandbox-identity
@@ -475,7 +475,7 @@ def test_attention_cost_approach_pct_cfg(cfg, clean_env, emit_reset):
 
 # ---------------------------------------------------------------------------
 # (4) auto_approve manifest schema carries `cost_approach_pct` (TB-330
-#     precedent for cross-component reads — the howto.md
+#     precedent for cross-component reads — the
 #     `test_every_config_key_documented` gate trips iff the schema and
 #     docs disagree, so the schema entry is load-bearing).
 # ---------------------------------------------------------------------------
@@ -485,7 +485,7 @@ def test_auto_approve_manifest_carries_cost_approach_pct():
     """The auto_approve component's `Manifest.config_schema` declares
     `cost_approach_pct` (TB-336). Mirrors the TB-330 precedent where
     a cross-component cfg-read forces the owning manifest to publish
-    the key so the howto.md TOML reference + the
+    the key so the ap2-config skill's TOML reference + the
     `test_every_config_key_documented` gate stay aligned.
     """
     schema = AUTO_APPROVE_MANIFEST.config_schema
@@ -494,7 +494,7 @@ def test_auto_approve_manifest_carries_cost_approach_pct():
         "`cost_approach_pct` in its config_schema — the attention "
         "component's `_cost_approach_pct(cfg)` reads it via "
         "`cfg.get_component_value('auto_approve', 'cost_approach_pct')`, "
-        "and the howto.md `test_every_config_key_documented` gate "
+        "and the `test_every_config_key_documented` gate "
         "trips iff this declaration is missing."
     )
     entry = schema["cost_approach_pct"]
@@ -509,8 +509,8 @@ def test_howto_md_documents_cost_approach_pct():
     `test_every_config_key_documented` gate stays green when the
     schema entry above is consulted.
 
-    TB-398 carved the `## Config keys (TOML)` block out of `howto.md`
-    into `skills/ap2-config/SKILL.md`, so this gate follows the content
+    TB-398 carved the `## Config keys (TOML)` block into
+    `skills/ap2-config/SKILL.md`, so this gate follows the content
     to the skill.
     """
     skill = (

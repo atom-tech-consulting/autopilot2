@@ -420,7 +420,7 @@ def test_howto_carries_tb259_cross_reference():
     surface). Mirrors TB-245's `test_howto_carries_tb245_cross_reference`
     shape.
 
-    TB-397 carved the Stats dashboard domain out of `howto.md` into
+    TB-397 carved the Stats dashboard domain into
     `skills/ap2-observability/SKILL.md` (the observability canary skill),
     so this gate follows the content to the skill.
     """

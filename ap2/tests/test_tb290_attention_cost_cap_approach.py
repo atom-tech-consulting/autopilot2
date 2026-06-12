@@ -723,7 +723,7 @@ def test_briefing_verification_greps_match():
       - `grep -q "AP2_AUTO_APPROVE_COST_APPROACH_PCT" ap2/config.py`
       - `grep -q "DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT" ap2/config.py`
       - `grep -q "AP2_AUTO_APPROVE_COST_APPROACH_PCT" ap2/env_reload.py`
-      - `grep -q "cost_cap_approach" ap2/howto.md`
+      - `grep -q "cost_cap_approach" skills/ap2-config/SKILL.md`
       - `grep -q "cost_cap_approach" ap2/architecture.md`
       - `grep -rq "_detect_cost_cap_approach" ap2/tests/`
         (this test module's own filename + `import` line satisfies the
@@ -737,8 +737,8 @@ def test_briefing_verification_greps_match():
     attention_src = (repo_root / "components" / "attention" / "impl.py").read_text()
     config_src = (repo_root / "config.py").read_text()
     env_reload_src = (repo_root / "env_reload.py").read_text()
-    # TB-398 carved the attention-knob documentation out of `ap2/howto.md`'s
-    # `## Configuration knobs` section into `skills/ap2-config/SKILL.md`, so
+    # TB-398 carved the attention-knob documentation into
+    # `skills/ap2-config/SKILL.md`'s `## Configuration knobs` section, so
     # the operator-facing detector mention now lives in the config skill.
     config_skill_src = (
         repo_root.parent / "skills" / "ap2-config" / "SKILL.md"

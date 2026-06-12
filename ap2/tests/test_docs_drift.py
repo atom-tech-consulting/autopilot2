@@ -10,7 +10,7 @@ for the MCP-tools enumeration). A future source addition (new env knob, new
 MCP tool, new event type, new CLI verb) trips one of these tests until docs
 catch up, so the operator-facing surface can't silently drift past the
 reference. (TB-397–406 carved every operator domain out of the old
-`ap2/howto.md` into per-domain skills and retired the file; each gate below
+operator manual into per-domain skills and retired the file; each gate below
 now reads the skill that owns its surface.)
 
 The five tests share a tiny module-local set of constants but otherwise
@@ -31,16 +31,16 @@ AP2_DIR = REPO_ROOT / "ap2"
 ARCHITECTURE_PATH = AP2_DIR / "architecture.md"
 
 # TB-397 — the observability domain (event schema + prose-judge diagnostics
-# + `ap2 logs` / stats) was carved out of the old `howto.md` into the first
-# domain skill as the canary that established the carve-plus-gate-retarget
-# pattern. The event-type drift gate reads its coverage surface from here.
-# (TB-406 retired `howto.md` entirely; every gate below now reads its owning
-# skill — there is no `HOWTO_PATH` fallback left.)
+# + `ap2 logs` / stats) was carved out of the old operator manual into the
+# first domain skill as the canary that established the carve-plus-gate-
+# retarget pattern. The event-type drift gate reads its coverage surface from
+# here. (TB-406 retired the file entirely; every gate below now reads its
+# owning skill — there is no `HOWTO_PATH` fallback left.)
 OBSERVABILITY_SKILL = REPO_ROOT / "skills/ap2-observability/SKILL.md"
 
 # TB-398 — the configuration domain (the `## Configuration knobs` flat
 # `AP2_*` catalogue + the `## Config keys (TOML)` typed-schema reference +
-# the Codex backend setup) was carved out of `howto.md` into
+# the Codex backend setup) was carved out of the old operator manual into
 # `skills/ap2-config/SKILL.md`, the second domain carve following the
 # TB-397 canary pattern. The env-knob and config-key coverage gates read
 # their documentation surface from here instead of `HOWTO_PATH`.
@@ -48,7 +48,7 @@ CONFIG_SKILL = REPO_ROOT / "skills/ap2-config/SKILL.md"
 
 # TB-399 — the board-ops domain (the `## Custom MCP tools (reference)` tool
 # catalogue + the `## Operator CLI verbs (reference)` table) was carved out
-# of `howto.md` into `skills/ap2-board-ops/SKILL.md`, the third domain carve
+# of the old operator manual into `skills/ap2-board-ops/SKILL.md`, the third domain carve
 # following the TB-397 canary pattern. The CLI-verb gate reads its coverage
 # surface from here instead of `HOWTO_PATH`; the MCP-tool gate adds the skill
 # to its accepted set alongside `architecture.md` (keeping the
@@ -59,7 +59,7 @@ BOARD_OPS_SKILL = REPO_ROOT / "skills/ap2-board-ops/SKILL.md"
 
 # TB-402 — the failure-recovery domain (the `## Failure modes the daemon
 # recovers from` auto-recovery catalogue + the `## Operator-question
-# playbook` lookup table) was carved out of `howto.md` into
+# playbook` lookup table) was carved out of the old operator manual into
 # `skills/ap2-failure-recovery/SKILL.md`, the fourth domain carve following
 # the TB-397 canary pattern. Unlike the env-knob / config-key / event-type /
 # CLI-verb axes, neither carved section had a mechanical docs-drift gate
@@ -71,8 +71,8 @@ FAILURE_RECOVERY_SKILL = REPO_ROOT / "skills/ap2-failure-recovery/SKILL.md"
 
 # TB-403 — the ideation + goal/focus-management domain (the `## Authoring
 # goal.md` operator-curated five-section reference + the `## Retrospective
-# audit workflow` `ap2 audit` review surface) was carved out of `howto.md`
-# into `skills/ap2-ideation-goals/SKILL.md`, the fifth domain carve following
+# audit workflow` `ap2 audit` review surface) was carved out of the old
+# operator manual into `skills/ap2-ideation-goals/SKILL.md`, the fifth domain carve following
 # the TB-397 canary pattern. The `## Authoring goal.md` section's existing
 # docs-location gate lives in `ap2/tests/test_docs.py` and was retargeted onto
 # this skill in the same commit (the structural-anchor + worked-example-
@@ -163,10 +163,9 @@ _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     # deprecated-alias map (and tests) for one release; they are
     # intentionally absent from `init.py`'s ENV_TEMPLATE / exempt set so
     # a fresh-project scaffold never advertises a deprecated knob. Exempt
-    # them from the template-vs-exempt + howto-mention gates here so the
-    # alias map doesn't force the deprecated name back into the scaffold.
-    # (howto.md still documents them as deprecated aliases for an operator
-    # grepping the old name — that mention is belt-and-suspenders, not
+    # them from the template-vs-exempt + config-skill-mention gates here so
+    # the alias map doesn't force the deprecated name back into the scaffold.
+    # (Keeping them out of the scaffold is belt-and-suspenders, not
     # gate-required.) A later task drops the aliases entirely.
     "AP2_FOCUS_ADVANCE_EMPTY_CYCLES",
     "AP2_FOCUS_AUTO_ADVANCE_DISABLED",
@@ -342,8 +341,9 @@ def test_every_env_knob_in_template_or_exempt():
     `ap2.init._TEMPLATE_EXEMPT_KNOBS` with an inline `# reason:` comment
     explaining why operators don't need it in the template (TB-305).
 
-    Parallel to `test_every_env_knob_documented` (which gates howto.md),
-    but pinned against the scaffold operators actually paste into their
+    Parallel to `test_every_env_knob_documented` (which gates the
+    `ap2-config` skill), but pinned against the scaffold operators actually
+    paste into their
     project. Forces the operator-facing-vs-internal decision at the same
     PR that adds a knob, instead of letting drift compound silently the
     way it did between TB-278 (which authored the template at 10 knobs)
@@ -411,7 +411,7 @@ def test_every_config_key_documented():
     Matching is full-path substring: each key is rendered as the dotted
     `components.<name>.<key>` form an operator would type into config.toml.
     A `` `components.foo.bar` `` backtick-fence OR a bare row entry both
-    satisfy the gate — the howto section uses tree-rendered prose, not a
+    satisfy the gate — the skill section uses tree-rendered prose, not a
     strict-fence enumeration. The test ALSO pins existence of the
     `## Config keys (TOML)` heading so a future refactor that moves the
     block (or removes it entirely) trips here.
@@ -419,7 +419,7 @@ def test_every_config_key_documented():
     TB-337 (axis-1 completion) extends the walk to `[core.*]` keys via
     `ap2.core_config_schema.CORE_CONFIG_SCHEMA`. Pre-TB-337 the test
     only covered per-component manifests because the core surface was
-    declared "schema deferred to a future axis" in `howto.md` L2376-2379;
+    declared "schema deferred to a future axis" (pre-TB-337);
     that gap is now closed and the gate enforces docs-drift parity
     across both surfaces in one walk.
     """
@@ -566,7 +566,7 @@ def test_every_event_type_documented():
     `OBSERVABILITY_SKILL` when the event-schema domain was carved into the
     canary skill — the skill is now the canonical home of the event timeline,
     so it is the surface a source-side event-type addition must keep in sync.
-    (TB-406 finished the carve sweep and retired `howto.md`; every sibling
+    (TB-406 finished the carve sweep and retired the file; every sibling
     gate now reads its owning skill, so no gate has a `HOWTO_PATH` fallback.)
     """
     skill = OBSERVABILITY_SKILL.read_text()
@@ -627,7 +627,7 @@ def test_architecture_md_control_agent_tools_complete():
     direction). This is the architecture-doc-specific counterpart of
     `test_every_mcp_tool_documented`: catches the case where the docs
     enumeration of the literal goes stale even if every tool also has a
-    descriptive mention in `howto.md`.
+    descriptive mention in `skills/ap2-board-ops/SKILL.md`.
     """
     text = ARCHITECTURE_PATH.read_text()
 
@@ -655,9 +655,9 @@ def test_failure_recovery_domain_carved_to_skill():
     """TB-402 docs-location pin: the failure-recovery domain — the
     `## Failure modes the daemon recovers from` auto-recovery catalogue and
     the `## Operator-question playbook` lookup table — lives in
-    `skills/ap2-failure-recovery/SKILL.md`. TB-406 retired `ap2/howto.md`
-    entirely, so the old no-duplication-in-howto half of this pin is moot
-    (there is no howto to duplicate into); what remains is the pin that the
+    `skills/ap2-failure-recovery/SKILL.md`. TB-406 retired the old operator
+    manual entirely, so the old no-duplication-in-howto half of this pin is moot
+    (there is no manual to duplicate into); what remains is the pin that the
     domain's content is present in its owning skill on exactly one surface.
     """
     skill = FAILURE_RECOVERY_SKILL.read_text()
@@ -685,8 +685,8 @@ def test_ideation_goals_domain_carved_to_skill():
     """TB-403 docs-location pin: the ideation + goal/focus-management domain —
     the `## Authoring goal.md` operator-curated five-section reference and the
     `## Retrospective audit workflow` `ap2 audit` review surface — lives in
-    `skills/ap2-ideation-goals/SKILL.md`. TB-406 retired `ap2/howto.md`
-    entirely, so the old no-duplication-in-howto half of this pin is moot;
+    `skills/ap2-ideation-goals/SKILL.md`. TB-406 retired the old operator
+    manual entirely, so the old no-duplication-in-howto half of this pin is moot;
     what remains is the pin that the domain's content is present in its owning
     skill on exactly one surface.
 
@@ -725,15 +725,15 @@ def test_components_enumeration_carved_to_observability_skill():
     describing the `## Components` block that `ap2 status` renders (text-mode
     layout, the three env-flag polarity conventions, the `<env_flag_desc>`
     rendering rules, and `--json` parity) — lives in
-    `skills/ap2-observability/SKILL.md`, NOT duplicated back in `ap2/howto.md`.
+    `skills/ap2-observability/SKILL.md`, the skill that owns the components surface.
 
     Mirrors the TB-402 / TB-403 `test_*_domain_carved_to_skill` shape: the
     content lives wholesale in its owning skill. This section is prose with no
     `HOWTO_PATH`-keyed coverage gate to retarget (the `ap2 status` CLI verb is
     gated against `BOARD_OPS_SKILL`, the `AP2_*` env flags against
     `CONFIG_SKILL`), so a location pin is the correct shape, not a gate flip.
-    TB-406 retired `ap2/howto.md` entirely, so the old no-duplication-in-howto
-    half is moot. The `## Components` render BEHAVIOR stays pinned by
+    TB-406 retired the old operator manual entirely, so the old
+    no-duplication-in-howto half is moot. The `## Components` render BEHAVIOR stays pinned by
     `ap2/tests/test_tb379_effective_config_snapshot.py` /
     `ap2/tests/test_tb319_status_components.py` — this is a docs-only move.
     """

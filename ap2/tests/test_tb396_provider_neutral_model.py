@@ -23,7 +23,7 @@ pins the same contract on every `pytest` run with no SDK / credential:
     same mechanism a default regression would trip) DOES reach a codex-routed
     kind, forwarding `model="claude-opus-4-7"` onto codex's native kwarg. That
     is the leak the provider-neutral default avoids out of the box (and the
-    operator-pin caveat in howto.md documents).
+    operator-pin caveat the `ap2-config` skill documents).
 """
 from __future__ import annotations
 

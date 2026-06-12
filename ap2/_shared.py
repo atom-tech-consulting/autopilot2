@@ -150,8 +150,8 @@ def parse_blocked_summary_fix_shape(summary: str) -> dict | None:
     `task_complete status=blocked` summary (TB-225). Returns a dict on a
     clean parse, else None.
 
-    Canonical agent contract (documented in `ap2/howto.md`'s
-    `## Operator-in-the-loop relaxations` section):
+    Canonical agent contract (documented in `skills/ap2-task/SKILL.md`'s
+    `## Reporting failures` section):
 
         BriefingFix: <shape> at <briefing_path>:<line>: <from> -> <to>
 

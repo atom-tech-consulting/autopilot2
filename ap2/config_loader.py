@@ -225,7 +225,7 @@ def validate_config(loaded_toml: dict[str, Any], registry: "Registry") -> None:
     pre-TB-337 `[core.*]` keys round-tripped through `from_toml` as
     free-form keys mapped to existing `Config` dataclass fields by
     name, and a typo (e.g. `[core.web_prot]`) silently kept the
-    env-path default (`howto.md` L2376-2379 flagged the asymmetry).
+    env-path default (the deferred-core-schema asymmetry, now closed).
     The walk now consults `CORE_CONFIG_SCHEMA`'s 21 typed entries
     and produces the same named-path error message shape as the
     component side.

@@ -42,7 +42,7 @@ CLI-verb fourth surface (TB-209): `test_every_cli_verb_has_test_reference`
 mirrors the three sibling tests' shape on the CLI-verb axis. The
 `_collect_cli_verbs` walk is imported from the shared
 `ap2/tests/_source_registry.py` module — the 3rd-call-site threshold
-(docs gate + coverage gate + howto-table source-of-truth from TB-207)
+(docs gate + coverage gate + the board-ops skill's CLI-verb table from TB-207)
 flipped goal.md L74-77's threshold-three rule from "premature
 abstraction" to "structurally appropriate extraction."
 
@@ -331,8 +331,9 @@ def test_every_cli_verb_has_test_reference():
 
     The walk is imported from `ap2/tests/_source_registry.py` rather
     than re-implemented here — same set the docs-drift gate
-    (`test_every_cli_verb_documented`) and the howto.md
-    `## Operator CLI verbs (reference)` table (TB-207) consume, so
+    (`test_every_cli_verb_documented`) and the
+    `skills/ap2-board-ops/SKILL.md` `## Operator CLI verbs (reference)`
+    table (TB-207) consume, so
     the docs and testing axes can't drift on what counts as a verb.
     """
     blob = _read_all_test_text()

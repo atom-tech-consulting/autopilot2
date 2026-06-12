@@ -447,13 +447,12 @@ def test_cron_default_yaml_stub_mentions_focus_rotation():
 def test_ideation_goals_skill_carries_tb244_cross_reference():
     """`grep -n TB-244 skills/ap2-ideation-goals/SKILL.md` must match.
 
-    TB-403 carved howto's `## Retrospective audit workflow` section — whose
+    TB-403 carved the `## Retrospective audit workflow` section — whose
     TB-258 natural-cadence paragraph names TB-244 as a wrap-helper-into-
     status-extras pattern precedent — into the auto-triggered
-    `ap2-ideation-goals` skill, displacing the only TB-244 operator-docs
-    cross-reference out of `howto.md`. The pin follows the reference onto the
-    skill (its new home) rather than re-seeding a TB-244 mention into the
-    one-line howto pointer.
+    `ap2-ideation-goals` skill, making it the only home of that TB-244
+    operator-docs cross-reference. The pin follows the reference onto the
+    skill (its new home).
     """
     skill = (
         Path(__file__).resolve().parents[2]

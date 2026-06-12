@@ -592,7 +592,8 @@ def test_attention_pushed_in_status_report_interesting_types():
 def test_push_event_types_documented_in_events_module():
     """Source-level pin: the three TB-297 event types appear in
     `ap2/events.py`'s docstring registry. The docs-drift gate
-    enforces every emitted type is mentioned in howto.md; this
+    enforces every emitted type is mentioned in
+    `skills/ap2-observability/SKILL.md`; this
     pin asserts the on-module registry-comment surface is also
     populated for readers grepping the event catalog."""
     events_src = (Path(__file__).resolve().parent.parent / "events.py").read_text()

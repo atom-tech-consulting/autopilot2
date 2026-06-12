@@ -402,8 +402,8 @@ Valid statuses:
   unknown shapes / line mismatches fall through to today's manual-
   unfreeze path. See `skills/ap2-task/SKILL.md` § "Reporting failures
   (`task_complete blocked` summaries)" for the four bootstrap shapes
-  with worked examples, and `ap2/howto.md`'s auto-unfreeze section
-  for the operator-side knobs / audit-event surface.
+  with worked examples, and the `ap2-config` skill's auto-unfreeze
+  section for the operator-side knobs / audit-event surface.
 - `failed`     — tried and could not make progress.
 
 ### Proposing recurring work (optional) — `cron_propose`

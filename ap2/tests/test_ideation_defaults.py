@@ -196,8 +196,9 @@ def test_ideation_prompt_warns_off_bare_python_and_path_pitfalls():
 
     TB-273 swapped the prompt's pitfall list (formerly: bare `python`,
     bare-path-as-command, multi-line bullets) to the four authoritative
-    pitfalls in `ap2/howto.md` L462-505 (literal-backtick, absence-`!`,
-    directory-`-r`, `Prose:` prefix). The legacy `python3` substring is
+    pitfalls in `ap2/ideation.default.md`'s `## Shell-bullet pitfalls to
+    AVOID` (literal-backtick, absence-`!`, directory-`-r`, `Prose:`
+    prefix). The legacy `python3` substring is
     intentionally gone (the bare-`python` pitfall was retired); the
     surviving anchors (`uv run python`, `test -f`) still appear in the
     prompt body — the `uv run python` example in the "Prefer concrete

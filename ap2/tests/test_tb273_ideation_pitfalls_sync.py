@@ -30,12 +30,13 @@ Pinned bullet-by-bullet per briefing §Scope §3:
       would be the regression we're pinning against).
 
 History: TB-400 consolidated the four-pitfall worked example + section
-out of the old `ap2/howto.md` into the operator-facing `ap2-task` skill
-(`skills/ap2-task/SKILL.md`), so the companion check
+into the operator-facing `ap2-task` skill (`skills/ap2-task/SKILL.md`),
+so the companion check
 (`test_skill_still_carries_all_four_pitfalls`) reads the skill. TB-406
-retired `ap2/howto.md` entirely and repointed the ideation prompt's own
-cross-reference (and the `test_section_cross_references_skill_worked_example`
-pin) off the dead howto anchor onto the skill section.
+retired the old operator manual entirely and repointed the ideation
+prompt's own cross-reference (and the
+`test_section_cross_references_skill_worked_example` pin) onto the skill
+section.
 """
 from __future__ import annotations
 
@@ -45,10 +46,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IDEATION_PROMPT = REPO_ROOT / "ap2" / "ideation.default.md"
-# TB-400 — the four-pitfall worked example + section were consolidated out
-# of the old `ap2/howto.md` into the operator-facing `ap2-task` skill, which
-# now mirrors `ap2/ideation.default.md`'s canonical pitfalls section. TB-406
-# retired `howto.md` entirely and repointed the ideation prompt's own
+# TB-400 — the four-pitfall worked example + section were consolidated
+# into the operator-facing `ap2-task` skill, which now mirrors
+# `ap2/ideation.default.md`'s canonical pitfalls section. TB-406 retired
+# the old operator manual entirely and repointed the ideation prompt's own
 # cross-reference here, so the companion check below + the cross-reference
 # pin both read the skill (the single surviving worked-example surface).
 TASK_SKILL = REPO_ROOT / "skills" / "ap2-task" / "SKILL.md"
@@ -172,9 +173,9 @@ def test_section_cross_references_skill_worked_example():
     Duplication is the future-drift surface this proposal explicitly
     avoids (briefing §Design).
 
-    TB-406 repointed this cross-reference off the retired `ap2/howto.md`
-    L462-505 anchor onto the owning skill (which has no stable line
-    numbers, so the anchor is the named section instead of a line range).
+    TB-406 repointed this cross-reference off the retired operator
+    manual's `L462-505` anchor onto the owning skill (which has no stable
+    line numbers, so the anchor is the named section instead of a line range).
 
     Pin both:
       - the cross-reference path `skills/ap2-task/SKILL.md` is named, AND
@@ -241,9 +242,9 @@ def test_section_heading_still_present_with_new_bullets_co_located():
 # the four pitfalls trips this module and forces the operator to decide
 # whether to retire the pitfall from BOTH surfaces in lockstep).
 #
-# TB-400 repointed this from `ap2/howto.md` to `skills/ap2-task/SKILL.md`:
-# the four-pitfall worked example + section were consolidated out of the
-# howto into the operator-facing ap2-task skill. `ap2/ideation.default.md`
+# TB-400 repointed this onto `skills/ap2-task/SKILL.md`:
+# the four-pitfall worked example + section were consolidated into the
+# operator-facing ap2-task skill. `ap2/ideation.default.md`
 # stays the canonical daemon copy (pinned by the four `test_pitfall_*`
 # checks above); the skill is now the operator-facing mirror.
 # ---------------------------------------------------------------------------
@@ -255,9 +256,8 @@ def test_skill_still_carries_all_four_pitfalls():
     mirror. Pin the skill-side too so the sync-direction (canonical
     prompt ↔ skill mirror) stays enforced.
 
-    TB-400 moved the four-pitfall section + worked example out of
-    `ap2/howto.md` into `skills/ap2-task/SKILL.md`; this check reads the
-    skill (was: the howto).
+    TB-400 moved the four-pitfall section + worked example into
+    `skills/ap2-task/SKILL.md`; this check reads the skill.
     """
     skill_text = TASK_SKILL.read_text(encoding="utf-8")
     # Anchor on the section heading so we don't false-positive on text
