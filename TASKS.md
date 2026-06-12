@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-407** **Cleanup: repoint/remove stale `ap2/howto.md` references in code + test comments (howto.md was retired by TB-406)** `#autopilot` `#docs` `#cleanup` `#howto` `#skills` `@blocked:TB-406` [→ brief](.cc-autopilot/tasks/cleanup-repoint-remove-stale-ap2-howto-m.md)
 
 ## Pipeline Pending
 
