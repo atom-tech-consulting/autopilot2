@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-407** **Cleanup: repoint/remove stale `ap2/howto.md` references in code + test comments (howto.md was retired by TB-406)** `#autopilot` `#docs` `#cleanup` `#howto` `#skills` `@blocked:TB-406` [→ brief](.cc-autopilot/tasks/cleanup-repoint-remove-stale-ap2-howto-m.md)
 
 ## Pipeline Pending
 
@@ -289,5 +288,6 @@
 - [x] **TB-403** **Carve howto.md goal/focus authoring + retrospective audit workflow into skills/ap2-ideation-goals/ + retarget displaced gates** `#autopilot` `#skills` `#docs` `#ideation` `#goal` `#refactor` `@blocked:TB-397` — Carve howto's Authoring goal.md + Retrospective audit workflow sections into a new skills/ap2-ideation-goals/SKILL.md (operator-facing goal/focus authoring + delete-test retrospective) and retarget the displaced docs-drift/docs-location gates in the same commit; ideation.default.md stays canonical for daemon briefing conventions. [→ brief](.cc-autopilot/tasks/carve-howto-md-goal-focus-authoring-retr.md)
 - [x] **TB-405** **Carve howto's `## Components enumeration (ap2 status)` into the ap2-observability skill (last domain carve)** `#autopilot` `#docs` `#skills` `#howto-retire` `#observability` — Final domain carve: move howto.md's `## Components enumeration (ap2 status)` into the ap2-observability skill, leave a pointer stub, register a docs-location pin; env-flag tuning stays in ap2-config and the status verb in ap2-board-ops. [→ brief](.cc-autopilot/tasks/carve-howto-s-components-enumeration-ap2.md)
 - [x] **TB-406** **Retire `ap2/howto.md` as a file — relocate residual content, drop the sync-assets target, flip residual gates, delete it** `#autopilot` `#docs` `#skills` `#howto-retire` `#deploy` `@blocked:TB-405` — Retire ap2/howto.md as a file: relocate residual orientation/core sections to architecture.md/skills, drop the sync-assets ap2-howto.md deploy target, flip residual HOWTO_PATH test gates, delete the file. [→ brief](.cc-autopilot/tasks/retire-ap2-howto-md-as-a-file-relocate-r-2.md)
+- [x] **TB-407** **Cleanup: repoint/remove stale `ap2/howto.md` references in code + test comments (howto.md was retired by TB-406)** `#autopilot` `#docs` `#cleanup` `#howto` `#skills` `@blocked:TB-406` [→ brief](.cc-autopilot/tasks/cleanup-repoint-remove-stale-ap2-howto-m.md)
 
 ## Frozen
