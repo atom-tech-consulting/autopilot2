@@ -389,3 +389,5 @@ ideation won't re-propose decisions logged here._
 - 2026-06-11T16:12:48Z — applied operator-queued approve → TB-405
 - 2026-06-11T16:12:48Z — applied operator-queued approve → TB-406
 - 2026-06-12T18:42:36Z — applied operator-queued add_backlog → TB-407 (goal-alignment check skipped)
+- 2026-06-15T21:32:37Z — FROZE TB-408 (codex session-isolation) — reason: AUTH LOCATION. The CODEX_HOME-redirect approach it's scoped around is NOT rotation-safe for a ChatGPT-login credential: codex's auth.json lives at ~/.codex and rotates a (single-use) refresh token, so a redirected CODEX_HOME would need a second auth.json copy/symlink that either breaks on atomic rewrite or dual-rotates and invalidates the shared token. Do NOT implement the CODEX_HOME redirect. Revive ONLY if re-scoped to in-place session-rollout isolation (keep CODEX_HOME=~/.codex and suppress/redirect just the sessions/ rollouts), or once codex exposes an auth-path knob independent of CODEX_HOME, or the operator opts into a static OPENAI_API_KEY.
+- 2026-06-15T20:54:56Z — applied operator-queued ack
