@@ -16,6 +16,12 @@ These tests parse `pyproject.toml` (no network resolution) and assert:
 2. The base `dependencies` list stays Claude-only — `claude-agent-sdk` is the
    always-installed backend and `openai-codex` is NOT pulled by a bare install —
    so `pip install autopilot2` with no extras remains a working Claude install.
+
+The MANIFEST.in tests (TB-410) parse `MANIFEST.in` as text (no build) and
+assert the committed top-level `skills/` operator manual and the docs an outside
+consumer needs are grafted/included into the setuptools source distribution.
+`skills/` is not a Python package, so package-data cannot carry it — an sdist
+that omits MANIFEST.in would silently drop the operator manual.
 """
 from __future__ import annotations
 
@@ -25,6 +31,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+MANIFEST_PATH = REPO_ROOT / "MANIFEST.in"
 
 
 def _load_pyproject() -> dict:
@@ -77,3 +84,50 @@ def test_base_install_stays_claude_only():
         "openai-codex must stay opt-in via the `codex` extra — a bare "
         "`pip install autopilot2` must remain a working Claude-only install."
     )
+
+
+def _manifest_directives() -> list[str]:
+    """Return MANIFEST.in's directive lines (comments / blanks stripped)."""
+    lines: list[str] = []
+    for raw in MANIFEST_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        lines.append(line)
+    return lines
+
+
+def test_manifest_exists():
+    """A MANIFEST.in exists at the repo root for the setuptools sdist."""
+    assert MANIFEST_PATH.is_file(), (
+        "MANIFEST.in must exist at the repo root so the setuptools source "
+        "distribution carries non-package files (the skills/ operator manual "
+        "and the top-level docs); without it an sdist silently drops them."
+    )
+
+
+def test_manifest_grafts_skills():
+    """MANIFEST.in grafts the committed top-level skills/ operator manual.
+
+    skills/ is not a Python package, so package-data cannot carry it — `graft
+    skills` is the setuptools sdist mechanism that ships the operator manual.
+    """
+    directives = _manifest_directives()
+    assert any(
+        line.split()[0] == "graft" and "skills" in line.split()[1:]
+        for line in directives
+    ), (
+        "MANIFEST.in must `graft skills` so the committed top-level skills/ "
+        f"operator manual ships in the sdist; got directives {directives!r}."
+    )
+
+
+def test_manifest_includes_docs():
+    """MANIFEST.in includes the top-level docs an outside consumer needs."""
+    manifest_text = MANIFEST_PATH.read_text(encoding="utf-8")
+    for doc in ("README.md", "LICENSE", "ap2/architecture.md"):
+        assert doc in manifest_text, (
+            f"MANIFEST.in must reference {doc!r} so the sdist carries it; "
+            "an outside consumer needs the README, license, and architecture "
+            "doc in the source distribution."
+        )

@@ -1,0 +1,20 @@
+# MANIFEST.in — graft non-package files into the setuptools source distribution.
+#
+# setuptools' sdist reads this file to pick up files that live OUTSIDE the
+# Python packages declared in pyproject.toml's [tool.setuptools] packages list.
+# The committed top-level `skills/` tree is ap2's operator manual (agentskills.io
+# SKILL.md bundles) and is NOT a Python package, so package-data cannot carry it
+# — MANIFEST.in is the correct mechanism to ship it, and the top-level docs an
+# outside consumer needs, in a clean `python -m build --sdist`.
+
+# Operator manual: the committed top-level skills/ tree.
+graft skills
+
+# Top-level docs an outside consumer needs.
+include README.md
+include LICENSE
+include CHANGELOG.md
+
+# Architecture doc (also wheel package-data via ap2/*.md; included here so the
+# sdist carries it explicitly alongside the rest of the docs).
+include ap2/architecture.md
