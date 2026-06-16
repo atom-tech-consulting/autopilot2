@@ -25,6 +25,7 @@ that omits MANIFEST.in would silently drop the operator manual.
 """
 from __future__ import annotations
 
+import ast
 import tomllib
 from pathlib import Path
 
@@ -32,6 +33,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 MANIFEST_PATH = REPO_ROOT / "MANIFEST.in"
+# TB-412: the Mattermost path's source files. The `[mattermost]`-extra
+# decision (see `test_mattermost_path_needs_no_extra`) parses these to
+# confirm the Mattermost integration pulls no dependency beyond the base
+# set — it speaks HTTP over stdlib `urllib`, not a third-party client.
+MATTERMOST_SRC_PATHS = (
+    REPO_ROOT / "ap2" / "components" / "mattermost" / "impl.py",
+    REPO_ROOT / "ap2" / "components" / "mattermost" / "__init__.py",
+)
 
 
 def _load_pyproject() -> dict:
@@ -83,6 +92,107 @@ def test_base_install_stays_claude_only():
     assert "openai-codex" not in base, (
         "openai-codex must stay opt-in via the `codex` extra — a bare "
         "`pip install autopilot2` must remain a working Claude-only install."
+    )
+
+
+def test_dev_extra_declared():
+    """The `dev` extra exists and references the `pytest` test runner (TB-412).
+
+    The hermetic test suite is run via `uv run --extra dev pytest -q`; an
+    outside contributor needs `pip install 'autopilot2[dev]'` /
+    `uv sync --extra dev` to get the runner. Pinning the extra here (next
+    to the `codex` pin) keeps the packaging surface from silently dropping
+    the only way to run the suite.
+    """
+    data = _load_pyproject()
+    extras = data["project"]["optional-dependencies"]
+    assert "dev" in extras, (
+        "pyproject.toml [project.optional-dependencies] must declare a "
+        "`dev` extra so `pip install 'autopilot2[dev]'` / "
+        "`uv sync --extra dev` installs the test runner."
+    )
+    dev_reqs = _requirement_names(extras["dev"])
+    assert "pytest" in dev_reqs, (
+        "the `dev` extra must list a `pytest` requirement (the test runner "
+        f"`uv run --extra dev pytest` drives); got {extras['dev']!r}."
+    )
+
+
+def _mattermost_imported_modules() -> set[str]:
+    """Top-level module names imported by the Mattermost path's source.
+
+    Parses each Mattermost source file with `ast` (no import / no network)
+    and returns the set of top-level module names every `import x` /
+    `from x import …` references. Used to record the `[mattermost]`-extra
+    decision: the Mattermost path speaks HTTP over stdlib `urllib`, so the
+    only non-stdlib names are the internal `ap2.*` packages — there is no
+    third-party Mattermost/HTTP client to declare in an extra.
+    """
+    modules: set[str] = set()
+    for path in MATTERMOST_SRC_PATHS:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    modules.add(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                # `from . import …` / `from .impl import …` have module=None
+                # / a relative module — intra-package, no distribution.
+                if node.level == 0 and node.module:
+                    modules.add(node.module.split(".")[0])
+    return modules
+
+
+def test_mattermost_path_needs_no_extra():
+    """Records the `[mattermost]`-extra decision (TB-412): NONE needed.
+
+    The communication/Mattermost path imports only the Python standard
+    library (`json`, `os`, `ssl`, `urllib`) plus the internal `ap2.*`
+    packages — it talks to Mattermost over stdlib `urllib.request`, not a
+    third-party client (no `requests` / `httpx` / `aiohttp` /
+    `mattermostdriver` / `websocket`). Because the base deps already carry
+    everything the Mattermost path needs, an empty `[mattermost]` extra
+    would only add packaging noise. The decision is to declare NO such
+    extra; this test pins both halves of that decision so a future
+    Mattermost change that pulls a real dependency fails the gate (forcing
+    the extra to be added then) and an accidental empty extra is rejected.
+    """
+    modules = _mattermost_imported_modules()
+
+    # The Mattermost path's stdlib HTTP client is `urllib` — confirm the
+    # stdlib path is the one in use (the basis for "no extra needed").
+    assert "urllib" in modules, (
+        "the Mattermost path is expected to speak HTTP over stdlib "
+        f"`urllib`; imported top-level modules were {sorted(modules)}."
+    )
+
+    # No third-party HTTP / Mattermost client is imported — so there is no
+    # distribution to pin in a `[mattermost]` extra.
+    third_party_clients = {
+        "requests",
+        "httpx",
+        "aiohttp",
+        "urllib3",
+        "websocket",
+        "websockets",
+        "mattermostdriver",
+        "mattermost",
+    }
+    leaked = third_party_clients & modules
+    assert not leaked, (
+        "the Mattermost path must stay stdlib-only (urllib) — a third-party "
+        f"client {sorted(leaked)} would require a `[mattermost]` extra; add "
+        "one to pyproject.toml when that happens."
+    )
+
+    # The recorded decision: no `[mattermost]` extra exists today (an empty
+    # extra would be packaging noise; the base deps cover the path).
+    data = _load_pyproject()
+    extras = data["project"]["optional-dependencies"]
+    assert "mattermost" not in extras, (
+        "no `[mattermost]` extra should be declared — the Mattermost path "
+        "pulls no dependency beyond the base set (stdlib urllib). Add the "
+        "extra only when the path takes a real third-party dependency."
     )
 
 
