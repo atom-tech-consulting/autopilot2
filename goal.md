@@ -21,7 +21,7 @@ briefing-validation — are NOT components; they are swappable adapters the
 runner calls. Every component can be turned on or off independently via
 env flag; the model makes features composable without code surgery and is
 the structural prerequisite for future distribution shapes (including a
-public OSS cut).
+public source-available cut).
 
 Concretely: an operator should be able to point ap2 at a project, set
 the goal, and walk away — returning to find the project measurably
@@ -72,7 +72,7 @@ For the component model specifically:
   (`AP2_AUTO_APPROVE`, `AP2_ATTENTION_IMMEDIATE_PUSH`,
   `AP2_FOCUS_AUTO_ADVANCE_DISABLED`, etc. still work unchanged from
   the operator's perspective).
-- A future "OSS distribution" focus can be defined entirely in terms
+- A future "distribution" focus can be defined entirely in terms
   of "which components default to enabled" plus packaging extras —
   no further structural refactor required.
 
@@ -98,88 +98,110 @@ For the structured-config focus specifically:
   operator skill — formerly `ap2/howto.md`'s `## Configuration
   knobs` section, retired into skills).
 
-## Current focus: consolidate the operator manual into auto-triggered, cross-runtime skills
+## Current focus: cut a public source-available distribution
 
-ap2's operator-facing knowledge is split across two surfaces with mismatched
-ergonomics: a ~184 KB `ap2/howto.md` (the operation manual — CLI verbs, env
-knobs, event schema, fix-shapes) that an agent reads only when pointed at it
-via a hand-maintained `~/.claude/CLAUDE.md` pointer, and a handful of
-auto-discovered skills (`/ap2`, `/ap2-task`). Now that the agentskills.io
-`SKILL.md` standard — `name`/`description` frontmatter, progressive
-disclosure, **description-based implicit (auto) invocation** — is supported by
-**both Claude Code and Codex**, the monolithic howto is the weaker form: a
-skill surfaces the right slice on a task match and is portable across runtimes;
-howto cannot.
+ap2 is structurally ready to ship outside the sandbox: the component model
+is finished (every loop-level behavior is registry-loaded and independently
+togglable), the operator manual is consolidated into cross-runtime skills,
+and the codex backend is live. What remains for a public release is not
+architecture — per the component-model `## Done when`, a distribution is
+definable "entirely in terms of which components default to enabled plus
+packaging extras, no further structural refactor required." This focus does
+exactly that, plus the minimal release-hygiene a public checkout needs
+(license wiring, identity scrubbing, an accurate README).
 
-This focus retires `ap2/howto.md` as a separate surface, consolidates the
-operator manual into a set of **domain skills**, retargets the docs guards and
-the deploy onto those skills, and makes the deploy **cross-runtime** (Claude +
-Codex). It is a docs/tooling restructure — no daemon behavior change.
+The release is **source-available and noncommercial** (PolyForm
+Noncommercial 1.0.0), NOT OSI open source — the license withholds
+commercial use. Naming and metadata must reflect that: it is a
+"source-available distribution," not an "open-source release," and no
+`License :: OSI Approved` classifier is claimed.
 
-The split it preserves:
-- **`architecture.md` stays the standalone design doc** — contributor-facing
-  "why it's shaped this way," read on a deep-dive, NOT operational. It is not
-  merged into skills (that would put design prose into the operator's
-  always-loaded skill budget).
-- **Skills are operator-session tooling only.** The daemon's task/ideation
-  agents run with `setting_sources=["project"]` + inlined prompts and do not
-  read skills or howto. So nothing a *daemon* agent relies on moves into a
-  skill — briefing-authoring conventions the **ideation** agent follows stay
-  canonical in `ideation.default.md` (an operator authoring skill may mirror
-  them, but the daemon's copy is the source of truth).
-- **Group by operator task/domain, not per CLI subcommand.** Skill summaries
-  are always loaded up front (~8 KB each under progressive disclosure), so
-  over-fragmentation bloats the always-on budget and blurs trigger boundaries.
-  Aim for ~6–9 coherent domain skills with tight descriptions.
+The split this focus preserves:
+- **The publish and public identity stay operator-only.** The `git push`
+  to the public remote (+ any package-registry upload) and the real repo
+  URL / author identity are operator-CLI / operator-hand actions — the same
+  rule that keeps goal mutations and pushes off the daemon path (they are
+  irreversible / set public direction). Daemon tasks prepare everything
+  else — **including dropping in the PolyForm Noncommercial 1.0.0 `LICENSE`
+  text and setting the matching `pyproject` `license` field + classifiers**
+  (a published, standard license — verbatim text, no operator legal
+  authorship needed) — but never perform the push or invent the real public
+  URL (a placeholder is fine; the operator sets the real value).
+- **Conservative-by-default posture.** A fresh `ap2 init` keeps the loop
+  whole but every operator-bypassing *behavior* off/inert: `auto_approve`
+  disabled (the one component that defaults off), `attention.immediate_push`
+  off (attention surfaces in status/web, never pushes unsolicited),
+  `communication` active but with no channel configured (no external posting
+  until the operator sets `AP2_MM_CHANNELS` + credentials), `auto_unfreeze`
+  active but with no `fix_shapes` (no automatic unfreezing). This is the
+  Non-goals "unconditional automation" rule applied to the default install;
+  it is already the schema default, so the work is to assert and document
+  it, not to disable whole components. (Mattermost is a channel adapter
+  wrapped by `communication`, not a standalone component; the retired
+  focus-auto-advance pointer is gone post-TB-342.)
+- **No behavior removal.** Packaging and defaults change; no feature is
+  deleted. The internal all-enabled install keeps doing everything it does
+  today, by every observable signal.
 
 Axes (coarse — ideation decomposes):
 
-(1) **Carve `howto.md` into domain skills.** Break the operation manual into
-~6–9 task/domain `SKILL.md` skills (e.g. monitoring/status, task + briefing /
-verification-bullet authoring, board ops, ideation + goal/focus management,
-event-schema / observability / diagnostics, config knobs + backend (codex)
-setup, failure-recovery / operator-playbook), each with a tight auto-trigger
-`description` and its reference material in the body. Retire `ap2/howto.md` as
-a separate file. Delete-test: if `howto.md` survives as the canonical
-operation manual, the consolidation didn't happen.
+(1) **License wiring + identity scrub.** Replace the proprietary "All
+Rights Reserved" `LICENSE` with the verbatim PolyForm Noncommercial 1.0.0
+text, and set the `pyproject` `license` field + classifiers to match
+(source-available, noncommercial — no `License :: OSI Approved`). Remove the
+one internal absolute-path leak (the `ap2/json_extract.py` comment
+referencing a local `~/repos/post-train/...` path), sweep source for any
+other sandbox-identity string baked in as a non-overridable default (vs. a
+documented overridable default like `AP2_SANDBOX_USER`), and make the
+packaging metadata coherent for an outside consumer — author, repo-URL
+placeholder, classifiers, and sdist contents (the committed `skills/` +
+docs must ship in the source distribution, not just the wheel). Update the
+README's License section to PolyForm Noncommercial 1.0.0 and add a note that
+the committed `.cc-autopilot/` tree is ap2's own self-management state
+(resettable via `ap2 init`), so an outside reader isn't confused by the
+shipped task history. Delete-test: if the repo still declares "All Rights
+Reserved", or a fresh install from a clean checkout leaks the sandbox's
+local paths/identity, or the sdist omits the skills/docs — the wiring didn't
+happen.
 
-(2) **Retarget the docs guards + deploy.** Repoint the `test_docs_drift.py`
-config-knob-coverage gate from `ap2/howto.md` to the skills; drop the
-`ap2-howto.md` target from `sandbox.sync-assets`; fix the skills'
-cross-references to resolve at their deployed paths (not repo-relative
-`ap2/howto.md`). Delete-test: if the drift gate still asserts coverage in
-`howto.md`, or `sync-assets` still deploys it, the surface wasn't retired.
+(2) **Default-config posture + extras.** The conservative posture above is
+already the schema default; this axis pins it as a release gate rather than
+changing it. Assert that the default config (loop whole, bypassing behaviors
+off/inert) AND the all-components-disabled config both keep the test suite
+green — the existing component-model invariant, now promoted to a release
+gate — and confirm a fresh `ap2 init` writes that conservative default.
+Confirm the install extras (`[codex]`, `[dev]`) resolve cleanly for someone
+outside this sandbox, and add a `[mattermost]` extra only if the
+communication/Mattermost path actually pulls a dependency beyond the base
+set (it may not — the base deps carry no Mattermost-specific package).
+Delete-test: if a fresh `ap2 init` install acts unattended on the operator's
+behalf out of the box, or an extra fails to resolve for an outside user, the
+posture isn't right.
 
-(3) **Cross-runtime deploy + managed pointer.** `sync-assets` gains a
-Codex/standard target (`~/.agents/skills`) alongside `~/.claude/skills`, so the
-same skills serve a Codex operator session; add the `AGENTS.md` analog of the
-operator `CLAUDE.md`, and have the deploy *manage* the discovery pointer
-(closing the current gap where the file is deployed but the `CLAUDE.md` pointer
-is hand-maintained). Delete-test: if deploying the skills still leaves an
-operator runtime unable to discover them without a manual edit, the deploy
-story isn't done.
-
-The delete-test for the focus: does the work move operator-operation knowledge
-into an auto-triggered domain skill (retiring the howto surface), retarget a
-guard/deploy from howto to skills, or make the skills cross-runtime? Polishing
-`ap2/howto.md` in place is anti-work — it's being retired.
+The delete-test for the focus: does the work make a clean outside checkout
+installable, safe-by-default, and accurately documented under the
+noncommercial source-available license — without removing behavior or
+performing the operator-only publish? Polishing internal-only ergonomics is
+anti-work here.
 
 Progress signals:
-- `ap2/howto.md` no longer exists as a separate operation manual; its content
-  lives in ~6–9 domain `SKILL.md` skills under `skills/`.
-- `architecture.md` remains the standalone design doc.
-- The docs-drift gate enforces config-knob coverage in the skills, not howto.
-- `sync-assets` deploys the skills to both `~/.claude/skills` and
-  `~/.agents/skills` (+ an `AGENTS.md`) and manages the discovery pointer;
-  nothing references `ap2/howto.md`.
-- Daemon-agent-relied conventions (ideation briefing authoring) remain in the
-  daemon prompts, not skills.
+- A clean checkout installs and runs the test suite green with no
+  sandbox-specific paths or identity baked into source.
+- The `LICENSE` is the verbatim PolyForm Noncommercial 1.0.0 text and
+  `pyproject` declares it (no "All Rights Reserved", no OSI-open-source
+  claim).
+- A fresh `ap2 init` keeps the loop whole with every operator-bypassing
+  behavior off/inert (`auto_approve` disabled, `attention.immediate_push`
+  off, no channels configured, no `fix_shapes`); the default and
+  all-disabled configs both pass the suite.
+- The only remaining steps to go public are the operator-only ones: set the
+  real repo URL/author, and push.
 
-Why now: the agentskills.io standard just converged across Claude + Codex
-(implicit invocation + progressive disclosure), and the codex backend just
-shipped — so consolidating into portable skills both fixes the howto-discovery
-gaps and delivers a clean, cross-runtime operator-onboarding surface, a
-prerequisite for the OSS cut.
+Why now: the component model, the skills consolidation, and the codex
+backend all landed — the structural prerequisites goal.md named for a
+distribution cut are met, so the remaining work is packaging + defaults +
+hygiene, exactly the shape goal.md said a distribution focus reduces to.
+Doing it now converts "structurally ready" into "actually shippable."
 
 ## Shipped focus
 
@@ -187,6 +209,16 @@ Completed focus arcs (newest first). Durable criteria live on in "## Done
 when" (component model, structured config) and "## Constraints" (pluggable
 backend, per-backend auth); the entries below are provenance.
 
+- **Consolidate the operator manual into cross-runtime skills (2026-06-11)**
+  — retired `ap2/howto.md` as a separate operation manual, carving it into
+  ~6–9 auto-triggered domain `SKILL.md` skills under `skills/` (board-ops,
+  config, task-authoring, observability, failure-recovery, ideation-goals,
+  status); retargeted the docs-drift config-knob-coverage gate and
+  `sandbox.sync-assets` off howto onto the skills; made the deploy
+  cross-runtime (`~/.claude/skills` + `~/.agents/skills` + an `AGENTS.md`)
+  with a managed discovery pointer. `architecture.md` remained the
+  standalone design doc; daemon-agent-relied briefing conventions stayed
+  canonical in `ideation.default.md`.
 - **Component boundary = loop-level participants only (2026-06-09)** —
   finished the component model: extracted cron + ideation into
   `ap2/components/` behind registry tick phases, introduced a single generic
@@ -255,11 +287,16 @@ backend, per-backend auth); the entries below are provenance.
   env flag; it does not delete features. The internal install with
   all components enabled continues to do everything that works today,
   by every observable signal.
-- **API stability commitments before the OSS cut**: the core surface
-  stays fluid until the component-extraction focus is exhausted and
-  the downstream OSS-distribution focus ships. We will not promise
+- **API stability commitments before the distribution cut**: the core
+  surface stays fluid until the component-extraction focus is exhausted
+  and the downstream distribution focus ships. We will not promise
   backwards compatibility on `ap2/core/` module signatures to
   internal callers during this refactor.
+- **Relicensing to OSI open source as part of this cut**: the public
+  distribution ships source-available and noncommercial (PolyForm
+  Noncommercial 1.0.0) by operator decision. Converting to a permissive
+  OSI license (allowing commercial use) is a separate operator call, not
+  in scope for the distribution focus.
 
 ## Constraints
 
