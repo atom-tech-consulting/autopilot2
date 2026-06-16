@@ -18,8 +18,8 @@ is hidden — the parser only sees the prose preamble. Concrete cost:
 post-train TB-89 burned three full ``unfreeze → retry`` cycles plus a
 manual operator unfreeze on exactly this shape (judge response contained
 ``{50/150, 150/50}`` in the recommendations section before the
-``{"status": "pass", ...}`` verdict). Full repro at
-``/Users/claude-agent/repos/post-train/.cc-autopilot/bug-reports/ap2-judge-response-parser-greedy-braces.md``.
+``{"status": "pass", ...}`` verdict). The repro lived in a downstream
+project's ``.cc-autopilot/bug-reports/`` notes for this parser shape.
 
 The fix is to extract the **rightmost top-level JSON object**, not "first
 ``{`` to last ``}``". The judge / janitor / validator-judge prompts all
