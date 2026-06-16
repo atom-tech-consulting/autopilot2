@@ -8,6 +8,8 @@
 
 ## Backlog
 
+- [ ] **TB-413** **Make config.toml the sole source for behavioral tunables; restrict env to a secrets + deployment-identity allowlist** `#autopilot` `#config` `#simplification` `#env` `#toml` `#back-compat` [→ brief](.cc-autopilot/tasks/make-config-toml-the-sole-source-for-beh.md)
+- [ ] **TB-414** **env-file template + ap2-config skill: document env as secrets + deployment-identity only (drop the flat AP2_ tunable examples)** `#autopilot` `#config` `#docs` `#env` `#skills` `#scaffolding` `@blocked:TB-413` [→ brief](.cc-autopilot/tasks/env-file-template-ap2-config-skill-docum.md)
 
 ## Pipeline Pending
 
