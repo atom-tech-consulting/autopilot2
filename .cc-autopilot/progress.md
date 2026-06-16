@@ -1653,3 +1653,9 @@
 - **Summary:** Added a repo-root MANIFEST.in grafting the committed top-level skills/ operator manual and including the top-level docs (README, LICENSE, CHANGELOG, ap2/architecture.md) into the setuptools sdist, and extended the hermetic ap2/tests/test_packaging.py with parse-only tests (exists/grafts-skills/includes-docs); all 5 packaging tests pass.
 - **Files:** MANIFEST.in, ap2/tests/test_packaging.py
 - **Tests:** pass
+
+## [2026-06-16] TB-411: README accuracy for an outside consumer: PolyForm Noncommercial License section + .cc-autopilot self-management note
+- **Commit:** `560fed2`
+- **Summary:** Rewrote README License section to PolyForm Noncommercial 1.0.0 (source-available, noncommercial, not OSI open source) pointing at LICENSE, and added a note that the committed .cc-autopilot/ tree is ap2's own self-management state resettable via `ap2 init`; both verification greps pass (PolyForm present, "all rights reserved" gone).
+- **Files:** README.md
+- **Tests:** pass
