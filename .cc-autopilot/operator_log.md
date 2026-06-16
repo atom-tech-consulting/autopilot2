@@ -397,3 +397,5 @@ ideation won't re-propose decisions logged here._
 - 2026-06-16T19:25:01Z — operator updated goal.md (Revise distribution focus: drop community-files + CI axis per operator; collapse to two axes (license wiring + identity scrub incl. README; default-config posture + extras). Supersedes prior queued update.)
 - 2026-06-16T19:50:42Z — applied operator-queued update_goal
 - 2026-06-16T19:50:42Z — operator updated goal.md (Correct conservative-default posture: only auto_approve defaults off; safety comes from bypassing BEHAVIORS being off/inert (immediate_push, channels, fix_shapes), already the schema default. Drop retired focus_advance + mattermost-as-component. Supersedes prior two queued updates.)
+- 2026-06-16T19:58:01Z — applied operator-queued update_goal
+- 2026-06-16T19:58:01Z — operator updated goal.md (Scrub stale focus_advance references (retired TB-342): drop from Done-when component list + back-compat knob example; rewrite Non-goals auto-rotation + Constraints operator-gate bullets to drop the dead AP2_FOCUS_AUTO_ADVANCE_DISABLED knob and focus-advancement gate. Keeps 2026-05-27 provenance intact. Supersedes prior queued updates.)

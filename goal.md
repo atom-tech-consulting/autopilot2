@@ -54,7 +54,7 @@ For ap2's own infrastructure, the practical "done enough" thresholds are:
 For the component model specifically:
 
 - Every loop-level autonomous behavior (auto-approve, auto-unfreeze,
-  attention, focus-advance, janitor, cron, ideation, communication)
+  attention, janitor, cron, ideation, communication)
   lives under `ap2/components/<name>/` and is loaded via the component
   registry, not via direct import from `ap2/daemon.py` or other core
   modules. The LLM judges (verification prose-judge, briefing
@@ -70,7 +70,7 @@ For the component model specifically:
   may be marked `requires_component=<name>` and skip when off.)
 - Existing env-knob names are preserved for backwards compatibility
   (`AP2_AUTO_APPROVE`, `AP2_ATTENTION_IMMEDIATE_PUSH`,
-  `AP2_FOCUS_AUTO_ADVANCE_DISABLED`, etc. still work unchanged from
+  `AP2_JANITOR_DISABLED`, etc. still work unchanged from
   the operator's perspective).
 - A future "distribution" focus can be defined entirely in terms
   of "which components default to enabled" plus packaging extras —
@@ -276,12 +276,12 @@ backend, per-backend auth); the entries below are provenance.
   focus auto-advance, ...) is OPT-IN with conservative defaults. ap2
   does not silently bypass the operator surface; relaxations are
   operator-curated trust upgrades.
-- **Goal.md auto-rotation**: the operator owns the focus list. The
-  `focus_advance/` component advances its internal "topmost active
-  focus" pointer based on exhaustion signals but never mutates
-  `goal.md` itself — adding, reordering, or retiring foci is
-  operator-only via `ap2 update-goal`. Auto-advance is a runtime
-  pointer change, not a docs change.
+- **Goal.md auto-rotation / auto-rewrite**: the operator owns the focus
+  list. ap2 never mutates `goal.md` — adding, reordering, or retiring
+  foci is operator-only via `ap2 update-goal`. When ideation exhausts a
+  focus it parks and surfaces a notice rather than advancing itself.
+  (The former `focus_advance/` auto-rotation pointer was retired in
+  TB-342; goal direction is now an operator-only edit.)
 - **Removing behavior during component extraction**: the component
   refactor moves modules into `ap2/components/` and gates them by
   env flag; it does not delete features. The internal install with
@@ -321,13 +321,12 @@ backend, per-backend auth); the entries below are provenance.
   acceptance criteria the daemon can evaluate unattended. No manual-step
   gating bullets.
 - **Operator-in-the-loop is configurable per surface, conservative by
-  default**: ideation proposals, retry-exhausted tasks, focus
-  advancement, and other per-cycle operator gates default to requiring
-  operator action. Relaxations are opt-in via components and their
-  env knobs (`AP2_AUTO_APPROVE`, `AP2_FOCUS_AUTO_ADVANCE_DISABLED`,
-  `AP2_ATTENTION_IMMEDIATE_PUSH`, future siblings) with documented
-  safety gates (tag-based opt-out, cumulative-regression pause,
-  all-foci-exhaust halt). Goal mutations (`goal.md` content —
+  default**: ideation proposals, retry-exhausted tasks, and other
+  per-cycle operator gates default to requiring operator action.
+  Relaxations are opt-in via components and their env knobs
+  (`AP2_AUTO_APPROVE`, `AP2_ATTENTION_IMMEDIATE_PUSH`, future siblings)
+  with documented safety gates (tag-based opt-out, cumulative-regression
+  pause, ideation-exhaustion halt). Goal mutations (`goal.md` content —
   including the focus list itself), git pushes, and cron schedule
   changes remain operator-CLI-only by design — they're either
   irreversible or set direction for everything downstream.
