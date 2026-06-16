@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/license-packaging-metadata-coherence-reg.md",
+  "focus_anchor": "current focus cut a public source available distribution",
+  "proposed_at": "2026-06-16T23:31:31Z",
+  "tb_id": "TB-416",
+  "why_now": "the license metadata is correct on disk but has zero test coverage \u2014 the\ndelete-test condition \"if the repo still declares 'All Rights Reserved'\" holds only\nby manual inspection, so a single careless metadata edit could ship a public cut\nthat reintroduces \"All Rights Reserved\", drops the PolyForm text, or adds an OSI\nclassifier with nothing failing."
+}

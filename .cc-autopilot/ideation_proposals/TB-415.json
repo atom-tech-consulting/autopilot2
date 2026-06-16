@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md",
+  "focus_anchor": "current focus cut a public source available distribution",
+  "proposed_at": "2026-06-16T23:29:54Z",
+  "tb_id": "TB-415",
+  "why_now": "TB-409 (landed today) claimed the identity scrub was done, but its\nnon-recursive `ap2/*.py` sweep left a sandbox-local absolute path baked into a\nshipped test module \u2014 Progress signal 1 is violated right now, and nothing prevents\nthe next copy-pasted debug path from re-introducing the same leak."
+}
