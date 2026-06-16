@@ -1,0 +1,8 @@
+{
+  "blocked_on": "review",
+  "briefing_path": ".cc-autopilot/tasks/source-identity-path-scrub-pyproject-aut.md",
+  "focus_anchor": "current focus cut a public source available distribution",
+  "proposed_at": "2026-06-16T20:20:56Z",
+  "tb_id": "TB-409",
+  "why_now": "a fresh install from a clean checkout currently leaks the sandbox's\nlocal path (`ap2/json_extract.py:22`), which is exactly the focus delete-test's\n\"leaks the sandbox's local paths/identity\" failure \u2014 an outside reader sees a\nprivate filesystem path baked into the package."
+}
