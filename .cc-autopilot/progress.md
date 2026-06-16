@@ -1647,3 +1647,9 @@
 - **Summary:** Scrubbed the /Users/claude-agent/repos/post-train absolute-path leak from ap2/json_extract.py's module comment (replaced with a sandbox-neutral reference, intent preserved); swept shipped ap2/*.py and found no other non-overridable identity leaks (sandbox.py's /Users/{user} derives from the overridable DEFAULT_USER/AP2_SANDBOX_USER knob, claude-agent-sdk is the real PyPI package); confirmed pyproject authors (Li Zhang) + Repository URL (github.com/lzhang/autopilot2) already read as coherent placeholders, so left untouched. json_extract tests green (14 passed).
 - **Files:** ap2/json_extract.py
 - **Tests:** pass
+
+## [2026-06-16] TB-410: sdist ships committed skills/ + docs (add MANIFEST.in + hermetic packaging test)
+- **Commit:** `7b0e12b`
+- **Summary:** Added a repo-root MANIFEST.in grafting the committed top-level skills/ operator manual and including the top-level docs (README, LICENSE, CHANGELOG, ap2/architecture.md) into the setuptools sdist, and extended the hermetic ap2/tests/test_packaging.py with parse-only tests (exists/grafts-skills/includes-docs); all 5 packaging tests pass.
+- **Files:** MANIFEST.in, ap2/tests/test_packaging.py
+- **Tests:** pass
