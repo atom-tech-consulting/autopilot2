@@ -107,4 +107,14 @@ guide (default suite + real-SDK smokes).
 
 ## License
 
-All rights reserved — see [LICENSE](LICENSE).
+Licensed under the **PolyForm Noncommercial License 1.0.0** — see
+[LICENSE](LICENSE). This is a source-available, noncommercial license: you may
+read, run, modify, and share the code for any noncommercial purpose, but it is
+**not** OSI-approved open source and does not permit commercial use. See
+<https://polyformproject.org/licenses/noncommercial/1.0.0> for the full terms.
+
+> **Note on the committed `.cc-autopilot/` tree.** This repository ships its own
+> `.cc-autopilot/` directory (board, tasks, progress, events) because ap2
+> dogfoods itself — that is ap2's *own* self-management state, not a template
+> for your project. In a fresh checkout you can reset it to an empty scaffold
+> with `ap2 init`; it is not part of any consumer's own project.
