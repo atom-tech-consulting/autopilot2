@@ -48,3 +48,12 @@ the axis-2 delete-test failure.
 - Changing any default value (the posture is already the schema default; this task asserts it).
 - A live `uv sync --extra` network resolution smoke (operator/CI).
 - Adding behavior or new components.
+## Attempts
+
+### 2026-06-16 — verification_failed
+(no summary)
+- **kind:** project_wide
+- **verify_command:** uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke
+- **exit_code:** 1
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260616T215158Z-TB-412.prompt.md`, `stream: .cc-autopilot/debug/20260616T215158Z-TB-412.stream.jsonl`, `messages: .cc-autopilot/debug/20260616T215158Z-TB-412.messages.jsonl`
