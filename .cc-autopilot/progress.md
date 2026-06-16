@@ -1659,3 +1659,9 @@
 - **Summary:** Rewrote README License section to PolyForm Noncommercial 1.0.0 (source-available, noncommercial, not OSI open source) pointing at LICENSE, and added a note that the committed .cc-autopilot/ tree is ap2's own self-management state resettable via `ap2 init`; both verification greps pass (PolyForm present, "all rights reserved" gone).
 - **Files:** README.md
 - **Tests:** pass
+
+## [2026-06-16] TB-412: Release-gate the default install: conservative-posture test (default + all-disabled) + install-extras pin
+- **Commit:** `47fa66f`
+- **Summary:** Previously committed in 47fa66f, which fully covers the briefing; re-verified completeness this run: read the diff against every scope item, ran both target files (10 passed) AND the full project-wide gate `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` (3064 passed) in the daemon's exact env — the prior verification_failed was a transient flake in an unrelated timing/concurrency test under load (the main suite mocks the validator judge and excludes the live smoke canary), not a defect in this work.
+- **Files:** ap2/tests/test_default_posture.py, ap2/tests/test_packaging.py
+- **Tests:** pass
