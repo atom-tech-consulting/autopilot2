@@ -1641,3 +1641,9 @@
 - **Summary:** Replaced the "All Rights Reserved" LICENSE with byte-verbatim PolyForm Noncommercial 1.0.0 text (canonical, diff-verified) keeping the copyright line, and set pyproject [project].license = PolyForm Noncommercial License 1.0.0 plus a classifiers list with the non-OSI "License :: Other/Proprietary License" trove classifier (no OSI claim); all 5 grep checks pass and the package builds/parses under uv.
 - **Files:** LICENSE, pyproject.toml
 - **Tests:** pass
+
+## [2026-06-16] TB-409: Source identity/path scrub + pyproject author/repo-URL coherence for an outside consumer
+- **Commit:** `7aefcd1`
+- **Summary:** Scrubbed the /Users/claude-agent/repos/post-train absolute-path leak from ap2/json_extract.py's module comment (replaced with a sandbox-neutral reference, intent preserved); swept shipped ap2/*.py and found no other non-overridable identity leaks (sandbox.py's /Users/{user} derives from the overridable DEFAULT_USER/AP2_SANDBOX_USER knob, claude-agent-sdk is the real PyPI package); confirmed pyproject authors (Li Zhang) + Repository URL (github.com/lzhang/autopilot2) already read as coherent placeholders, so left untouched. json_extract tests green (14 passed).
+- **Files:** ap2/json_extract.py
+- **Tests:** pass
