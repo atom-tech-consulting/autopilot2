@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/license-wiring-polyform-noncommercial-1.md",
   "focus_anchor": "current focus cut a public source available distribution",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-16T21:21:40Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-16T20:20:25Z",
   "tb_id": "TB-408",
   "why_now": "a clean outside checkout that still declares \"All Rights Reserved\"\n(LICENSE L1-3, pyproject L7) cannot be published under the chosen noncommercial\nlicense \u2014 this is the focus delete-test's first failure mode and blocks every\ndownstream packaging step."

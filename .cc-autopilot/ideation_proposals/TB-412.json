@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/release-gate-the-default-install-conserv.md",
   "focus_anchor": "current focus cut a public source available distribution",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-16T21:21:41Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-16T20:23:36Z",
   "tb_id": "TB-412",
   "why_now": "the conservative posture is already the schema default but nothing pins\nit as a release gate \u2014 without a gate, a future config change could silently ship\na public install that acts unattended on the operator's behalf out of the box,\nthe axis-2 delete-test failure."

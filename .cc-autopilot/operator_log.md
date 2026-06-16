@@ -400,3 +400,8 @@ ideation won't re-propose decisions logged here._
 - 2026-06-16T19:58:01Z — applied operator-queued update_goal
 - 2026-06-16T19:58:01Z — operator updated goal.md (Scrub stale focus_advance references (retired TB-342): drop from Done-when component list + back-compat knob example; rewrite Non-goals auto-rotation + Constraints operator-gate bullets to drop the dead AP2_FOCUS_AUTO_ADVANCE_DISABLED knob and focus-advancement gate. Keeps 2026-05-27 provenance intact. Supersedes prior queued updates.)
 - 2026-06-16T20:09:57Z — applied operator-queued ideate → (forced)
+- 2026-06-16T21:21:29Z — applied operator-queued approve → TB-408
+- 2026-06-16T21:21:29Z — applied operator-queued approve → TB-409
+- 2026-06-16T21:21:29Z — applied operator-queued approve → TB-410
+- 2026-06-16T21:21:29Z — applied operator-queued approve → TB-411
+- 2026-06-16T21:21:29Z — applied operator-queued approve → TB-412

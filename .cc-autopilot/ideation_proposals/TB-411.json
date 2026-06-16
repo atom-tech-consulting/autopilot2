@@ -2,6 +2,13 @@
   "blocked_on": "review,TB-408",
   "briefing_path": ".cc-autopilot/tasks/readme-accuracy-for-an-outside-consumer.md",
   "focus_anchor": "current focus cut a public source available distribution",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-16T21:21:41Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-16T20:22:56Z",
   "tb_id": "TB-411",
   "why_now": "the README still says \"All rights reserved \u2014 see LICENSE\" (README\nL108-110), which will contradict the new PolyForm LICENSE and mislead the first\noutside reader about whether and how they may use the code."

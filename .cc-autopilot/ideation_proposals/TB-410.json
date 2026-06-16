@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/sdist-ships-committed-skills-docs-add-ma.md",
   "focus_anchor": "current focus cut a public source available distribution",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "approved",
+    "decision_ts": "2026-06-16T21:21:41Z",
+    "reason": ""
+  },
   "proposed_at": "2026-06-16T20:22:19Z",
   "tb_id": "TB-410",
   "why_now": "the committed top-level `skills/` tree is ap2's operator manual, yet it\nships in neither the wheel package-data (`ap2/*.md,*.yaml` only) nor any sdist\nmanifest \u2014 so a clean checkout's built source distribution would silently drop\nthe manual an outside consumer needs."
