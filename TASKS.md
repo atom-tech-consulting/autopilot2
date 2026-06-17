@@ -11,6 +11,7 @@
 - [ ] **TB-414** **env-file template + ap2-config skill: document env as secrets + deployment-identity only (drop the flat AP2_ tunable examples)** `#autopilot` `#config` `#docs` `#env` `#skills` `#scaffolding` `@blocked:TB-413` [→ brief](.cc-autopilot/tasks/env-file-template-ap2-config-skill-docum.md)
 - [ ] **TB-415** **Scrub residual sandbox-path leak in ap2/tests + regression-gate shipped source against sandbox-local absolute paths** `#autopilot` `#distribution` `#packaging` `#identity-scrub` `#regression-pin` `#tests` `@blocked:review` — Remove the hard-coded /Users/claude-agent/repos/post-train absolute path still in ap2/tests/test_json_extract_util.py and add a recursive regression gate so a sandbox-local path can't reappear in shipped source. [→ brief](.cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md)
 - [ ] **TB-416** **License + packaging-metadata coherence regression gate (PolyForm verbatim, no OSI claim, README accuracy)** `#autopilot` `#distribution` `#packaging` `#license` `#regression-pin` `#tests` `@blocked:review` — Pin Progress signal 2 with a regression test over the already-committed license metadata: LICENSE verbatim PolyForm Noncommercial 1.0.0, pyproject declares it with no OSI-Approved classifier, README License section names PolyForm. [→ brief](.cc-autopilot/tasks/license-packaging-metadata-coherence-reg.md)
+- [ ] **TB-413** **Make config.toml the sole source for behavioral tunables; restrict env to a secrets + deployment-identity allowlist** `#autopilot` `#config` `#simplification` `#env` `#toml` `#back-compat` [→ brief](.cc-autopilot/tasks/make-config-toml-the-sole-source-for-beh.md)
 
 ## Pipeline Pending
 
@@ -299,5 +300,3 @@
 - [x] **TB-412** **Release-gate the default install: conservative-posture test (default + all-disabled) + install-extras pin** `#autopilot` `#distribution` `#config` `#posture` `#packaging` `#tests` — Add a test pinning the fresh-install conservative posture (auto_approve off, attention.immediate_push off, no channels, no fix_shapes) plus all-disabled-config load, and extend the hermetic packaging gate to assert the dev extra and record the mattermost-extra decision (axis 2, distribution focus). [→ brief](.cc-autopilot/tasks/release-gate-the-default-install-conserv.md)
 
 ## Frozen
-
-- [ ] **TB-413** **Make config.toml the sole source for behavioral tunables; restrict env to a secrets + deployment-identity allowlist** `#autopilot` `#config` `#simplification` `#env` `#toml` `#back-compat` [→ brief](.cc-autopilot/tasks/make-config-toml-the-sole-source-for-beh.md)

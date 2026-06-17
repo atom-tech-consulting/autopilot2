@@ -46,6 +46,11 @@ pattern.
   core task).
 - Edit scaffolding + docs only; do NOT change config-resolution code (owned by the
   predecessor task).
+- **Execution discipline.** Run test / verification commands in the FOREGROUND and
+  let them finish; do NOT launch them with `run_in_background` and poll the output
+  file — that loops and exhausts the task timeout. Iterate against TARGETED test
+  files, not the full `ap2/tests/` suite repeatedly; the daemon's verifier runs the
+  full suite after you report. Keep total tool calls bounded.
 
 ## Verification
 
