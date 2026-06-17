@@ -586,7 +586,7 @@ def test_disabled_judge_zero_sdk_calls_all_ambiguous(
     → no SDK calls AND every emitted finding carries verdict=ambiguous
     (deterministic-only behavior, mirroring TB-177 minus the operator-log
     line that TB-178 also dropped)."""
-    monkeypatch.setenv("AP2_JANITOR_MAX_FINDINGS_LLM", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_JANITOR_MAX_FINDINGS_LLM", "0")
     cfg = _project(tmp_path)
 
     # Seed all three subkinds (same shape as the regression fixture).
@@ -744,7 +744,7 @@ def test_cron_dispatch_routes_janitor_through_run_janitor_not_control_agent(
     flavor. A separate test (test_cron_dispatch_invokes_judge_when_enabled)
     pins the SDK-active path.
     """
-    monkeypatch.setenv("AP2_JANITOR_MAX_FINDINGS_LLM", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_JANITOR_MAX_FINDINGS_LLM", "0")
     cfg = _project(tmp_path)
     # Seed a stranded file so the run produces a finding.
     (tmp_path / "scratch.txt").write_text("untracked scratch\n")

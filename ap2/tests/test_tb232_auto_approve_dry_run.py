@@ -132,12 +132,12 @@ def test_would_auto_approve_event_fires_when_dry_run_set(
     `would_auto_approve` event with `dry_run=True`, (b) does NOT emit
     an `auto_approved` event, (c) leaves the row's `@blocked:review`
     codespan intact (operator-manual `ap2 approve` still required)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
     # Don't set AP2_AUTO_APPROVE_GATE_TAGS — default is
     # `#breaking-change,#high-risk` which the `#autopilot` tag below
     # doesn't intersect, so the tags gate passes cleanly.
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     res = tools.do_board_edit(
         cfg,
@@ -258,9 +258,9 @@ def test_real_auto_approve_unaffected_when_dry_run_unset(
     no-regression guarantee on the non-dry-run path — confirms the
     dry-run check sits behind a real boolean, not a flag that always
     suppresses the real path."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     res = tools.do_board_edit(
         cfg,
@@ -310,9 +310,9 @@ def test_falsy_dry_run_values_treated_as_unset(cfg: Config, monkeypatch):
     dry-run, matching the rest of ap2's boolean env-knob convention.
     A future refactor that flipped to "any non-empty value =
     dry-run" would trip here."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "0")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "0")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     res = tools.do_board_edit(
         cfg,
@@ -351,14 +351,14 @@ def test_dry_run_flag_in_collect_auto_approve_state(cfg: Config, monkeypatch):
     has `dry_run_enabled=True`. Operator-facing CLI / web / JSON
     surfaces consume this key to render a "dry-run" badge so the
     operator can confirm at a glance the loop is in monitor mode."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
 
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["dry_run_enabled"] is True
 
     # Unset → False (default).
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["dry_run_enabled"] is False
 

@@ -45,14 +45,24 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
         monkeypatch.delenv(k, raising=False)
 
     # Low retry/timeout so a misbehaving test fails fast rather than hanging.
+    # These knobs are read directly from the flat env at `Config.load()` time
+    # into `cfg.task_timeout_s` / `cfg.control_timeout_s` / `cfg.max_retries`
+    # (see `ap2/config.py`), NOT through the reverse-`FLAT_TO_SECTIONED`
+    # override path that TB-413 removed — so the flat names stay correct here
+    # (the briefing explicitly keeps the Config-loader's direct field reads
+    # out of scope).
     monkeypatch.setenv("AP2_TASK_TIMEOUT_S", "30")
     monkeypatch.setenv("AP2_CONTROL_TIMEOUT_S", "30")
     monkeypatch.setenv("AP2_MAX_RETRIES", "3")
     # Suppress empty-board ideation by default. Tests exercising it call
-    # `monkeypatch.delenv("AP2_IDEATION_DISABLED")` and configure a
+    # `monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED")` and configure a
     # short cooldown explicitly. Without this, every test with an empty
     # board would inadvertently fire the ideation agent.
-    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    # TB-413: the ideation kill switch is resolved via
+    # `_ideation_disabled(cfg)` -> `cfg.get_core_value("ideation_disabled")`,
+    # whose flat `AP2_IDEATION_DISABLED` override was removed — so this
+    # suppression must inject the sectioned `AP2_CORE_IDEATION_DISABLED` name.
+    monkeypatch.setenv("AP2_CORE_IDEATION_DISABLED", "1")
     # TB-235: disable the LLM-driven dependency-coherence check (#7) in
     # `_validate_briefing_structure` by default. The check fires on
     # `do_board_edit` / `do_operator_queue_append` `add_*` paths, and
@@ -63,7 +73,9 @@ def e2e_project(tmp_path: Path, monkeypatch) -> Callable[..., Config]:
     # `dep_judge_fn`; the dedicated regression-pin lives in
     # `ap2/tests/test_dep_validator_judge.py` (no SDK touch — all
     # cases mock the judge round-trip).
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
+    # TB-413: sectioned name (`components.validator_judge.disabled`) — the
+    # flat `AP2_VALIDATOR_JUDGE_DISABLED` no longer overrides config.toml.
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", "1")
 
     def build(
         *,

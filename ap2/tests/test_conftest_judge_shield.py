@@ -54,9 +54,14 @@ def test_validator_judge_disabled_env_is_set_during_test_session():
     deleted conftest), the whole unit-test surface re-leaks Haiku-4.5
     SDK calls on every `add_*` invocation; this test is the canary.
     """
-    val = os.environ.get("AP2_VALIDATOR_JUDGE_DISABLED", "")
+    # TB-413: the shield now installs the SECTIONED knob name — the flat
+    # `AP2_VALIDATOR_JUDGE_DISABLED` override path was removed (config.toml is
+    # the sole source for behavioral tunables), so `_validator_judge_disabled`
+    # (which routes through `cfg.get_component_value("validator_judge",
+    # "disabled")`) only honors the sectioned name.
+    val = os.environ.get("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", "")
     assert val.lower() in {"1", "true", "yes"}, (
-        f"AP2_VALIDATOR_JUDGE_DISABLED expected truthy under the "
+        f"AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED expected truthy under the "
         f"ap2/tests/conftest.py shield; got {val!r}. Did the conftest "
         "shield get removed or renamed?"
     )
@@ -115,7 +120,8 @@ def test_local_override_unsets_shield(tmp_path, monkeypatch):
     `test_dep_validator_judge.py::_make_judge`) so the assertion is
     "judge stub was called" rather than "didn't fail".
     """
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+    # TB-413: opt out via the sectioned knob name (the shield's name).
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", raising=False)
     captured: list[dict] = []
 
     def _judge(**kwargs):

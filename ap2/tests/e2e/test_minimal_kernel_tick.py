@@ -107,7 +107,7 @@ def test_minimal_kernel_tick_dispatch_verify_report(e2e_project, monkeypatch):
     # Post-TB-391 the helper already maps `AP2_IDEATION_DISABLED -> "1"`, but
     # set it explicitly so the minimal-kernel config is robust to ordering /
     # any future helper change.
-    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_DISABLED", "1")
     # Force re-discovery so the cached registry reflects the disabled env.
     _reset_default_registry()
 

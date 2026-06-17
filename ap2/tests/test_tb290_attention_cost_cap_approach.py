@@ -70,16 +70,16 @@ def cfg(tmp_path: Path, monkeypatch) -> Config:
     auto-approve knobs the detector consults so each test can set
     them as needed.
     """
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
-    monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
-    monkeypatch.delenv("AP2_TASK_FROZEN_RECENCY_S", raising=False)
-    monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()
@@ -203,7 +203,7 @@ def test_detector_misses_when_cap_is_zero(cfg: Config, monkeypatch):
     cap-disabled-with-explicit-zero shape since operators set `0` to
     disable rather than unsetting.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "0")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=10_000_000, now=now)
 
@@ -222,7 +222,7 @@ def test_detector_misses_below_threshold(cfg: Config, monkeypatch):
     no fire. Pin the strict-inequality seam below the threshold so
     every transient spend doesn't surface the Attention bullet.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=600, now=now)
 
@@ -243,7 +243,7 @@ def test_detector_fires_inside_approach_window(cfg: Config, monkeypatch):
     happy-path approach fire including summary contents + extras
     blob the briefing's Design clause names.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=800, now=now)
 
@@ -276,7 +276,7 @@ def test_detector_boundary_fires_at_exact_threshold(
     strict-greater-than doesn't push the bullet off the wrong side
     of the boundary.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=750, now=now)
 
@@ -299,7 +299,7 @@ def test_detector_misses_at_or_above_cap(cfg: Config, monkeypatch):
     doesn't regress the briefing's "two simultaneous bullets would
     be noise" design clause.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=1000, now=now)
 
@@ -330,7 +330,7 @@ def test_detector_debounce_suppresses_within_window(
     contract so a sustained approach window doesn't re-fire every
     tick.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=800, now=now)
     # Emit a prior fire 1h ago — well inside the 6h default debounce.
@@ -363,7 +363,7 @@ def test_detector_debounce_releases_after_window(
     re-notified once per debounce window for sustained issues
     (mirrors TB-287 / TB-288 / TB-289's debounce-release contract).
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=800, now=now)
     events.append(
@@ -397,8 +397,8 @@ def test_pct_env_override_fires_at_50_percent(
     operator tightening the threshold via `.cc-autopilot/env`
     takes effect on the next detector tick without code changes.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "50")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "50")
     assert _cost_approach_pct(cfg) == 50
 
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
@@ -423,8 +423,8 @@ def test_pct_env_override_at_50_pct_misses_at_499(
     can't tip a sum just below the floor over the boundary via
     floating-point rounding.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "50")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "50")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=499, now=now)
 
@@ -451,7 +451,7 @@ def test_detector_respects_operator_ack_reset(
     Seed a big spend, then emit the resume ack, then no new spend →
     detector returns `[]` because the post-ack window is empty.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     # Seed a sum that WOULD trip the approach detector...
     _seed_approach_sum(cfg, total_tokens=900, now=now)
@@ -491,7 +491,7 @@ def test_debounce_independent_from_other_detectors(
     cross-detector independence so a different detector firing
     1 minute ago doesn't gate the approach bullet.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=800, now=now)
     # Recent task_stuck fire — different attention_type, different key.
@@ -528,7 +528,7 @@ def test_detector_ignores_events_outside_24h_window(
     → no fire. Pin the window boundary so a refactor that broadens
     the walk doesn't accidentally surface old budget noise.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     # All spend 25h ago — should not count toward the rolling sum.
     tid = "TB-800"
@@ -556,7 +556,7 @@ def test_detector_ignores_non_auto_approved_task_spend(
     task_ids` filter the trip-check uses so the approach surface
     can't surface on operator-driven spend.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     # Big spend on a task without an `auto_approved` event preceding.
     _seed_task_run_usage(
@@ -587,7 +587,7 @@ def test_approach_sum_matches_trip_check_sum(
     drop below the cap and confirm the approach detector fires
     with the same sum the trip-check would have reported.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     # Sum just below the cap → approach should fire.
     _seed_approach_sum(cfg, total_tokens=900, now=now)
@@ -634,7 +634,7 @@ def test_detect_attention_conditions_includes_cost_cap_approach(
     `_detect_cost_cap_approach` and unions the results. Pin the
     wire-up so a refactor that forgets one detector surfaces.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=800, now=now)
 
@@ -658,7 +658,7 @@ def test_render_attention_section_includes_cost_cap_approach(
     """
     from ap2.status_report import render_attention_section
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_approach_sum(cfg, total_tokens=800, now=now)
 
@@ -679,7 +679,7 @@ def test_cost_approach_pct_default_when_unset(cfg: Config, monkeypatch):
     contract (TB-336: cfg helper) so env-reload propagates without
     re-threading state.
     """
-    monkeypatch.delenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", raising=False)
     assert _cost_approach_pct(cfg) == 75
 
 
@@ -688,9 +688,9 @@ def test_cost_approach_pct_invalid_falls_back(cfg: Config, monkeypatch):
     the default. Pin the parse-defensive shape (mirrors
     `_task_stuck_threshold_s` / `_task_frozen_recency_s`).
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "not-a-number")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "not-a-number")
     assert _cost_approach_pct(cfg) == 75
-    monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "-5")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "-5")
     assert _cost_approach_pct(cfg) == 75
 
 
@@ -701,9 +701,9 @@ def test_cost_approach_pct_clamps_above_99(cfg: Config, monkeypatch):
     100 means the resolver caps just below the trip rather than
     raising.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "100")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "100")
     assert _cost_approach_pct(cfg) == 99
-    monkeypatch.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "150")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "150")
     assert _cost_approach_pct(cfg) == 99
 
 

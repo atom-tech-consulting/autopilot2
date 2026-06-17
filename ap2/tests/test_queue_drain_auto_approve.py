@@ -116,9 +116,9 @@ def test_drain_add_backlog_with_review_strips_when_auto_approve_on(
     review token from the landed task and emits `auto_approved` with
     `task=TB-N` + `knob=1`. Mirrors `do_board_edit`'s TB-223 set-knob
     case at the queue-drain surface."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     tb_id = _queue_and_drain(cfg, {
         "title": "queue-drained auto-approved feature",
@@ -201,9 +201,9 @@ def test_drain_add_backlog_dry_run_emits_simulated_event(
     queue-drain handler keeps the review token but emits a
     `would_auto_approve` event with `dry_run=True`. Mirrors
     `do_board_edit`'s TB-232 dry-run on-ramp at the queue surface."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     tb_id = _queue_and_drain(cfg, {
         "title": "queue-drained dry-run feature",

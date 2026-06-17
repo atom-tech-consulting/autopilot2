@@ -128,6 +128,13 @@ _COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset({
     # future addition stays on the right side of the partition.
     "AP2_DIR",
     "AP2_REAL_SDK",
+    # TB-413: deployment-identity members of `config.ENV_PERMITTED_KEYS` (the
+    # 12-factor allowlist) the regex picks up from the allowlist literal in
+    # `ap2/config.py`. Their focused default/override/docs coverage is the
+    # explicit scope of the blocked companion task TB-414; mirrors the
+    # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` entries.
+    "AP2_WEB_HOST",
+    "AP2_SANDBOX_USER",
 })
 
 

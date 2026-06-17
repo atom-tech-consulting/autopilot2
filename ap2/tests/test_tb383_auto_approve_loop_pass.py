@@ -127,10 +127,10 @@ def test_board_edit_lands_blocked_review_regardless_of_knob(
     at mutation time. TB-383: the strip is no longer a mutation-time
     decision; the proposal is uniformly born blocked."""
     if knob is None:
-        monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+        monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
     else:
-        monkeypatch.setenv("AP2_AUTO_APPROVE", knob)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
+        monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", knob)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
 
     tb_id = _add_review_proposal(cfg, title="born blocked")
 
@@ -159,7 +159,7 @@ def test_board_edit_lands_blocked_review_regardless_of_knob(
 def test_loop_pass_noop_when_knob_unset(cfg: Config, monkeypatch):
     """With `AP2_AUTO_APPROVE` unset, the loop pass is a no-op: the
     `@blocked:review` codespan survives and no `auto_approved` fires."""
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
 
     tb_id = _add_review_proposal(cfg, title="knob off")
     run_auto_approve_pass(cfg)
@@ -178,9 +178,9 @@ def test_loop_pass_strips_when_knob_set_and_gates_pass(
     pass strips `@blocked:review` and emits `auto_approved` (`task=`,
     `knob=`) — the exact payload the pre-TB-383 proposal-time site
     produced, just from the between-runs site."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     tb_id = _add_review_proposal(cfg, title="strip me")
     # Born blocked.
@@ -210,9 +210,9 @@ def test_loop_pass_retains_review_for_gate_tagged_proposal(
     `@blocked:review` even after the loop pass runs with the master knob
     on — the tags policy (relocated into the component) short-circuits the
     gate chain to "noop"."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     tb_id = _add_review_proposal(
         cfg, title="risky", tags=["#autopilot", "#breaking-change"],
@@ -231,8 +231,8 @@ def test_loop_pass_retains_review_for_gate_tagged_proposal(
 def test_loop_pass_is_idempotent_after_strip(cfg: Config, monkeypatch):
     """Running the loop pass twice strips once and emits exactly one
     `auto_approved` — the second pass finds no `review` token to act on."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
 
     tb_id = _add_review_proposal(cfg, title="once only")
     run_auto_approve_pass(cfg)
@@ -259,9 +259,9 @@ def test_loop_pass_dry_run_emits_once_and_preserves_codespan(
     the task stays in the pass's candidate set — the dedup gate ensures the
     event fires exactly ONCE across repeated passes (preserving the
     pre-TB-383 emit-once semantics + the 24h dry-run counter)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     tb_id = _add_review_proposal(cfg, title="dry run")
     run_auto_approve_pass(cfg)
@@ -383,9 +383,9 @@ def test_tick_auto_approves_then_dispatches_in_same_tick(
     within a single `_tick`, exactly as the pre-TB-383 proposal-time strip
     produced. Pins the load-bearing sequencing (pass runs before
     dispatch)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     tb_id = _add_review_proposal(cfg, title="approve and dispatch")
     assert "@blocked:review" in _line(cfg, tb_id)

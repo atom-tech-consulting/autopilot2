@@ -478,9 +478,9 @@ def test_manifest_tick_hook_applies_patch_end_to_end(
     task is back in Backlog.
     """
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
     cfg = _make_cfg(tmp_path)
     task_id, briefing_path = _add_and_freeze(cfg)
     _emit_blocked_complete_with_fix(

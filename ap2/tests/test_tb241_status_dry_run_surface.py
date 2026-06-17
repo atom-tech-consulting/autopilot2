@@ -74,9 +74,9 @@ def test_cli_status_renders_dry_run_line_when_auto_approve_dry_run_on(
     """
     from ap2.cli import cmd_status
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
 
     events.append(
         cfg.events_file, "would_auto_approve",
@@ -101,9 +101,9 @@ def test_cli_status_renders_dry_run_line_when_auto_unfreeze_dry_run_on(
     """
     from ap2.cli import cmd_status
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
 
     events.append(
         cfg.events_file, "would_auto_unfreeze",
@@ -136,9 +136,9 @@ def test_cli_status_omits_dry_run_line_when_both_knobs_off(
     """
     from ap2.cli import cmd_status
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
@@ -218,9 +218,9 @@ def test_web_automation_card_renders_would_approved_row_and_badge(
     """
     from ap2 import web
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
 
     events.append(
         cfg.events_file, "would_auto_approve",
@@ -250,9 +250,9 @@ def test_web_automation_card_renders_would_unfrozen_row_when_au_dry_run_on(
     """
     from ap2 import web
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
 
     events.append(
         cfg.events_file, "would_auto_unfreeze",
@@ -279,9 +279,9 @@ def test_web_automation_card_omits_dry_run_artifacts_when_both_knobs_off(
     """
     from ap2 import web
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
 
     html = web._render_home(cfg)
     # Parent card still renders (knob on).

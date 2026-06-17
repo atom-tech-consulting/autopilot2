@@ -179,7 +179,7 @@ def test_section_present_when_knob_on_and_counters_zero(
     """Knob on, no halt, no loop events in the window → render the
     healthy baseline so the operator's scanning position is stable.
     Pin the headline + the "0 tasks auto-approved" baseline bullet."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
 
     section = render_automation_loop_activity_section(
         cfg, since_event_idx=_previous_status_report_idx(cfg),
@@ -681,9 +681,9 @@ def test_dry_run_subblock_renders_when_either_knob_on(
     """
     # Auto-approve dry-run on; knob also on (real-mode toggle is
     # required to engage the gate, dry-run flips the WRITE step).
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
 
     events.append(
         cfg.events_file, "would_auto_approve",
@@ -710,9 +710,9 @@ def test_dry_run_subblock_renders_both_lines_when_both_knobs_on(
     """Both dry-run knobs on → the sub-block lists BOTH axes. Pins the
     parallel structure so operators reading the post during a paired
     dry-run window see both readiness signals in one block."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
 
     events.append(
         cfg.events_file, "would_auto_approve",
@@ -749,9 +749,9 @@ def test_dry_run_subblock_omitted_when_both_dry_runs_off(
     zero` (knob on, no halt, no loop events) so the comparison
     captures the full pre-TB-238 baseline shape.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
 
     section = render_automation_loop_activity_section(
         cfg, since_event_idx=_previous_status_report_idx(cfg),

@@ -194,11 +194,11 @@ def test_auto_approve_dispatches_ideation_proposal_without_operator(
     # Knob set + freeze threshold zeroed out so the circuit-breaker
     # doesn't accidentally fire on this clean run (no prior failure
     # window exists, but explicit is safer than implicit).
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
     # Enable ideation + short cooldown so step-4 fires on tick 1.
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "3600")
     # Project-override ideation prompt — gives the FakeSDK a stable
     # substring to match on rather than depending on `ideation.default.md`.
     override = cfg.project_root / ".cc-autopilot" / "ideation_prompt.md"
@@ -432,12 +432,12 @@ def test_auto_unfreeze_briefingfix_repairs_frozen_task(
     # _UNFREEZE_BRIEFING content). Auto-approve is also ON to pin the
     # in-concert behavior — TB-225 doesn't exercise this combination.
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
     # Suppress ideation — this test is focused on the auto-unfreeze path.
-    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_DISABLED", "1")
 
     # Add a Backlog task via the operator queue (the same path the
     # operator's `ap2 add` takes) so the briefing materializes on disk
@@ -656,12 +656,12 @@ def test_focus_advance_and_roadmap_complete_across_ticks(
     # (`ideation_empty_board`) + exit (`ideation_complete`) with no
     # proposal inside, forming one full empty cycle (+1 to the counter
     # under TB-292's cycle-grouped semantics).
-    monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "2")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "2")
     # Kill-switch off (default) so the detector pass is allowed to fire.
-    monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     # Enable ideation; cooldown=0 so it fires every tick.
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "0")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "0")
     # Project-override ideation prompt — stable substring for FakeSDK
     # routing.
     override = cfg.project_root / ".cc-autopilot" / "ideation_prompt.md"

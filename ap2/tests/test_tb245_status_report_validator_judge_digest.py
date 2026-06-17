@@ -459,7 +459,7 @@ def test_collect_window_validator_judge_threshold_flips_is_noisy(
     the collector level so the renderer is purely presentational
     (the threshold check lives in one place)."""
     # Tune the threshold to 2 so we don't need 5 events.
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "2")
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "2")
     events.append(cfg.events_file, "validator_judge_fail", error="x")
     events.append(cfg.events_file, "validator_judge_fail", error="x")
     state = automation_status.collect_window_validator_judge(cfg)

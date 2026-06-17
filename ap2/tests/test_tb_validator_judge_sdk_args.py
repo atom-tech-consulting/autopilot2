@@ -64,7 +64,7 @@ def _unshield_validator_judge(monkeypatch):
     the judge stub fire and inspect what kwargs the validator passed;
     monkeypatch restores the shield on teardown.
     """
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", raising=False)
 
 
 def _events_file(tmp_path: Path) -> Path:
@@ -136,8 +136,8 @@ def test_validator_judge_extra_args_does_not_contain_max_tokens():
 # positive int. Default path with no env knob set uses the module
 # default (`_VALIDATOR_JUDGE_MAX_TURNS_DEFAULT`).
 def test_validator_judge_uses_max_turns_for_budget(tmp_path, monkeypatch):
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", raising=False)
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TURNS", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
     captured: list[dict] = []
     judge = _make_judge(
         {"hard_predecessors": [], "reasoning": "no deps"},
@@ -163,8 +163,8 @@ def test_validator_judge_uses_max_turns_for_budget(tmp_path, monkeypatch):
 
 # (2b) Env override: AP2_VALIDATOR_JUDGE_MAX_TURNS=3 propagates.
 def test_validator_judge_env_override_propagates(tmp_path, monkeypatch):
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", "3")
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TURNS", "3")
     captured: list[dict] = []
     judge = _make_judge(
         {"hard_predecessors": [], "reasoning": "x"},
@@ -188,8 +188,8 @@ def test_validator_judge_deprecated_knob_alias(tmp_path, monkeypatch):
     # Reset the one-shot per-process logged set so the test is
     # order-independent.
     tools._VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED.clear()
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", raising=False)
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "10")
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TURNS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TOKENS", "10")
     events_file = _events_file(tmp_path)
     captured: list[dict] = []
     judge = _make_judge(
@@ -216,6 +216,11 @@ def test_validator_judge_deprecated_knob_alias(tmp_path, monkeypatch):
         f"got {dep!r}"
     )
     payload = dep[0]
+    # TB-413: the knob is now SET via the sectioned env name (line above), but
+    # the deprecation event's `knob`/`replacement` fields are the hardcoded
+    # human-readable labels emitted by `briefing_validators.py` (the TB-249/
+    # TB-345 deprecation-message mechanism, untouched by TB-413), which spell
+    # the flat names — so the event payload still reports the flat labels.
     assert payload.get("knob") == "AP2_VALIDATOR_JUDGE_MAX_TOKENS", payload
     assert payload.get("replacement") == "AP2_VALIDATOR_JUDGE_MAX_TURNS", payload
     assert int(payload.get("legacy_value")) == 10, payload
@@ -249,8 +254,8 @@ def test_validator_judge_deprecated_knob_alias(tmp_path, monkeypatch):
 # operator-active-use; future-TB cleanup decides whether to escalate).
 def test_validator_judge_canonical_knob_wins_over_legacy(tmp_path, monkeypatch):
     tools._VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED.clear()
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", "3")
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "999")
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TURNS", "3")
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TOKENS", "999")
     events_file = _events_file(tmp_path)
     captured: list[dict] = []
     judge = _make_judge(

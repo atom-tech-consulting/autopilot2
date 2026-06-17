@@ -76,7 +76,9 @@ def _write_goal_with_foci(cfg: Config, *titles: str) -> None:
 @pytest.fixture
 def cfg(tmp_path: Path, monkeypatch) -> Config:
     """Project root with the standard ap2 init layout."""
-    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    # TB-413: sectioned knob name (`core.ideation_halt_disabled`) — the flat
+    # `AP2_IDEATION_HALT_DISABLED` override path was removed.
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     init_project(tmp_path)
     cfg = Config.load(tmp_path)
     cfg.ensure_dirs()
@@ -92,7 +94,7 @@ def _exhaust(cfg: Config, *titles: str, monkeypatch=None) -> None:
     gone, so the halt fires from the empty-cycles detector directly."""
     _write_goal_with_foci(cfg, *titles)
     if monkeypatch is not None:
-        monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+        monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
     events.append(cfg.events_file, "ideation_empty_board", cooldown_s=0)
     events.append(cfg.events_file, "ideation_complete", summary="empty")
     ideation_halt.maybe_halt_on_exhaustion(cfg)
@@ -164,7 +166,7 @@ def test_fresh_emit_clears_stale_dismissal_marker(cfg, monkeypatch):
     action. TB-340 clears the marker at emit time so each episode
     re-nags exactly once.
     """
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
     pointer = goal.load_pointer(cfg)
     # Stale dismissal from a PRIOR episode at the same foci count (2),

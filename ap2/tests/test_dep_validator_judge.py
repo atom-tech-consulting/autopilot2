@@ -63,7 +63,7 @@ def _unshield_validator_judge(monkeypatch):
     safely undone by that test's `monkeypatch.setenv` in monkeypatch's
     LIFO stack.
     """
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", raising=False)
 
 
 def _events_file(tmp_path: Path) -> Path:
@@ -192,7 +192,7 @@ def test_dep_judge_malformed_response_fails_open(tmp_path):
 # (e) Timeout → log + pass (fail-open).
 def test_dep_judge_timeout_fails_open(tmp_path, monkeypatch):
     events_file = _events_file(tmp_path)
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "3")
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_TIMEOUT_S", "3")
     judge = _make_judge(None, raise_timeout=True)
     err = tools._validate_briefing_structure(
         _CANONICAL,
@@ -211,7 +211,7 @@ def test_dep_judge_timeout_fails_open(tmp_path, monkeypatch):
 # (f) AP2_VALIDATOR_JUDGE_DISABLED=1 → check #7 skipped entirely.
 def test_dep_judge_disabled_skips_check(tmp_path, monkeypatch):
     events_file = _events_file(tmp_path)
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", "1")
     # The judge stub should NEVER be called; pin that via a sentinel
     # exception — if it fires, the test fails with a clear trace.
     def _explode(**_kwargs):
@@ -364,7 +364,7 @@ def test_dep_judge_skipped_when_no_events_file_or_judge():
 # Env-knob smoke: AP2_VALIDATOR_JUDGE_TIMEOUT_S parses correctly
 # (default 15, override via env). Pin the propagation path.
 def test_dep_judge_timeout_env_knob_parses(tmp_path, monkeypatch):
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "42")
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_TIMEOUT_S", "42")
     captured: list[dict] = []
     judge = _make_judge(
         {"hard_predecessors": [], "reasoning": "x"},
@@ -386,8 +386,8 @@ def test_dep_judge_timeout_env_knob_parses(tmp_path, monkeypatch):
 # now resolves into `max_turns` via a deprecated-alias path covered by
 # `test_tb_validator_judge_sdk_args.py`).
 def test_dep_judge_max_turns_env_knob_parses(tmp_path, monkeypatch):
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", "4")
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TURNS", "4")
     captured: list[dict] = []
     judge = _make_judge(
         {"hard_predecessors": [], "reasoning": "x"},
@@ -411,9 +411,9 @@ def test_dep_judge_max_turns_env_knob_parses(tmp_path, monkeypatch):
 # constants trips this test (forcing the env-knob docs to update in
 # lockstep).
 def test_dep_judge_env_knob_defaults(tmp_path, monkeypatch):
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_TIMEOUT_S", raising=False)
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_MAX_TURNS", raising=False)
     captured: list[dict] = []
     judge = _make_judge(
         {"hard_predecessors": [], "reasoning": "x"},

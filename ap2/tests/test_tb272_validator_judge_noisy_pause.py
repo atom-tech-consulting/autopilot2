@@ -317,16 +317,16 @@ def test_noisy_pause_disabled_knob_opts_out(cfg: Config, monkeypatch):
     `pause_reason` is None (no other halt-class signal is active) or
     one of the cost/freeze tokens, but NOT `"validator_judge_noisy"`.
     """
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
     _seed_validator_judge_events(cfg, fail=10)
 
     # Sanity: without the opt-out the noisy token fires.
-    monkeypatch.delenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["pause_reason"] == "validator_judge_noisy", state
 
     # With the opt-out, the noisy state contributes None.
-    monkeypatch.setenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", "1")
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["pause_reason"] != "validator_judge_noisy", state
 
@@ -353,15 +353,15 @@ def test_auto_approve_skipped_when_validator_judge_noisy(
 
     Mirrors TB-224's per-task-cap end-to-end pin shape.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
     # Suppress the other axis-1/2/3 pauses so the test focuses on
     # the TB-272 branch: zero the freeze threshold + leave cost caps
     # unset so neither branch can also fire.
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
 
     tb = _seed_auto_approved_task(cfg, title="tb272 should be paused")
     _seed_validator_judge_events(cfg, fail=3, timeout=2)

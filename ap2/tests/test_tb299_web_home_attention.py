@@ -270,7 +270,7 @@ def test_home_attention_card_sits_between_focus_and_automation(
     # Force the automation card to render — `AP2_AUTO_APPROVE=1`
     # flips `state["auto_approve_enabled"]` truthy so the card is
     # not omitted-on-empty.
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
     # Force the attention card to render with at least one bullet.
     cond = _per_task_cond("TB-9", "TB-9 Active for 2.0h")
     monkeypatch.setattr(

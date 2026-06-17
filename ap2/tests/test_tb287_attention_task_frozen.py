@@ -62,9 +62,9 @@ def cfg(tmp_path: Path, monkeypatch) -> Config:
     siblings so the `task_stuck` detector doesn't false-fire from
     test-seeded `task_start` events that may co-occur in some arcs.
     """
-    monkeypatch.delenv("AP2_TASK_FROZEN_RECENCY_S", raising=False)
-    monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
-    monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()
@@ -326,7 +326,7 @@ def test_task_frozen_recency_default(cfg: Config, monkeypatch):
     TB-328: the helper now takes a `cfg` argument; the resolved-config
     layer reads sectioned-env > flat-env > TOML > default at call time.
     """
-    monkeypatch.delenv("AP2_TASK_FROZEN_RECENCY_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", raising=False)
     assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
     assert DEFAULT_TASK_FROZEN_RECENCY_S == 86400
 
@@ -337,7 +337,7 @@ def test_task_frozen_recency_env_override(cfg: Config, monkeypatch):
     drops out. Pin both the resolver result AND the end-to-end
     detector behavior under the override.
     """
-    monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "3600")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", "3600")
     assert _task_frozen_recency_s(cfg) == 3600
 
     _seed_frozen_task(cfg, "TB-340", "Two-hour-stale freeze")
@@ -358,11 +358,11 @@ def test_task_frozen_recency_invalid_falls_back(cfg: Config, monkeypatch):
     silently (parallel to TB-282's
     `test_task_stuck_threshold_invalid_falls_back`).
     """
-    monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "not-a-number")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", "not-a-number")
     assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
-    monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", "0")
     assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
-    monkeypatch.setenv("AP2_TASK_FROZEN_RECENCY_S", "-1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", "-1")
     assert _task_frozen_recency_s(cfg) == DEFAULT_TASK_FROZEN_RECENCY_S
 
 

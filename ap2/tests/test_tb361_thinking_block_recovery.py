@@ -416,10 +416,10 @@ def test_thinking_block_task_error_does_not_trip_breaker(cfg, monkeypatch):
     from the TB-224 single-event breaker — `_auto_approve_check_violations`
     returns None — while an UNFLAGGED `task_error` for an auto-approved task
     still trips it. One classifier flag, one exemption."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
 
     events.append(cfg.events_file, "auto_approved", task="TB-900", knob="1")
     # Flagged thinking-block task_error → exempt → no violation.
@@ -450,7 +450,7 @@ def test_thinking_block_failure_not_counted_in_freeze_window(cfg, monkeypatch):
     TB-223 consecutive-freeze window: three flagged completions (which would
     cross the default threshold of 3) do NOT pause, while three unflagged
     failures do."""
-    monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
 
     def _fail(task, *, flag):
         events.append(
@@ -483,9 +483,9 @@ def test_gated_head_does_not_freeze_operator_work_behind_it(cfg, monkeypatch):
     gated auto-approved head stays in Backlog with its skip event. Proves a
     gated head no longer freezes non-gated work behind it (the live
     2026-05-31 wedge: human-authored TB-361 stuck behind gated TB-359/360)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     # Prior auto-approved task burned the rolling-window budget → window_cap
     # halt is active for the auto layer.
@@ -542,9 +542,9 @@ def test_all_gated_candidates_stay_held_no_promotion(cfg, monkeypatch):
     """When EVERY dispatchable candidate is auto-approved and the window is
     halted, none promote (the pause still holds the auto layer) — each gated
     candidate emits its skip event and the tick ends with no promotion."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
     events.append(cfg.events_file, "auto_approved", task="TB-900", knob="1")
     events.append(
         cfg.events_file, "task_run_usage", task="TB-900", run_id="r-900-1",

@@ -212,7 +212,7 @@ def test_control_max_turns_env_override_flows_through_to_sdk(tmp_path, monkeypat
     """Happy path: `AP2_CONTROL_MAX_TURNS="30"` → MM-handler SDK call sees
     `max_turns=30`. Pins the env read in `handle_message` so a refactor
     that drops it surfaces."""
-    monkeypatch.setenv("AP2_CONTROL_MAX_TURNS", "30")
+    monkeypatch.setenv("AP2_CORE_CONTROL_MAX_TURNS", "30")
     cfg = _cfg(tmp_path)
     opts = _drive_handle_message(cfg, monkeypatch)
     assert opts["max_turns"] == 30
@@ -222,7 +222,7 @@ def test_control_max_turns_invalid_value_raises(tmp_path, monkeypatch):
     """Error path: non-int env value raises ValueError on the bare
     `int(...)` parse. Pins CURRENT behavior; a future refactor to a
     permissive helper would be a deliberate change visible here."""
-    monkeypatch.setenv("AP2_CONTROL_MAX_TURNS", "abc")
+    monkeypatch.setenv("AP2_CORE_CONTROL_MAX_TURNS", "abc")
     cfg = _cfg(tmp_path)
     with pytest.raises(ValueError):
         _drive_handle_message(cfg, monkeypatch)
@@ -317,7 +317,7 @@ def test_ideation_max_turns_default_is_one_hundred_when_env_unset(tmp_path, monk
 def test_ideation_max_turns_env_override_flows_through(tmp_path, monkeypatch):
     """Happy path: `AP2_IDEATION_MAX_TURNS="50"` → ideation SDK call sees
     `max_turns=50`. Pins the env read in `_run_ideation`."""
-    monkeypatch.setenv("AP2_IDEATION_MAX_TURNS", "50")
+    monkeypatch.setenv("AP2_CORE_IDEATION_MAX_TURNS", "50")
     calls = _stub_run_control_agent_capturing_max_turns(monkeypatch)
     captured = _drive_force_ideate(tmp_path, monkeypatch, calls)
     assert captured["max_turns"] == 50
@@ -330,7 +330,7 @@ def test_ideation_max_turns_invalid_value_raises(tmp_path, monkeypatch):
     the stubbed control-agent receives no calls. Pinning CURRENT
     behavior — a refactor to the permissive `_cooldown_s`-style parse
     helper would be a deliberate change visible here."""
-    monkeypatch.setenv("AP2_IDEATION_MAX_TURNS", "abc")
+    monkeypatch.setenv("AP2_CORE_IDEATION_MAX_TURNS", "abc")
     calls = _stub_run_control_agent_capturing_max_turns(monkeypatch)
     cfg = _cfg(tmp_path)
     override = cfg.project_root / ".cc-autopilot" / "ideation_prompt.md"
@@ -350,8 +350,8 @@ def test_ideation_max_turns_takes_precedence_over_generic_on_ideation_path(
     from the per-site env (42), NOT the generic (99). Mirrors the
     `AP2_VERIFY_JUDGE_EFFORT` vs `AP2_AGENT_EFFORT` precedence pin in
     `test_verify_retry_diff.py`."""
-    monkeypatch.setenv("AP2_IDEATION_MAX_TURNS", "42")
-    monkeypatch.setenv("AP2_CONTROL_MAX_TURNS", "99")
+    monkeypatch.setenv("AP2_CORE_IDEATION_MAX_TURNS", "42")
+    monkeypatch.setenv("AP2_CORE_CONTROL_MAX_TURNS", "99")
     calls = _stub_run_control_agent_capturing_max_turns(monkeypatch)
     captured = _drive_force_ideate(tmp_path, monkeypatch, calls)
     assert captured["max_turns"] == 42, (
@@ -368,8 +368,8 @@ def test_control_max_turns_wins_on_mm_handler_path_when_both_set(
     knob does NOT bleed into other control-agent call sites. Catches a
     refactor that swaps to a single generic knob and silently drops the
     per-site override semantics."""
-    monkeypatch.setenv("AP2_IDEATION_MAX_TURNS", "42")
-    monkeypatch.setenv("AP2_CONTROL_MAX_TURNS", "99")
+    monkeypatch.setenv("AP2_CORE_IDEATION_MAX_TURNS", "42")
+    monkeypatch.setenv("AP2_CORE_CONTROL_MAX_TURNS", "99")
     cfg = _cfg(tmp_path)
     opts = _drive_handle_message(cfg, monkeypatch)
     assert opts["max_turns"] == 99, (
@@ -435,7 +435,7 @@ def test_agent_model_env_override_flows_through_to_sdk(tmp_path, monkeypatch):
     """Happy path: `AP2_AGENT_MODEL="claude-haiku-4-5-20251001"` → SDK
     options carry that value. Pins that the env read isn't dropped or
     overridden in `_run_control_agent`."""
-    monkeypatch.setenv("AP2_AGENT_MODEL", "claude-haiku-4-5-20251001")
+    monkeypatch.setenv("AP2_CORE_AGENT_MODEL", "claude-haiku-4-5-20251001")
     opts = _run_control_agent_capturing_options(tmp_path, monkeypatch)
     assert opts["model"] == "claude-haiku-4-5-20251001"
 

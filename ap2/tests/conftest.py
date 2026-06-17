@@ -59,43 +59,51 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Surgical mirror of `ap2/tests/e2e/conftest.py:66`. Set as the
+# Surgical mirror of `ap2/tests/e2e/conftest.py`'s shield. Set as the
 # session default so every unit test under `ap2/tests/` inherits the
 # shield. Tests that need the judge to fire override via
-# `monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)`.
+# `monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", raising=False)`.
 #
-# TB-333 axis-5 migration exemption: the two `os.environ.get(
-# "AP2_VALIDATOR_JUDGE_DISABLED", ...)` / `os.environ.setdefault(
-# "AP2_VALIDATOR_JUDGE_DISABLED", ...)` calls below stay env-driven
-# (NOT migrated to `cfg.get_component_value("validator_judge",
-# "disabled")` like the cross-package consumers in
-# `automation_status.py` / `doctor.py`). The shield runs at conftest
-# import time — pytest hasn't constructed any project's `Config` yet,
-# so a cfg-routed read has no Config instance to consult and would
-# need to synthesize one against an unknown project root. The env
-# read here is the operator-facing source-of-truth surface anyway
-# (the operator opts out via `AP2_VALIDATOR_JUDGE_DISABLED=0 uv run
-# pytest`, not via a TOML edit), which makes env-only the right
-# resolution layer for this specific call site even after the axis-5
-# migration completes.
+# TB-413: the shield now installs the SECTIONED env name
+# (`AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED` → the
+# `components.validator_judge.disabled` knob). The flat
+# `AP2_VALIDATOR_JUDGE_DISABLED` override path was removed in TB-413
+# (config.toml is the sole source for behavioral tunables; env is
+# consulted only for the secrets + deployment-identity allowlist), so
+# `_validator_judge_disabled(cfg)` — which routes through
+# `cfg.get_component_value("validator_judge", "disabled")` — no longer
+# honors the flat name. Setting the flat name here would silently leave
+# the dep-coherence judge ENABLED across the whole unit-test session and
+# dispatch real Haiku-4.5 SDK calls per `add_*` invocation. The
+# sectioned name is the one `get_component_value` still consults (at
+# highest precedence), so the shield keeps working post-TB-413.
 #
-# Edge case: shells that `export AP2_VALIDATOR_JUDGE_DISABLED=` (no
-# value, empty string) make the key present in `os.environ` so
+# TB-333 exemption (carried forward): the shield runs at conftest import
+# time — pytest hasn't constructed any project's `Config` yet, so a
+# cfg-routed read has no Config to consult; the env read here is the right
+# resolution surface (the one intentional cross-package env read of the
+# validator_judge cluster). Post-TB-413 the only change is the knob NAME:
+# the sectioned `AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED` instead of the
+# retired flat `AP2_VALIDATOR_JUDGE_DISABLED`. The operator opts out via
+# `AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED=0 uv run pytest` (sectioned),
+# not via a TOML edit, so `setdefault` (not direct assignment) preserves
+# operator intent.
+#
+# Edge case: shells that `export AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED=`
+# (no value, empty string) make the key present in `os.environ` so
 # `setdefault` would leave the empty string alone and the shield
-# wouldn't take effect (the validator's
-# `os.environ.get(...).lower() in {"1","true","yes"}` test rejects
-# the empty string and fires the judge anyway). Treat an unset OR
-# empty value as "operator did not opt out" — strip it first so
-# `setdefault` then installs the shield value. Any other operator-set
-# value (e.g. `0` to opt out and verify the judge fires locally) is
-# preserved untouched.
-if not os.environ.get("AP2_VALIDATOR_JUDGE_DISABLED", "").strip():
-    os.environ.pop("AP2_VALIDATOR_JUDGE_DISABLED", None)
+# wouldn't take effect (the truthy test rejects the empty string and
+# fires the judge anyway). Treat an unset OR empty value as "operator
+# did not opt out" — strip it first so `setdefault` then installs the
+# shield value. Any other operator-set value (e.g. `0` to opt out and
+# verify the judge fires locally) is preserved untouched.
+if not os.environ.get("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", "").strip():
+    os.environ.pop("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", None)
 
 # `setdefault` preserves the operator-shell override
-# (`AP2_VALIDATOR_JUDGE_DISABLED=0 uv run pytest -q ap2/tests/`) so a
-# local "did the judge actually fire?" check is one knob away.
-os.environ.setdefault("AP2_VALIDATOR_JUDGE_DISABLED", "1")
+# (`AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED=0 uv run pytest -q ap2/tests/`)
+# so a local "did the judge actually fire?" check is one knob away.
+os.environ.setdefault("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", "1")
 
 
 # --- TB-266: cross-module CLI test helpers --------------------------------

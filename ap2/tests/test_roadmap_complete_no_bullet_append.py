@@ -171,8 +171,8 @@ def test_roadmap_complete_emits_event_and_sets_pointer_flag(cfg, monkeypatch):
     removed (TB-302). TB-342: the trigger is now
     `empty_cycles_heuristic` (the rotation `pointer_past_last`
     value retired with the multi-focus pointer walk)."""
-    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_empty_cycle(cfg)
 
@@ -242,8 +242,8 @@ def test_subsequent_ticks_dont_re_emit_or_modify_state(cfg, monkeypatch):
     """After the first detection sets
     `roadmap_complete_emitted=true`, subsequent calls to
     `_maybe_advance_focus` short-circuit."""
-    monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_empty_cycle(cfg)
 
@@ -279,8 +279,8 @@ def test_kill_switch_path_still_writes_decisions_needed_bullet(cfg, monkeypatch)
     `## Decisions needed from operator` bullet via
     `_append_decisions_needed_bullet`. TB-302 scoped the removal
     to the roadmap-complete branch ONLY."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
-    monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_DISABLED", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
     _emit_empty_cycle(cfg)
 

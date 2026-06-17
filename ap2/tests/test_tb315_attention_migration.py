@@ -429,9 +429,9 @@ def test_manifest_tick_hook_emits_attention_raised_end_to_end(
     explicitly so a stray env var on the test host doesn't make
     `_maybe_push_attention` try to reach Mattermost).
     """
-    monkeypatch.delenv("AP2_ATTENTION_IMMEDIATE_PUSH", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", raising=False)
     # Tighten the stuck-threshold to 60s so the test runs quickly.
-    monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "60")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", "60")
     cfg = _make_cfg(tmp_path)
 
     # Seed a stuck Active task: place TB-700 in Active, then emit a

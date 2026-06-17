@@ -65,10 +65,10 @@ def cfg(tmp_path: Path, monkeypatch) -> Config:
     `task_stuck` / `task_frozen` siblings don't false-fire from
     test-seeded events that may co-occur in some arcs.
     """
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
-    monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
-    monkeypatch.delenv("AP2_TASK_FROZEN_RECENCY_S", raising=False)
-    monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()
@@ -343,8 +343,8 @@ def test_threshold_override_fires_on_single_event(
     via `.cc-autopilot/env` takes effect on the next detector tick
     without code changes.
     """
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "1")
-    assert validator_judge_noisy_threshold() == 1
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "1")
+    assert validator_judge_noisy_threshold(cfg) == 1
 
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_judge_events(cfg, fail_count=1, timeout_count=0, now=now)
@@ -366,8 +366,8 @@ def test_threshold_override_zero_falls_back_to_default(
     quiet. Pin the safe-default rule from the resolver — operator
     typo of `0` MUST NOT silently disable the safety surface.
     """
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "0")
-    assert validator_judge_noisy_threshold() == 5
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "0")
+    assert validator_judge_noisy_threshold(cfg) == 5
 
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_judge_events(cfg, fail_count=4, timeout_count=0, now=now)

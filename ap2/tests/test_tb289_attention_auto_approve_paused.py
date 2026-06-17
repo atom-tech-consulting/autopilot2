@@ -73,13 +73,13 @@ def cfg(tmp_path: Path, monkeypatch) -> Config:
     co-occur in some arcs; explicitly leaves the auto-approve knob
     unset by default so each test sets it as needed.
     """
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
-    monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
-    monkeypatch.delenv("AP2_TASK_FROZEN_RECENCY_S", raising=False)
-    monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_FROZEN_RECENCY_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()
@@ -200,7 +200,7 @@ def test_detector_misses_when_auto_approve_disabled(
     project) doesn't drown the operator's first-touch surface in
     permanently-quiet projects.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "0")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     state = collect_auto_approve_state(cfg, now=now)
     assert state["auto_approve_enabled"] is False
@@ -225,7 +225,7 @@ def test_detector_fires_on_consecutive_freezes(cfg: Config, monkeypatch):
     event-stream reader has the diagnostic context inline (per the
     briefing's extras contract).
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_consecutive_freezes(cfg, count=3, now=now)
 
@@ -425,7 +425,7 @@ def test_detector_respects_noisy_pause_opt_out(
     doesn't fire the Attention bullet when the operator has
     explicitly opted out of the pause behavior.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", "1")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_judge_events(cfg, fail_count=5, timeout_count=0, now=now)
 
@@ -449,7 +449,7 @@ def test_detect_attention_conditions_includes_auto_approve_paused(
     `_detect_auto_approve_paused` and unions the results. Pin the
     wire-up so a refactor that forgets one detector surfaces.
     """
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_consecutive_freezes(cfg, count=3, now=now)
 
@@ -473,7 +473,7 @@ def test_render_attention_section_includes_auto_approve_paused(
     """
     from ap2.status_report import render_attention_section
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     _seed_consecutive_freezes(cfg, count=3, now=now)
 

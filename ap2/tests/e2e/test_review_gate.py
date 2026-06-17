@@ -181,8 +181,8 @@ def test_ideation_cron_proposals_are_all_review_gated(e2e_project, monkeypatch):
     import time
     from ap2.cron import save_state
 
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "3600")
     # TB-280 hermeticity fix: the operator's shell sets
     # `AP2_AUTO_APPROVE=1`, which leaks into pytest and triggers
     # `tools.do_board_edit`'s add_backlog branch to strip the
@@ -191,7 +191,7 @@ def test_ideation_cron_proposals_are_all_review_gated(e2e_project, monkeypatch):
     # the assertion would fail purely on operator-shell pollution
     # rather than a real regression in the gate. Mirrors the
     # delenv pattern already used in `test_cli_status_json_*`.
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
 
     # No `ideation_prompt=` override → the daemon loads the real
     # `ap2/ideation.default.md`, so this test exercises the same prompt

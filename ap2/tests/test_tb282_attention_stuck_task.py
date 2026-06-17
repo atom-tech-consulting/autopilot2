@@ -73,8 +73,8 @@ from ap2.status_report import (
 def cfg(tmp_path: Path, monkeypatch) -> Config:
     """Clean project scaffold with both TB-282 env knobs unset so the
     defaults are the contract under test."""
-    monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
-    monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()
@@ -579,7 +579,7 @@ def test_task_stuck_threshold_default(cfg: Config, monkeypatch):
     TB-328: the helper now takes a `cfg` argument; the resolved-config
     layer reads sectioned-env > flat-env > TOML > default at call time.
     """
-    monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", raising=False)
     assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
     assert DEFAULT_TASK_STUCK_THRESHOLD_S == 14400
 
@@ -590,7 +590,7 @@ def test_task_stuck_threshold_env_override(cfg: Config, monkeypatch):
     resolved-config layer's call-time env-first precedence preserves
     the pre-migration lazy-read pattern so an env-reload propagates
     without re-threading state."""
-    monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "7200")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", "7200")
     assert _task_stuck_threshold_s(cfg) == 7200
 
 
@@ -598,18 +598,18 @@ def test_task_stuck_threshold_invalid_falls_back(cfg: Config, monkeypatch):
     """Garbage value (`AP2_TASK_STUCK_THRESHOLD_S=not-a-number`) →
     falls back to the default. Pin the safe-default rule so an
     operator typo doesn't disable the detector silently."""
-    monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "not-a-number")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", "not-a-number")
     assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
-    monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", "0")
     assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
-    monkeypatch.setenv("AP2_TASK_STUCK_THRESHOLD_S", "-1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", "-1")
     assert _task_stuck_threshold_s(cfg) == DEFAULT_TASK_STUCK_THRESHOLD_S
 
 
 def test_attention_debounce_default(cfg: Config, monkeypatch):
     """No env knob set → `_attention_debounce_s` returns
     `DEFAULT_ATTENTION_DEBOUNCE_S` (21600 / 6h). Pin the default."""
-    monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", raising=False)
     assert _attention_debounce_s(cfg) == DEFAULT_ATTENTION_DEBOUNCE_S
     assert DEFAULT_ATTENTION_DEBOUNCE_S == 21600
 
@@ -617,15 +617,15 @@ def test_attention_debounce_default(cfg: Config, monkeypatch):
 def test_attention_debounce_env_override(cfg: Config, monkeypatch):
     """`AP2_ATTENTION_DEBOUNCE_S=3600` → `_attention_debounce_s`
     returns 3600 (operator tightens to 1h)."""
-    monkeypatch.setenv("AP2_ATTENTION_DEBOUNCE_S", "3600")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", "3600")
     assert _attention_debounce_s(cfg) == 3600
 
 
 def test_attention_debounce_invalid_falls_back(cfg: Config, monkeypatch):
     """Garbage value → falls back to the default."""
-    monkeypatch.setenv("AP2_ATTENTION_DEBOUNCE_S", "garbage")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", "garbage")
     assert _attention_debounce_s(cfg) == DEFAULT_ATTENTION_DEBOUNCE_S
-    monkeypatch.setenv("AP2_ATTENTION_DEBOUNCE_S", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", "0")
     assert _attention_debounce_s(cfg) == DEFAULT_ATTENTION_DEBOUNCE_S
 
 

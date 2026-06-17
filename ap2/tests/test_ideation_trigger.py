@@ -156,7 +156,7 @@ def test_default_threshold_fires_when_two_backlog_tasks(tmp_path, monkeypatch):
 def test_threshold_one_skips_with_two_backlog_tasks(tmp_path, monkeypatch):
     """Threshold=1 reproduces the legacy "fire only when fully empty" behavior:
     2 Backlog items → skip."""
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "1")
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -502,7 +502,7 @@ def test_slot_count_injected_into_state_extras(tmp_path, monkeypatch):
     snapshot value (`proposal slots this cycle` / "at most N") instead
     of the pre-TB-183 hardcoded `fewer than 3`.
     """
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -564,7 +564,7 @@ def test_slots_zero_skips_with_event_and_marks_run(tmp_path, monkeypatch):
           inspecting events sees why the skip fired;
       (c) `mark_run` is called so the cooldown clock advances normally.
     """
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -618,7 +618,7 @@ def test_slots_clamp_prevents_negative_count(tmp_path, monkeypatch):
     must never inject a negative integer into the prompt or wrap into
     a giant unsigned value.
     """
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _make_project(
         tmp_path,
         monkeypatch,

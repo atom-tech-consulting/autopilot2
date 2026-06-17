@@ -303,7 +303,7 @@ def test_reset_attempt_clears_both_counter_and_level(cfg):
 
 
 def test_kill_switch_keeps_effort_at_base_and_skips_bump(cfg, monkeypatch):
-    monkeypatch.setenv("AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED", "1")
+    monkeypatch.setenv("AP2_CORE_THINKING_BLOCK_EFFORT_DROP_DISABLED", "1")
 
     # A pre-existing downshift level (e.g. from before the switch was set) is
     # ignored at dispatch — effort resolves to base.

@@ -129,9 +129,9 @@ def test_digest_dry_run_subblock_renders_when_either_knob_on(
     `*Dry-run window:*` sub-block. On-axis line surfaces the rolling
     24h count; off-axis line is suppressed (no zero-noise on the axis
     the operator hasn't opted in to)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
 
     events.append(
         cfg.events_file, "would_auto_approve",

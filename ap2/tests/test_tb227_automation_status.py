@@ -186,11 +186,11 @@ def test_collect_state_auto_unfreeze_dry_run_flag(cfg: Config, monkeypatch):
     no_activity` and the per-knob behavior pin live alongside the
     rest of the collector contract.
     """
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["auto_unfreeze_dry_run_enabled"] is False
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["auto_unfreeze_dry_run_enabled"] is True
 
@@ -253,7 +253,7 @@ def test_is_auto_unfreeze_dry_run_helper_directly(monkeypatch):
 def test_collect_state_knob_on_no_halt(cfg: Config, monkeypatch):
     """Knob truthy → `auto_approve_enabled=True`, no halt-class event
     → `auto_approve_paused=False`, `pause_reason=None`."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
 
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["auto_approve_enabled"] is True
@@ -265,7 +265,7 @@ def test_collect_state_freeze_threshold_env_override(cfg: Config, monkeypatch):
     """`AP2_AUTO_APPROVE_FREEZE_THRESHOLD=5` surfaces as 5, not the
     default 3. Operator-configured caps must be reflected in the
     surface."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["freeze_threshold"] == 5
 
@@ -274,8 +274,8 @@ def test_collect_state_token_caps_surfaced(cfg: Config, monkeypatch):
     """Both token-cap knobs surface as their int value when set;
     `None` when unset. Operators tuning their budget must see what
     the daemon's check uses."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "150000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "150000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000000")
 
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["per_task_token_cap"] == 150000
@@ -552,7 +552,7 @@ def test_cli_status_renders_healthy_line_when_knob_on(
     24h counters. No `PAUSED` token."""
     from ap2.cli import cmd_status
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
@@ -569,7 +569,7 @@ def test_cli_status_renders_paused_line_with_ack_verb(
     nudge away (mirrors TB-151's pending-review line shape)."""
     from ap2.cli import cmd_status
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
     events.append(
         cfg.events_file, "auto_approve_halted",
         task="TB-600", reason="window_cap", used=1_200_000, cap=1_000_000,
@@ -692,7 +692,7 @@ def test_web_home_renders_healthy_card_when_knob_on(cfg: Config, monkeypatch):
     visual-class branch for the happy path."""
     from ap2 import web
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
     html = web._render_home(cfg)
     assert '<div class="automation-status is-healthy"' in html
     assert "Auto-approve" in html
@@ -708,7 +708,7 @@ def test_web_home_renders_paused_card_with_red_border(cfg: Config, monkeypatch):
     operator can copy-paste."""
     from ap2 import web
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
     events.append(
         cfg.events_file, "auto_approve_halted",
         task="TB-900", reason="window_cap", used=1_200_000, cap=1_000_000,

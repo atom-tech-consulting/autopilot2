@@ -84,7 +84,7 @@ def _unshield_validator_judge(monkeypatch):
     monkeypatch restores the shield on teardown so the shield's
     cross-module guarantee is preserved.
     """
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", raising=False)
 
 
 # ---------------------------------------------------------------------------

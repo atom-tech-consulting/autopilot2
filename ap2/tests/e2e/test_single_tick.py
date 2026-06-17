@@ -260,8 +260,8 @@ def test_tick_runs_ideation_when_board_is_empty(e2e_project, monkeypatch):
     import time
     from ap2.cron import load_state, save_state
 
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "3600")
     cfg = e2e_project(ideation_prompt=_TEST_IDEATION_PROMPT)
     save_state(cfg.cron_state_file, {"ideation": time.time() - 7200})
 
@@ -305,8 +305,8 @@ def test_tick_skips_ideation_if_ready_has_work(e2e_project):
 def test_tick_ideation_honors_cooldown(e2e_project, monkeypatch):
     """A recent ideation run in cron_state.json suppresses the trigger."""
     import time
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "3600")
     cfg = e2e_project(ideation_prompt=_TEST_IDEATION_PROMPT)
 
     from ap2.cron import save_state
@@ -362,8 +362,8 @@ def test_tick_first_run_fires_ideation_with_default_prompt(e2e_project, monkeypa
     ideation is always available."""
     import time
     from ap2.cron import load_state
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "3600")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "3600")
     cfg = e2e_project()
     sdk = FakeSDK()
     # The default prompt contains "ideation_state_write" prominently — match

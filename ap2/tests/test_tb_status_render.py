@@ -101,7 +101,7 @@ def test_status_text_auto_approve_enabled_renders_enabled(
     from ap2.cli import cmd_status
 
     _clear_auto_env(monkeypatch)
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
@@ -222,7 +222,7 @@ def test_status_text_auto_approve_paused_renders_paused(
     from ap2.cli import cmd_status
 
     _clear_auto_env(monkeypatch)
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
 
     # Seed a pause event via the canonical TB-223 chain — same fixture
     # shape used by test_tb227_automation_status::test_collect_state_paused_on_consecutive_freezes.

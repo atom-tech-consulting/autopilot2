@@ -1245,8 +1245,8 @@ def test_status_report_per_site_env_takes_precedence(tmp_path, monkeypatch):
     `AP2_AGENT_EFFORT`. With per-site=`high` and global=`xhigh`, the SDK
     options carry `high` — operators can dial status-report separately
     from the rest of the agent fleet."""
-    monkeypatch.setenv("AP2_STATUS_REPORT_EFFORT", "high")
-    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+    monkeypatch.setenv("AP2_CORE_STATUS_REPORT_EFFORT", "high")
+    monkeypatch.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
 
     effort = _run_status_report_capturing_effort(tmp_path, monkeypatch)
     assert effort == "high"
@@ -1259,8 +1259,8 @@ def test_status_report_falls_through_to_global_when_per_site_unset(
     but `AP2_AGENT_EFFORT` is set, the global wins (and so status-report
     inherits whatever global override the operator pinned). Only when
     BOTH are unset does the per-site default of `medium` kick in."""
-    monkeypatch.delenv("AP2_STATUS_REPORT_EFFORT", raising=False)
-    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+    monkeypatch.delenv("AP2_CORE_STATUS_REPORT_EFFORT", raising=False)
+    monkeypatch.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
 
     effort = _run_status_report_capturing_effort(tmp_path, monkeypatch)
     assert effort == "xhigh"

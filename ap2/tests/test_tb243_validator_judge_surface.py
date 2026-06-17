@@ -168,8 +168,8 @@ def test_cli_status_omits_validator_judge_line_when_both_counts_zero(
     """
     from ap2.cli import cmd_status
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
@@ -429,8 +429,8 @@ def test_cli_status_threshold_override_lowers_noisy_trip_point(
     """
     from ap2.cli import cmd_status
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "2")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "2")
 
     events.append(cfg.events_file, "validator_judge_fail", error="x")
     events.append(cfg.events_file, "validator_judge_fail", error="y")

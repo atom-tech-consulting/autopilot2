@@ -283,7 +283,7 @@ def test_task_max_turns_env_override_flows_through_to_run_task(tmp_path, monkeyp
     src = inspect.getsource(daemon.run_task)
     assert _TASK_MAX_TURNS_EXPR in src
 
-    monkeypatch.setenv("AP2_TASK_MAX_TURNS", "30")
+    monkeypatch.setenv("AP2_CORE_TASK_MAX_TURNS", "30")
     assert _eval_task_max_turns_via_helper(tmp_path) == 30
 
 
@@ -308,7 +308,7 @@ def test_task_max_turns_invalid_value_raises(tmp_path, monkeypatch):
     src = inspect.getsource(daemon.run_task)
     assert _TASK_MAX_TURNS_EXPR in src
 
-    monkeypatch.setenv("AP2_TASK_MAX_TURNS", "abc")
+    monkeypatch.setenv("AP2_CORE_TASK_MAX_TURNS", "abc")
     with pytest.raises(ValueError):
         _eval_task_max_turns_via_helper(tmp_path)
 
@@ -349,8 +349,8 @@ def test_janitor_judge_effort_env_override_flows_through_to_sdk(
     `janitor._judge_finding`'s SDK call carries
     `extra_args["effort"] == "medium"`. Pins the env read at
     `janitor.py:717` so a refactor that drops it surfaces."""
-    monkeypatch.setenv("AP2_JANITOR_JUDGE_EFFORT", "medium")
-    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_JANITOR_JUDGE_EFFORT", "medium")
+    monkeypatch.delenv("AP2_CORE_AGENT_EFFORT", raising=False)
     sdk = _ScriptedJudgeSDK()
     _drive_judge_finding(tmp_path, sdk)
 
@@ -367,8 +367,8 @@ def test_janitor_judge_effort_takes_precedence_over_global_agent_effort(
     `AP2_VERIFY_JUDGE_EFFORT` vs `AP2_AGENT_EFFORT` precedence pin in
     `test_verify_retry_diff.py:test_judge_effort_per_site_env_takes_precedence`.
     Catches a refactor that flips the nested `os.environ.get` order."""
-    monkeypatch.setenv("AP2_JANITOR_JUDGE_EFFORT", "medium")
-    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+    monkeypatch.setenv("AP2_COMPONENTS_JANITOR_JUDGE_EFFORT", "medium")
+    monkeypatch.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
     sdk = _ScriptedJudgeSDK()
     _drive_judge_finding(tmp_path, sdk)
 
@@ -387,8 +387,8 @@ def test_janitor_judge_effort_falls_through_to_global_when_per_site_unset(
     BOTH are unset does the per-site default `high` kick in. Catches a
     refactor that hardcodes the per-site default and silently breaks the
     fall-through."""
-    monkeypatch.delenv("AP2_JANITOR_JUDGE_EFFORT", raising=False)
-    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+    monkeypatch.delenv("AP2_COMPONENTS_JANITOR_JUDGE_EFFORT", raising=False)
+    monkeypatch.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
     sdk = _ScriptedJudgeSDK()
     _drive_judge_finding(tmp_path, sdk)
 
@@ -432,7 +432,7 @@ def test_janitor_judge_max_turns_env_override_flows_through(
     `janitor._judge_finding`'s SDK call carries `max_turns=5`. Pins the
     env read in `_judge_finding` so a refactor that drops the env read
     surfaces."""
-    monkeypatch.setenv("AP2_JANITOR_JUDGE_MAX_TURNS", "5")
+    monkeypatch.setenv("AP2_COMPONENTS_JANITOR_JUDGE_MAX_TURNS", "5")
     sdk = _ScriptedJudgeSDK()
     _drive_judge_finding(tmp_path, sdk)
 

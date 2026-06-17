@@ -494,9 +494,9 @@ def test_ideation_status_card_cooldown_state(
     that carries BOTH the absolute next-eligible timestamp AND a
     relative remaining-duration string. Operator can compute "is this
     soon?" without doing math."""
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _tb197_project(tmp_path)
     _seed_cron_state_ideation(cfg, seconds_ago=30 * 60)  # 30 min ago
 
@@ -525,9 +525,9 @@ def test_ideation_status_card_eligible_state(
     """Cooldown elapsed (last fire 3h ago, cooldown 2h) + 0 Active +
     queued under threshold → eligible card. No "cooldown remaining"
     wording leaks; "next tick" semantics surface."""
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _tb197_project(tmp_path)
     _seed_cron_state_ideation(cfg, seconds_ago=3 * 3600)  # 3h ago
 
@@ -546,9 +546,9 @@ def test_ideation_status_card_active_running_blocker(
     (the hard gate runs BEFORE cooldown / threshold). The card names
     the blocker as "Active task in flight"; cooldown / queue wording
     must not leak (they're irrelevant once Active blocks)."""
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _tb197_project(tmp_path)
     # Add an Active task (replace TASKS.md with a board carrying one).
     (cfg.project_root / "TASKS.md").write_text(
@@ -579,9 +579,9 @@ def test_ideation_status_card_queued_full_blocker(
     queued_full blocker. Card surfaces both the actual count AND the
     threshold value (e.g. "5 ≥ threshold 5") so the operator can
     sanity-check `AP2_IDEATION_TRIGGER_TASK_COUNT` inline."""
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "3")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "3")
     cfg = _tb197_project(tmp_path)
     # 3 Backlog items — at-threshold.
     (cfg.project_root / "TASKS.md").write_text(
@@ -615,7 +615,7 @@ def test_ideation_status_card_disabled_state(
     """`AP2_IDEATION_DISABLED=1` set in env → disabled card; the env
     knob name surfaces VERBATIM so the operator can grep their env file
     without guessing the exact variable name."""
-    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_DISABLED", "1")
     cfg = _tb197_project(tmp_path)
 
     html_block = web._render_ideation_status_block(cfg)
@@ -632,9 +632,9 @@ def test_ideation_status_card_gate_priority_disabled_wins(
     per `_maybe_ideate`'s order. Disabled wins over everything because
     it short-circuits the daemon's gate chain at step 1 — reporting any
     deeper gate would mislead the operator."""
-    monkeypatch.setenv("AP2_IDEATION_DISABLED", "1")
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "3")
+    monkeypatch.setenv("AP2_CORE_IDEATION_DISABLED", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "3")
     cfg = _tb197_project(tmp_path)
     # Layer on an Active task AND recent last-fire so disabled is one of
     # several would-be blockers. The daemon's `_maybe_ideate` returns at
@@ -668,9 +668,9 @@ def test_ideation_status_card_omits_cooldown_when_never_fired(
     """No `cron_state.json` on disk (never-fired project) and no other
     blockers → eligible card. The daemon treats `last_fire_unix=None`
     as "elapsed forever" so the card mirrors that semantics."""
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _tb197_project(tmp_path)
     # Do NOT seed cron_state.json — fresh project, ideation never fired.
     assert not cfg.cron_state_file.exists()
@@ -685,9 +685,9 @@ def test_ideation_status_card_always_renders_on_home(
     """Briefing pin: the card is small (1-2 lines) and ALWAYS rendered
     on `/`. No omit-on-empty path — even on the steady-state happy path
     the operator gets a synchronous gate-state read."""
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _tb197_project(tmp_path)
 
     page = web._render_home(cfg)
@@ -720,8 +720,8 @@ def test_ideation_status_card_escapes_html(
     derived from int/datetime computations today — guards against a
     future refactor that introduces user-controlled content into the
     card without re-auditing the escape path."""
-    monkeypatch.delenv("AP2_IDEATION_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
     cfg = _tb197_project(tmp_path)
     _seed_cron_state_ideation(cfg, seconds_ago=30 * 60)
 

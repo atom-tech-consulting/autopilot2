@@ -92,7 +92,7 @@ def test_web_card_renders_enabled_when_auto_approve_on(
     `is-healthy` element. Pins the State-A branch unchanged by TB-256.
     """
     _clear_auto_env(monkeypatch)
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
 
     rendered = web._render_automation_card(cfg)
     assert "enabled — circuit healthy" in rendered, rendered
@@ -181,7 +181,7 @@ def test_web_card_paused_state(cfg: Config, monkeypatch):
     OFF + not paused).
     """
     _clear_auto_env(monkeypatch)
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
 
     # Seed a pause event via the canonical TB-223 chain — same fixture
     # shape used by test_tb227_automation_status::test_web_home_renders_paused_card_with_red_border.

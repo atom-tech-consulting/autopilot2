@@ -216,7 +216,7 @@ def test_dep_coherence_check_fires_by_default(
     check (appended after the core validators) and the stub is invoked. The
     error path (judge names a missing hard predecessor) surfaces verbatim.
     """
-    monkeypatch.delenv("AP2_VALIDATOR_JUDGE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", raising=False)
     _reset_default_registry()
     events_file = tmp_path / "events.jsonl"
     captured: list[dict] = []

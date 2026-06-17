@@ -463,7 +463,7 @@ def test_judge_max_turns_default_is_twenty(monkeypatch):
 
     from ap2 import verify
 
-    monkeypatch.delenv("AP2_VERIFY_JUDGE_MAX_TURNS", raising=False)
+    monkeypatch.delenv("AP2_CORE_VERIFY_JUDGE_MAX_TURNS", raising=False)
 
     captured: dict = {}
 
@@ -503,7 +503,7 @@ def test_judge_max_turns_env_override_still_works(monkeypatch):
 
     from ap2 import verify
 
-    monkeypatch.setenv("AP2_VERIFY_JUDGE_MAX_TURNS", "4")
+    monkeypatch.setenv("AP2_CORE_VERIFY_JUDGE_MAX_TURNS", "4")
 
     captured: dict = {}
 
@@ -730,8 +730,8 @@ def test_judge_default_effort_is_high_when_no_env_set(monkeypatch):
     set, the per-site default kicks in and the SDK options carry
     `extra_args["effort"] == "high"` — NOT `xhigh` (the pre-TB-156 global
     default that this knob displaces for the judge specifically)."""
-    monkeypatch.delenv("AP2_VERIFY_JUDGE_EFFORT", raising=False)
-    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_CORE_VERIFY_JUDGE_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_CORE_AGENT_EFFORT", raising=False)
 
     captured = _capture_judge_options()
     extra = captured["options"]["extra_args"]
@@ -743,8 +743,8 @@ def test_judge_effort_per_site_env_takes_precedence(monkeypatch):
     `AP2_AGENT_EFFORT`. With per-site=`medium` and global=`xhigh`, the SDK
     options carry `medium` — operators can dial the judge separately from
     the rest of the agent fleet."""
-    monkeypatch.setenv("AP2_VERIFY_JUDGE_EFFORT", "medium")
-    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+    monkeypatch.setenv("AP2_CORE_VERIFY_JUDGE_EFFORT", "medium")
+    monkeypatch.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
 
     captured = _capture_judge_options()
     assert captured["options"]["extra_args"]["effort"] == "medium"
@@ -755,8 +755,8 @@ def test_judge_effort_falls_through_to_global_when_per_site_unset(monkeypatch):
     but `AP2_AGENT_EFFORT` is set, the global wins (and so the judge
     inherits whatever global override the operator pinned). Only when
     BOTH are unset does the per-site default of `high` kick in."""
-    monkeypatch.delenv("AP2_VERIFY_JUDGE_EFFORT", raising=False)
-    monkeypatch.setenv("AP2_AGENT_EFFORT", "xhigh")
+    monkeypatch.delenv("AP2_CORE_VERIFY_JUDGE_EFFORT", raising=False)
+    monkeypatch.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
 
     captured = _capture_judge_options()
     assert captured["options"]["extra_args"]["effort"] == "xhigh"
@@ -769,8 +769,8 @@ def test_judge_diff_truncated_to_30kb_in_prompt(monkeypatch):
     (the judge can Grep/Read for what it needs — TB-136). This pins the
     new cap; a regression that bumps it back to 100KB would re-introduce
     the ~70KB-of-padding judge-token waste that motivated TB-156."""
-    monkeypatch.delenv("AP2_VERIFY_JUDGE_EFFORT", raising=False)
-    monkeypatch.delenv("AP2_AGENT_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_CORE_VERIFY_JUDGE_EFFORT", raising=False)
+    monkeypatch.delenv("AP2_CORE_AGENT_EFFORT", raising=False)
 
     captured = _capture_judge_options()
     prompt = captured["prompt"]
