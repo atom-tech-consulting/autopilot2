@@ -162,7 +162,7 @@ DEFAULT_ATTENTION_IMMEDIATE_PUSH = False
 # of truth for every max-turn knob.
 DEFAULT_TASK_MAX_TURNS = 500
 DEFAULT_CONTROL_MAX_TURNS = 15
-DEFAULT_IDEATION_MAX_TURNS = 100
+DEFAULT_IDEATION_MAX_TURNS = 200  # TB-418: baseline bumped 100 → 200
 
 # TB-284: model for `ap2/ideation_scrub.py`'s post-write filter that
 # strips exhaustion-asserting sentences from `ideation_state.md` after

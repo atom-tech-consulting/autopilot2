@@ -78,7 +78,6 @@ from .config import (
     DEFAULT_CONTROL_TIMEOUT_S,
     DEFAULT_EVENT_CONTEXT_SIZE,
     DEFAULT_IDEATION_MAX_TURNS,
-    DEFAULT_IDEATION_SCRUB_MODEL,
     DEFAULT_MAX_RETRIES,
     DEFAULT_MM_TICK_INTERVAL_S,
     DEFAULT_TASK_MAX_TURNS,
@@ -104,8 +103,8 @@ _DEFAULT_DAEMON_WEB_PORT = 8729
 # mirror the module-local defaults in `ap2/ideation.py`
 # (`IDEATION_COOLDOWN_DEFAULT_S` / `IDEATION_TRIGGER_TASK_COUNT_DEFAULT`).
 # Same parity-test pin keeps them aligned.
-_DEFAULT_IDEATION_COOLDOWN_S = 7200
-_DEFAULT_IDEATION_TRIGGER_TASK_COUNT = 3
+_DEFAULT_IDEATION_COOLDOWN_S = 3600
+_DEFAULT_IDEATION_TRIGGER_TASK_COUNT = 10
 # `_DEFAULT_VERIFY_JUDGE_MAX_TURNS` mirrors the inline default in
 # `ap2/verify.py`'s `cfg.get_core_value("verify_judge_max_turns",
 # default=20)` call. Verifier judge defaults to 20 max-turns — enough
@@ -411,9 +410,9 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
         description=(
             "Minimum seconds between ideation cron fires when the "
             "board stays empty. Throttles the cycle so the agent isn't "
-            "hammered every tick on a quiet project. Default 7200 "
-            "(2h). Mirrors the flat env `AP2_IDEATION_COOLDOWN_S`; "
-            "hot-reloadable."
+            "hammered every tick on a quiet project. Default 3600 "
+            "(1h; TB-418, was 7200/2h). Mirrors the flat env "
+            "`AP2_IDEATION_COOLDOWN_S`; hot-reloadable."
         ),
         hot_reloadable=True,
     ),
@@ -424,22 +423,34 @@ CORE_CONFIG_SCHEMA: dict[str, ConfigKey] = {
         description=(
             "Max turns per ideation-agent SDK query. Default raised "
             "30 → 100 in TB-278 after a goal.md rewrite mid-cycle hit "
-            "`error_max_turns` at 31. `control_timeout_s` still bounds "
-            "runaway wall-clock. Mirrors the flat env "
-            "`AP2_IDEATION_MAX_TURNS`; hot-reloadable."
+            "`error_max_turns` at 31, then 100 → 200 in TB-418. "
+            "`control_timeout_s` still bounds runaway wall-clock. "
+            "Mirrors the flat env `AP2_IDEATION_MAX_TURNS`; "
+            "hot-reloadable."
         ),
         hot_reloadable=True,
     ),
     "ideation_scrub_model": ConfigKey(
         name="ideation_scrub_model",
         type=str,
-        default=DEFAULT_IDEATION_SCRUB_MODEL,
+        # TB-418: provider-aware default — unset (`""`), NOT a fixed
+        # `claude-*` string. When empty, `ideation_scrub._resolved_model`
+        # resolves the fallback by the `ideation_scrub` kind's backend
+        # (`get_agent_backend("ideation_scrub")`): the Claude backend gets
+        # `claude-haiku-4-5-20251001`, the Codex backend gets `gpt-5.4-mini`
+        # — the cheap model for whichever provider the scrub canary routes
+        # to, so a codex-routed project isn't handed a Claude id out of the
+        # box. An explicit operator value (config.toml or sectioned env)
+        # still wins via the `get_core_value` precedence chain.
+        default="",
         description=(
             "Model name for `ideation_scrub.py`'s post-write filter "
             "that strips exhaustion-asserting sentences from "
-            "`ideation_state.md` after each ideation cycle. Haiku-4.5 "
-            "is the cost-target floor (sentence-level classification, "
-            "not deep reasoning). Mirrors the flat env "
+            "`ideation_state.md` after each ideation cycle. Provider-aware "
+            "default: unset (`\"\"`) resolves to the cheap model for the "
+            "`ideation_scrub` kind's backend — `claude-haiku-4-5-20251001` "
+            "(Claude) / `gpt-5.4-mini` (Codex). Set the `[core] "
+            "ideation_scrub_model` key to pin one. Mirrors the flat env "
             "`AP2_IDEATION_SCRUB_MODEL`; hot-reloadable."
         ),
         hot_reloadable=True,

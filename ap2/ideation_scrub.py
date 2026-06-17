@@ -29,8 +29,12 @@ Design:
 
 Configuration:
 
-  * ``AP2_IDEATION_SCRUB_MODEL`` (default ``claude-haiku-4-5-20251001``)
-    — operator override for the scrub model. Listed in
+  * ``AP2_IDEATION_SCRUB_MODEL`` (provider-aware default; TB-418) —
+    operator override for the scrub model. When unset the fallback is
+    resolved by the ``ideation_scrub`` kind's backend:
+    ``claude-haiku-4-5-20251001`` for the Claude backend,
+    ``gpt-5.4-mini`` for the Codex backend (the cheap model per
+    provider — the scrub is a cost-floor canary). Listed in
     ``env_reload.HOT_RELOADABLE_KNOBS`` so an operator swapping models
     takes effect on the next tick without a daemon restart. Parallel
     to ``AP2_AGENT_MODEL``.
@@ -51,11 +55,21 @@ if TYPE_CHECKING:
     from .config import Config
 
 
-# TB-284: default scrub model. Haiku-4.5 is the cost-target floor —
-# sentence-level classification, not deep reasoning. Overrideable via
-# ``AP2_IDEATION_SCRUB_MODEL`` (listed in
+# TB-284: default scrub model for the CLAUDE backend. Haiku-4.5 is the
+# cost-target floor — sentence-level classification, not deep reasoning.
+# Overrideable via ``AP2_IDEATION_SCRUB_MODEL`` (listed in
 # ``env_reload.HOT_RELOADABLE_KNOBS``).
 DEFAULT_SCRUB_MODEL = "claude-haiku-4-5-20251001"
+
+# TB-418: provider-aware fallback for the CODEX backend. The scrub is a
+# cost-floor canary, so when no operator override is set it wants the CHEAP
+# model for whichever provider the ``ideation_scrub`` kind routes to — NOT
+# the backend's full default (sonnet / ``gpt-5.5``). ``gpt-5.4-mini`` is the
+# canonical cheap Codex model id (verbatim lowercase). ``_resolved_model``
+# picks between this and ``DEFAULT_SCRUB_MODEL`` by
+# ``cfg.get_agent_backend("ideation_scrub")`` so the fallback automatically
+# follows ``[agent_backends]`` without a second routing rule.
+DEFAULT_SCRUB_MODEL_CODEX = "gpt-5.4-mini"
 
 # Wall-clock cap on the scrub SDK call. Sentence-classification over a
 # typical ~10-20KB ideation_state.md completes in a few seconds with
@@ -163,25 +177,40 @@ def _resolved_model(cfg: "Config | None" = None) -> str:
     TB-335 (axis-5 core-cluster migration): resolves through
     ``cfg.get_core_value("ideation_scrub_model")`` — the sectioned-env >
     flat-env > TOML-snapshot > schema-default precedence chain
-    ``Config.get_core_value`` defines (TB-334). TB-346 dropped the
-    redundant inline ``default=""`` so the resolver's schema-default
-    backstop (``CORE_CONFIG_SCHEMA["ideation_scrub_model"]`` →
-    ``DEFAULT_IDEATION_SCRUB_MODEL``) is the single source of truth;
-    behavior is unchanged since that schema default equals this module's
-    ``DEFAULT_SCRUB_MODEL`` and the empty-value fallback below is
-    untouched. The helper
-    reads env at call time so a hot-reload via
-    ``env_reload.maybe_reload_env`` propagates without rebinding any
-    cached state (parity with the pre-TB-335 direct env read).
+    ``Config.get_core_value`` defines (TB-334). The helper reads env at
+    call time so a hot-reload via ``env_reload.maybe_reload_env``
+    propagates without rebinding any cached state (parity with the
+    pre-TB-335 direct env read).
 
-    Empty / whitespace-only overrides fall back to the module default
-    (the safer choice — a typo'd empty value shouldn't silently route
-    the SDK call to "" and trip an opaque SDK error).
+    TB-418 (provider-aware default): the schema default for
+    ``ideation_scrub_model`` is now empty (``""``), NOT a fixed
+    ``claude-*`` string. When no explicit operator override is present,
+    the unset fallback is resolved by the ``ideation_scrub`` kind's
+    backend (``cfg.get_agent_backend("ideation_scrub")`` — the SAME
+    selector the dispatcher uses, so the fallback follows
+    ``[agent_backends]`` without a second routing rule):
+
+      * Claude backend → ``DEFAULT_SCRUB_MODEL``
+        (``claude-haiku-4-5-20251001``).
+      * Codex backend → ``DEFAULT_SCRUB_MODEL_CODEX`` (``gpt-5.4-mini``).
+
+    The scrub is a cost-floor canary, so each branch is the CHEAP model
+    for its provider — not the backend's full default — which is why the
+    fallback is an explicit per-provider value rather than ``None`` /
+    backend-self-default (cf. TB-396's ``agent_model`` ``None`` shape).
+    An explicit operator value (config.toml or an allowlisted env
+    override) still wins via the ``get_core_value`` precedence chain —
+    only the empty-value fallback VALUE became provider-aware.
+
+    Empty / whitespace-only overrides fall back to the provider-aware
+    default (the safer choice — a typo'd empty value shouldn't silently
+    route the SDK call to "" and trip an opaque SDK error).
 
     Default ``cfg=None`` preserves the legacy env-read fallback for
     test paths that ``monkeypatch.setenv("AP2_IDEATION_SCRUB_MODEL",
-    ...)`` without threading a Config. Cfg-kwarg-+-TypeError-guard
-    shape per TB-327.
+    ...)`` without threading a Config; with no Config there is no backend
+    to resolve, so the cfg-less path keeps the Claude-haiku default.
+    Cfg-kwarg-+-TypeError-guard shape per TB-327.
     """
     # Late import keeps the boundary between `ideation_scrub` and the
     # heavyweight `config` module narrow — `Config` is referenced
@@ -195,12 +224,33 @@ def _resolved_model(cfg: "Config | None" = None) -> str:
     if cfg is not None:
         raw = cfg.get_core_value("ideation_scrub_model")
         value = str(raw or "").strip()
-    else:
-        # Legacy fallback (TB-335 back-compat shape — `os.getenv` for
-        # cross-package grep-gate hygiene; the canonical NEW-read path
-        # is `cfg.get_core_value`).
-        value = (os.getenv("AP2_IDEATION_SCRUB_MODEL", "") or "").strip()
+        if value:
+            return value
+        # TB-418: no explicit override — pick the cheap model for the
+        # `ideation_scrub` kind's backend.
+        return _default_scrub_model_for_backend(cfg)
+    # Legacy fallback (TB-335 back-compat shape — `os.getenv` for
+    # cross-package grep-gate hygiene; the canonical NEW-read path
+    # is `cfg.get_core_value`). No Config → no backend to resolve, so
+    # the cfg-less path keeps the Claude-haiku default.
+    value = (os.getenv("AP2_IDEATION_SCRUB_MODEL", "") or "").strip()
     return value or DEFAULT_SCRUB_MODEL
+
+
+def _default_scrub_model_for_backend(cfg: "Config") -> str:
+    """Cheap scrub model for the ``ideation_scrub`` kind's backend (TB-418).
+
+    Reads the same per-kind backend selector the scrub dispatcher uses
+    (``cfg.get_agent_backend("ideation_scrub")`` →
+    ``AP2_AGENT_BACKEND_IDEATION_SCRUB`` env > ``[agent_backends]`` table >
+    the all-``claude`` default), so the unset-default fallback automatically
+    follows ``[agent_backends]`` without a second routing rule. Codex backend
+    → ``DEFAULT_SCRUB_MODEL_CODEX`` (``gpt-5.4-mini``); every other backend
+    (Claude / unrecognized) → ``DEFAULT_SCRUB_MODEL`` (``claude-haiku``).
+    """
+    if cfg.get_agent_backend("ideation_scrub") == "codex":
+        return DEFAULT_SCRUB_MODEL_CODEX
+    return DEFAULT_SCRUB_MODEL
 
 
 def scrub_exhaustion_language(

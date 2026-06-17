@@ -267,8 +267,8 @@ def test_get_core_value_falls_back_to_schema_default_when_default_is_none(
 ):
     """When the caller passes `default=None` AND the key has a
     declared schema default, the schema default wins over `None`."""
-    # Schema default for ideation_cooldown_s is 7200.
-    assert cfg.get_core_value("ideation_cooldown_s") == 7200
+    # Schema default for ideation_cooldown_s is 3600 (TB-418, was 7200).
+    assert cfg.get_core_value("ideation_cooldown_s") == 3600
     # Schema default for tick_interval_s is 30.
     assert cfg.get_core_value("tick_interval_s") == 30
     # Schema default for web_port is 8729.
@@ -282,10 +282,10 @@ def test_get_core_value_explicit_default_wins_over_schema_default(
     schema default — preserves the pre-TB-337 contract for migrated
     readers that pass their own per-site default."""
     # Caller-supplied default `999` wins, even though schema default
-    # for ideation_cooldown_s is 7200.
+    # for ideation_cooldown_s is 3600.
     assert cfg.get_core_value("ideation_cooldown_s", default=999) == 999
-    # Caller-supplied `"X"` wins over schema default
-    # ("claude-haiku-4-5-20251001") for ideation_scrub_model.
+    # Caller-supplied `"X"` wins over the (now empty, TB-418) schema
+    # default for ideation_scrub_model.
     assert cfg.get_core_value("ideation_scrub_model", default="X") == "X"
 
 

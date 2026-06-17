@@ -1,6 +1,6 @@
 """TB-160: AP2_IDEATION_TRIGGER_TASK_COUNT trigger-threshold gate.
 
-Pins the new env knob (`AP2_IDEATION_TRIGGER_TASK_COUNT`, default 3) and
+Pins the env knob (`AP2_IDEATION_TRIGGER_TASK_COUNT`, default 10) and
 its semantics:
 
 - The threshold compares against the **Ready+Backlog count** only;
@@ -41,10 +41,10 @@ from ap2.ideation import (
 # Module constant + env-knob parsing pins.
 
 
-def test_default_trigger_count_is_three():
-    """The module default is 3 — matches the prompt's `fewer than 3 workable
-    items` cap."""
-    assert IDEATION_TRIGGER_TASK_COUNT_DEFAULT == 3
+def test_default_trigger_count_is_ten():
+    """The module default is 10 (TB-418 bumped the baseline 3 → 10) — doubles
+    as the per-cycle proposal-slot budget."""
+    assert IDEATION_TRIGGER_TASK_COUNT_DEFAULT == 10
 
 
 def test_trigger_task_count_unset_returns_default(monkeypatch):
@@ -134,7 +134,7 @@ def _make_project(tmp_path: Path, monkeypatch, *, sections: dict[str, list[tuple
 
 
 def test_default_threshold_fires_when_two_backlog_tasks(tmp_path, monkeypatch):
-    """Default threshold 3, Backlog has 2 (Active/Ready empty) → ideation fires.
+    """Default threshold 10, Backlog has 2 (Active/Ready empty) → ideation fires.
 
     The historical behavior was "skip if any Backlog item exists" — this
     test verifies the new behavior under the default knob."""
@@ -148,7 +148,7 @@ def test_default_threshold_fires_when_two_backlog_tasks(tmp_path, monkeypatch):
 
     asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
 
-    assert len(calls) == 1, "ideation should have fired (count=2 < default 3)"
+    assert len(calls) == 1, "ideation should have fired (count=2 < default 10)"
     kinds = [e["type"] for e in events.tail(cfg.events_file, 20)]
     assert "ideation_empty_board" in kinds
 
@@ -173,7 +173,7 @@ def test_threshold_one_skips_with_two_backlog_tasks(tmp_path, monkeypatch):
 
 def test_active_is_hard_gate_independent_of_threshold(tmp_path, monkeypatch):
     """Active=non-empty + Ready/Backlog empty → skip even though count (0) <
-    threshold (default 3). Pins the SDK-contention safety gate."""
+    threshold (default 10). Pins the SDK-contention safety gate."""
     monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
     cfg = _make_project(
         tmp_path,
@@ -191,7 +191,9 @@ def test_active_is_hard_gate_independent_of_threshold(tmp_path, monkeypatch):
 
 def test_threshold_boundary_skip_at_exact_count(tmp_path, monkeypatch):
     """`>=` semantics: count == threshold causes skip, NOT fire."""
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "3")
+    # TB-413: the flat tunable is ignored; the sectioned env is the honored
+    # override (decoupled from the TB-418 default bump 3 → 10).
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "3")
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -209,7 +211,9 @@ def test_threshold_boundary_skip_at_exact_count(tmp_path, monkeypatch):
 
 def test_threshold_boundary_fire_below_count(tmp_path, monkeypatch):
     """Threshold-minus-one items causes ideation to fire."""
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "3")
+    # TB-413: sectioned env is the honored override (see the sibling
+    # skip-at-exact test); decoupled from the TB-418 default bump.
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "3")
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -229,7 +233,7 @@ def test_threshold_counts_ready_plus_backlog_not_pipeline_or_frozen(tmp_path, mo
     """Pipeline Pending and Frozen don't count toward the threshold.
 
     Board: 1 Pipeline Pending + 1 Frozen + 0 Ready + 0 Backlog → count=0,
-    below default threshold 3 → ideation fires."""
+    below default threshold 10 → ideation fires."""
     monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
     cfg = _make_project(
         tmp_path,
@@ -269,7 +273,7 @@ def test_force_ideate_bypasses_disable_cooldown_and_backlog_gates(
     run so the next natural cooldown clock resets (back-to-back forced
     fires don't lap the next cron-driven natural fire)."""
     # Build a project with a Backlog that would otherwise skip the
-    # natural threshold (10 items >= default 3).
+    # natural threshold (10 items >= default 10).
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -451,7 +455,7 @@ def test_run_ideation_prompt_filters_events_block_to_relevant_kinds(
     calls = _stub_run_control_agent(monkeypatch)
     asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
 
-    assert len(calls) == 1, "ideation should have fired (count=2 < default 3)"
+    assert len(calls) == 1, "ideation should have fired (count=2 < default 10)"
     prompt = calls[0]["prompt"]
 
     # Anchor on the events-block heading — TB-N references can appear
@@ -645,17 +649,16 @@ def test_slots_clamp_prevents_negative_count(tmp_path, monkeypatch):
 
 
 def test_slot_count_default_threshold_full_budget(tmp_path, monkeypatch):
-    """Backwards-compat: with `AP2_IDEATION_TRIGGER_TASK_COUNT` unset
-    (default=3) and workable=0, slots=3 — i.e. the default behavior
-    matches today's pre-TB-183 hardcoded prompt instruction ("propose
-    new tasks ONLY if Backlog has fewer than 3 workable items" → up
-    to 3 proposals when Backlog is empty).
+    """Backwards-compat: with the trigger-count knob unset (TB-418
+    default=10) and workable=0, slots=10 — i.e. the default proposal
+    budget equals the default threshold when the board is empty.
 
-    Pins that bumping the env knob is the ONLY way to change the
-    proposal-slot budget — there's no remaining hardcoded magic-3
-    that would break parity with TB-160's env-knob default.
+    Pins that overriding the knob is the ONLY way to change the
+    proposal-slot budget — there's no remaining hardcoded magic number
+    that would break parity with the schema default.
     """
     monkeypatch.delenv("AP2_IDEATION_TRIGGER_TASK_COUNT", raising=False)
+    monkeypatch.delenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", raising=False)
     cfg = _make_project(tmp_path, monkeypatch, sections={})
     # Use the load-bearing default prompt so the slot line lands as it
     # would in production.
@@ -666,16 +669,16 @@ def test_slot_count_default_threshold_full_budget(tmp_path, monkeypatch):
 
     asyncio.run(_maybe_ideate(cfg, sdk=None, mcp_server=None))
 
-    assert len(calls) == 1, "ideation should have fired (workable=0 < default 3)"
+    assert len(calls) == 1, "ideation should have fired (workable=0 < default 10)"
     prompt = calls[0]["prompt"]
     snapshot_start = prompt.find(
         "## Current state (rendered just before this prompt was sent)"
     )
     snapshot_end = prompt.find("## Control job:", snapshot_start)
     snapshot = prompt[snapshot_start:snapshot_end]
-    assert "- proposal slots this cycle: 3" in snapshot, (
-        f"default-threshold path must inject slot-count=3 (the historical "
-        f"hardcoded value); snapshot:\n{snapshot}"
+    assert "- proposal slots this cycle: 10" in snapshot, (
+        f"default-threshold path must inject slot-count=10 (the TB-418 "
+        f"default threshold); snapshot:\n{snapshot}"
     )
 
 
@@ -749,8 +752,11 @@ def test_maybe_ideate_slot_skip_respects_cooldown(tmp_path, monkeypatch):
     `ideation_skipped_no_slots` event per cooldown window, as TB-183's
     commit message originally claimed.
     """
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    # TB-413: sectioned env is the honored override (the flat tunable is
+    # ignored); threshold 5 = workable 5 → slots=0, decoupled from the
+    # TB-418 default bump.
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -763,7 +769,7 @@ def test_maybe_ideate_slot_skip_respects_cooldown(tmp_path, monkeypatch):
     )
     # `_make_project` clobbers the cooldown to 0 — undo that here so the
     # cooldown gate is actually exercised.
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", "7200")
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "7200")
 
     # Anchor a deterministic clock. t0 is "now" for the first call;
     # last_run is set 10000s in the past (>> cooldown), so the cooldown
@@ -811,7 +817,10 @@ def test_maybe_ideate_slot_skip_re_emits_after_cooldown(tmp_path, monkeypatch):
     one skip event per cooldown window so the at-or-above-threshold
     state remains visible (just not at 30s/tick spam rate).
     """
-    monkeypatch.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "5")
+    # TB-413: sectioned env is the honored override (the flat tunable is
+    # ignored); threshold 5 = workable 5 → slots=0, decoupled from the
+    # TB-418 default bump.
+    monkeypatch.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "5")
     cfg = _make_project(
         tmp_path,
         monkeypatch,
@@ -823,7 +832,7 @@ def test_maybe_ideate_slot_skip_re_emits_after_cooldown(tmp_path, monkeypatch):
         },
     )
     cooldown_s = 7200
-    monkeypatch.setenv("AP2_IDEATION_COOLDOWN_S", str(cooldown_s))
+    monkeypatch.setenv("AP2_CORE_IDEATION_COOLDOWN_S", str(cooldown_s))
 
     # Mutable clock — start past the cooldown so the first call fires.
     clock = {"t": 1_700_000_000.0}

@@ -52,14 +52,15 @@ IDEATION_NAME = "ideation"
 # `IDEATION_MAX_TURNS_DEFAULT` directly keep working). Value bumped from
 # the prior 30 to 100 as part of the TB-278 battle-tested-defaults pass.
 IDEATION_MAX_TURNS_DEFAULT = DEFAULT_IDEATION_MAX_TURNS
-IDEATION_COOLDOWN_DEFAULT_S = 7200  # 2h between fires when board stays empty
+IDEATION_COOLDOWN_DEFAULT_S = 3600  # 1h between fires when board stays empty (TB-418, was 7200)
 # Trigger threshold: ideation fires when Ready+Backlog count is BELOW this
 # value (and Active is empty). TB-183: also serves as the per-cycle
 # proposal-slot budget — `slots = max(0, threshold - workable)` flows into
 # the prompt's `## Current state` snapshot block so the agent reads it
 # from a single source of truth instead of a hardcoded magic-3 in the
 # prompt body. Tunable via AP2_IDEATION_TRIGGER_TASK_COUNT.
-IDEATION_TRIGGER_TASK_COUNT_DEFAULT = 3
+# TB-418: baseline bumped 3 → 10 (operator-directed cadence default).
+IDEATION_TRIGGER_TASK_COUNT_DEFAULT = 10
 
 # TB-169: allowlist of event `type` values ideation actually keys off.
 # `_run_ideation` passes this to `build_control_prompt` so the rendered

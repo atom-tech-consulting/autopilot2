@@ -296,11 +296,12 @@ def _drive_force_ideate(tmp_path, monkeypatch, calls):
     return calls[0]
 
 
-def test_ideation_max_turns_default_is_one_hundred_when_env_unset(tmp_path, monkeypatch):
-    """Happy path: env unset → `_run_ideation` passes `max_turns=100` (the
+def test_ideation_max_turns_default_is_two_hundred_when_env_unset(tmp_path, monkeypatch):
+    """Happy path: env unset → `_run_ideation` passes `max_turns=200` (the
     `IDEATION_MAX_TURNS_DEFAULT` alias of `config.DEFAULT_IDEATION_MAX_TURNS`,
-    raised from 30 in TB-278) to `_run_control_agent`. A regression that
-    drops the env read OR flips the constant trips this test."""
+    raised 30 → 100 in TB-278, then 100 → 200 in TB-418) to
+    `_run_control_agent`. A regression that drops the env read OR flips the
+    constant trips this test."""
     from ap2.config import DEFAULT_IDEATION_MAX_TURNS
 
     monkeypatch.delenv("AP2_IDEATION_MAX_TURNS", raising=False)
@@ -310,7 +311,7 @@ def test_ideation_max_turns_default_is_one_hundred_when_env_unset(tmp_path, monk
         captured["max_turns"]
         == ideation.IDEATION_MAX_TURNS_DEFAULT
         == DEFAULT_IDEATION_MAX_TURNS
-        == 100
+        == 200
     )
 
 
