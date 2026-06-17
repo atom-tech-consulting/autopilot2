@@ -58,6 +58,14 @@ footgun ship as-is.
   (the known env-knob verifier-leak failure mode).
 - Keep scope to the flat `AP2_*` override path; do not expand into a config-loader
   rewrite.
+- **Execution discipline (this task previously froze on a runaway loop).** Run
+  test / verification commands in the FOREGROUND and let them finish; do NOT launch
+  them with `run_in_background` and then poll the output file — that loops, balloons
+  the run into thousands of messages, and exhausts the task timeout (the prior freeze
+  cause). Iterate against TARGETED test files (the config-resolution tests you are
+  changing), not the full `ap2/tests/` suite repeatedly; the daemon's verifier runs
+  the full suite after you report `report_result`, so you do not need to self-run all
+  3000+ tests. Keep total tool calls bounded.
 
 ## Verification
 
@@ -72,22 +80,3 @@ footgun ship as-is.
 - How secret / deployment-identity values are read from env (unchanged).
 - Removing or renaming any allowlisted env knob.
 - Editing `goal.md` (the structured-config "one release cycle" Done-when bullet may later be tightened; this task does not touch goal.md).
-## Attempts
-
-### 2026-06-16 — timeout
-(no summary)
-- **timeout_s:** 3600
-- **stderr_tail:** 
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260616T222240Z-TB-413.prompt.md`, `stream: .cc-autopilot/debug/20260616T222240Z-TB-413.stream.jsonl`, `messages: .cc-autopilot/debug/20260616T222240Z-TB-413.messages.jsonl`
-### 2026-06-17 — timeout
-(no summary)
-- **timeout_s:** 3600
-- **stderr_tail:** 
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260616T233236Z-TB-413.prompt.md`, `stream: .cc-autopilot/debug/20260616T233236Z-TB-413.stream.jsonl`, `messages: .cc-autopilot/debug/20260616T233236Z-TB-413.messages.jsonl`
-### 2026-06-17 — verification_failed
-(no summary)
-- **kind:** project_wide
-- **verify_command:** uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke
-- **exit_code:** None
-- **stderr_tail:** 
-- **Debug dumps:** `prompt: .cc-autopilot/debug/20260617T003312Z-TB-413.prompt.md`, `stream: .cc-autopilot/debug/20260617T003312Z-TB-413.stream.jsonl`, `messages: .cc-autopilot/debug/20260617T003312Z-TB-413.messages.jsonl`
