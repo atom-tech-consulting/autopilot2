@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-418** **Tune ideation defaults (trigger 10 / cooldown 3600 / max_turns 200) and make ideation_scrub_model provider-aware (claude-haiku for claude, gpt-5.4-mini for codex)** `#autopilot` `#config` `#ideation` `#defaults` `#codex` `#provider-aware` [→ brief](.cc-autopilot/tasks/tune-ideation-defaults-trigger-10-cooldo.md)
 
 ## Pipeline Pending
 
