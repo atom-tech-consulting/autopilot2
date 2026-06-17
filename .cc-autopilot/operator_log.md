@@ -411,3 +411,6 @@ ideation won't re-propose decisions logged here._
 - 2026-06-17T05:05:56Z — applied operator-queued update → TB-414 (goal-alignment check skipped)
 - 2026-06-17T05:05:56Z — applied operator-queued unfreeze → TB-413
 - 2026-06-17T05:07:03Z — applied operator-queued add_backlog → TB-417 (goal-alignment check skipped)
+- 2026-06-17T21:44:18Z — applied operator-queued approve → TB-415
+- 2026-06-17T21:44:18Z — applied operator-queued reject → TB-416
+- 2026-06-17T21:44:18Z — rejected ideation proposal → TB-416 (License + packaging-metadata coherence regression gate (PolyForm verbatim, no OSI claim, README accuracy)): Pure regression-pin over already-correct, static license metadata — defensive-only, no live gap. (Contrast TB-415, which fixes a real shipping leak.) Skip low-value 'lock already-correct values' test-only tasks; manual review + the daemon verify gate already cover this.

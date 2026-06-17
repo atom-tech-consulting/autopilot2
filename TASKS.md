@@ -8,8 +8,7 @@
 
 ## Backlog
 
-- [ ] **TB-415** **Scrub residual sandbox-path leak in ap2/tests + regression-gate shipped source against sandbox-local absolute paths** `#autopilot` `#distribution` `#packaging` `#identity-scrub` `#regression-pin` `#tests` `@blocked:review` — Remove the hard-coded /Users/claude-agent/repos/post-train absolute path still in ap2/tests/test_json_extract_util.py and add a recursive regression gate so a sandbox-local path can't reappear in shipped source. [→ brief](.cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md)
-- [ ] **TB-416** **License + packaging-metadata coherence regression gate (PolyForm verbatim, no OSI claim, README accuracy)** `#autopilot` `#distribution` `#packaging` `#license` `#regression-pin` `#tests` `@blocked:review` — Pin Progress signal 2 with a regression test over the already-committed license metadata: LICENSE verbatim PolyForm Noncommercial 1.0.0, pyproject declares it with no OSI-Approved classifier, README License section names PolyForm. [→ brief](.cc-autopilot/tasks/license-packaging-metadata-coherence-reg.md)
+- [ ] **TB-415** **Scrub residual sandbox-path leak in ap2/tests + regression-gate shipped source against sandbox-local absolute paths** `#autopilot` `#distribution` `#packaging` `#identity-scrub` `#regression-pin` `#tests` — Remove the hard-coded /Users/claude-agent/repos/post-train absolute path still in ap2/tests/test_json_extract_util.py and add a recursive regression gate so a sandbox-local path can't reappear in shipped source. [→ brief](.cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md)
 
 ## Pipeline Pending
 

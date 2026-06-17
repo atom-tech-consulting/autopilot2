@@ -2,6 +2,13 @@
   "blocked_on": "review",
   "briefing_path": ".cc-autopilot/tasks/license-packaging-metadata-coherence-reg.md",
   "focus_anchor": "current focus cut a public source available distribution",
+  "outcome": {
+    "commit": null,
+    "decision_actor": "operator",
+    "decision_kind": "rejected",
+    "decision_ts": "2026-06-17T21:44:49Z",
+    "reason": "Pure regression-pin over already-correct, static license metadata \u2014 defensive-only, no live gap. (Contrast TB-415, which fixes a real shipping leak.) Skip low-value 'lock already-correct values' test-only tasks; manual review + the daemon verify gate already cover this."
+  },
   "proposed_at": "2026-06-16T23:31:31Z",
   "tb_id": "TB-416",
   "why_now": "the license metadata is correct on disk but has zero test coverage \u2014 the\ndelete-test condition \"if the repo still declares 'All Rights Reserved'\" holds only\nby manual inspection, so a single careless metadata edit could ship a public cut\nthat reintroduces \"All Rights Reserved\", drops the PolyForm text, or adds an OSI\nclassifier with nothing failing."
