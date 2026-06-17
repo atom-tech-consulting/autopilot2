@@ -24,10 +24,12 @@ Behavioral cases pinned here:
   Env knobs (`AP2_IDEATION_HALT_EMPTY_CYCLES`,
   `AP2_IDEATION_HALT_DISABLED`): default / override / invalid-value
     parse + empty-cycles clamp to [1, 20], all via the core
-    `cfg.get_core_value(...)` resolution path. Plus a back-compat pin
-    that the DEPRECATED `AP2_FOCUS_AUTO_ADVANCE_DISABLED` /
-    `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` aliases still resolve through to
-    `core.ideation_halt_*`.
+    `cfg.get_core_value(...)` resolution path. TB-413: these are
+    BEHAVIORAL tunables, so their flat `AP2_*` overrides are removed
+    (config.toml is the sole source) — overrides are injected via the
+    SECTIONED `AP2_CORE_IDEATION_HALT_*` env names. The DEPRECATED flat
+    `AP2_FOCUS_AUTO_ADVANCE_DISABLED` / `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+    aliases are now IGNORED (pinned by the alias-ignored tests below).
 
   Pointer state (slimmed schema), exhaustion detector, halt + ack
   semantics, dispatch un-gating (TB-275), resume on goal_updated —
@@ -262,88 +264,110 @@ def test_parse_focus_list_line_range():
 
 
 def test_ideation_halt_empty_cycles_default(cfg, monkeypatch):
-    """`AP2_IDEATION_HALT_EMPTY_CYCLES` unset / empty → schema default 3."""
+    """Unset / empty → schema default 3 (sectioned env per TB-413)."""
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_EMPTY_CYCLES", raising=False)
     monkeypatch.delenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", raising=False)
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 3
 
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "")
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 3
 
 
 def test_ideation_halt_empty_cycles_override(cfg, monkeypatch):
-    """Operator can override via the canonical env var."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "5")
+    """Operator can override via the SECTIONED env var (TB-413: the flat
+    `AP2_IDEATION_HALT_EMPTY_CYCLES` tunable override is removed —
+    config.toml is the sole source; the sectioned `AP2_CORE_*` form still
+    overrides at `cfg.get_core_value` resolution time)."""
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "5")
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 5
 
 
 def test_ideation_halt_empty_cycles_clamps(cfg, monkeypatch):
-    """Out-of-range values clamp to [1, 20]."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "0")
+    """Out-of-range values clamp to [1, 20] (injected via the SECTIONED
+    env name per TB-413)."""
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "0")
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 1
 
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "-50")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "-50")
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 1
 
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "999")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "999")
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 20
 
 
 def test_ideation_halt_empty_cycles_invalid_falls_back(cfg, monkeypatch):
-    """Non-int values fall back to the default."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "garbage")
+    """Non-int values fall back to the default (injected via the
+    SECTIONED env name per TB-413)."""
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "garbage")
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 3
 
 
 def test_ideation_halt_disabled_default(cfg, monkeypatch):
     """Default unset → False (auto-halt enabled)."""
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", raising=False)
     assert ideation_halt._ideation_halt_disabled(cfg) is False
 
 
 def test_ideation_halt_disabled_truthy(cfg, monkeypatch):
-    """`1` / `true` / `yes` / `on` all parse as True."""
+    """`1` / `true` / `yes` / `on` all parse as True (injected via the
+    SECTIONED env name per TB-413 — the flat `AP2_IDEATION_HALT_DISABLED`
+    tunable override is removed)."""
     for val in ("1", "true", "TRUE", "yes", "Yes", "on", "ON"):
-        monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", val)
+        monkeypatch.setenv("AP2_CORE_IDEATION_HALT_DISABLED", val)
         assert ideation_halt._ideation_halt_disabled(cfg) is True, f"failed for {val!r}"
 
 
 def test_ideation_halt_disabled_falsy(cfg, monkeypatch):
-    """`0` / `false` / `no` / empty all parse as False."""
+    """`0` / `false` / `no` / empty all parse as False (injected via the
+    SECTIONED env name per TB-413)."""
     for val in ("0", "false", "no", "", "off"):
-        monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", val)
+        monkeypatch.setenv("AP2_CORE_IDEATION_HALT_DISABLED", val)
         assert ideation_halt._ideation_halt_disabled(cfg) is False, f"failed for {val!r}"
 
 
 # --- Deprecated back-compat alias pins (TB-345) ----------------------------
 
 
-def test_deprecated_alias_disables_halt(cfg, monkeypatch):
-    """The DEPRECATED `AP2_FOCUS_AUTO_ADVANCE_DISABLED` alias still
-    disables the halt — it resolves through `FLAT_TO_SECTIONED` to the
-    same `core.ideation_halt_disabled` key the canonical name maps to,
-    so a stale operator env keeps working for one release."""
+def test_deprecated_alias_is_ignored(cfg, monkeypatch):
+    """TB-413: the DEPRECATED flat `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+    alias is now IGNORED (it maps to the behavioral tunable
+    `core.ideation_halt_disabled`, which is NOT on
+    `config.ENV_PERMITTED_KEYS`). Its flat-env override is removed —
+    config.toml is the sole source — so the resolved value stays at the
+    schema default (False) even with the alias set in the env. Pin
+    against a regression that re-honors a stale flat alias."""
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
-    assert ideation_halt._ideation_halt_disabled(cfg) is True
-    # And it actually short-circuits the detector (see kill-switch test
-    # below for the end-to-end behavioral pin).
+    assert ideation_halt._ideation_halt_disabled(cfg) is False, (
+        "TB-413: a flat deprecated alias for a behavioral tunable must be "
+        "ignored, not resolved to the halt-disabled state"
+    )
 
 
-def test_deprecated_alias_empty_cycles_threshold(cfg, monkeypatch):
-    """The DEPRECATED `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` alias still
-    resolves through to `core.ideation_halt_empty_cycles`."""
+def test_deprecated_alias_empty_cycles_is_ignored(cfg, monkeypatch):
+    """TB-413: the DEPRECATED flat `AP2_FOCUS_ADVANCE_EMPTY_CYCLES` alias
+    is now IGNORED (maps to the behavioral tunable
+    `core.ideation_halt_empty_cycles`). The resolved threshold stays at
+    the schema default (3), not the alias's `7`."""
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_EMPTY_CYCLES", raising=False)
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "7")
-    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 7
+    assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 3, (
+        "TB-413: a flat deprecated alias for a behavioral tunable must be "
+        "ignored; resolution falls through to the schema default"
+    )
 
 
-def test_canonical_wins_over_deprecated_alias(cfg, monkeypatch):
-    """When BOTH the canonical and the deprecated name are set, the
-    canonical name wins (it precedes the alias in `FLAT_TO_SECTIONED`
-    iteration order)."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "4")
+def test_sectioned_wins_over_ignored_deprecated_alias(cfg, monkeypatch):
+    """TB-413: the SECTIONED `AP2_CORE_IDEATION_HALT_EMPTY_CYCLES` env
+    overrides, while the DEPRECATED flat `AP2_FOCUS_ADVANCE_EMPTY_CYCLES`
+    alias is ignored. With both set, the sectioned value (`4`) wins and
+    the flat alias's `9` has no effect."""
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "4")
     monkeypatch.setenv("AP2_FOCUS_ADVANCE_EMPTY_CYCLES", "9")
     assert ideation_halt._ideation_halt_empty_cycles_threshold(cfg) == 4
 
@@ -457,7 +481,8 @@ def test_empty_cycles_threshold_emits_roadmap_complete(cfg, monkeypatch):
     """Threshold reached → `roadmap_complete` fires once with
     `trigger=empty_cycles_heuristic`, `roadmap_complete_emitted=True`,
     and `roadmap_exhausted` flips to True."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta", "gamma")
 
@@ -493,7 +518,8 @@ def test_empty_cycles_threshold_emits_roadmap_complete(cfg, monkeypatch):
 
 def test_empty_cycles_below_threshold_no_halt(cfg, monkeypatch):
     """Below-threshold count does NOT emit `roadmap_complete`."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta")
 
@@ -516,7 +542,8 @@ def test_empty_cycles_below_threshold_no_halt(cfg, monkeypatch):
 def test_empty_cycles_resets_on_proposal(cfg, monkeypatch):
     """A productive ideation cycle resets the empty-cycles counter to
     0, even after several prior empty cycles."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta")
 
@@ -539,7 +566,8 @@ def test_goal_updated_resets_counter_window(cfg, monkeypatch):
     most recent `goal_updated` event. Pre-edit empty cycles do not
     count against the post-edit runway, so a goal.md edit followed by
     a single empty cycle leaves the counter at 1 (not 4)."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_foci(cfg, "alpha", "beta")
 
@@ -564,7 +592,8 @@ def test_progress_signals_focus_halts_via_empty_cycles_only(cfg, monkeypatch):
     """TB-283 + TB-285 pin: a focus that carries `Progress signals:`
     bullets halts via the SAME empty-cycles heuristic — the bullets
     are advisory ideation-prompt context only."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "3")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     _write_goal_with_progress_signals(
         cfg, "alpha", ["signal 1", "signal 2"],
@@ -594,9 +623,14 @@ def test_progress_signals_focus_halts_via_empty_cycles_only(cfg, monkeypatch):
 def test_halt_disabled_short_circuits(cfg, monkeypatch):
     """`AP2_IDEATION_HALT_DISABLED=1` blocks the halt even when the
     empty-cycles threshold trips. A decisions-needed bullet surfaces so
-    the operator can halt manually (by editing goal.md)."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
-    monkeypatch.setenv("AP2_IDEATION_HALT_DISABLED", "1")
+    the operator can halt manually (by editing goal.md).
+
+    TB-413: inject both core tunables via their SECTIONED env names
+    (the flat overrides are removed). The decisions-needed bullet the
+    source emits still names the canonical `AP2_IDEATION_HALT_DISABLED`
+    knob, asserted below."""
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_DISABLED", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
     _emit_ideation_empty(cfg)
 
@@ -620,11 +654,15 @@ def test_halt_disabled_short_circuits(cfg, monkeypatch):
     assert "AP2_IDEATION_HALT_DISABLED" in text
 
 
-def test_deprecated_kill_switch_alias_short_circuits(cfg, monkeypatch):
-    """Back-compat: the DEPRECATED `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
-    alias still blocks the halt end-to-end (resolves to
-    `core.ideation_halt_disabled`)."""
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+def test_deprecated_kill_switch_alias_is_ignored_end_to_end(cfg, monkeypatch):
+    """TB-413: the DEPRECATED flat `AP2_FOCUS_AUTO_ADVANCE_DISABLED`
+    alias is now IGNORED end-to-end (it maps to the behavioral tunable
+    `core.ideation_halt_disabled`, whose flat-env override is removed).
+    Setting it does NOT block the halt — the empty-cycles threshold
+    still trips and `roadmap_complete` fires. Pin against a regression
+    that re-honors the stale alias as a kill switch."""
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.setenv("AP2_FOCUS_AUTO_ADVANCE_DISABLED", "1")
     _write_goal_with_foci(cfg, "alpha", "beta")
@@ -633,11 +671,12 @@ def test_deprecated_kill_switch_alias_short_circuits(cfg, monkeypatch):
     ideation_halt.maybe_halt_on_exhaustion(cfg)
 
     pointer = goal.load_pointer(cfg)
-    assert pointer["roadmap_complete_emitted"] is False, (
-        "deprecated kill-switch alias should have blocked the halt"
+    assert pointer["roadmap_complete_emitted"] is True, (
+        "TB-413: the deprecated flat kill-switch alias must be ignored, "
+        "so the halt fires normally"
     )
     tail = events.tail(cfg.events_file, 50)
-    assert not [e for e in tail if e.get("type") == "roadmap_complete"]
+    assert [e for e in tail if e.get("type") == "roadmap_complete"]
 
 
 # ===========================================================================
@@ -649,8 +688,9 @@ def test_ack_does_not_clear_roadmap_complete_gate(cfg, monkeypatch):
     """TB-340: an operator ack with the `roadmap_complete` token does
     NOT clear the gate. The gate is `roadmap_complete_emitted`; the
     ack only DISMISSES the operator nag."""
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_ideation_empty(cfg)
 
@@ -674,8 +714,9 @@ def test_ack_without_token_does_not_clear(cfg, monkeypatch):
     gate. (Post-TB-340 NO ack clears the gate — the predicate is the
     pointer flag — so this is the same verdict as the token-bearing
     ack; the test is retained as a regression guard.)"""
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_ideation_empty(cfg)
     ideation_halt.maybe_halt_on_exhaustion(cfg)
@@ -709,11 +750,15 @@ def test_dispatch_promotes_when_roadmap_exhausted(cfg, monkeypatch):
     """TB-275 regression pin (behavioral): when the halt is active AND
     a dispatchable Backlog task is present, the daemon
     auto-promotes/dispatches it (no halt)."""
+    monkeypatch.delenv("AP2_CORE_IDEATION_HALT_DISABLED", raising=False)
     monkeypatch.delenv("AP2_IDEATION_HALT_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
-    monkeypatch.setenv("AP2_IDEATION_HALT_EMPTY_CYCLES", "1")
+    monkeypatch.setenv("AP2_CORE_IDEATION_HALT_EMPTY_CYCLES", "1")
     _write_goal_with_foci(cfg, "alpha")
     _emit_ideation_empty(cfg)
     ideation_halt.maybe_halt_on_exhaustion(cfg)

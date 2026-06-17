@@ -103,10 +103,20 @@ _BRIEFING = (
 
 
 @pytest.fixture
-def cfg(tmp_path: Path) -> Config:
+def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     """Project root with the standard ap2 init layout + a real
     `goal.md` so the briefing-structural gate has anchors to match.
-    Same fixture shape as `test_tb223_auto_approve.py::cfg`."""
+    Same fixture shape as `test_tb223_auto_approve.py::cfg`.
+
+    Disables the LLM dep-coherence judge (`AP2_VALIDATOR_JUDGE_DISABLED`)
+    so the `do_board_edit add_backlog` calls below don't make a real,
+    slow, non-deterministic Haiku judge call (which can spuriously flag
+    the fixture briefing's `TB-223`/`TB-224` references as a hard
+    predecessor and reject the add). The judge is orthogonal to the
+    token-cap behavior under test. `AP2_VALIDATOR_JUDGE_DISABLED` is an
+    `ENV_PERMITTED_KEYS` env-only knob, so its flat env still applies
+    under TB-413."""
+    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
     init_project(tmp_path)
     (tmp_path / "goal.md").write_text(_GOAL_MD)
     cfg = Config.load(tmp_path)
@@ -176,8 +186,9 @@ class _NoopSDK:
 
 def _seed_auto_approved_task(cfg: Config, *, title: str, tags=None) -> str:
     """Add an auto-approved Backlog task. Returns the TB-N assigned by the
-    daemon. Caller is responsible for setting `AP2_AUTO_APPROVE=1` in the
-    env before calling.
+    daemon. Caller is responsible for enabling auto-approve via the
+    sectioned env `AP2_COMPONENTS_AUTO_APPROVE_ENABLED=1` (TB-413: the
+    flat `AP2_AUTO_APPROVE` tunable override is removed) before calling.
 
     TB-383: `board_edit` is policy-free (the row is born `@blocked:review`);
     the auto-approve strip + `auto_approved` emit now happen in the
@@ -236,26 +247,27 @@ def test_per_task_cap_unset_defaults_to_zero(cfg: Config, monkeypatch):
     / non-positive → `_per_task_token_cap(cfg)` returns 0 (cap
     disabled). Pin against a refactor that bakes in a default cap.
 
-    TB-326 (axis-5): the helper now takes a `cfg` argument and routes
-    the env lookup through `Config.get_component_value`'s reverse-
-    `FLAT_TO_SECTIONED` fallback. The flat env name still wins via the
-    back-compat shim, so this parser pin still exercises the env
-    parser shape end-to-end (default-on-empty/garbage/negative,
-    positive-int passthrough).
+    TB-326 (axis-5): the helper takes a `cfg` argument and routes the
+    env lookup through `Config.get_component_value`. TB-413: the flat
+    `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` tunable override is removed
+    (config.toml is the sole source), so this parser pin injects via the
+    SECTIONED env name `AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP`,
+    which still overrides — exercising the env parser shape end-to-end
+    (default-on-empty/garbage/negative, positive-int passthrough).
     """
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
     assert daemon._per_task_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "")
     assert daemon._per_task_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "not-a-number")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "not-a-number")
     assert daemon._per_task_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "-5")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "-5")
     assert daemon._per_task_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "50000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "50000")
     assert daemon._per_task_token_cap(cfg) == 50000
 
 
@@ -265,8 +277,10 @@ def test_window_cap_unset_defaults_to_zero(tmp_path: Path, monkeypatch):
     so a single regression names the failing knob explicitly.
 
     TB-326 (axis-5): same `cfg`-argument migration as the sibling
-    per-task-cap parser test; the flat env name still wins via the
-    `Config.get_component_value` back-compat reverse-lookup. Unlike the
+    per-task-cap parser test. TB-413: the flat tunable override is
+    removed, so this injects via the SECTIONED env name
+    `AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP`, which still
+    overrides via `Config.get_component_value`. Unlike the
     sibling test, this one builds its own cfg AFTER stripping every
     `AP2_*` env var so the cfg snapshot doesn't carry a stale
     `window_token_cap` value from a parent process whose
@@ -283,19 +297,19 @@ def test_window_cap_unset_defaults_to_zero(tmp_path: Path, monkeypatch):
     init_project(tmp_path)
     cfg = Config.load(tmp_path)
 
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
     assert daemon._window_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "")
     assert daemon._window_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "garbage")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "garbage")
     assert daemon._window_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "0")
     assert daemon._window_token_cap(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000000")
     assert daemon._window_token_cap(cfg) == 1000000
 
 
@@ -309,10 +323,10 @@ def test_unset_per_task_cap_does_not_halt(cfg: Config, monkeypatch):
     BUT `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP` unset, even an event
     with massive token counts produces no halt. Pins the
     no-cap-default behavior."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     tb = _seed_auto_approved_task(cfg, title="tb224 no-cap")
     # Massive usage but no cap → daemon must not halt.
@@ -361,10 +375,10 @@ def test_per_task_cap_exceeded_halts_with_dedup(cfg: Config, monkeypatch):
     `auto_approve_halted` (it's deduped against the same trigger
     episode) but SHOULD re-emit `auto_approve_skipped` (each preempt
     is its own observability event)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "5000")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "5000")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     # Seed an auto-approved task that already ran and exceeded the
     # cap. In production this is the retry-after-failure path: the
@@ -431,10 +445,10 @@ def test_unset_window_cap_does_not_halt(cfg: Config, monkeypatch):
     """With `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` unset, cumulative
     `task_run_usage` token sums regardless of size produce no halt.
     Pins the window-cap default-disabled behavior."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     tb_a = _seed_auto_approved_task(cfg, title="tb224 window-A")
     tb_b = _seed_auto_approved_task(cfg, title="tb224 window-B")
@@ -464,10 +478,10 @@ def test_window_cap_exceeded_halts_auto_promote(
     and refuses to auto-promote the auto-approved Backlog task.
     The `auto_approve_skipped` event names the would-have-promoted
     TB-N. Pins the briefing's window-cap halt rule from Scope (2)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     # Prior auto-approved tasks that already ran and burned the
     # budget. Emit the audit events without adding board rows so the
@@ -538,9 +552,9 @@ def test_window_cap_halt_lets_operator_approved_dispatch(
     `test_operator_approved_task_dispatches_even_when_freeze_active`
     — single Backlog task that isn't auto-approved, halt active
     on the auto layer, expect promotion to Ready."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
     # Prior auto-approved tasks burned the window budget.
     events.append(cfg.events_file, "auto_approved", task="TB-910", knob="1")
     _seed_task_run_usage(
@@ -549,7 +563,7 @@ def test_window_cap_halt_lets_operator_approved_dispatch(
 
     # Land a task that is NOT auto-approved (carries a gate-tag so
     # `@blocked:review` stays on the row), then operator-approve it.
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
     res = tools.do_board_edit(
         cfg,
         {
@@ -591,10 +605,10 @@ def test_task_error_single_event_halts_auto_promote(cfg: Config, monkeypatch):
     to `.cc-autopilot/ideation_state.md` naming the failing TB-N +
     the error excerpt, so `ap2 status` surfaces it without waiting
     for the next ideation cron."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.delenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", raising=False)
 
     # tb_a is the prior auto-approved task that hit a `task_error`
     # (SDK timeout). tb_b is the new auto-approved task in Backlog
@@ -669,10 +683,10 @@ def test_ack_window_resume_clears_window_cap_halt(cfg: Config, monkeypatch):
     `auto_approve_window_resume` token resets the halt state. The
     next `_tick` auto-promotes the previously-paused auto-approved
     Backlog task."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "5000")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "5000")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     tb_old = _seed_auto_approved_task(cfg, title="tb224 burned the budget")
     _seed_task_run_usage(
@@ -729,8 +743,8 @@ def test_ack_window_resume_clears_task_error_halt(cfg: Config, monkeypatch):
     `task_error` halt — one ack covers both reasons since they share
     the same auto-promote-paused state. Mirrors TB-223's
     `auto_approve_unfreeze` shape but on a distinct token."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     tb_failed = _seed_auto_approved_task(cfg, title="tb224 infra-failed (ack)")
     events.append(
@@ -777,9 +791,9 @@ def test_task_error_takes_precedence_over_caps(cfg: Config, monkeypatch):
     precedence — infrastructure failures deserve immediate operator
     attention even if a cost cap also tripped). Pins the priority
     order in `_auto_approve_check_violations`."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "1000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "1000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
 
     tb = _seed_auto_approved_task(cfg, title="tb224 both")
     _seed_task_run_usage(cfg, task=tb, input_tokens=5000, output_tokens=5000)
@@ -802,10 +816,10 @@ def test_window_cap_only_counts_auto_approved_tasks(cfg: Config, monkeypatch):
     (operator-approved or unmarked) do NOT contribute to the window
     sum. Pins the briefing's filter: "tasks identified as auto-
     approved via TB-223's `auto_approved` audit event"."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_GATE_TAGS", "#__never__")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "10000")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", "#__never__")
 
     # tb_manual: operator-approved (not in auto bucket). Big tokens
     # but shouldn't count.

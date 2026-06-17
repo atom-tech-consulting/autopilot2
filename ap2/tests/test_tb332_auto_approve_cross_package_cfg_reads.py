@@ -192,10 +192,10 @@ def test_dry_run_helper_cfg_reads_match_env(cfg, clean_env, emit_reset):
     via the flat-env back-compat reverse-lookup.
     """
     for val in ("1", "true", "yes"):
-        clean_env.setenv("AP2_AUTO_APPROVE_DRY_RUN", val)
+        clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", val)
         assert automation_status._is_auto_approve_dry_run(cfg) is True, val
     for val in ("0", "false", "no", ""):
-        clean_env.setenv("AP2_AUTO_APPROVE_DRY_RUN", val)
+        clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", val)
         assert automation_status._is_auto_approve_dry_run(cfg) is False, val
 
 
@@ -207,9 +207,11 @@ def test_noisy_pause_disabled_helper_cfg_reads_match_env(
     dry-run pin above; both helpers share the
     `cfg.get_component_value` + `_is_truthy` chain.
     """
-    clean_env.delenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False)
+    clean_env.delenv(
+        "AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", raising=False,
+    )
     assert automation_status._is_validator_judge_noisy_pause_disabled(cfg) is False
-    clean_env.setenv("AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_NOISY_PAUSE_DISABLED", "1")
     assert automation_status._is_validator_judge_noisy_pause_disabled(cfg) is True
 
 
@@ -220,11 +222,15 @@ def test_freeze_threshold_helper_cfg_reads_match_env(
     int value identical to the pre-TB-332 helper. Defaults to 3 on
     unset / non-int; honors operator-set non-positive values.
     """
-    clean_env.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
+    clean_env.delenv(
+        "AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False,
+    )
     assert automation_status._freeze_threshold(cfg) == 3
-    clean_env.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
     assert automation_status._freeze_threshold(cfg) == 5
-    clean_env.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "not-a-number")
+    clean_env.setenv(
+        "AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "not-a-number",
+    )
     assert automation_status._freeze_threshold(cfg) == 3
 
 
@@ -242,13 +248,21 @@ def test_positive_int_cap_helper_cfg_reads_match_env(
         "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP",
         "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP",
     ):
-        clean_env.delenv(env_name, raising=False)
+        # `_positive_int_cap` still takes the FLAT env name as its first
+        # positional (it maps that name to the component key internally
+        # and reads via `cfg.get_component_value`). TB-413 removed the
+        # flat-env OVERRIDE, so inject via the SECTIONED env name (which
+        # still overrides) while keeping the flat `env_name` argument.
+        sectioned = "AP2_COMPONENTS_AUTO_APPROVE_" + env_name[
+            len("AP2_AUTO_APPROVE_"):
+        ]
+        clean_env.delenv(sectioned, raising=False)
         assert automation_status._positive_int_cap(env_name, cfg) is None
-        clean_env.setenv(env_name, "42000")
+        clean_env.setenv(sectioned, "42000")
         assert automation_status._positive_int_cap(env_name, cfg) == 42000
-        clean_env.setenv(env_name, "0")
+        clean_env.setenv(sectioned, "0")
         assert automation_status._positive_int_cap(env_name, cfg) is None
-        clean_env.setenv(env_name, "not-an-int")
+        clean_env.setenv(sectioned, "not-an-int")
         assert automation_status._positive_int_cap(env_name, cfg) is None
 
 
@@ -261,15 +275,15 @@ def test_ideation_should_auto_approve_cfg_reads_match_env(
     pre-TB-332 env-only helper.
     """
     # Master switch off → False regardless of tags.
-    clean_env.delenv("AP2_AUTO_APPROVE", raising=False)
+    clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
     assert auto_approve.should_auto_approve(["#anything"], cfg) is False
     # Master switch on, default gate tags → #breaking-change blocks.
-    clean_env.setenv("AP2_AUTO_APPROVE", "1")
-    clean_env.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
     assert auto_approve.should_auto_approve(["#breaking-change"], cfg) is False
     assert auto_approve.should_auto_approve(["#autopilot"], cfg) is True
-    # Operator-customized gate tags via flat env.
-    clean_env.setenv("AP2_AUTO_APPROVE_GATE_TAGS", "#__never__")
+    # Operator-customized gate tags via sectioned env.
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", "#__never__")
     assert auto_approve.should_auto_approve(["#breaking-change"], cfg) is True
 
 
@@ -280,11 +294,11 @@ def test_collect_auto_approve_state_cfg_reads_match_env(
     operator-set knobs through the cfg layer end-to-end. Drives the
     `ap2 status` text/JSON + web home automation card.
     """
-    clean_env.setenv("AP2_AUTO_APPROVE", "1")
-    clean_env.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "7")
-    clean_env.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "150000")
-    clean_env.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000000")
-    clean_env.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "7")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "150000")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "1000000")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["auto_approve_enabled"] is True
     assert state["freeze_threshold"] == 7
@@ -300,11 +314,11 @@ def test_doctor_auto_approve_audit_cfg_reads_match_env(
     switch off → INFO-only. With master on + no caps → 3 WARN lines.
     Same shape the TB-234 env-only tests pin on `auto_approve_audit()`.
     """
-    clean_env.delenv("AP2_AUTO_APPROVE", raising=False)
+    clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
     res = doctor.auto_approve_audit(cfg)
     assert [lvl for lvl, _ in res.messages] == ["INFO"]
 
-    clean_env.setenv("AP2_AUTO_APPROVE", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
     res = doctor.auto_approve_audit(cfg)
     levels = [lvl for lvl, _ in res.messages]
     assert levels.count("WARN") == 3, levels

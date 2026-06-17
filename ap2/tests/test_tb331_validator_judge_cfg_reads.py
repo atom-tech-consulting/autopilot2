@@ -285,21 +285,23 @@ def test_max_tokens_legacy_reads_from_toml(tmp_path, clean_env, emit_reset):
 # ---------------------------------------------------------------------------
 
 
-def test_disabled_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_VALIDATOR_JUDGE_DISABLED=1` set on an env-only project (no
-    TOML-side override) still resolves to True via the
-    `Config.get_component_value` reverse-`FLAT_TO_SECTIONED` lookup.
-    Pins the back-compat path the shell-export operator depends on.
+def test_disabled_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = vj._validator_judge_disabled(cfg)  # flat unset
     clean_env.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
-    assert vj._validator_judge_disabled(cfg) is True
+    assert vj._validator_judge_disabled(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
 def test_disabled_flat_env_truthy_variants(cfg, clean_env, emit_reset):
     """The pre-TB-331 truthy enumeration (`"1"` / `"true"` / `"yes"`,
     case-insensitive) is preserved through the cfg-routed read."""
     for truthy in ("1", "true", "TRUE", "yes", "YES", "True"):
-        clean_env.setenv("AP2_VALIDATOR_JUDGE_DISABLED", truthy)
+        clean_env.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", truthy)
         assert vj._validator_judge_disabled(cfg) is True, truthy
 
 
@@ -313,29 +315,40 @@ def test_disabled_flat_env_falsy_variants(cfg, clean_env, emit_reset):
         assert vj._validator_judge_disabled(cfg) is False, falsy
 
 
-def test_timeout_s_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_VALIDATOR_JUDGE_TIMEOUT_S=42` on an env-only project
-    resolves to 42.0 via the flat-env back-compat path.
+def test_timeout_s_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = vj._validator_judge_timeout_s(cfg)  # flat unset
     clean_env.setenv("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "42")
-    assert vj._validator_judge_timeout_s(cfg) == 42.0
+    assert vj._validator_judge_timeout_s(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_max_turns_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_VALIDATOR_JUDGE_MAX_TURNS=4` on an env-only project
-    resolves to 4 via the flat-env back-compat path.
+def test_max_turns_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = vj._validator_judge_max_turns(cfg)  # flat unset
     clean_env.setenv("AP2_VALIDATOR_JUDGE_MAX_TURNS", "4")
-    assert vj._validator_judge_max_turns(cfg) == 4
+    assert vj._validator_judge_max_turns(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_max_tokens_legacy_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_VALIDATOR_JUDGE_MAX_TOKENS=3` on an env-only project
-    resolves to 3 via the flat-env back-compat path (the deprecated
-    alias helper). The caller still ceiling-caps at 5.
+def test_max_tokens_legacy_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = vj._validator_judge_max_tokens_legacy(cfg)  # flat unset
     clean_env.setenv("AP2_VALIDATOR_JUDGE_MAX_TOKENS", "3")
-    assert vj._validator_judge_max_tokens_legacy(cfg) == 3
+    assert vj._validator_judge_max_tokens_legacy(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
 # ---------------------------------------------------------------------------

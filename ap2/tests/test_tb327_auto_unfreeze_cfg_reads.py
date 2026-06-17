@@ -265,52 +265,67 @@ def test_max_per_day_reads_from_toml(tmp_path, clean_env, emit_reset):
 # ---------------------------------------------------------------------------
 
 
-def test_disabled_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_UNFREEZE_DISABLED=1` set on an env-only project still
-    resolves to True via the `Config.get_component_value` reverse-
-    `FLAT_TO_SECTIONED` lookup. Pins the back-compat path the
-    shell-export operator depends on.
+def test_disabled_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = _is_auto_unfreeze_disabled(cfg)  # flat unset
     clean_env.setenv("AP2_AUTO_UNFREEZE_DISABLED", "1")
-    assert _is_auto_unfreeze_disabled(cfg) is True
+    assert _is_auto_unfreeze_disabled(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_fix_shapes_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_UNFREEZE_FIX_SHAPES=foo,bar` on an env-only project
-    resolves to `{"foo", "bar"}` via the flat-env back-compat path.
+def test_fix_shapes_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = daemon._auto_unfreeze_allowlist(cfg)  # flat unset
     clean_env.setenv(
         "AP2_AUTO_UNFREEZE_FIX_SHAPES",
         "grep_missing_r_on_dir,bare_path_to_test_f",
     )
-    assert daemon._auto_unfreeze_allowlist(cfg) == frozenset({
-        "grep_missing_r_on_dir",
-        "bare_path_to_test_f",
-    })
+    assert daemon._auto_unfreeze_allowlist(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_dry_run_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_UNFREEZE_DRY_RUN=true` on an env-only project resolves
-    to True via the flat-env back-compat path.
+def test_dry_run_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = daemon._auto_unfreeze_dry_run(cfg)  # flat unset
     clean_env.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "true")
-    assert daemon._auto_unfreeze_dry_run(cfg) is True
+    assert daemon._auto_unfreeze_dry_run(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_max_per_task_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_UNFREEZE_MAX_PER_TASK=9` on an env-only project resolves
-    to 9 via the flat-env back-compat path.
+def test_max_per_task_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = daemon._auto_unfreeze_max_per_task(cfg)  # flat unset
     clean_env.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "9")
-    assert daemon._auto_unfreeze_max_per_task(cfg) == 9
+    assert daemon._auto_unfreeze_max_per_task(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_max_per_day_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_UNFREEZE_MAX_PER_DAY=11` on an env-only project resolves
-    to 11 via the flat-env back-compat path.
+def test_max_per_day_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = daemon._auto_unfreeze_max_per_day(cfg)  # flat unset
     clean_env.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "11")
-    assert daemon._auto_unfreeze_max_per_day(cfg) == 11
+    assert daemon._auto_unfreeze_max_per_day(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +404,7 @@ def test_max_per_task_zero_honored_as_disable(cfg, clean_env, emit_reset):
     stated semantics — disabling the per-task cap should be an
     explicit operator decision, not a side effect of garbage).
     """
-    clean_env.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "0")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "0")
     assert daemon._auto_unfreeze_max_per_task(cfg) == 0
 
 

@@ -6,10 +6,11 @@ L317-329):
   1. Sectioned env override applies — `AP2_COMPONENTS_AUTO_APPROVE_ENABLED=1`
      overrides `[components.auto_approve] enabled = false` on the loaded
      `Config.from_toml` result.
-  2. Flat back-compat override applies — `AP2_AUTO_APPROVE=1` lands the
-     value at the matching sectioned path on `cfg.components_config` AND
-     fires exactly one `env_deprecated` event per process per knob; a
-     second read on the same process stays silent.
+  2. Flat behavioral-tunable env is IGNORED (TB-413) — `AP2_AUTO_APPROVE=1`
+     does NOT land its value on `cfg.components_config` (config.toml is the
+     SOLE source for tunables) and fires NO `env_deprecated` event (the
+     emission is retired — an ignored flat tunable has no override to
+     deprecate).
   3. 12-factor `_KNOBS_STAYING_ENV_ONLY` entries don't fire
      `env_deprecated` even when present in env (the partition's
      env-only side is documented-permanent — no deprecation framing).
@@ -171,42 +172,55 @@ def test_sectioned_env_override_does_not_emit_env_deprecated(
 # ---------------------------------------------------------------------------
 
 
-def test_flat_back_compat_override_applies_to_sectioned_path(
+def test_flat_tunable_env_is_ignored_not_applied(
     tmp_path, clean_env, emit_reset
 ):
-    """`AP2_AUTO_APPROVE=1` (a flat-name knob present in
-    `FLAT_TO_SECTIONED`) lands the value at
-    `components.auto_approve.enabled` on `cfg.components_config`, even
-    when the TOML omits the components section entirely."""
+    """TB-413: `AP2_AUTO_APPROVE=1` (a flat-name BEHAVIORAL tunable, NOT
+    on `config.ENV_PERMITTED_KEYS`) is IGNORED — `config.toml` is the
+    SOLE source for tunables. With the env set but the TOML omitting the
+    `[components.auto_approve]` section, the flat env value does NOT land
+    on `cfg.components_config["auto_approve"]["enabled"]`; the key is
+    absent (or carries the schema/template default), never the env's
+    `True`. Pins that a stale shell-exported `AP2_<tunable>` no longer
+    silently overrides the operator's TOML."""
     _write_toml(tmp_path, "[core]\ntick_interval_s = 30\n")
     clean_env.setenv("AP2_AUTO_APPROVE", "1")
     cfg = Config.load(tmp_path)
-    assert cfg.components_config.get("auto_approve", {}).get("enabled") is True
+    enabled = cfg.components_config.get("auto_approve", {}).get("enabled")
+    assert enabled is not True, (
+        "TB-413: a flat behavioral-tunable env must be ignored, not "
+        f"applied to the sectioned path; got enabled={enabled!r}"
+    )
 
 
-def test_flat_back_compat_override_overlays_existing_toml_value(
+def test_flat_tunable_env_does_not_override_toml(
     tmp_path, clean_env, emit_reset
 ):
-    """When the TOML already declares the sectioned key with a typed
-    default (`enabled = false`), the flat-name env hit coerces against
-    the existing type — `"1"` becomes `True` (bool), not int 1."""
+    """TB-413: when the TOML declares `[components.auto_approve] enabled =
+    false`, a flat `AP2_AUTO_APPROVE=1` env does NOT override it — the
+    flat tunable is ignored and the TOML value wins. The resolved value
+    stays `False`."""
     _write_toml(
         tmp_path,
         "[components.auto_approve]\nenabled = false\n",
     )
     clean_env.setenv("AP2_AUTO_APPROVE", "1")
     cfg = Config.load(tmp_path)
-    assert cfg.components_config["auto_approve"]["enabled"] is True
+    assert cfg.components_config["auto_approve"]["enabled"] is False, (
+        "TB-413: flat tunable env must lose to the TOML value (config.toml "
+        "is the sole source); got "
+        f"{cfg.components_config['auto_approve']['enabled']!r}"
+    )
 
 
-def test_flat_back_compat_emits_env_deprecated_exactly_once(
+def test_flat_tunable_env_emits_no_env_deprecated(
     tmp_path, clean_env, emit_reset
 ):
-    """Each flat-name hit fires exactly ONE `env_deprecated` event per
-    process per knob. A second `apply_env_overrides` call (e.g. on a
-    later config reload pass) stays silent — the module-level
-    `_EMITTED_ONCE` set guards against per-tick repeats that would
-    flood `events.jsonl`."""
+    """TB-413: the `env_deprecated` emission is RETIRED. An ignored flat
+    behavioral tunable (`AP2_AUTO_APPROVE=1`) has no override to
+    deprecate, so NO `env_deprecated` event is emitted on the load path.
+    Pin against a refactor that reintroduces the per-tick deprecation
+    emission that would flood `events.jsonl`."""
     _write_toml(tmp_path, "[core]\ntick_interval_s = 30\n")
     clean_env.setenv("AP2_AUTO_APPROVE", "1")
     cfg = Config.load(tmp_path)
@@ -214,43 +228,19 @@ def test_flat_back_compat_emits_env_deprecated_exactly_once(
     deprecations = [
         e for e in _read_events(cfg.events_file) if e.get("type") == "env_deprecated"
     ]
-    auto_approve_hits = [
-        e for e in deprecations if e.get("flat") == "AP2_AUTO_APPROVE"
-    ]
-    assert len(auto_approve_hits) == 1, (
-        f"expected exactly one env_deprecated for AP2_AUTO_APPROVE; "
-        f"got: {auto_approve_hits}"
+    assert deprecations == [], (
+        "TB-413: a flat tunable env must NOT emit env_deprecated "
+        f"(emission retired); got: {deprecations}"
     )
-    # Second read should stay silent — re-apply against the same cfg.
+    # A second apply pass must also stay silent — re-apply against the
+    # same cfg to confirm no deferred emission fires.
     apply_env_overrides(cfg)
     deprecations_after = [
         e for e in _read_events(cfg.events_file) if e.get("type") == "env_deprecated"
     ]
-    auto_approve_after = [
-        e for e in deprecations_after if e.get("flat") == "AP2_AUTO_APPROVE"
-    ]
-    assert len(auto_approve_after) == 1, (
-        f"second read should not re-emit; got: {auto_approve_after}"
+    assert deprecations_after == [], (
+        f"second apply pass must also stay silent; got: {deprecations_after}"
     )
-
-
-def test_env_deprecated_payload_shape(tmp_path, clean_env, emit_reset):
-    """The `env_deprecated` event payload carries `flat`, `sectioned`,
-    and `process_pid` — the briefing's pinned shape. `ts` is auto-added
-    by `events.append`."""
-    _write_toml(tmp_path, "[core]\ntick_interval_s = 30\n")
-    clean_env.setenv("AP2_AUTO_APPROVE", "true")
-    cfg = Config.load(tmp_path)
-    hits = [
-        e for e in _read_events(cfg.events_file)
-        if e.get("type") == "env_deprecated" and e.get("flat") == "AP2_AUTO_APPROVE"
-    ]
-    assert len(hits) == 1
-    evt = hits[0]
-    assert evt["flat"] == "AP2_AUTO_APPROVE"
-    assert evt["sectioned"] == "components.auto_approve.enabled"
-    assert evt["process_pid"] == os.getpid()
-    assert "ts" in evt
 
 
 # ---------------------------------------------------------------------------

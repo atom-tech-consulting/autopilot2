@@ -253,30 +253,42 @@ def test_judge_max_turns_reads_from_toml(tmp_path, clean_env, emit_reset):
 # ---------------------------------------------------------------------------
 
 
-def test_max_findings_llm_flat_env_back_compat(
+def test_max_findings_llm_flat_env_ignored(
     cfg, clean_env, emit_reset,
 ):
-    """`AP2_JANITOR_MAX_FINDINGS_LLM=7` set on an env-only project (no
-    TOML-side override) still resolves to 7 via the
-    `Config.get_component_value` reverse-`FLAT_TO_SECTIONED` lookup.
-    Pins the back-compat path the shell-export operator depends on.
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = janitor._max_findings_llm(cfg)  # flat unset
     clean_env.setenv("AP2_JANITOR_MAX_FINDINGS_LLM", "7")
-    assert janitor._max_findings_llm(cfg) == 7
+    assert janitor._max_findings_llm(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_judge_effort_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_JANITOR_JUDGE_EFFORT=medium` on an env-only project
-    resolves to "medium" via the flat-env back-compat path."""
+def test_judge_effort_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
+    """
+    baseline = janitor._judge_effort(cfg)  # flat unset
     clean_env.setenv("AP2_JANITOR_JUDGE_EFFORT", "medium")
-    assert janitor._judge_effort(cfg) == "medium"
+    assert janitor._judge_effort(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_judge_max_turns_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_JANITOR_JUDGE_MAX_TURNS=5` on an env-only project resolves
-    to 5 via the flat-env back-compat path."""
+def test_judge_max_turns_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
+    """
+    baseline = janitor._judge_max_turns(cfg)  # flat unset
     clean_env.setenv("AP2_JANITOR_JUDGE_MAX_TURNS", "5")
-    assert janitor._judge_max_turns(cfg) == 5
+    assert janitor._judge_max_turns(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +338,7 @@ def test_max_findings_llm_negative_clamps_to_zero(
     """Negative env value clamps to 0 (disables the judge). Pins the
     `max(0, v)` clamp the pre-migration helper enforced.
     """
-    clean_env.setenv("AP2_JANITOR_MAX_FINDINGS_LLM", "-5")
+    clean_env.setenv("AP2_COMPONENTS_JANITOR_MAX_FINDINGS_LLM", "-5")
     assert janitor._max_findings_llm(cfg) == 0
 
 
@@ -334,7 +346,7 @@ def test_max_findings_llm_zero_explicit(cfg, clean_env, emit_reset):
     """Explicit 0 → 0 (judge disabled, deterministic-only fallback).
     Pins the "set to 0 to disable" contract the module docstring
     promises."""
-    clean_env.setenv("AP2_JANITOR_MAX_FINDINGS_LLM", "0")
+    clean_env.setenv("AP2_COMPONENTS_JANITOR_MAX_FINDINGS_LLM", "0")
     assert janitor._max_findings_llm(cfg) == 0
 
 
@@ -358,7 +370,7 @@ def test_judge_effort_unset_falls_back_to_agent_effort(
     behavior the pre-migration nested `os.environ.get(...,
     os.environ.get('AP2_AGENT_EFFORT', 'high'))` expression carried.
     """
-    clean_env.setenv("AP2_AGENT_EFFORT", "low")
+    clean_env.setenv("AP2_CORE_AGENT_EFFORT", "low")
     assert janitor._judge_effort(cfg) == "low"
 
 
@@ -378,8 +390,8 @@ def test_judge_effort_janitor_specific_wins_over_agent_effort(
     → janitor-specific knob wins ("medium"). Pins the precedence
     contract the pre-migration nested-env-get expression enforced
     (janitor-specific outer, agent-wide inner)."""
-    clean_env.setenv("AP2_JANITOR_JUDGE_EFFORT", "medium")
-    clean_env.setenv("AP2_AGENT_EFFORT", "low")
+    clean_env.setenv("AP2_COMPONENTS_JANITOR_JUDGE_EFFORT", "medium")
+    clean_env.setenv("AP2_CORE_AGENT_EFFORT", "low")
     assert janitor._judge_effort(cfg) == "medium"
 
 
@@ -563,7 +575,7 @@ def test_run_janitor_skips_judge_when_cap_zero_via_cfg(
     """
     import subprocess as _subprocess
 
-    clean_env.setenv("AP2_JANITOR_MAX_FINDINGS_LLM", "0")
+    clean_env.setenv("AP2_COMPONENTS_JANITOR_MAX_FINDINGS_LLM", "0")
 
     # Minimal git-initialized project (mirrors test_janitor.py's
     # `_project` helper but without the full cron / SDK plumbing).

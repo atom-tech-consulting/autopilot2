@@ -243,19 +243,21 @@ def test_flat_to_sectioned_maps_migrated_knob(flat, key, _default):
 
 
 @pytest.mark.parametrize("flat, key, _default", _TB339_MIGRATED_KEYS)
-def test_flat_env_resolves_via_get_core_value(
+def test_flat_env_ignored_by_get_core_value(
     cfg, clean_env, emit_reset, flat, key, _default,
 ):
-    """With the flat env knob set, `cfg.get_core_value(<key>)` returns
-    the env value — the back-compat path through FLAT_TO_SECTIONED. Same
-    parity shape as TB-334's `test_get_core_value_flat_env_parity`,
-    pinned here for the two TB-339 keys so a per-knob regression
-    surfaces in the named TB.
+    """TB-413: the flat env knob is now IGNORED for these two behavioral
+    effort tunables — `config.toml`/schema is the sole source. Setting
+    the legacy flat env must NOT change what `cfg.get_core_value(<key>)`
+    resolves to. Same ignored shape as TB-334's
+    `test_get_core_value_flat_env_ignored`, pinned here for the two
+    TB-339 keys so a per-knob regression surfaces in the named TB.
     """
+    baseline = cfg.get_core_value(key, default="")
     clean_env.setenv(flat, "low")
-    assert cfg.get_core_value(key, default="") == "low", (
-        f"TB-339: flat env `{flat}=low` should resolve to `\"low\"` "
-        f"via `cfg.get_core_value({key!r})`."
+    assert cfg.get_core_value(key, default="") == baseline, (
+        f"TB-413: flat tunable env `{flat}=low` must be ignored; "
+        f"config.toml/schema wins for `{key}` (baseline {baseline!r})."
     )
 
 
@@ -305,8 +307,13 @@ def test_or_chain_uses_agent_effort_when_per_site_empty(
     """When `agent_effort` IS set (globally) but the per-site knob isn't,
     the `or`-chain picks up the global. Pins the precedence layer
     between the per-site default ("") and the global cfg-read default.
+
+    TB-413: `agent_effort` is a behavioral tunable, so it's injected via
+    the sectioned `AP2_CORE_AGENT_EFFORT` (the flat `AP2_AGENT_EFFORT`
+    override is ignored); the sectioned env still overrides, so the
+    downstream or-chain fallback logic is still exercised.
     """
-    clean_env.setenv("AP2_AGENT_EFFORT", "xhigh")
+    clean_env.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
     per_site = cfg.get_core_value(key, default="")
     assert per_site == "", (
         f"TB-339: per-site `{key}` should remain `\"\"` when only "
@@ -331,9 +338,15 @@ def test_or_chain_per_site_wins_over_agent_effort(
     """When BOTH per-site and global are set, the per-site value wins —
     the very precedence the original `os.environ.get(<flat>,
     cfg.get_core_value("agent_effort", ...))` shape preserved.
+
+    TB-413: both effort knobs are behavioral tunables, so they're
+    injected via their sectioned env names (`AP2_CORE_AGENT_EFFORT` and
+    `AP2_CORE_<KEY>`) — the flat overrides are ignored; the sectioned
+    env still overrides, so the downstream or-chain precedence logic is
+    still exercised.
     """
-    clean_env.setenv("AP2_AGENT_EFFORT", "xhigh")
-    clean_env.setenv(flat, "low")
+    clean_env.setenv("AP2_CORE_AGENT_EFFORT", "xhigh")
+    clean_env.setenv(f"AP2_CORE_{key.upper()}", "low")
     per_site = cfg.get_core_value(key, default="")
     assert per_site == "low"
     effort = per_site or cfg.get_core_value(

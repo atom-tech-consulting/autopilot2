@@ -147,10 +147,15 @@ def test_list_json_carries_structured_rows(tmp_path, clean_env, capsys):
 def test_list_source_attribution_recognizes_env_override(
     tmp_path, clean_env, capsys
 ):
-    """Setting `AP2_AUTO_APPROVE=1` flips `components.auto_approve.enabled`
-    row's source to `env-override` (flat back-compat path)."""
+    """Setting `AP2_COMPONENTS_AUTO_APPROVE_ENABLED=1` flips the
+    `components.auto_approve.enabled` row's source to `env-override`.
+
+    TB-413: the flat `AP2_AUTO_APPROVE` tunable override is removed
+    (the runtime resolver ignores it, so `_attribute_source` no longer
+    credits it as `env-override`); the sectioned env is the surviving
+    structured-override path the attribution must recognize."""
     cfg = _project(tmp_path)
-    clean_env.setenv("AP2_AUTO_APPROVE", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
     rc = cmd_config_list(cfg, Namespace(json=True))
     assert rc == 0
     out = capsys.readouterr().out
@@ -198,13 +203,17 @@ def _core_row(rows, field_name):
 def test_collect_rows_resolves_agent_model_env_override(
     tmp_path, clean_env
 ):
-    """TB-344: with `AP2_AGENT_MODEL` set (flat env back-compat),
+    """TB-344: with `AP2_CORE_AGENT_MODEL` set (the sectioned env),
     `collect_rows` resolves `core.agent_model` to the env value via
     `cfg.get_core_value` — the same value a dispatch site receives.
     Pre-fix `getattr(cfg, "agent_model")` had no attribute and the row
-    rendered `(unset)`."""
+    rendered `(unset)`.
+
+    TB-413: injects via the SECTIONED env name (the flat `AP2_AGENT_MODEL`
+    tunable override is removed; config.toml is the sole source, with the
+    sectioned env remaining the explicit structured override)."""
     cfg = _project(tmp_path)
-    clean_env.setenv("AP2_AGENT_MODEL", "claude-opus-4-8[1m]")
+    clean_env.setenv("AP2_CORE_AGENT_MODEL", "claude-opus-4-8[1m]")
     row = _core_row(collect_rows(cfg, default_registry()), "agent_model")
     assert row.value == "claude-opus-4-8[1m]", (
         f"expected env-override value, got {row.value!r}"
@@ -289,14 +298,17 @@ def _component_row(rows, path):
 
 
 def test_collect_rows_resolves_component_env_override(tmp_path, clean_env):
-    """TB-346: with `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` set (flat env
-    back-compat), `collect_rows` resolves
+    """TB-346: with `AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP` set
+    (the sectioned env), `collect_rows` resolves
     `components.auto_approve.window_token_cap` to the env value via
     `cfg.get_component_value` — the same value a runtime component read
     receives. Pre-fix `_resolve_component_value` read the cfg snapshot +
-    schema default and so displayed the default `0`."""
+    schema default and so displayed the default `0`.
+
+    TB-413: injects via the SECTIONED env name (the flat
+    `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP` tunable override is removed)."""
     cfg = _project(tmp_path)
-    clean_env.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "100000000")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_WINDOW_TOKEN_CAP", "100000000")
     rows = collect_rows(cfg, default_registry())
     row = _component_row(rows, "components.auto_approve.window_token_cap")
     assert row.value == "100000000", (

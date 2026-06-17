@@ -62,9 +62,9 @@ def cfg(tmp_path: Path, monkeypatch) -> Config:
     conservative default is the contract under test. Detector knobs
     cleared too so each arc controls its own threshold/debounce
     semantics explicitly."""
-    monkeypatch.delenv("AP2_ATTENTION_IMMEDIATE_PUSH", raising=False)
-    monkeypatch.delenv("AP2_TASK_STUCK_THRESHOLD_S", raising=False)
-    monkeypatch.delenv("AP2_ATTENTION_DEBOUNCE_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_TASK_STUCK_THRESHOLD_S", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", raising=False)
     init_project(tmp_path)
     c = Config.load(tmp_path)
     c.ensure_dirs()
@@ -143,7 +143,7 @@ def test_push_opt_out_by_default(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import tools, daemon
 
-    monkeypatch.delenv("AP2_ATTENTION_IMMEDIATE_PUSH", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", raising=False)
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     posts: list[tuple[str, str]] = []
@@ -175,7 +175,7 @@ def test_push_opt_out_for_falsy_value(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import tools, daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "0")
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     posts: list = []
@@ -207,7 +207,7 @@ def test_push_on_calls_mm_post_with_documented_shape(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     posts: list[tuple[str, str]] = []
@@ -250,7 +250,7 @@ def test_push_text_includes_project_name_prefix(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     posts: list[tuple[str, str]] = []
@@ -296,7 +296,7 @@ def test_no_destination_emits_sticky_warning_then_suppresses(
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
 
     posts: list = []
@@ -339,7 +339,7 @@ def test_no_destination_state_file_persists_flag(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events, _attention_push_state_path
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
 
     def _unused_mm_post(*a, **k):
@@ -376,7 +376,7 @@ def test_no_destination_flag_resets_after_successful_push(
     # had landed.
     _save_attention_push_state(cfg, {"warned_no_destination": True})
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.setenv("AP2_MM_CHANNELS", "now-configured-channel")
 
     def _fake_mm_post(channel: str, text: str, thread_id: str = "") -> str:
@@ -404,7 +404,7 @@ def test_mm_post_failure_emits_attention_push_error(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     def _raising_mm_post(channel: str, text: str, thread_id: str = "") -> str:
@@ -435,7 +435,7 @@ def test_mm_post_failure_does_not_abort_iteration(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     calls: list[str] = []
@@ -485,7 +485,7 @@ def test_push_debounce_piggybacks_on_attention_raised_debounce(
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     posts: list = []
@@ -523,7 +523,7 @@ def test_push_refire_past_debounce_window(cfg: Config, monkeypatch):
     from ap2.daemon import _maybe_emit_attention_events
     from ap2 import daemon
 
-    monkeypatch.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH", "1")
     monkeypatch.setenv("AP2_MM_CHANNELS", "test-channel-id")
 
     posts: list = []

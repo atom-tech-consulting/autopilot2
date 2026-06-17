@@ -110,6 +110,12 @@ def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     for name in list(os.environ):
         if name.startswith("AP2_"):
             monkeypatch.delenv(name, raising=False)
+    # Disable the LLM dep-coherence judge so the `add_backlog` path
+    # below doesn't make a real, slow, non-deterministic Haiku judge
+    # call (orthogonal to the auto-unfreeze behavior under test).
+    # `AP2_VALIDATOR_JUDGE_DISABLED` is an `ENV_PERMITTED_KEYS` env-only
+    # knob, so its flat env still applies under TB-413.
+    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
     init_project(tmp_path)
     (tmp_path / "goal.md").write_text(_GOAL_MD)
     cfg = Config.load(tmp_path)
@@ -258,18 +264,20 @@ def test_allowlist_unset_returns_empty(cfg: Config, monkeypatch):
     daemon treats this as "feature disabled," not as a typo / parse
     failure. Pins the opt-in default.
 
-    TB-327: helper now takes a `cfg` argument and resolves via
-    `Config.get_component_value`; the flat env name still wins via
-    the back-compat reverse-lookup, so the parse-shape pin holds
-    end-to-end.
+    TB-327: helper takes a `cfg` argument and resolves via
+    `Config.get_component_value`. TB-413: the flat
+    `AP2_AUTO_UNFREEZE_FIX_SHAPES` tunable override is removed
+    (config.toml is the sole source), so the parse-shape pin injects via
+    the SECTIONED env name `AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES`,
+    which still overrides — holding the pin end-to-end.
     """
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", raising=False)
     assert daemon._auto_unfreeze_allowlist(cfg) == frozenset()
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", "")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "")
     assert daemon._auto_unfreeze_allowlist(cfg) == frozenset()
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", "  ")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "  ")
     assert daemon._auto_unfreeze_allowlist(cfg) == frozenset()
 
 
@@ -281,7 +289,7 @@ def test_allowlist_parses_csv(cfg: Config, monkeypatch):
     TB-327: same `cfg`-argument migration as the unset-pin sibling.
     """
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES",
         "grep_missing_r_on_dir, literal_backtick_in_shell_bullet ,, bare_path_to_test_f",
     )
     got = daemon._auto_unfreeze_allowlist(cfg)
@@ -298,28 +306,30 @@ def test_per_task_cap_default_is_one(cfg: Config, monkeypatch):
     before fallback to manual unfreeze). Pins the briefing's stated
     default.
 
-    TB-327: helper now takes a `cfg` argument; the flat env name still
-    wins via the `Config.get_component_value` back-compat reverse-
-    lookup, so the parse-shape pin still exercises the env parser
-    shape end-to-end (default-on-empty/garbage/negative, zero-honored,
-    positive-int passthrough).
+    TB-327: helper takes a `cfg` argument. TB-413: the flat
+    `AP2_AUTO_UNFREEZE_MAX_PER_TASK` tunable override is removed, so the
+    parse-shape pin injects via the SECTIONED env name
+    `AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK`, which still overrides —
+    exercising the env parser shape end-to-end
+    (default-on-empty/garbage/negative, zero-honored, positive-int
+    passthrough).
     """
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", raising=False)
     assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "")
     assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "garbage")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "garbage")
     assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "-5")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "-5")
     assert daemon._auto_unfreeze_max_per_task(cfg) == 1
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "0")
     assert daemon._auto_unfreeze_max_per_task(cfg) == 0  # explicit disable honored
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "5")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "5")
     assert daemon._auto_unfreeze_max_per_task(cfg) == 5
 
 
@@ -353,10 +363,10 @@ def test_tb320_kill_switch_short_circuits_and_emits_event(
     au._reset_disabled_event_emitted_for_tests()
 
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES",
         "grep_missing_r_on_dir",
     )
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "1")
 
     task_id, briefing_path = _add_and_freeze(cfg)
     rel = str(briefing_path.relative_to(cfg.project_root))
@@ -430,9 +440,9 @@ def test_tb320_kill_switch_unset_runs_sweep_normally(
     from ap2.components import auto_unfreeze as au
 
     au._reset_disabled_event_emitted_for_tests()
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", raising=False)
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES",
         "grep_missing_r_on_dir",
     )
 
@@ -476,49 +486,51 @@ def test_tb320_is_auto_unfreeze_disabled_truthy_parse(
     truthy set as the sibling kill-switch parsers
     (`AP2_FOCUS_AUTO_ADVANCE_DISABLED`, `AP2_VALIDATOR_JUDGE_DISABLED`):
     `1` / `true` / `yes` / `on` (case-insensitive). Default-unset →
-    False. The flat env name still wins via the back-compat reverse-
-    lookup so the truthy-parse pin still exercises the env-side parser
-    shape end-to-end.
+    False. TB-413: the flat `AP2_AUTO_UNFREEZE_DISABLED` tunable override
+    is removed, so the truthy-parse pin injects via the SECTIONED env
+    name `AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED`, which still overrides —
+    exercising the env-side parser shape end-to-end.
     """
     from ap2.components.auto_unfreeze import _is_auto_unfreeze_disabled
 
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", raising=False)
     assert _is_auto_unfreeze_disabled(cfg) is False
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "")
     assert _is_auto_unfreeze_disabled(cfg) is False
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "0")
     assert _is_auto_unfreeze_disabled(cfg) is False
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "false")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "false")
     assert _is_auto_unfreeze_disabled(cfg) is False
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "1")
     assert _is_auto_unfreeze_disabled(cfg) is True
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "TRUE")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "TRUE")
     assert _is_auto_unfreeze_disabled(cfg) is True
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "yes")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "yes")
     assert _is_auto_unfreeze_disabled(cfg) is True
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DISABLED", "on")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DISABLED", "on")
     assert _is_auto_unfreeze_disabled(cfg) is True
 
 
 def test_per_day_cap_default_is_three(cfg: Config, monkeypatch):
     """`AP2_AUTO_UNFREEZE_MAX_PER_DAY` defaults to 3 (rolling 24h).
 
-    TB-327: helper now takes a `cfg` argument; the flat env name still
-    wins via the back-compat reverse-lookup.
+    TB-327: helper takes a `cfg` argument. TB-413: the flat tunable
+    override is removed, so this injects via the SECTIONED env name
+    `AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY`.
     """
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", raising=False)
     assert daemon._auto_unfreeze_max_per_day(cfg) == 3
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "")
     assert daemon._auto_unfreeze_max_per_day(cfg) == 3
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "not-a-number")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "not-a-number")
     assert daemon._auto_unfreeze_max_per_day(cfg) == 3
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "0")
     assert daemon._auto_unfreeze_max_per_day(cfg) == 0
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "10")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "10")
     assert daemon._auto_unfreeze_max_per_day(cfg) == 10
 
 
@@ -532,7 +544,7 @@ def test_a_unset_allowlist_is_noop(cfg: Config, monkeypatch):
     even when a Frozen task has a parseable `BriefingFix:` prefix. No
     `auto_unfreeze_applied` / `auto_unfreeze_skipped` events fire; the
     task stays Frozen until operator-manual `ap2 unfreeze`."""
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", raising=False)
     task_id, briefing_path = _add_and_freeze(cfg)
     # Provide a perfectly-shaped fix in a blocked summary.
     rel = str(briefing_path.relative_to(cfg.project_root))
@@ -584,7 +596,7 @@ def test_b_patch_applied_and_redispatched(cfg: Config, monkeypatch):
     queue update op, and the unfreeze op moves the task to Backlog.
     Pins the briefing's Scope (3) end-to-end."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES",
         "grep_missing_r_on_dir,literal_backtick_in_shell_bullet",
     )
 
@@ -663,7 +675,7 @@ def test_c_briefing_mismatch_skips_and_stays_frozen(cfg: Config, monkeypatch):
     reason=briefing_mismatch` and leaves the task Frozen. Pins the
     data-race-window safety check from Scope (3)."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
 
     task_id, briefing_path = _add_and_freeze(cfg)
@@ -720,7 +732,7 @@ def test_d_unlisted_shape_skips(cfg: Config, monkeypatch):
     `shape_not_in_allowlist`. The operator opens new shapes by editing
     the env-knob string; the daemon never invents shapes."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
 
     task_id, briefing_path = _add_and_freeze(cfg)
@@ -767,9 +779,9 @@ def test_e_per_task_cap_falls_back_to_manual(cfg: Config, monkeypatch):
     applications, further attempts skip with `per_task_cap` and the task
     stays Frozen until operator-manual unfreeze. Bounds oscillation."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "1")
 
     task_id, briefing_path = _add_and_freeze(cfg)
     rel = str(briefing_path.relative_to(cfg.project_root))
@@ -841,10 +853,10 @@ def test_f_per_day_cap_halts_and_emits_decisions_needed(
     bullet to ideation_state.md so the operator sees a systemic-regression
     signal."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "5")  # keep per-task open
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "2")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "5")  # keep per-task open
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "2")
 
     # Seed 2 prior auto-unfreeze applications within the last 24h.
     events.append(
@@ -927,7 +939,7 @@ def test_g_missing_prefix_falls_through_to_manual(cfg: Config, monkeypatch):
     event, task stays Frozen. Pins the "no regex-on-prose guessing"
     contract."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
 
     task_id, _ = _add_and_freeze(cfg)
@@ -967,9 +979,9 @@ def test_per_day_cap_window_rolls_off_after_24h(cfg: Config, monkeypatch):
     the per-day cap — the window is rolling, not cumulative. Pins the
     briefing's "rolling 24h cap" rule from Scope (4)."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "2")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "2")
 
     # Seed an old applied event (more than 24h ago) and a recent one.
     # We can't easily backdate events.append's ts, so we'll patch
@@ -1053,7 +1065,7 @@ def test_end_to_end_tick_walks_auto_unfreeze_path(cfg: Config, monkeypatch):
     sweep queues `update` + `unfreeze`; the NEXT tick's drain applies
     them. Pins the two-tick sequence end-to-end."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
 
     task_id, briefing_path = _add_and_freeze(cfg, title="tb225 e2e")

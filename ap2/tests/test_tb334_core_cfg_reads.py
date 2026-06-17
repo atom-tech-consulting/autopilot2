@@ -242,21 +242,23 @@ _FLAT_PARITY_CASES = [
 
 
 @pytest.mark.parametrize("key, flat, sample", _FLAT_PARITY_CASES)
-def test_get_core_value_flat_env_parity(
+def test_get_core_value_flat_env_ignored(
     cfg, clean_env, emit_reset, key, flat, sample,
 ):
-    """For each migrated agent-runtime knob, a
-    `monkeypatch.setenv(<flat>, <sample>)` value reaches
-    `cfg.get_core_value(<key>)` identical to what
-    `os.environ.get(<flat>, default)` would have returned pre-TB-334.
+    """TB-413: the flat `AP2_*` tunable override is now IGNORED for these
+    behavioral agent-runtime knobs — `config.toml`/schema is the sole
+    source. Setting the legacy flat env must NOT change what
+    `cfg.get_core_value(<key>)` resolves to (the baseline stays put).
 
-    Drives the back-compat path the shell-export operator depends on
-    via the helper's reverse-`FLAT_TO_SECTIONED` lookup.
+    The five migrated agent-runtime knobs are behavioral tunables (none
+    is on `ENV_PERMITTED_KEYS`), so the reverse-`FLAT_TO_SECTIONED`
+    back-compat layer never fires for them.
     """
+    baseline = cfg.get_core_value(key, default="UNSET")
     clean_env.setenv(flat, sample)
-    assert cfg.get_core_value(key, default="UNSET") == sample, (
-        f"TB-334: flat env `{flat}={sample}` should resolve to {sample!r} "
-        f"via `cfg.get_core_value({key!r})`."
+    assert cfg.get_core_value(key, default="UNSET") == baseline, (
+        f"TB-413: flat tunable env `{flat}={sample}` must be ignored; "
+        f"config.toml/schema wins for `{key}` (baseline {baseline!r})."
     )
 
 
@@ -354,17 +356,21 @@ def test_get_core_value_reads_from_toml_snapshot(tmp_path, clean_env, emit_reset
     assert cfg.get_core_value("task_max_turns", default=999) == 88
 
 
-def test_flat_env_wins_over_toml_snapshot(tmp_path, clean_env, emit_reset):
-    """Precedence pin: flat env (back-compat layer) wins over the TOML
-    snapshot — the operator who hasn't migrated their env file still
-    sees their env value override the TOML default.
+def test_toml_snapshot_wins_over_flat_env(tmp_path, clean_env, emit_reset):
+    """TB-413 precedence pin: the TOML snapshot wins over the (now
+    ignored) flat env. An operator who hasn't migrated their env file
+    no longer sees the flat `AP2_AGENT_MODEL` value override the TOML
+    — `config.toml`/schema is the sole source for this behavioral knob.
     """
     cfg = _load_toml_cfg(
         tmp_path,
         '[core]\nagent_model = "claude-sonnet-toml"\n',
     )
     clean_env.setenv("AP2_AGENT_MODEL", "claude-flat-env")
-    assert cfg.get_core_value("agent_model", default="X") == "claude-flat-env"
+    assert cfg.get_core_value("agent_model", default="X") == "claude-sonnet-toml", (
+        "TB-413: the TOML snapshot must win; the flat tunable env "
+        "`AP2_AGENT_MODEL` is ignored."
+    )
 
 
 def test_sectioned_env_wins_over_toml_snapshot(tmp_path, clean_env, emit_reset):

@@ -230,10 +230,10 @@ def test_is_auto_unfreeze_dry_run_cfg_reads_match_env(
     via the flat-env back-compat reverse-lookup.
     """
     for val in ("1", "true", "yes"):
-        clean_env.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", val)
+        clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", val)
         assert automation_status._is_auto_unfreeze_dry_run(cfg) is True, val
     for val in ("0", "false", "no", ""):
-        clean_env.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", val)
+        clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", val)
         assert automation_status._is_auto_unfreeze_dry_run(cfg) is False, val
 
 
@@ -245,15 +245,19 @@ def test_validator_judge_noisy_threshold_cfg_reads_match_env(
     Defaults to 5 on unset / non-int / non-positive; honors operator-
     set positive values.
     """
-    clean_env.delenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False)
+    clean_env.delenv(
+        "AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", raising=False,
+    )
     assert automation_status.validator_judge_noisy_threshold(cfg) == 5
-    clean_env.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "7")
+    clean_env.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "7")
     assert automation_status.validator_judge_noisy_threshold(cfg) == 7
-    clean_env.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "not-a-number")
+    clean_env.setenv(
+        "AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "not-a-number",
+    )
     assert automation_status.validator_judge_noisy_threshold(cfg) == 5
-    clean_env.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "0")
+    clean_env.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "0")
     assert automation_status.validator_judge_noisy_threshold(cfg) == 5
-    clean_env.setenv("AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD", "-3")
+    clean_env.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_NOISY_THRESHOLD", "-3")
     assert automation_status.validator_judge_noisy_threshold(cfg) == 5
 
 
@@ -266,11 +270,11 @@ def test_collect_auto_approve_state_threads_cfg_through_unfreeze_dry_run(
     key end-to-end. Drives the `ap2 status` text/JSON + web home
     automation card.
     """
-    clean_env.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["auto_unfreeze_dry_run_enabled"] is True
 
-    clean_env.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    clean_env.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
     state = automation_status.collect_auto_approve_state(cfg)
     assert state["auto_unfreeze_dry_run_enabled"] is False
 
@@ -292,13 +296,15 @@ def test_doctor_auto_unfreeze_audit_cfg_reads_match_env(
     assert "disabled" in res.messages[0][1].lower()
 
     # Branch 2: dry-run armed without allowlist → WARN.
-    clean_env.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
     res = doctor.auto_unfreeze_audit(cfg)
     levels = [lvl for lvl, _ in res.messages]
     assert levels.count("WARN") == 1, levels
 
     # Branch 3: dry-run armed WITH allowlist → INFO summary.
-    clean_env.setenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir")
+    clean_env.setenv(
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+    )
     res = doctor.auto_unfreeze_audit(cfg)
     levels = [lvl for lvl, _ in res.messages]
     assert levels == ["INFO"], levels
@@ -314,9 +320,9 @@ def test_doctor_auto_unfreeze_audit_honors_custom_caps_via_cfg(
     surface in the INFO summary when set, mirroring the TB-239 env-only
     contract.
     """
-    clean_env.setenv("AP2_AUTO_UNFREEZE_FIX_SHAPES", "shape_a")
-    clean_env.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "5")
-    clean_env.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "10")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "shape_a")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "5")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "10")
     res = doctor.auto_unfreeze_audit(cfg)
     msg = res.messages[0][1]
     assert "per-task cap 5" in msg
@@ -332,7 +338,7 @@ def test_doctor_validator_judge_timeout_audit_cfg_reads_match_env(
     (the parser still runs; we exercise the value-flow through cfg via
     the message body, which echoes the env knob name).
     """
-    clean_env.setenv("AP2_VALIDATOR_JUDGE_TIMEOUT_S", "60")
+    clean_env.setenv("AP2_COMPONENTS_VALIDATOR_JUDGE_TIMEOUT_S", "60")
     # With no validator_judge_passed events seeded, the audit short-
     # circuits to INFO "insufficient data" — that confirms the cfg
     # path didn't trip an exception during parse.

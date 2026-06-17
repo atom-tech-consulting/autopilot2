@@ -103,6 +103,12 @@ def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     for name in list(os.environ):
         if name.startswith("AP2_"):
             monkeypatch.delenv(name, raising=False)
+    # Disable the LLM dep-coherence judge so the `add_backlog` path
+    # doesn't make a real, slow, non-deterministic Haiku judge call
+    # (orthogonal to the dry-run behavior under test).
+    # `AP2_VALIDATOR_JUDGE_DISABLED` is an `ENV_PERMITTED_KEYS` env-only
+    # knob, so its flat env still applies under TB-413.
+    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
     init_project(tmp_path)
     (tmp_path / "goal.md").write_text(_GOAL_MD)
     cfg = Config.load(tmp_path)
@@ -203,25 +209,27 @@ def test_dry_run_helper_default_off_and_truthy_parse(
     False so a typo doesn't silently enable a feature that's supposed
     to flip the WRITE step. Pins the briefing's Scope (1) parse shape.
 
-    TB-327: helper now takes a `cfg` argument and resolves the env
-    name via `Config.get_component_value`'s reverse-`FLAT_TO_SECTIONED`
-    back-compat path, so the flat env name still wins end-to-end and
-    the parse-shape pin holds.
+    TB-327: helper takes a `cfg` argument and resolves the env name via
+    `Config.get_component_value`. TB-413: the flat
+    `AP2_AUTO_UNFREEZE_DRY_RUN` tunable override is removed (config.toml
+    is the sole source), so the parse-shape pin injects via the SECTIONED
+    env name `AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN`, which still
+    overrides — holding the pin end-to-end.
     """
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
     assert daemon._auto_unfreeze_dry_run(cfg) is False
 
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "")
     assert daemon._auto_unfreeze_dry_run(cfg) is False
 
     for truthy in ("1", "true", "yes", "TRUE", "Yes", "TrUe"):
-        monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", truthy)
+        monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", truthy)
         assert daemon._auto_unfreeze_dry_run(cfg) is True, (
             f"{truthy!r} must parse truthy"
         )
 
     for falsy in ("0", "false", "no", "off", "garbage", "  "):
-        monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", falsy)
+        monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", falsy)
         assert daemon._auto_unfreeze_dry_run(cfg) is False, (
             f"{falsy!r} must parse falsy"
         )
@@ -243,10 +251,10 @@ def test_a_dry_run_emits_would_event_and_leaves_state_untouched(
     the operator queue untouched. Pins briefing Scope (2) end-to-end.
     """
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES",
         "grep_missing_r_on_dir,literal_backtick_in_shell_bullet",
     )
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
 
     task_id, briefing_path = _add_and_freeze(cfg)
     rel = str(briefing_path.relative_to(cfg.project_root))
@@ -339,10 +347,10 @@ def test_b_dry_run_per_task_cap_skip_wins_over_dry_run(
     `would_auto_unfreeze` event lands for the task either. Pins
     briefing Scope (6b)."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "1")
 
     task_id, briefing_path = _add_and_freeze(cfg)
     rel = str(briefing_path.relative_to(cfg.project_root))
@@ -433,11 +441,11 @@ def test_c_dry_run_per_day_cap_halts_without_decisions_needed_bullet(
     Pins briefing Scope (6c) + Design point on "dry-run users get the
     same halt signal pre-flight"."""
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_DRY_RUN", "1")
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_TASK", "5")
-    monkeypatch.setenv("AP2_AUTO_UNFREEZE_MAX_PER_DAY", "2")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_TASK", "5")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_UNFREEZE_MAX_PER_DAY", "2")
 
     # Seed 2 prior real auto_unfreeze_applied events within the last 24h
     # (the per-day cap counts real applications, not dry-run sims).
@@ -550,9 +558,9 @@ def test_default_off_is_byte_identical_to_tb225_path(
     and the briefing gets patched on the next drain. Pins the briefing's
     Design point on "Default-off: when AP2_AUTO_UNFREEZE_DRY_RUN is
     unset, behavior is byte-identical to today"."""
-    monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_UNFREEZE_DRY_RUN", raising=False)
     monkeypatch.setenv(
-        "AP2_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
+        "AP2_COMPONENTS_AUTO_UNFREEZE_FIX_SHAPES", "grep_missing_r_on_dir",
     )
 
     task_id, briefing_path = _add_and_freeze(cfg)

@@ -277,45 +277,55 @@ def test_immediate_push_reads_from_toml(tmp_path, clean_env, emit_reset):
 # ---------------------------------------------------------------------------
 
 
-def test_task_stuck_threshold_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_TASK_STUCK_THRESHOLD_S=7200` on an env-only project still
-    resolves to 7200 via the `Config.get_component_value` reverse-
-    `FLAT_TO_SECTIONED` lookup. Pins the back-compat path the
-    shell-export operator depends on.
+def test_task_stuck_threshold_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = _task_stuck_threshold_s(cfg)  # flat unset
     clean_env.setenv("AP2_TASK_STUCK_THRESHOLD_S", "7200")
-    assert _task_stuck_threshold_s(cfg) == 7200
+    assert _task_stuck_threshold_s(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_task_frozen_recency_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_TASK_FROZEN_RECENCY_S=3600` on an env-only project resolves
-    to 3600 via the flat-env back-compat path.
+def test_task_frozen_recency_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = _task_frozen_recency_s(cfg)  # flat unset
     clean_env.setenv("AP2_TASK_FROZEN_RECENCY_S", "3600")
-    assert _task_frozen_recency_s(cfg) == 3600
+    assert _task_frozen_recency_s(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_attention_debounce_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_ATTENTION_DEBOUNCE_S=1800` on an env-only project resolves
-    to 1800 via the flat-env back-compat path.
+def test_attention_debounce_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = _attention_debounce_s(cfg)  # flat unset
     clean_env.setenv("AP2_ATTENTION_DEBOUNCE_S", "1800")
-    assert _attention_debounce_s(cfg) == 1800
+    assert _attention_debounce_s(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_immediate_push_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_ATTENTION_IMMEDIATE_PUSH=1` on an env-only project resolves
-    to True via the flat-env back-compat path. Same truthy set the
-    pre-migration env-only parse accepted (`1`/`true`/`yes`/`on`).
+def test_immediate_push_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default), regardless of which
+    truthy spelling the stale flat env carries.
     """
-    clean_env.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "1")
-    assert _is_attention_immediate_push_enabled(cfg) is True
-    clean_env.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "true")
-    assert _is_attention_immediate_push_enabled(cfg) is True
-    clean_env.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "yes")
-    assert _is_attention_immediate_push_enabled(cfg) is True
-    clean_env.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", "on")
-    assert _is_attention_immediate_push_enabled(cfg) is True
+    baseline = _is_attention_immediate_push_enabled(cfg)  # flat unset
+    for truthy in ("1", "true", "yes", "on"):
+        clean_env.setenv("AP2_ATTENTION_IMMEDIATE_PUSH", truthy)
+        assert _is_attention_immediate_push_enabled(cfg) == baseline, (
+            "TB-413: flat tunable env must be ignored; "
+            "config.toml/schema wins"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +513,7 @@ def test_should_suppress_resolves_debounce_via_cfg(cfg, clean_env, emit_reset):
     the helper resolves through the cfg-side path and respects the
     new window. Pins the cfg-threading TB-328 introduced.
     """
-    clean_env.setenv("AP2_ATTENTION_DEBOUNCE_S", "120")  # 2 min
+    clean_env.setenv("AP2_COMPONENTS_ATTENTION_DEBOUNCE_S", "120")  # 2 min
     cond = AttentionCondition(
         type="task_stuck",
         key="task_stuck:TB-1",

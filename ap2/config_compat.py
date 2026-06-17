@@ -7,8 +7,12 @@ L317-329). This module ships three load-bearing surfaces:
      existing flat `AP2_*` env knob (as audited 2026-05-28) to its
      sectioned counterpart (e.g. `AP2_AUTO_APPROVE` →
      `components.auto_approve.enabled`, `AP2_TICK_S` →
-     `core.tick_interval_s`). Anything in this map gets a back-compat
-     read path with a deprecation event; anything in
+     `core.tick_interval_s`). The map is retained as the operator-facing
+     name→path contract (and the reverse-lookup table the cfg helpers
+     walk), but TB-413 gates the flat-env OVERRIDE it grants to the
+     `config.ENV_PERMITTED_KEYS` allowlist: a behavioral-tunable flat
+     name is ignored (config.toml is the sole source) while allowlisted
+     deployment-identity / runtime-fixed flat names still win. Anything in
      `_KNOBS_STAYING_ENV_ONLY` is documented-permanent env-only. The
      two sets partition the existing `AP2_*` namespace; a regression-pin
      test asserts the partition is total against
@@ -17,10 +21,12 @@ L317-329). This module ships three load-bearing surfaces:
      after the TOML overlay. For each `AP2_<SECTION>_<KEY>` env name
      present in `os.environ` that matches a key already populated on
      the loaded config (sectioned-env path), override the value. For
-     each flat `AP2_*` key in `FLAT_TO_SECTIONED` present in
-     `os.environ` (back-compat path), apply the override to the
-     matching sectioned path AND emit a one-shot `env_deprecated` event
-     per process per knob.
+     each flat `AP2_*` key in `FLAT_TO_SECTIONED`, TB-413 gates the
+     overlay to the `config.ENV_PERMITTED_KEYS` allowlist: only
+     env-permitted flat names (secret / deployment-identity /
+     runtime-fixed) still apply; a flat name for a behavioral tunable is
+     IGNORED. The `env_deprecated` emission is RETIRED (an ignored flat
+     tunable has no override to deprecate).
   3. `_KNOBS_STAYING_ENV_ONLY` — frozenset of true 12-factor knobs
      (Mattermost auth / channel identity, integration secrets,
      deployment-environment paths) that never migrate to TOML per
@@ -28,10 +34,12 @@ L317-329). This module ships three load-bearing surfaces:
      documents the cut-line for auditability per goal.md L361.
 
 Precedence order (high → low):
-  sectioned env > flat env (back-compat) > TOML file > in-source defaults.
+  sectioned env > flat env (env-permitted allowlist only, TB-413) >
+  TOML file > in-source defaults.
 
-Same shape as today's "shell export wins over `.cc-autopilot/env`"
-rule, extended one precedence level lower.
+`config.toml` is the SOLE source for behavioral tunables (TB-413); the
+flat `AP2_<tunable>` override that used to win over the TOML value is
+removed. Env still wins for the secret + deployment-identity allowlist.
 
 Import-direction (TB-311 parity): this module must NOT statically
 import from `ap2.components`. Schema declarations live on component
@@ -261,12 +269,20 @@ _KNOBS_STAYING_ENV_ONLY: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 # One-shot env_deprecated emission bookkeeping.
 #
+# TB-413 RETIRED the `env_deprecated` emission: the flat `AP2_*` tunable
+# override path is removed, so there is no longer an override to deprecate
+# (an ignored flat tunable simply has no effect — see
+# `_apply_flat_back_compat`). `_emit_env_deprecated` is therefore no longer
+# invoked from any runtime path. The function + its one-shot accounting +
+# `reset_env_deprecated_emit_for_tests` are RETAINED (not deleted) so the
+# `env_deprecated` event type stays registered in the events vocabulary and
+# the existing test-import surface (`reset_env_deprecated_emit_for_tests`,
+# imported by the axis-5 cfg-reads regression modules) keeps resolving — a
+# zero-churn retirement.
+#
 # Mirrors the `_emitted_attention_keys` accounting in `ap2/watchdog.py` —
 # a module-level set guarded by a lock, populated on first emit, never
-# trimmed during the process. One `env_deprecated` event per (flat-knob,
-# process) pair so the operator's audit trail in `events.jsonl` carries a
-# single discoverable signal per process per migrated knob, not a per-tick
-# repeat.
+# trimmed during the process.
 # ---------------------------------------------------------------------------
 _EMITTED_LOCK = threading.Lock()
 _EMITTED_ONCE: set[str] = set()
@@ -542,24 +558,37 @@ def _apply_sectioned_env_overrides(cfg: "Config") -> dict[str, Any]:
 
 
 def _apply_flat_back_compat(cfg: "Config") -> dict[str, Any]:
-    """For each flat `AP2_*` knob in `FLAT_TO_SECTIONED` present in
-    `os.environ`, apply the override to the matching sectioned path AND
-    emit a one-shot `env_deprecated` event per process per knob.
+    """Overlay env-permitted flat `AP2_*` knobs onto their sectioned path.
+
+    TB-413: the flat `AP2_<knob>` tunable OVERRIDE path is removed. Only
+    flat names on the `config.ENV_PERMITTED_KEYS` allowlist (the
+    secret / deployment-identity / runtime-fixed cut-line) still overlay a
+    value at their sectioned path; a flat name for a behavioral tunable is
+    IGNORED — `.cc-autopilot/config.toml` is the SOLE source for tunables,
+    so a stale shell-exported `AP2_<tunable>` no longer silently pins the
+    daemon over the operator's TOML. No `env_deprecated` event is emitted
+    anymore (there is no override to deprecate; an ignored flat tunable
+    simply has no effect).
+
+    For THIS daemon's config.toml branch the only knobs this still applies
+    are the FLAT_TO_SECTIONED ∩ ENV_PERMITTED_KEYS members
+    (`AP2_TICK_S`, `AP2_MM_TICK_S`, `AP2_WEB_PORT`, `AP2_WEB_DISABLED`,
+    `AP2_PROJECT_NAME`) — deployment-identity / runtime-fixed knobs an
+    operator legitimately pins per-deployment via env.
 
     Returns the dict of overrides applied (flat-name → coerced value).
-    Skips entries in `_KNOBS_STAYING_ENV_ONLY` — the partition is
-    enforced at construction time (the partition-coverage test pins
-    no overlap), but the runtime double-check makes the contract
-    explicit at the call site.
+    `_KNOBS_STAYING_ENV_ONLY` members are disjoint from `FLAT_TO_SECTIONED`
+    (pinned by the partition tests) and never reach this loop; the
+    allowlist gate subsumes the old `_KNOBS_STAYING_ENV_ONLY` skip.
     """
     overrides: dict[str, Any] = {}
-    events_file = getattr(cfg, "events_file", None)
+    # Lazy import keeps the config_compat.py ↔ config.py boundary tidy
+    # (config.py imports config_compat only via the helpers' late imports;
+    # config_compat imports Config solely behind TYPE_CHECKING).
+    from .config import ENV_PERMITTED_KEYS
     for flat, sectioned in FLAT_TO_SECTIONED.items():
-        if flat in _KNOBS_STAYING_ENV_ONLY:
-            # Belt-and-suspenders: a future edit that listed a knob in
-            # BOTH sets would silently fire deprecation events for an
-            # explicitly-env-only knob. Skip here to make the
-            # _KNOBS_STAYING_ENV_ONLY contract authoritative.
+        if flat not in ENV_PERMITTED_KEYS:
+            # Behavioral tunable — its flat `AP2_*` override is removed.
             continue
         if flat not in os.environ:
             continue
@@ -568,11 +597,6 @@ def _apply_flat_back_compat(cfg: "Config") -> dict[str, Any]:
         coerced = _coerce(os.environ[flat], existing=existing)
         if _set_path(cfg, path, coerced):
             overrides[flat] = coerced
-        # Emit the deprecation event regardless of whether _set_path
-        # landed — even an unknown-path write (refactor mid-flight, a
-        # knob whose sectioned target the dataclass hasn't grown yet)
-        # is still a flat-knob hit worth surfacing for the operator.
-        _emit_env_deprecated(events_file, flat, sectioned)
     return overrides
 
 
@@ -589,10 +613,13 @@ def apply_env_overrides(cfg: "Config") -> dict[str, Any]:
     precedence-defined order (high → low):
 
       1. Sectioned env (`AP2_<SECTION>_<KEY>`) → wins over TOML.
-      2. Flat env (`AP2_<FLAT>`, back-compat) → wins over TOML but loses
-         to a same-target sectioned-env override (applied first; flat-
-         path overrides on the same sectioned target then overwrite,
-         making flat last-wins by iteration order).
+      2. Flat env (`AP2_<FLAT>`) → TB-413: gated to
+         `config.ENV_PERMITTED_KEYS`. Only env-permitted (secret /
+         deployment-identity / runtime-fixed) flat names still win over
+         TOML; a behavioral-tunable flat name is ignored. Allowlisted
+         flat overrides lose to a same-target sectioned-env override
+         (applied first; the re-apply below restores sectioned
+         precedence).
 
     Returns a dict mapping every applied-override path to the coerced
     value (sectioned keys: `"components.x.y"`; flat-name keys preserve
@@ -600,11 +627,8 @@ def apply_env_overrides(cfg: "Config") -> dict[str, Any]:
     return value for logging / metrics; the primary effect is the
     in-place mutation of `cfg`.
 
-    The flat shim's `env_deprecated` emission is one-shot per (knob,
-    process) — a daemon-restart resets the accounting, mirroring the
-    `note_initial_applied` startup pass in `env_reload`. Tests that
-    want clean state call `reset_env_deprecated_emit_for_tests()` in
-    setup.
+    TB-413 retired the flat shim's `env_deprecated` emission (an ignored
+    flat tunable has no override to deprecate).
     """
     sectioned_applied = _apply_sectioned_env_overrides(cfg)
     flat_applied = _apply_flat_back_compat(cfg)

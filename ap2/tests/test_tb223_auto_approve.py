@@ -98,10 +98,19 @@ _BRIEFING = (
 
 
 @pytest.fixture
-def cfg(tmp_path: Path) -> Config:
+def cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Config:
     """Project root with the standard ap2 init layout and a real goal.md
     so the briefing-structural gate has anchors to match. `init_project`
-    seeds the placeholder goal.md; we overwrite it with `_GOAL_MD`."""
+    seeds the placeholder goal.md; we overwrite it with `_GOAL_MD`.
+
+    Disables the LLM dep-coherence judge (`AP2_VALIDATOR_JUDGE_DISABLED`)
+    so the `do_board_edit add_backlog` calls don't make a real, slow,
+    non-deterministic Haiku judge call (which can spuriously flag the
+    fixture briefing's predecessor references and reject the add). The
+    judge is orthogonal to the auto-approve behavior under test.
+    `AP2_VALIDATOR_JUDGE_DISABLED` is an `ENV_PERMITTED_KEYS` env-only
+    knob, so its flat env still applies under TB-413."""
+    monkeypatch.setenv("AP2_VALIDATOR_JUDGE_DISABLED", "1")
     init_project(tmp_path)
     (tmp_path / "goal.md").write_text(_GOAL_MD)
     cfg = Config.load(tmp_path)
@@ -146,6 +155,7 @@ def test_unset_knob_preserves_blocked_review_codespan(cfg: Config, monkeypatch):
     event fires. Pin against a refactor that silently flips the
     default toward auto-approve."""
     monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
 
     res = tools.do_board_edit(
         cfg,
@@ -190,8 +200,13 @@ def test_set_knob_strips_blocked_review_and_emits_audit_event(
     is born `@blocked:review`); the loop pass (`run_auto_approve_pass`)
     does the strip between agent runs, exactly as the daemon's
     PRE_DISPATCH walk drives it. The next-tick auto-promote will pick the
-    task up immediately because no review gate remains."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    task up immediately because no review gate remains.
+
+    TB-413: the flat `AP2_AUTO_APPROVE` tunable override is removed
+    (config.toml is the sole source); to inject the enable for this
+    downstream-behavior test we set the SECTIONED env name, which still
+    overrides at `cfg.get_component_value` resolution time."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
 
     res = tools.do_board_edit(
         cfg,
@@ -238,11 +253,14 @@ def test_set_knob_strips_blocked_review_and_emits_audit_event(
 def test_set_knob_with_mixed_blockers_only_strips_review(
     cfg: Config, monkeypatch,
 ):
-    """When `blocked_on="review,TB-5"`, AP2_AUTO_APPROVE strips ONLY
+    """When `blocked_on="review,TB-5"`, auto-approve strips ONLY
     the `review` token — the `TB-5` dependency stays on the row.
     Pins the surgical-strip behavior so a future refactor that
-    no-op'd the whole codespan trips here."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "true")
+    no-op'd the whole codespan trips here.
+
+    TB-413: inject the enable via the SECTIONED env (the flat
+    `AP2_AUTO_APPROVE` tunable override is removed)."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "true")
 
     res = tools.do_board_edit(
         cfg,
@@ -282,10 +300,15 @@ def test_gate_tag_match_retains_blocked_review_even_when_knob_on(
     """With `AP2_AUTO_APPROVE=1` AND the proposed task carrying
     `#breaking-change` (a default gate-tag), the row retains its
     `@blocked:review` codespan. Operator's escape hatch for elevated-
-    risk categories still works under auto-approve."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "yes")
-    # Don't set AP2_AUTO_APPROVE_GATE_TAGS — default is
+    risk categories still works under auto-approve.
+
+    TB-413: enable auto-approve via the SECTIONED env (the flat
+    `AP2_AUTO_APPROVE` tunable override is removed) so the gate-tag
+    path is exercised with the feature genuinely ON."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "yes")
+    # Don't set the gate-tags knob — default is
     # `#breaking-change,#high-risk` which the helper picks up.
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     res = tools.do_board_edit(
@@ -324,9 +347,14 @@ def test_custom_gate_tag_list_overrides_default(cfg: Config, monkeypatch):
     """`AP2_AUTO_APPROVE_GATE_TAGS` overrides the default set. With
     `#schema-migration` as the custom gate-tag, a task carrying
     `#breaking-change` (NOT in the custom list) gets auto-approved,
-    and a task carrying `#schema-migration` retains review."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_GATE_TAGS", "#schema-migration")
+    and a task carrying `#schema-migration` retains review.
+
+    TB-413: inject both knobs via their SECTIONED env names (the flat
+    `AP2_AUTO_APPROVE*` tunable overrides are removed)."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv(
+        "AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", "#schema-migration",
+    )
 
     # Task carrying old-default but NOT in custom list → auto-approved.
     res1 = tools.do_board_edit(
@@ -397,21 +425,23 @@ def test_freeze_threshold_default_is_three(cfg: Config, monkeypatch):
     (`ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT`). Direct pin
     against the parser default flipping silently.
 
-    TB-326 (axis-5): the helper now takes a `cfg` argument and routes
-    the env lookup through `Config.get_component_value`'s reverse-
-    `FLAT_TO_SECTIONED` fallback. The flat env name still wins via the
-    back-compat shim, so this parser pin still exercises the env
-    parser shape end-to-end (default-on-empty, int-cast, default-on-
-    error).
+    TB-326 (axis-5): the helper takes a `cfg` argument and routes the
+    env lookup through `Config.get_component_value`. TB-413: the flat
+    `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` tunable override is removed
+    (config.toml is the sole source), so this parser pin injects via the
+    SECTIONED env name `AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD`,
+    which still overrides — exercising the env parser shape end-to-end
+    (default-on-empty, int-cast, default-on-error).
     """
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
     assert daemon._auto_approve_freeze_threshold(cfg) == 3
     assert ideation.AUTO_APPROVE_FREEZE_THRESHOLD_DEFAULT == 3
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
     assert daemon._auto_approve_freeze_threshold(cfg) == 5
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "not-a-number")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "not-a-number")
     assert daemon._auto_approve_freeze_threshold(cfg) == 3
 
 
@@ -421,7 +451,7 @@ def test_auto_approve_paused_fires_after_threshold_failures(
     """When N=3 consecutive `task_complete` events have status in the
     failure set AND end in `retry_exhausted`, `_auto_approve_paused`
     returns True. With fewer than N failures, returns False."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
 
     # Fewer than threshold → not paused.
     _seed_completions(
@@ -444,7 +474,7 @@ def test_auto_approve_paused_ignores_successes(cfg: Config, monkeypatch):
     """A successful `task_complete` interleaved in the recent window
     breaks the consecutive-failure chain — `_auto_approve_paused`
     returns False even if there are >= N total failures."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
 
     # 2 fails + 1 success + 2 fails: only the last 2 fails are
     # "consecutive" in the window (the success splits the streak).
@@ -471,8 +501,11 @@ def test_auto_approve_paused_disabled_by_zero_threshold(
     """`AP2_AUTO_APPROVE_FREEZE_THRESHOLD=0` → the circuit-breaker is
     disabled outright. `_auto_approve_paused` short-circuits to False
     regardless of failure window. Operator's explicit-trust escape
-    hatch."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
+    hatch.
+
+    TB-413: inject the disable via the SECTIONED env (the flat
+    `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` tunable override is removed)."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
     _seed_completions(
         cfg, task_ids=["TB-100", "TB-101", "TB-102", "TB-103"],
         status="verification_failed",
@@ -541,9 +574,12 @@ def test_tick_halts_auto_promote_when_freeze_active(
     auto-approved task waiting in Backlog, `_tick` emits
     `auto_approve_paused` and does NOT promote the task to Ready.
     A subsequent `ap2 ack auto_approve_unfreeze` is exercised in the
-    next test (case e)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    next test (case e).
+
+    TB-413: inject both knobs via their SECTIONED env names (flat
+    tunable overrides removed)."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
 
     # 1. Land a proposal carrying `@blocked:review`. TB-383: `board_edit`
     #    is policy-free, so the row is born blocked and NO `auto_approved`
@@ -617,9 +653,12 @@ def test_operator_ack_unfreeze_resumes_auto_promote(cfg: Config, monkeypatch):
     active) AND an `operator_ack` whose `note` carries the
     `auto_approve_unfreeze` token, `_auto_approve_paused` returns
     False. Driving `_tick` then promotes the previously-paused
-    auto-approved Backlog task to Ready."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    auto-approved Backlog task to Ready.
+
+    TB-413: inject both knobs via their SECTIONED env names (flat
+    tunable overrides removed)."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
 
     # Land the auto-approved task.
     res = tools.do_board_edit(
@@ -685,12 +724,16 @@ def test_operator_approved_task_dispatches_even_when_freeze_active(
     operator-approved task (`ideation_approved` event, not
     `auto_approved`) continues to dispatch normally even while the
     circuit-breaker is active. Pins the "targeted, not blanket"
-    behavior from the briefing's Scope (3)."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    behavior from the briefing's Scope (3).
+
+    TB-413: inject both knobs via their SECTIONED env names (flat
+    tunable overrides removed)."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
 
     # Land a task that is NOT auto-approved (carries a gate-tag so
     # the review codespan stays on the row).
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
     res = tools.do_board_edit(
         cfg,

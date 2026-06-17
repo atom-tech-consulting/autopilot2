@@ -103,10 +103,14 @@ def test_get_core_value_agent_model_is_none_under_default_config(cfg):
 
 
 def test_empty_string_env_coerces_to_none(cfg, clean_env):
-    """`AP2_AGENT_MODEL=""` resolves to a literal `""` from `get_core_value`,
-    which the dispatch-site `or None` coercion folds to `None` — the
-    load-bearing distinction the schema comment calls out."""
-    clean_env.setenv("AP2_AGENT_MODEL", "")
+    """`AP2_CORE_AGENT_MODEL=""` resolves to a literal `""` from
+    `get_core_value`, which the dispatch-site `or None` coercion folds to
+    `None` — the load-bearing distinction the schema comment calls out.
+
+    TB-413: injects via the SECTIONED env (the flat `AP2_AGENT_MODEL`
+    tunable override is removed; config.toml is the sole source, the
+    sectioned env remaining the explicit structured override)."""
+    clean_env.setenv("AP2_CORE_AGENT_MODEL", "")
     assert cfg.get_core_value("agent_model") == ""
     assert (cfg.get_core_value("agent_model") or None) is None
 
@@ -165,7 +169,7 @@ def test_a_claude_model_reaches_a_codex_kind_when_resolved(cfg, clean_env):
     `test_codex_routed_dispatch_omits_model_under_default_config`, which shows
     the default config omits it entirely.)"""
     clean_env.setenv("AP2_AGENT_BACKEND_TASK", "codex")
-    clean_env.setenv("AP2_AGENT_MODEL", "claude-opus-4-7")
+    clean_env.setenv("AP2_CORE_AGENT_MODEL", "claude-opus-4-7")
     adapter = select_adapter("task", cfg)
     assert isinstance(adapter, CodexAdapter)
 

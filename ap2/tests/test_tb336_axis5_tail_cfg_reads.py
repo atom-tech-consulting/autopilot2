@@ -78,6 +78,7 @@ from ap2.components.attention import (
 from ap2.components.auto_approve.manifest import MANIFEST as AUTO_APPROVE_MANIFEST
 from ap2.config import (
     DEFAULT_VERIFY_TIMEOUT_S,
+    ENV_PERMITTED_KEYS,
     Config,
 )
 from ap2.config_compat import (
@@ -296,18 +297,30 @@ def test_flat_env_parity(
     cfg, clean_env, emit_reset,
     label, sectioned_path, flat, sectioned_env, sample, getter,
 ):
-    """A `monkeypatch.setenv(<flat>, <sample>)` value reaches the cfg
-    helper identical to what `os.environ.get(<flat>, default)` would
-    have returned pre-TB-336.
+    """TB-413: the flat `AP2_*` tunable override is now IGNORED for
+    behavioral knobs — `config.toml`/schema is the sole source. The only
+    flat names that still resolve are the five deployment/runtime knobs
+    on `ENV_PERMITTED_KEYS` (`AP2_WEB_DISABLED` / `AP2_WEB_PORT` here).
 
-    Drives the back-compat path the shell-export operator depends on
-    via the helper's reverse-`FLAT_TO_SECTIONED` lookup.
+    So this pin branches per case: an allowlisted flat env still resolves
+    (the back-compat layer fires); a behavioral-tunable flat env is
+    ignored (the helper's baseline doesn't move). The sibling
+    `test_sectioned_env_parity` covers that the sectioned name still
+    overrides for every case.
     """
-    clean_env.setenv(flat, sample)
-    assert str(getter(cfg)) == sample, (
-        f"TB-336 ({label}): flat env `{flat}={sample}` should resolve "
-        f"to {sample!r} via the cfg helper."
-    )
+    if flat in ENV_PERMITTED_KEYS:
+        clean_env.setenv(flat, sample)
+        assert str(getter(cfg)) == sample, (
+            f"TB-336 ({label}): allowlisted flat env `{flat}={sample}` "
+            f"should still resolve to {sample!r} via the cfg helper."
+        )
+    else:
+        baseline = getter(cfg)
+        clean_env.setenv(flat, sample)
+        assert getter(cfg) == baseline, (
+            f"TB-413 ({label}): flat tunable env `{flat}={sample}` must be "
+            f"ignored; config.toml/schema wins (baseline {baseline!r})."
+        )
 
 
 @pytest.mark.parametrize(
@@ -437,8 +450,8 @@ def test_doctor_verify_gate_state_cfg_kwarg(cfg, clean_env, emit_reset):
     knobs via `cfg.get_core_value`. The audit's OK / INFO line set is
     the same; pin the resolved string surfaces in the audit body.
     """
-    clean_env.setenv("AP2_VERIFY_CMD", "uv run pytest -q")
-    clean_env.setenv("AP2_VERIFY_TIMEOUT_S", "1234")
+    clean_env.setenv("AP2_CORE_VERIFY_CMD", "uv run pytest -q")
+    clean_env.setenv("AP2_CORE_VERIFY_TIMEOUT_S", "1234")
     res = doctor._verify_gate_state(cfg=cfg)
     body = " ".join(line for _level, line in res.messages)
     assert "uv run pytest -q" in body
@@ -464,12 +477,14 @@ def test_attention_cost_approach_pct_cfg(cfg, clean_env, emit_reset):
     """
     # Unset → documented default (75).
     assert _cost_approach_pct(cfg) == DEFAULT_AUTO_APPROVE_COST_APPROACH_PCT
-    # Flat env override flows through the back-compat path.
-    clean_env.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "50")
+    # TB-413: the flat tunable env is ignored, so the override flows
+    # through the sectioned component env name instead — exercising the
+    # same downstream parse + clamp path.
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "50")
     assert _cost_approach_pct(cfg) == 50
     # >= 100 clamps to 99 — the trip-line handoff to the post-trip
     # `auto_approve_paused` detector.
-    clean_env.setenv("AP2_AUTO_APPROVE_COST_APPROACH_PCT", "150")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_COST_APPROACH_PCT", "150")
     assert _cost_approach_pct(cfg) == 99
 
 

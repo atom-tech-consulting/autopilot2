@@ -193,6 +193,81 @@ DEFAULT_IDEATION_SCRUB_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_AGENT_BACKEND = "claude"
 
 
+# ---------------------------------------------------------------------------
+# TB-413: env allowlist — the single 12-factor exception cut-line.
+#
+# `.cc-autopilot/config.toml` is the SOLE source for behavioral tunables;
+# `.cc-autopilot/env` is reserved for secrets + deployment-identity
+# (12-factor) values only. `ENV_PERMITTED_KEYS` is the explicit, named
+# allowlist of env var names the config layer is permitted to consult. Any
+# key NOT listed here is a behavioral tunable that resolves from
+# `config.toml` -> schema default ONLY — its flat `AP2_*` override is
+# IGNORED (the reverse-`FLAT_TO_SECTIONED` override path removed in TB-413;
+# see `get_component_value` / `get_core_value` / `config_compat.
+# _apply_flat_back_compat`). There is no `env_deprecated` event for an
+# ignored flat tunable — it simply has no effect.
+#
+# The allowlist is the structural inverse of "tunable": a key is
+# env-permitted iff it is a secret, an integration credential, or a
+# deployment-identity / runtime-fixed knob. Any key with a component/core
+# `config_schema` home (the structured tunables) is config.toml-only and is
+# deliberately ABSENT here. Three categories make up the cut-line:
+#
+#   1. Credentials / integration secrets — auth-bearing, rotated out of
+#      band, never project-tracked (`CLAUDE_CODE_OAUTH_TOKEN`,
+#      `OPENAI_API_KEY`, `CODEX_HOME`, `MATTERMOST_URL`, `MATTERMOST_TOKEN`,
+#      and the Mattermost bot/team/report/mention identity envs +
+#      `AP2_WEBHOOK_URL`).
+#   2. Deployment-identity — per-daemon identity an operator running
+#      multiple daemons against one project sets per-deployment
+#      (`AP2_MM_CHANNELS`, `AP2_WEB_HOST`, `AP2_WEB_PORT`,
+#      `AP2_WEB_DISABLED`, `AP2_SANDBOX_USER`, `AP2_PROJECT_NAME`,
+#      `AP2_CHANNEL_FILE_PATH`).
+#   3. Runtime-fixed / bootstrap / escape-hatch knobs with no config.toml
+#      home — loop tempo + kill switches read before (or independent of)
+#      the structured-config layer (`AP2_TICK_S`, `AP2_MM_TICK_S`,
+#      `AP2_DIR`, `AP2_REAL_SDK`, `AP2_CRON_DISABLED`,
+#      `AP2_VERIFY_JUDGE_DISABLED`).
+#
+# Only the members that ALSO appear in `config_compat.FLAT_TO_SECTIONED`
+# (`AP2_TICK_S`, `AP2_MM_TICK_S`, `AP2_WEB_PORT`, `AP2_WEB_DISABLED`,
+# `AP2_PROJECT_NAME`) actually gate the reverse-`FLAT_TO_SECTIONED` lookup;
+# the rest are read by their own dedicated call sites (auth gate,
+# mattermost, watchdog, web, smoke runner) and are enumerated here so the
+# allowlist is the ONE auditable answer to "what may legitimately live in
+# env". The companion `config_compat._KNOBS_STAYING_ENV_ONLY` stays the
+# source of truth for the `FLAT_TO_SECTIONED` partition / cut-line tests.
+# ---------------------------------------------------------------------------
+ENV_PERMITTED_KEYS: frozenset[str] = frozenset({
+    # 1. Credentials / integration secrets.
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "CODEX_HOME",
+    "MATTERMOST_URL",
+    "MATTERMOST_TOKEN",
+    "AP2_MM_BOT_USER_ID",
+    "AP2_MM_TEAM_ID",
+    "AP2_MM_REPORT_CHANNEL",
+    "AP2_MM_MENTION",
+    "AP2_WEBHOOK_URL",
+    # 2. Deployment-identity.
+    "AP2_MM_CHANNELS",
+    "AP2_WEB_HOST",
+    "AP2_WEB_PORT",
+    "AP2_WEB_DISABLED",
+    "AP2_SANDBOX_USER",
+    "AP2_PROJECT_NAME",
+    "AP2_CHANNEL_FILE_PATH",
+    # 3. Runtime-fixed / bootstrap / escape hatches (no config.toml home).
+    "AP2_TICK_S",
+    "AP2_MM_TICK_S",
+    "AP2_DIR",
+    "AP2_REAL_SDK",
+    "AP2_CRON_DISABLED",
+    "AP2_VERIFY_JUDGE_DISABLED",
+})
+
+
 @dataclass
 class Config:
     """Resolved per-project configuration."""
@@ -463,10 +538,13 @@ class Config:
              ``apply_env_overrides`` putting sectioned env at the head
              of the load-time precedence).
           2. Flat env (``AP2_<knob>``) via reverse-``FLAT_TO_SECTIONED``
-             lookup — the back-compat path the shell-export operator
-             who never migrated their ``.cc-autopilot/env`` carries.
-             Same precedence ordering as ``_apply_flat_back_compat``'s
-             load-time hits.
+             lookup — TB-413: gated to ``ENV_PERMITTED_KEYS``. Component
+             knobs are behavioral tunables (they carry a ``config_schema``
+             home), so NO component flat name is on the allowlist and this
+             layer never fires for a component — the flat tunable override
+             is ignored, exactly the footgun TB-413 removes. (Allowlisted
+             core knobs like ``web_port`` keep their flat env via the
+             sibling ``get_core_value``.)
           3. ``self.components_config[component][key]`` — the cfg
              snapshot populated by ``config_loader.from_toml`` (TOML
              overlay) at load time. Values here are already type-
@@ -511,18 +589,27 @@ class Config:
         raw = os.environ.get(sectioned_env_name)
         if raw is not None:
             return raw
-        # 2) Flat env via reverse-FLAT_TO_SECTIONED lookup. Late import
-        #    keeps the config.py ↔ config_compat.py boundary tidy and
-        #    avoids a startup-time import cycle (config_compat imports
+        # 2) Flat env via reverse-FLAT_TO_SECTIONED lookup — TB-413: now
+        #    gated to the `ENV_PERMITTED_KEYS` allowlist. A component knob is
+        #    a behavioral tunable (it has a `config_schema` home), so its
+        #    flat `AP2_*` name is NEVER on the allowlist; the override is
+        #    IGNORED and resolution falls through to the config.toml snapshot
+        #    -> schema default. No component flat name is env-permitted, so
+        #    this loop never returns for a component today; the membership
+        #    gate is kept for symmetry with `get_core_value` (and so a future
+        #    deployment-identity component knob would route correctly).
+        #    Late import keeps the config.py ↔ config_compat.py boundary tidy
+        #    and avoids a startup-time import cycle (config_compat imports
         #    Config only behind TYPE_CHECKING).
         from .config_compat import FLAT_TO_SECTIONED
         sectioned_target = f"components.{component}.{key}"
         for flat, sectioned in FLAT_TO_SECTIONED.items():
             if sectioned != sectioned_target:
                 continue
-            raw = os.environ.get(flat)
-            if raw is not None:
-                return raw
+            if flat in ENV_PERMITTED_KEYS:
+                raw = os.environ.get(flat)
+                if raw is not None:
+                    return raw
             break
         # 3) cfg snapshot (TOML overlay / load-time env-coerced value).
         comp = (self.components_config or {}).get(component)
@@ -551,10 +638,16 @@ class Config:
              ``_apply_sectioned_env_overrides``'s head-of-list position
              at load time).
           2. Flat env (``AP2_<knob>``) via reverse-``FLAT_TO_SECTIONED``
-             lookup — catches the pre-migration flat names
-             (``AP2_AGENT_MODEL`` → ``core.agent_model``,
-             ``AP2_TASK_MAX_TURNS`` → ``core.task_max_turns``, &c.)
-             without forcing the operator to rename their env file.
+             lookup — TB-413: gated to ``ENV_PERMITTED_KEYS``. Only the
+             allowlisted core knobs (``AP2_TICK_S`` → ``core.tick_interval_s``,
+             ``AP2_MM_TICK_S``, ``AP2_WEB_PORT`` → ``core.web_port``,
+             ``AP2_WEB_DISABLED``, ``AP2_PROJECT_NAME`` — deployment-identity
+             / runtime-fixed) keep their flat env. A behavioral-tunable core
+             knob (``AP2_AGENT_MODEL`` → ``core.agent_model``,
+             ``AP2_TASK_MAX_TURNS`` → ``core.task_max_turns``, &c.) is NOT on
+             the allowlist, so its flat name is skipped — the override is
+             ignored and resolution falls through to the config.toml snapshot
+             -> schema default (the SOLE sources for tunables).
           3. ``self.core_config.get(key)`` — the cfg snapshot populated
              by ``config_loader.from_toml``'s ``[core.<key>]`` overlay.
              Values here are the TOML-parsed types (int / bool / str)
@@ -614,10 +707,21 @@ class Config:
         #    resolves at call-time. (Pre-TB-345 every core target had
         #    exactly one flat alias, so the loop never iterated past
         #    the first match.)
+        #    TB-413: each candidate flat name is gated to the
+        #    `ENV_PERMITTED_KEYS` allowlist. Allowlisted core knobs
+        #    (`AP2_TICK_S`, `AP2_MM_TICK_S`, `AP2_WEB_PORT`,
+        #    `AP2_WEB_DISABLED`, `AP2_PROJECT_NAME` — deployment-identity /
+        #    runtime-fixed) keep their flat env. A behavioral-tunable core
+        #    knob (`AP2_TASK_MAX_TURNS`, `AP2_AGENT_MODEL`, the ideation /
+        #    verifier knobs, &c.) is NOT allowlisted, so its flat `AP2_*`
+        #    name is skipped and resolution falls through to the config.toml
+        #    snapshot -> schema default — the flat tunable override removed.
         from .config_compat import FLAT_TO_SECTIONED
         sectioned_target = f"core.{key}"
         for flat, sectioned in FLAT_TO_SECTIONED.items():
             if sectioned != sectioned_target:
+                continue
+            if flat not in ENV_PERMITTED_KEYS:
                 continue
             raw = os.environ.get(flat)
             if raw is not None:

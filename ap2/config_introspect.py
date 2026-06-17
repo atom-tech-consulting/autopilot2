@@ -25,11 +25,15 @@ Design notes:
   surface for non-component tunables (until axis-(5) per-cluster
   migrations promote each to a typed core schema, this is the
   best-available enumeration).
-- A flat env hit (`AP2_<flat>`) AND a sectioned env hit
-  (`AP2_<SECTION>_<KEY>`) both count as `env-override`. The
-  `apply_env_overrides` precedence already resolves which one wins —
-  we just report "env beat the file" without re-deriving precedence
-  inside the introspect layer.
+- A sectioned env hit (`AP2_<SECTION>_<KEY>`) counts as `env-override`.
+  TB-413: a flat env hit (`AP2_<flat>`) only counts as `env-override`
+  when the flat name is on `config.ENV_PERMITTED_KEYS` (the secret /
+  deployment-identity / runtime-fixed allowlist) — a flat behavioral-
+  tunable name is IGNORED by the runtime resolver
+  (`cfg.get_core_value` / `get_component_value`), so crediting it here
+  would mislabel a row as `env-override` while its value showed the
+  TOML/default. The source attribution must mirror what the resolver
+  actually does.
 """
 from __future__ import annotations
 
@@ -38,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .config import CONFIG_TOML_FILE, Config
+from .config import CONFIG_TOML_FILE, Config, ENV_PERMITTED_KEYS
 from .config_compat import FLAT_TO_SECTIONED
 from .config_loader import ConfigKey, aggregate_schemas, parse_toml
 from .registry import Registry
@@ -112,14 +116,16 @@ def _attribute_source(
 ) -> str:
     """Pick the source label given the three input signals.
 
-    Precedence mirrors `apply_env_overrides`: env (either kind) wins
-    over the TOML file, file wins over default. The display label
-    flattens both env paths to `env-override` — the operator can grep
-    `os.environ` directly to see which knob fired.
+    Precedence mirrors `apply_env_overrides`: env wins over the TOML
+    file, file wins over default. The sectioned env always counts as
+    `env-override`. TB-413: a flat env name counts only when it is on
+    `config.ENV_PERMITTED_KEYS` — the runtime resolver ignores a flat
+    behavioral-tunable name, so it must not be credited here either
+    (that would mislabel the row while the value showed TOML/default).
     """
     if sectioned_env in os.environ:
         return "env-override"
-    if flat_env and flat_env in os.environ:
+    if flat_env and flat_env in ENV_PERMITTED_KEYS and flat_env in os.environ:
         return "env-override"
     if has_toml:
         return "file"

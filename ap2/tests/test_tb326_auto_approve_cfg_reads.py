@@ -233,30 +233,40 @@ def test_window_token_cap_reads_from_toml(tmp_path, clean_env, emit_reset):
 # ---------------------------------------------------------------------------
 
 
-def test_freeze_threshold_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_APPROVE_FREEZE_THRESHOLD=5` set on an env-only project
-    (no `config.toml`) still resolves to 5 via the
-    `Config.get_component_value` reverse-`FLAT_TO_SECTIONED` lookup.
-    Pins the back-compat path the shell-export operator depends on.
+def test_freeze_threshold_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = daemon._auto_approve_freeze_threshold(cfg)  # flat unset
     clean_env.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "5")
-    assert daemon._auto_approve_freeze_threshold(cfg) == 5
+    assert daemon._auto_approve_freeze_threshold(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_per_task_token_cap_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP=12345` on an env-only
-    project resolves to 12345 via the flat-env back-compat path.
+def test_per_task_token_cap_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = daemon._per_task_token_cap(cfg)  # flat unset
     clean_env.setenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "12345")
-    assert daemon._per_task_token_cap(cfg) == 12345
+    assert daemon._per_task_token_cap(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
-def test_window_token_cap_flat_env_back_compat(cfg, clean_env, emit_reset):
-    """`AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP=678910` on an env-only
-    project resolves to 678910 via the flat-env back-compat path.
+def test_window_token_cap_flat_env_ignored(cfg, clean_env, emit_reset):
+    """TB-413: a flat tunable env name no longer overrides config.toml —
+    it is IGNORED. The helper returns the same value it returns with the
+    flat env unset (config.toml/schema default).
     """
+    baseline = daemon._window_token_cap(cfg)  # flat unset
     clean_env.setenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "678910")
-    assert daemon._window_token_cap(cfg) == 678910
+    assert daemon._window_token_cap(cfg) == baseline, (
+        "TB-413: flat tunable env must be ignored; config.toml/schema wins"
+    )
 
 
 # ---------------------------------------------------------------------------

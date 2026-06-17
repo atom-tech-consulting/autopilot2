@@ -205,21 +205,23 @@ _FLAT_PARITY_CASES = [
 
 
 @pytest.mark.parametrize("key, flat, sample", _FLAT_PARITY_CASES)
-def test_get_core_value_flat_env_parity(
+def test_get_core_value_flat_env_ignored(
     cfg, clean_env, emit_reset, key, flat, sample,
 ):
-    """For each migrated ideation knob, a
-    `monkeypatch.setenv(<flat>, <sample>)` value reaches
-    `cfg.get_core_value(<key>)` identical to what
-    `os.environ.get(<flat>, default)` would have returned pre-TB-335.
+    """TB-413: the flat `AP2_IDEATION_*` tunable override is now IGNORED
+    for these behavioral ideation knobs — `config.toml`/schema is the
+    sole source. Setting the legacy flat env must NOT change what
+    `cfg.get_core_value(<key>)` resolves to (the baseline stays put).
 
-    Drives the back-compat path the shell-export operator depends on
-    via the helper's reverse-`FLAT_TO_SECTIONED` lookup.
+    The four migrated ideation knobs are behavioral tunables (none is on
+    `ENV_PERMITTED_KEYS`), so the reverse-`FLAT_TO_SECTIONED` back-compat
+    layer never fires for them.
     """
+    baseline = cfg.get_core_value(key, default="UNSET")
     clean_env.setenv(flat, sample)
-    assert cfg.get_core_value(key, default="UNSET") == sample, (
-        f"TB-335: flat env `{flat}={sample}` should resolve to {sample!r} "
-        f"via `cfg.get_core_value({key!r})`."
+    assert cfg.get_core_value(key, default="UNSET") == baseline, (
+        f"TB-413: flat tunable env `{flat}={sample}` must be ignored; "
+        f"config.toml/schema wins for `{key}` (baseline {baseline!r})."
     )
 
 
@@ -267,12 +269,14 @@ def test_get_core_value_sectioned_env_wins_over_flat_env(
 # ---------------------------------------------------------------------------
 
 
-def test_cooldown_helper_reads_flat_env_via_cfg(cfg, clean_env, emit_reset):
-    """`_cooldown_s(cfg)` returns the parsed flat-env value — the
+def test_cooldown_helper_reads_sectioned_env_via_cfg_300(cfg, clean_env, emit_reset):
+    """`_cooldown_s(cfg)` returns the parsed sectioned-env value — the
     behavioral path the daemon takes when the operator has set
-    `AP2_IDEATION_COOLDOWN_S=300` in `.cc-autopilot/env`.
+    `AP2_CORE_IDEATION_COOLDOWN_S=300`. (TB-413: the flat
+    `AP2_IDEATION_COOLDOWN_S` tunable is ignored; the sectioned env still
+    overrides, so the downstream int-parse path is exercised here.)
     """
-    clean_env.setenv("AP2_IDEATION_COOLDOWN_S", "300")
+    clean_env.setenv("AP2_CORE_IDEATION_COOLDOWN_S", "300")
     assert ideation._cooldown_s(cfg) == 300
 
 
@@ -302,9 +306,12 @@ def test_cooldown_helper_invalid_falls_back_to_default(cfg, clean_env, emit_rese
         )
 
 
-def test_trigger_helper_reads_flat_env_via_cfg(cfg, clean_env, emit_reset):
-    """`_trigger_task_count(cfg)` returns the parsed flat-env value."""
-    clean_env.setenv("AP2_IDEATION_TRIGGER_TASK_COUNT", "9")
+def test_trigger_helper_reads_sectioned_env_via_cfg_9(cfg, clean_env, emit_reset):
+    """`_trigger_task_count(cfg)` returns the parsed sectioned-env value.
+    (TB-413: the flat `AP2_IDEATION_TRIGGER_TASK_COUNT` tunable is
+    ignored; the sectioned env still overrides, exercising the parse.)
+    """
+    clean_env.setenv("AP2_CORE_IDEATION_TRIGGER_TASK_COUNT", "9")
     assert ideation._trigger_task_count(cfg) == 9
 
 
@@ -332,12 +339,17 @@ def test_trigger_helper_invalid_falls_back_to_default(cfg, clean_env, emit_reset
 
 
 @pytest.mark.parametrize("truthy", ["1", "true", "yes"])
-def test_ideation_disabled_helper_truthy_flat_env(cfg, clean_env, emit_reset, truthy):
+def test_ideation_disabled_helper_truthy_sectioned_env_via_cfg(
+    cfg, clean_env, emit_reset, truthy,
+):
     """`_ideation_disabled(cfg)` returns True for the canonical truthy
     values — same parse shape as `_is_auto_approve_enabled` and the
-    pre-TB-335 inline read at `_maybe_ideate`.
+    pre-TB-335 inline read at `_maybe_ideate`. (TB-413: injected via the
+    sectioned `AP2_CORE_IDEATION_DISABLED` since the flat
+    `AP2_IDEATION_DISABLED` tunable is ignored; the truthy-parse path is
+    what this test exercises.)
     """
-    clean_env.setenv("AP2_IDEATION_DISABLED", truthy)
+    clean_env.setenv("AP2_CORE_IDEATION_DISABLED", truthy)
     assert ideation._ideation_disabled(cfg) is True
 
 
@@ -364,9 +376,15 @@ def test_ideation_disabled_helper_unset_is_false(cfg, clean_env, emit_reset):
     assert ideation._ideation_disabled(cfg) is False
 
 
-def test_scrub_model_helper_reads_flat_env_via_cfg(cfg, clean_env, emit_reset):
-    """`_resolved_model(cfg)` returns the flat-env-supplied model name."""
-    clean_env.setenv("AP2_IDEATION_SCRUB_MODEL", "claude-test-haiku")
+def test_scrub_model_helper_reads_sectioned_env_via_cfg_haiku(
+    cfg, clean_env, emit_reset,
+):
+    """`_resolved_model(cfg)` returns the sectioned-env-supplied model
+    name. (TB-413: the flat `AP2_IDEATION_SCRUB_MODEL` tunable is
+    ignored; the sectioned env still overrides, exercising the
+    non-empty-override resolution path.)
+    """
+    clean_env.setenv("AP2_CORE_IDEATION_SCRUB_MODEL", "claude-test-haiku")
     assert ideation_scrub._resolved_model(cfg) == "claude-test-haiku"
 
 
@@ -462,18 +480,22 @@ def test_ideation_disabled_helper_reads_toml_snapshot(
     assert ideation._ideation_disabled(cfg) is True
 
 
-def test_flat_env_wins_over_toml_snapshot(tmp_path, clean_env, emit_reset):
-    """Precedence pin: flat env (back-compat layer) wins over the TOML
-    snapshot for the ideation cluster too — the operator who hasn't
-    migrated their env file still sees their env value override the
-    TOML default.
+def test_toml_snapshot_wins_over_flat_env(tmp_path, clean_env, emit_reset):
+    """TB-413 precedence pin: the TOML snapshot wins over the (now
+    ignored) flat env for the ideation cluster too. An operator who
+    hasn't migrated their env file no longer sees the flat
+    `AP2_IDEATION_COOLDOWN_S` value override the TOML —
+    `config.toml`/schema is the sole source for this behavioral knob.
     """
     cfg = _load_toml_cfg(
         tmp_path,
         "[core]\nideation_cooldown_s = 100\n",
     )
     clean_env.setenv("AP2_IDEATION_COOLDOWN_S", "777")
-    assert ideation._cooldown_s(cfg) == 777
+    assert ideation._cooldown_s(cfg) == 100, (
+        "TB-413: the TOML snapshot must win; the flat tunable env "
+        "`AP2_IDEATION_COOLDOWN_S` is ignored."
+    )
 
 
 # ---------------------------------------------------------------------------
