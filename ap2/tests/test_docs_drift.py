@@ -155,16 +155,28 @@ _DOCS_DRIFT_EXEMPT_ENV_KNOBS = frozenset({
     "AP2_AGENT_BACKEND_TASK",
     "AP2_DIR",          # TB-323 — forward-compat placeholder per goal.md L358, not currently read
     "AP2_REAL_SDK",     # TB-323 — forward-compat placeholder per goal.md L358, not currently read
-    # TB-413 — deployment-identity members of `config.ENV_PERMITTED_KEYS`
-    # (the 12-factor allowlist) that the regex now picks up from the
-    # allowlist literal in `ap2/config.py`. Their operator-facing
-    # documentation (SKILL.md `## Configuration knobs` + `init.ENV_TEMPLATE`)
-    # is the explicit scope of the blocked companion task TB-414 ("env-file
-    # template + ap2-config skill: document env as secrets + deployment-
-    # identity only"); exempt here until that lands so TB-413 doesn't have to
-    # reach into the out-of-scope docs/scaffold surface.
+    # TB-413/TB-414 — deployment-identity members of
+    # `config.ENV_PERMITTED_KEYS` (the 12-factor allowlist) that the regex
+    # picks up from the allowlist literal in `ap2/config.py`. TB-414 lands
+    # their operator-facing documentation in `init.ENV_TEMPLATE`'s
+    # `Deployment identity` block + the `ap2-config` skill's `##
+    # Configuration knobs`. They stay exempt from the mechanical docs gate
+    # because neither has a DEDICATED reader in source yet (both appear only
+    # in the `ENV_PERMITTED_KEYS` allowlist literal) — forward-compat
+    # allowlist members, same shape as `AP2_DIR` / `AP2_REAL_SDK` above. A
+    # future TB that wires a real reader graduates them off this list.
     "AP2_WEB_HOST",
     "AP2_SANDBOX_USER",
+    # TB-414 — the global agent-model tunable's flat name. It HAS a
+    # config.toml home (`core.agent_model`) and is documented in the
+    # `ap2-config` skill (`## Configuration knobs` + `## Config keys
+    # (TOML)`), so it is NOT undocumented; it is exempted here only because
+    # TB-414's env-template canary grep (`! grep -nE "AP2_AGENT_MODEL|…"
+    # ap2/init.py`) forbids the flat-name literal anywhere in `ap2/init.py`,
+    # which rules out the usual `init._TEMPLATE_EXEMPT_KNOBS` home its
+    # behavioral-tunable siblings (AP2_TASK_MAX_TURNS, …) use. Operators set
+    # it via `ap2 config set core.agent_model <id>`, never the env scaffold.
+    "AP2_AGENT_MODEL",
     # TB-345 — DEPRECATED back-compat aliases. The `focus_advance`
     # component was merged into the core `ap2/ideation_halt.py` module
     # and these two flat names were renamed to the `AP2_IDEATION_HALT_*`

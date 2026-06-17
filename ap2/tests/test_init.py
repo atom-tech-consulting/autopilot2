@@ -439,21 +439,18 @@ def test_partial_state_only_appends_missing(tmp_path: Path):
 
 
 def test_creates_env_template_when_missing(tmp_path: Path):
-    """Fresh project gets a documented `.cc-autopilot/env` template so
-    operators see the available tunables + their defaults instead of
-    discovering them by reading source. The template is commented-out
-    so it documents-by-default without overriding code defaults.
+    """Fresh project gets a documented `.cc-autopilot/env` template. Post-
+    TB-413/TB-414 the env surface is SECRETS + DEPLOYMENT-IDENTITY only —
+    behavioral tunables live in `.cc-autopilot/config.toml` — so the
+    template documents the `config.ENV_PERMITTED_KEYS` allowlist, not the
+    flat `AP2_<tunable>` examples it carried pre-TB-414.
 
     Pin:
       - File exists at `.cc-autopilot/env`.
       - Report flag flipped to True (first-init signal).
       - Content matches `ENV_TEMPLATE` verbatim.
-      - The common knobs the operator might tune are mentioned (each
-        as a `# AP2_FOO=<default>` commented line), with their default
-        value shown inline (sourced from `config.DEFAULT_*` so the
-        rendered template never drifts from source-of-truth).
-      - The template comment-fences EVERY knob line (no uncommented
-        `KEY=VALUE` would override the code default unexpectedly).
+      - The secrets + deployment-identity knobs are each mentioned,
+        commented-out (no uncommented `KEY=VALUE` override).
     """
     report = init_project(tmp_path)
     env = tmp_path / ".cc-autopilot" / "env"
@@ -466,22 +463,25 @@ def test_creates_env_template_when_missing(tmp_path: Path):
         "when `.cc-autopilot/env` is absent"
     )
 
-    # The operator-tunable knobs the briefing names must each appear
-    # commented-out with their default inline. Pin existence + the
-    # leading `# ` fence so a future refactor that flips one to live
-    # (silently overriding the code default) trips here.
+    # The secrets + deployment-identity allowlist knobs must each appear
+    # commented-out. Pin existence + the leading `# ` fence so a future
+    # refactor that flips one to live (silently overriding) trips here.
     for knob in (
-        "AP2_VERIFY_CMD",
-        "AP2_VERIFY_TIMEOUT_S",
-        "AP2_TASK_TIMEOUT_S",
-        "AP2_TASK_MAX_TURNS",
-        "AP2_CONTROL_TIMEOUT_S",
-        "AP2_IDEATION_MAX_TURNS",
-        "AP2_IDEATION_TRIGGER_TASK_COUNT",
-        "AP2_AGENT_MODEL",
-        "AP2_AGENT_EFFORT",
         "AP2_MM_CHANNELS",
+        "AP2_WEB_PORT",
+        "AP2_WEB_DISABLED",
+        "AP2_SANDBOX_USER",
+        "AP2_PROJECT_NAME",
+        "AP2_CHANNEL_FILE_PATH",
+        "AP2_TICK_S",
+        "AP2_MM_TICK_S",
+        "AP2_MM_BOT_USER_ID",
+        "AP2_WEBHOOK_URL",
     ):
+        assert knob in text, (
+            f"env template must document the deployment-identity / secret "
+            f"knob {knob!r} (TB-414 allowlist)"
+        )
         # Every knob mention must sit behind a `# ` so it's prose, not a
         # live override. The check is per-line: any uncommented
         # `KNOB=` line would be a regression.
@@ -490,47 +490,46 @@ def test_creates_env_template_when_missing(tmp_path: Path):
                 stripped = line.lstrip()
                 assert stripped.startswith("# "), (
                     f"env template must keep {knob!r} commented-out so the "
-                    f"file documents without overriding code defaults; "
+                    f"file documents without overriding defaults; "
                     f"found live line: {line!r}"
                 )
 
 
-def test_env_template_default_values_match_config_constants(tmp_path: Path):
-    """The `ENV_TEMPLATE` source uses `config.DEFAULT_*` constants
-    interpolated into the rendered string, so the template's documented
-    defaults track the code's single source of truth. A bump to any
-    `DEFAULT_*` in `config.py` flows through to the rendered file
-    without a manual edit. Pin the round-trip so a future refactor
-    that hardcodes a literal in the template (silently drifting from
-    the real default) trips here.
+def test_env_template_is_secrets_and_deployment_identity_only(tmp_path: Path):
+    """TB-414 contract: the env scaffold documents ONLY secrets +
+    deployment-identity, NOT behavioral tunables. The flat `AP2_<tunable>`
+    override was removed in TB-413, so a scaffolded env still listing
+    `AP2_TASK_MAX_TURNS` / `AP2_AGENT_MODEL` / … would re-teach a retired
+    pattern. Pin: those behavioral-tunable flat names are absent, and the
+    header points operators at config.toml + `ap2 config set`.
     """
-    from ap2.config import (
-        DEFAULT_CONTROL_TIMEOUT_S,
-        DEFAULT_IDEATION_MAX_TURNS,
-        DEFAULT_TASK_MAX_TURNS,
-        DEFAULT_TASK_TIMEOUT_S,
-        DEFAULT_VERIFY_TIMEOUT_S,
-    )
-
     init_project(tmp_path)
     text = (tmp_path / ".cc-autopilot" / "env").read_text()
 
-    # The template renders `# AP2_FOO=<DEFAULT>` for each constant-backed
-    # knob. Pin both directions: the comment-line is present AND the
-    # value matches the live constant.
-    for knob, expected in (
-        ("AP2_TASK_TIMEOUT_S", DEFAULT_TASK_TIMEOUT_S),
-        ("AP2_TASK_MAX_TURNS", DEFAULT_TASK_MAX_TURNS),
-        ("AP2_CONTROL_TIMEOUT_S", DEFAULT_CONTROL_TIMEOUT_S),
-        ("AP2_IDEATION_MAX_TURNS", DEFAULT_IDEATION_MAX_TURNS),
-        ("AP2_VERIFY_TIMEOUT_S", DEFAULT_VERIFY_TIMEOUT_S),
+    # Representative behavioral tunables must NOT be scaffolded into env.
+    for tunable in (
+        "AP2_AGENT_MODEL",
+        "AP2_AGENT_BACKEND",
+        "AP2_AGENT_EFFORT",
+        "AP2_TASK_MAX_TURNS",
+        "AP2_TASK_TIMEOUT_S",
+        "AP2_CONTROL_TIMEOUT_S",
+        "AP2_IDEATION_MAX_TURNS",
+        "AP2_IDEATION_TRIGGER_TASK_COUNT",
+        "AP2_VERIFY_CMD",
+        "AP2_VERIFY_TIMEOUT_S",
+        "AP2_ATTENTION_IMMEDIATE_PUSH",
+        "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP",
+        "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP",
     ):
-        needle = f"# {knob}={expected}"
-        assert needle in text, (
-            f"env template must document {knob}'s default from "
-            f"config.{knob.replace('AP2_', 'DEFAULT_')}; expected to "
-            f"find {needle!r}; template:\n{text!r}"
+        assert tunable not in text, (
+            f"env template must NOT scaffold the behavioral tunable "
+            f"{tunable!r} (config.toml is its sole source post-TB-413)"
         )
+
+    # The header must steer operators to config.toml + `ap2 config set`.
+    assert "config.toml" in text
+    assert "ap2 config set" in text
 
 
 def test_does_not_clobber_existing_env_file(tmp_path: Path):

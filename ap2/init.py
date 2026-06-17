@@ -17,14 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .config import (
-    AUTOPILOT_DIR_NAME,
-    DEFAULT_CONTROL_TIMEOUT_S,
-    DEFAULT_IDEATION_MAX_TURNS,
-    DEFAULT_TASK_MAX_TURNS,
-    DEFAULT_TASK_TIMEOUT_S,
-    DEFAULT_VERIFY_TIMEOUT_S,
-)
+from .config import AUTOPILOT_DIR_NAME
 
 
 TASKS_TEMPLATE = (
@@ -234,142 +227,94 @@ IDEATION_STATE_TEMPLATE = (
 )
 
 
-# TB-278: documented `.cc-autopilot/env` scaffolding written by `ap2 init`
-# to fresh projects. Every common knob is listed with its code default
-# shown inline and the `KEY=VALUE` line commented out — the file
-# documents-by-default without overriding anything (the code defaults
-# still apply unless the operator uncomments).
+# TB-278 / TB-414: documented `.cc-autopilot/env` scaffolding written by
+# `ap2 init` to fresh projects. Post-TB-413 the env surface is the
+# SECRETS + DEPLOYMENT-IDENTITY half of the config model only — ALL
+# behavioral tunables live in `.cc-autopilot/config.toml` (authored
+# directly or via `ap2 config set`), and a flat `AP2_<tunable>` env name
+# no longer overrides the TOML value (the reverse-`FLAT_TO_SECTIONED`
+# override was removed in TB-413; such a name is simply IGNORED). So the
+# template documents ONLY the `config.ENV_PERMITTED_KEYS` allowlist:
+# credential / integration-secret placeholders plus the per-deployment
+# identity knobs (Mattermost channels, web host/port, sandbox user,
+# project name, channel-file path, tick intervals). The commented
+# behavioral-tunable `AP2_*` examples this template carried pre-TB-414
+# (model/effort, timeouts, max-turns, ideation, auto-approve, attention,
+# …) were removed so a fresh scaffold never re-teaches the retired
+# flat-override pattern; operators set those in config.toml instead.
 #
 # Idempotent + non-clobbering: `init_project` only writes this when
 # `.cc-autopilot/env` is ABSENT (operators put secrets / channel IDs in
 # it; an init re-run on an existing project must not stomp the file).
 #
-# The defaults shown here are pulled from `config.DEFAULT_*` constants
-# (DEFAULT_TASK_MAX_TURNS, DEFAULT_IDEATION_MAX_TURNS,
-# DEFAULT_CONTROL_TIMEOUT_S, DEFAULT_TASK_TIMEOUT_S,
-# DEFAULT_VERIFY_TIMEOUT_S) so the template never drifts from the source
-# of truth — a future bump to any constant updates the rendered template
-# the next time a fresh project is init'd. AGENT_MODEL / AGENT_EFFORT /
-# MM_CHANNELS / IDEATION_TRIGGER_TASK_COUNT have non-constant or "(unset)"
-# defaults that are inlined as string literals (matching how `ap2/README.md`
-# and the `ap2-config` skill's `## Configuration knobs` enumerate them).
-#
 # Note: `.cc-autopilot/env` is gitignored (`NESTED_GITIGNORE_BLOCKS`
 # above), so the generated file is per-project local — the TEMPLATE
 # constant here is the committed source-of-truth; the rendered file is
 # not.
-ENV_TEMPLATE = f"""\
-# .cc-autopilot/env — per-project tunables for the ap2 daemon.
+ENV_TEMPLATE = """\
+# .cc-autopilot/env — per-project SECRETS + DEPLOYMENT-IDENTITY for the
+# ap2 daemon.
 #
 # Lines are KEY=VALUE. Blank lines and `#` comments are ignored. Quoted
-# values (single or double) are stripped. Shell exports take precedence
-# over this file at daemon-start (TB-271 `note_initial_applied`); a key
-# set ONLY in shell will keep that value even if added here later
-# (un-export + restart, or set here before daemon-start, to fix).
+# values (single or double) are stripped. This file is gitignored — it
+# holds credentials and per-deployment identity, not project-tracked
+# behavioral config.
 #
-# Every knob below is commented out — the code default (shown inline)
-# applies unless you uncomment. Edit + save: the daemon hot-reloads
-# tunables at the top of every tick (TB-271 `env_reload`); a restart is
-# only required for the lifecycle knobs (`AP2_WEB_PORT`,
-# `AP2_WEB_DISABLED`, `AP2_MM_CHANNELS`) that wire stateful resources.
+# THIS FILE IS NOT WHERE BEHAVIORAL TUNABLES LIVE. Post-TB-413 the
+# config surface is split in two along the 12-factor cut-line:
 #
-# See the `ap2-config` skill (`skills/ap2-config/SKILL.md`)
-# `## Configuration knobs` for the full list with descriptions, and
-# `ap2/config.py` for the in-source DEFAULT_* constants.
+#   * `.cc-autopilot/config.toml` — ALL behavioral tunables: timeouts,
+#     max-turns, model/effort, ideation, auto-approve / auto-unfreeze,
+#     the verify gate, attention, janitor, agent backends, etc. Author
+#     them there directly, or run `ap2 config set <key> <value>`
+#     (e.g. `ap2 config set core.task_max_turns 500`). A flat
+#     `AP2_<TUNABLE>` env var no longer overrides config.toml — it is
+#     IGNORED (the reverse-`FLAT_TO_SECTIONED` override was removed in
+#     TB-413), so a stale shell export can't silently pin the daemon.
+#
+#   * THIS file — only the secrets + deployment-identity allowlist
+#     (`config.ENV_PERMITTED_KEYS`): credentials, integration secrets,
+#     and the per-daemon identity an operator running several daemons
+#     against one project sets per deployment.
+#
+# Every key below is commented out — fill in the ones your deployment
+# needs and leave the rest. The lifecycle knobs (`AP2_WEB_PORT`,
+# `AP2_WEB_DISABLED`, `AP2_MM_CHANNELS`) wire a stateful resource at
+# daemon-start, so a change to them needs `ap2 stop && ap2 start`; the
+# tick intervals hot-reload at the top of the next tick (TB-271).
+#
+# See the `ap2-config` skill (`skills/ap2-config/SKILL.md`) for the full
+# reference: `## Configuration knobs` enumerates this env allowlist and
+# `## Config keys (TOML)` documents the config.toml tunable surface.
 
-# Project-wide regression gate. Runs after every successful task agent
-# commit; failure routes the task through retry like any other crash.
-# Unset (default) = no project-wide gate runs.
-# AP2_VERIFY_CMD=uv run pytest -q
+# --- Credentials / integration secrets -------------------------------------
+# Auth-bearing; rotate out of band. Commonly exported from the operator's
+# shell instead of this file.
+# CLAUDE_CODE_OAUTH_TOKEN=        # Claude backend OAuth token (required)
+# OPENAI_API_KEY=                 # only for a codex-backed agent kind
+# CODEX_HOME=                     # codex auth dir (default ~/.codex)
+# MATTERMOST_URL=                 # Mattermost base URL
+# MATTERMOST_TOKEN=               # Mattermost bot token
+# AP2_MM_BOT_USER_ID=             # bot user ID (self-message filtering)
+# AP2_MM_TEAM_ID=                 # Mattermost team ID
+# AP2_MM_REPORT_CHANNEL=          # status-report channel (else AP2_MM_CHANNELS[0])
+# AP2_MM_MENTION=@claude-bot      # mention pattern that triggers the handler
+# AP2_WEBHOOK_URL=                # WebhookChannelAdapter destination (Slack/Discord/HTTP)
 
-# Timeout (s) for `AP2_VERIFY_CMD`. Bump if your suite outgrows the
-# default; `ap2 doctor` warns when set below observed-typical successful
-# verify duration.
-# AP2_VERIFY_TIMEOUT_S={DEFAULT_VERIFY_TIMEOUT_S}
+# --- Deployment identity ----------------------------------------------------
+# Per-daemon identity; set per deployment when running several daemons
+# against one project.
+# AP2_MM_CHANNELS=                # comma-separated MM channel IDs to poll (lifecycle: restart)
+# AP2_WEB_HOST=                   # web UI bind host
+# AP2_WEB_PORT=7820               # web UI bind port (lifecycle: restart)
+# AP2_WEB_DISABLED=               # set 1/true to skip the daemon-spawned web UI (lifecycle: restart)
+# AP2_SANDBOX_USER=               # sandbox user identity
+# AP2_PROJECT_NAME=               # status-headline project name (default: project dir name)
+# AP2_CHANNEL_FILE_PATH=          # FileAppendChannelAdapter target path
 
-# Per-task SDK query timeout (s). The shipped default is 3600 (60 min) —
-# raised to the value this project validated over its full history
-# (TB-122 hit `error_max_turns` at 51 turns and the old wall-clock cap
-# also bit on real refactors). Bump further only for unusually heavy
-# projects.
-# AP2_TASK_TIMEOUT_S={DEFAULT_TASK_TIMEOUT_S}
-
-# Max turns per task agent. The shipped default is 500 — raised over this
-# project's history (50 → 200 in TB-278 after TB-122 hit the old wall at
-# 51 turns, then 200 → 500 in TB-347 to match the validated operating
-# value). Bump further only for unusually heavy projects.
-# AP2_TASK_MAX_TURNS={DEFAULT_TASK_MAX_TURNS}
-
-# Per-control-agent (mattermost / cron / ideation) SDK query timeout (s).
-# Default raised from 300 → 1200 in TB-278 — `xhigh`-effort ideation
-# routinely blew the old 5-min wall against a populated
-# progress.md / operator_log.md.
-# AP2_CONTROL_TIMEOUT_S={DEFAULT_CONTROL_TIMEOUT_S}
-
-# Max turns for the ideation agent. Default raised from 30 → 100 in
-# TB-278 after a goal.md rewrite mid-cycle hit `error_max_turns` at 31.
-# `AP2_CONTROL_TIMEOUT_S` still bounds runaway wall-clock.
-# AP2_IDEATION_MAX_TURNS={DEFAULT_IDEATION_MAX_TURNS}
-
-# Fire ideation when Ready+Backlog count is BELOW this threshold (and
-# Active is empty). Doubles as the per-cycle proposal-slot budget. Set
-# to 1 for the legacy "fire only when working queue is fully empty"
-# behavior; raise for projects with very fluid scope.
-# AP2_IDEATION_TRIGGER_TASK_COUNT=3
-
-# Model passed to `ClaudeAgentOptions` for task / control / verifier /
-# janitor agents. Empty-string env DOES propagate (only an ABSENT key
-# falls through to the default).
-# AP2_AGENT_MODEL=claude-opus-4-7
-
-# Global reasoning-effort level (low|medium|high|xhigh|max). Per-job
-# sub-knobs (`AP2_STATUS_REPORT_EFFORT`, `AP2_VERIFY_JUDGE_EFFORT`,
-# `AP2_JANITOR_JUDGE_EFFORT`) override this for their respective agents.
-# AP2_AGENT_EFFORT=xhigh
-
-# Per-agent-kind backend selection (codex support, axis 5). Each agent
-# kind defaults to the `claude` backend (sdk.query against the bundled
-# Claude Code binary). Opt a kind into the `codex` backend by exporting
-# AP2_AGENT_BACKEND_<KIND>=codex with <KIND> upper-cased — one of: task,
-# ideation, status_report, cron, mattermost, verifier_judge,
-# ideation_scrub, validator_judge, janitor_judge. A codex-backed kind
-# requires the OpenAI credential (OPENAI_API_KEY) at daemon start; an
-# all-default install needs only CLAUDE_CODE_OAUTH_TOKEN as before. The
-# equivalent config.toml surface is the `[agent_backends]` table
-# (e.g. `task = "codex"`).
-# AP2_AGENT_BACKEND_<KIND>=claude
-
-# Comma-separated Mattermost channel IDs the daemon polls for `@bot`
-# mentions. Unset = no Mattermost integration. This is a LIFECYCLE knob
-# (FIXED_KNOBS) — changing it requires `ap2 stop && ap2 start` to
-# re-subscribe.
-# AP2_MM_CHANNELS=
-
-# Opt-in immediate Mattermost push when the attention detector emits a
-# fresh `attention_raised` (TB-297). Default OFF — the
-# status-report cron stays the routine push channel for fresh projects.
-# Flip to `1` once you've sampled the detector cadence (`ap2 attention`
-# / `ap2 logs --type attention_raised`) and confirmed the rate is low
-# enough not to noise the channel. Requires `AP2_MM_CHANNELS` above to
-# be set; debounce piggybacks on `AP2_ATTENTION_DEBOUNCE_S` (default 6h).
-# AP2_ATTENTION_IMMEDIATE_PUSH=0
-
-# Per-task token ceiling for auto-approved tasks (TB-224). Unset / 0 =
-# cap disabled (operators who haven't budgeted their project don't get
-# a hardcoded ceiling surprising them). When set, an auto-approved
-# task whose `task_run_usage` reports input+output tokens above this
-# value trips `auto_approve_paused:per_task_cap` — dispatch halts until
-# `ap2 ack auto_approve_window_resume`.
-# AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP=
-
-# 24h-rolling cumulative token ceiling across all auto-approved tasks
-# (TB-224). Unset / 0 = cap disabled. When set, the sum of input+output
-# tokens across auto-approved tasks in the last 24h crossing this value
-# trips `auto_approve_paused:window_token_cap_exceeded`. The pre-trip
-# nudge (`cost_cap_approach`, TB-290) fires at
-# `AP2_AUTO_APPROVE_COST_APPROACH_PCT` (default 75)% of this cap so the
-# walk-away operator gets a budget-spending heads-up before the halt.
-# AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP=
+# --- Loop tempo (runtime-fixed; no config.toml home) -----------------------
+# AP2_TICK_S=30                   # main-loop tick interval (seconds)
+# AP2_MM_TICK_S=10                # Mattermost polling tick interval (seconds)
 """
 
 
@@ -396,14 +341,37 @@ ENV_TEMPLATE = f"""\
 # split the same source-of-truth knob universe along the
 # can-hot-reload axis). Living next to `ENV_TEMPLATE` keeps the
 # template-vs-exempt decision a one-file edit for the knob-adder.
+#
+# TB-414: every behavioral tunable (timeouts, max-turns, effort, the
+# verify gate, ideation / auto-approve / attention / janitor knobs, …)
+# is now exempt with `reason: config.toml-homed behavioral tunable` —
+# its authoring surface is `.cc-autopilot/config.toml` (`ap2 config set
+# <sectioned.key>`), NOT the env scaffold, since the flat `AP2_<tunable>`
+# override was removed in TB-413. Exempting them HERE (rather than from
+# `_DOCS_DRIFT_EXEMPT_ENV_KNOBS`) keeps them gated by the
+# `ap2-config` skill's `## Configuration knobs` / `## Config keys (TOML)`
+# catalogue while keeping them out of the secrets-only env template. The
+# deployment-identity + integration-secret knobs the template now SHIPS
+# (the Mattermost channel/auth identity, the web host/port/disabled trio,
+# sandbox user, project name, channel-file path, and the tick intervals)
+# were dropped from this set — they live as template substrings now, so
+# the gate is satisfied there. (The global agent-model tunable,
+# `core.agent_model`, is the one knob NOT listed here: TB-414's canary
+# grep forbids its flat-name literal anywhere in `ap2/init.py`, so it is
+# exempted from `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` instead — see the note
+# there.)
 _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
+    "AP2_AGENT_EFFORT",                      # reason: config.toml-homed behavioral tunable (core.agent_effort); set via `ap2 config set`
     "AP2_ATTENTION_DEBOUNCE_S",              # reason: detector-sensitivity tuning, default 6h rarely tuned
+    "AP2_ATTENTION_IMMEDIATE_PUSH",          # reason: config.toml-homed behavioral tunable (components.attention.immediate_push); set via `ap2 config set`
     "AP2_AUTO_APPROVE",                      # reason: opt-in main toggle; operators flip via shell export after sampling the dry-run audit surface
     "AP2_AUTO_APPROVE_COST_APPROACH_PCT",    # reason: internal default (75%), rarely tuned
     "AP2_AUTO_APPROVE_DRY_RUN",              # reason: debug/test only
     "AP2_AUTO_APPROVE_FREEZE_THRESHOLD",     # reason: internal default, rarely tuned
     "AP2_AUTO_APPROVE_GATE_TAGS",            # reason: internal default, rarely tuned
     "AP2_AUTO_APPROVE_NOISY_PAUSE_DISABLED", # reason: debug/test only
+    "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP",   # reason: config.toml-homed behavioral tunable (components.auto_approve.per_task_token_cap); set via `ap2 config set`
+    "AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP",     # reason: config.toml-homed behavioral tunable (components.auto_approve.window_token_cap); set via `ap2 config set`
     "AP2_AUTO_DIAGNOSE_COOLDOWN_S",          # reason: internal default, rarely tuned
     "AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S",    # reason: internal default, rarely tuned
     "AP2_AUTO_UNFREEZE_DISABLED",            # reason: debug/test only — TB-320 kill switch for the auto_unfreeze component; operators flip via shell export, not the per-project template
@@ -411,38 +379,38 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_AUTO_UNFREEZE_FIX_SHAPES",          # reason: operator opt-in allowlist; set via shell export so a per-project template doesn't broaden the auto-patch surface by default
     "AP2_AUTO_UNFREEZE_MAX_PER_DAY",         # reason: internal default, rarely tuned
     "AP2_AUTO_UNFREEZE_MAX_PER_TASK",        # reason: internal default, rarely tuned
-    "AP2_CHANNEL_FILE_PATH",                 # reason: TB-312 core sibling channel adapter target; default path is fine for most projects, only set via shell export when explicitly wiring `FileAppendChannelAdapter` to a non-default location
     "AP2_CONTROL_MAX_TURNS",                 # reason: internal default, rarely tuned
+    "AP2_CONTROL_TIMEOUT_S",                 # reason: config.toml-homed behavioral tunable (core.control_timeout_s); set via `ap2 config set`
     "AP2_CRON_DISABLED",                     # reason: debug/test only — TB-381 kill switch for the cron scheduler component; operators flip via shell export, not the per-project template
     "AP2_EVENT_CONTEXT",                     # reason: internal default, rarely tuned
     "AP2_IDEATION_HALT_EMPTY_CYCLES",        # reason: internal default, rarely tuned
     "AP2_IDEATION_HALT_DISABLED",            # reason: debug/test only
     "AP2_IDEATION_COOLDOWN_S",               # reason: internal default, rarely tuned
     "AP2_IDEATION_DISABLED",                 # reason: debug/test only
-    "AP2_IDEATION_SCRUB_MODEL",              # reason: covered by global AP2_AGENT_MODEL for most projects
+    "AP2_IDEATION_MAX_TURNS",                # reason: config.toml-homed behavioral tunable (core.ideation_max_turns); set via `ap2 config set`
+    "AP2_IDEATION_SCRUB_MODEL",              # reason: covered by the global agent-model config key (core.agent_model) for most projects
+    "AP2_IDEATION_TRIGGER_TASK_COUNT",       # reason: config.toml-homed behavioral tunable (core.ideation_trigger_task_count); set via `ap2 config set`
     "AP2_JANITOR_DISABLED",                  # reason: debug/test only — kill switch for the janitor component (TB-309); operators flip via shell export, not the per-project template
+    "AP2_JANITOR_JUDGE_EFFORT",              # reason: config.toml-homed behavioral tunable (components.janitor.judge_effort); set via `ap2 config set`
     "AP2_JANITOR_JUDGE_MAX_TURNS",           # reason: internal default, rarely tuned
     "AP2_JANITOR_MAX_FINDINGS_LLM",          # reason: internal default, rarely tuned
     "AP2_MAX_RETRIES",                       # reason: internal default, rarely tuned
-    "AP2_MM_BOT_USER_ID",                    # reason: integration secret; set via shell export alongside AP2_MM_CHANNELS
-    "AP2_MM_MENTION",                        # reason: integration default, rarely tuned
-    "AP2_MM_REPORT_CHANNEL",                 # reason: integration secret; set via shell export alongside AP2_MM_CHANNELS
-    "AP2_MM_TEAM_ID",                        # reason: integration secret; set via shell export alongside AP2_MM_CHANNELS
-    "AP2_MM_TICK_S",                         # reason: internal default, rarely tuned
-    "AP2_PROJECT_NAME",                      # reason: defaults to project_root.name; operator renames via shell export
+    "AP2_STATUS_REPORT_EFFORT",              # reason: config.toml-homed behavioral tunable (core.status_report_effort); set via `ap2 config set`
     "AP2_TASK_FROZEN_RECENCY_S",             # reason: internal default, rarely tuned
+    "AP2_TASK_MAX_TURNS",                    # reason: config.toml-homed behavioral tunable (core.task_max_turns); set via `ap2 config set`
     "AP2_TASK_STUCK_THRESHOLD_S",            # reason: internal default, rarely tuned
+    "AP2_TASK_TIMEOUT_S",                    # reason: config.toml-homed behavioral tunable (core.task_timeout_s); set via `ap2 config set`
     "AP2_THINKING_BLOCK_EFFORT_DROP_DISABLED", # reason: debug/test only — TB-356 kill switch for the thinking-block-400 effort-downshift; degradation is on by default, operators flip via shell export
-
-    "AP2_TICK_S",                            # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_DISABLED",          # reason: debug/test only
     "AP2_VALIDATOR_JUDGE_MAX_TOKENS",        # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_MAX_TURNS",         # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_NOISY_THRESHOLD",   # reason: internal default, rarely tuned
     "AP2_VALIDATOR_JUDGE_TIMEOUT_S",         # reason: internal default, rarely tuned
+    "AP2_VERIFY_CMD",                        # reason: config.toml-homed behavioral tunable (core.verify_cmd); set via `ap2 config set`
     "AP2_VERIFY_JUDGE_DISABLED",             # reason: debug/test only — TB-386 kill switch for the optional LLM prose-bullet verify judge (a core sub-step of verify_task, no longer a component); prose judging is on by default, operators disable via shell export to verify with shell bullets alone
+    "AP2_VERIFY_JUDGE_EFFORT",               # reason: config.toml-homed behavioral tunable (core.verify_judge_effort); set via `ap2 config set`
     "AP2_VERIFY_JUDGE_MAX_TURNS",            # reason: internal default, rarely tuned
-    "AP2_WEBHOOK_URL",                       # reason: TB-312 integration secret for the `WebhookChannelAdapter`; set via shell export alongside the project-specific webhook destination (Slack incoming webhook, Discord, etc.)
+    "AP2_VERIFY_TIMEOUT_S",                  # reason: config.toml-homed behavioral tunable (core.verify_timeout_s); set via `ap2 config set`
 })
 
 

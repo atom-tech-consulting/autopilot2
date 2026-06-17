@@ -7,17 +7,38 @@ description: "Use when configuring an ap2 daemon — discovering or tuning an `A
 
 The operator-facing configuration reference for an ap2 daemon. Discover or
 tune any tunable here — an operator should never have to hunt through the
-ap2 source for a knob. Two parallel surfaces describe the same tunable set:
+ap2 source for a knob.
 
-- **Configuration knobs** — the full flat `AP2_*` environment-variable
-  catalogue (loop cadence + per-run timeouts, agent model/effort,
-  verification, the briefing validator, the auto-approve / auto-unfreeze
-  gates, ideation, watchdog, attention, janitor, channel adapters,
-  Mattermost, the local web UI), the per-agent-kind backend selector, and
-  the Codex backend install + auth setup.
-- **Config keys (TOML)** — the typed `.cc-autopilot/config.toml` surface the
-  structured-config focus is migrating the flat env set onto (`[core.*]`,
-  `[components.<name>.*]`, `[agent_backends]`).
+**Two surfaces, split along the 12-factor cut-line (TB-413).** Behavioral
+tunables and secrets/deployment-identity live in *different* files now; pick
+the right one:
+
+- **`.cc-autopilot/config.toml` — the SOLE source for behavioral tunables.**
+  Loop cadence + per-run timeouts, agent model/effort, verification, the
+  briefing validator, the auto-approve / auto-unfreeze gates, ideation,
+  watchdog, attention, janitor, the per-agent-kind backend map — author them
+  here (typed `[core.*]` / `[components.<name>.*]` / `[agent_backends]`
+  tables) or run `ap2 config set <key> <value>` (e.g. `ap2 config set
+  core.task_max_turns 500`). See **Config keys (TOML)** below.
+- **`.cc-autopilot/env` — SECRETS + DEPLOYMENT-IDENTITY only.** Credentials
+  / integration secrets and the per-daemon deployment identity an operator
+  running several daemons against one project sets per deployment
+  (`config.ENV_PERMITTED_KEYS`: Mattermost channels + auth, web host/port,
+  sandbox user, project name, channel-file path, tick intervals, the
+  integration secrets). Nothing here changes the daemon's behavior beyond
+  which credentials / channels / ports / identity it wires up. The fresh-
+  project `ap2 init` env scaffold (`ap2.init.ENV_TEMPLATE`) documents exactly
+  this allowlist and nothing else.
+
+**No flat-`AP2_<tunable>` override anymore (TB-413).** Setting a behavioral
+tunable's flat env name (e.g. `AP2_TASK_MAX_TURNS=999`) no longer overrides
+config.toml — the reverse-`FLAT_TO_SECTIONED` override path was removed, so
+such a name is simply IGNORED (and emits no `env_deprecated` event). Only the
+`ENV_PERMITTED_KEYS` allowlist members still resolve from env. The
+**Configuration knobs** catalogue below still enumerates every flat `AP2_*`
+name (it is the operator-facing name → `config.toml` key reference, and the
+docs-drift gate requires it), but for a behavioral tunable that name is now a
+*lookup key into config.toml*, not a live env override.
 
 Two docs-drift gates in `ap2/tests/test_docs_drift.py` keep this skill in
 lock-step with the source: `test_every_env_knob_documented` (every `AP2_*`
@@ -29,11 +50,39 @@ up.
 
 ## Configuration knobs
 
-Set in shell, in `<project>/.cc-autopilot/env`, or in
-`~claude-agent/.zshenv`. The full set the ap2 source consults
+This catalogue enumerates every flat `AP2_*` name the ap2 source consults
 (`grep -nE 'AP2_[A-Z_]+' ap2/*.py` is the source-of-truth — the
 `test_every_env_knob_documented` gate in `ap2/tests/test_docs_drift.py`
 fails CI if a new knob is added and not listed here).
+
+**Where each name actually resolves (TB-413).** The flat name doubles as
+the operator-facing lookup key, but only two classes still read from env:
+
+- **Secrets + deployment-identity** (`config.ENV_PERMITTED_KEYS`) — the
+  only knobs `.cc-autopilot/env` is *for*. Set them in shell, in
+  `<project>/.cc-autopilot/env`, or in `~claude-agent/.zshenv`. This is what
+  the `ap2 init` env scaffold documents.
+- **Behavioral tunables** — every other knob below. Its config home is
+  `.cc-autopilot/config.toml` (the `core.<key>` / `components.<name>.<key>`
+  path each row names; author it there or via `ap2 config set`). The flat
+  `AP2_<tunable>` env name is **IGNORED** post-TB-413 — it no longer
+  overrides config.toml and emits no `env_deprecated` event. The rows below
+  keep the flat name so an operator who knows the old name can find its TOML
+  key (cross-referenced in **Config keys (TOML)**), not because setting the
+  env var still works.
+
+**12-factor exempt set + CI gate (TB-338).** The subset of knobs that
+NEVER migrate to TOML — Mattermost auth / channel identity, integration
+secrets (`AP2_WEBHOOK_URL`), deployment-environment paths
+(`AP2_CHANNEL_FILE_PATH`), sandbox-identity placeholders (`AP2_DIR`,
+`AP2_REAL_SDK`) — is enumerated in
+`ap2/config_compat.py::_KNOBS_STAYING_ENV_ONLY`. The
+`test_tb338_env_only_cut_line` gate enforces this cut-line on every
+PR: any new `os.environ.get("AP2_…")` read added outside the exempt
+set + the `ap2/config.py` / `ap2/env_reload.py` bootstrap path fails
+CI until the author migrates via `cfg.get_*_value` or explicitly
+documents the new knob in `_KNOBS_STAYING_ENV_ONLY` with a one-line
+justification:
 
 **12-factor exempt set + CI gate (TB-338).** The subset of knobs that
 NEVER migrate to TOML — Mattermost auth / channel identity, integration
@@ -750,11 +799,20 @@ status-report cron's tick rate):
 - `AP2_MM_TEAM_ID` — Mattermost team ID (sandbox install-channel
   helper uses this).
 
-**Local web UI (`ap2 web`, daemon-spawned read-only HTTP).**
+**Local web UI (`ap2 web`, daemon-spawned read-only HTTP).** Deployment-
+identity knobs — set per daemon in `.cc-autopilot/env`, not config.toml.
+- `AP2_WEB_HOST` — bind host for the daemon-spawned web UI. Deployment-
+  identity (on `config.ENV_PERMITTED_KEYS`); an operator binding to a
+  specific interface sets it per deployment.
 - `AP2_WEB_PORT` (7820) — bind port. Malformed values fall back to
   the default rather than crashing daemon startup.
 - `AP2_WEB_DISABLED` — set to `1`/`true`/`yes`/`on` to skip starting
   the daemon-spawned web UI.
+
+**Sandbox / deployment identity.**
+- `AP2_SANDBOX_USER` — sandbox user identity for the deployment. Deployment-
+  identity (on `config.ENV_PERMITTED_KEYS`); env-only, never a config.toml
+  tunable.
 
 **Agent backend selection (`[agent_backends]` / `AP2_AGENT_BACKEND_<KIND>`,
 TB-358).** Every agent kind runs on a pluggable backend — `claude` (the
@@ -1145,16 +1203,23 @@ declared and not listed here OR in
 `ap2.config_compat.apply_env_overrides` at daemon-start):
 
     sectioned env (`AP2_<SECTION>_<KEY>`)
-      > flat env  (`AP2_<FLAT>`, back-compat per `FLAT_TO_SECTIONED`)
+      > flat env  (`AP2_<FLAT>` — ENV_PERMITTED_KEYS allowlist only, TB-413)
       > this TOML file (`.cc-autopilot/config.toml`)
       > in-source defaults.
 
-`ap2/config_compat.FLAT_TO_SECTIONED` is the operator-facing back-
-compat map: every `AP2_*` flat name in `## Configuration knobs` above
-that has a TOML counterpart routes through that map (and emits a
-one-shot `env_deprecated` event so the audit trail surfaces the
-migration). The flat surface stays read-supported indefinitely; the
-TOML surface is the forward-canonical authoring shape.
+`ap2/config_compat.FLAT_TO_SECTIONED` is the operator-facing name → TOML-key
+map: it tells you which `config.toml` path a flat `AP2_*` name corresponds
+to. **TB-413 gates the flat-env OVERRIDE that map used to grant** to the
+`config.ENV_PERMITTED_KEYS` allowlist — only a flat name that is a secret /
+deployment-identity / runtime-fixed knob (the `FLAT_TO_SECTIONED ∩
+ENV_PERMITTED_KEYS` set: `AP2_TICK_S`, `AP2_MM_TICK_S`, `AP2_WEB_PORT`,
+`AP2_WEB_DISABLED`, `AP2_PROJECT_NAME`) still wins over the TOML value. A
+flat name for a *behavioral tunable* is IGNORED (config.toml is its sole
+source) and fires **no** `env_deprecated` event (the emission was retired in
+TB-413 — an ignored override has nothing to deprecate). The sectioned env
+form (`AP2_<SECTION>_<KEY>`, e.g. `AP2_CORE_TASK_MAX_TURNS`) remains the
+highest-precedence override for power users; `config.toml` is the
+forward-canonical authoring shape.
 
 The hot-reload watcher (TB-271 extended by TB-323) tracks
 `.cc-autopilot/config.toml`'s mtime alongside `.cc-autopilot/env`,

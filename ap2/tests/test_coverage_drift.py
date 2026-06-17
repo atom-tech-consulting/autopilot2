@@ -128,10 +128,14 @@ _COVERAGE_DRIFT_EXEMPT_SURFACES: frozenset[str] = frozenset({
     # future addition stays on the right side of the partition.
     "AP2_DIR",
     "AP2_REAL_SDK",
-    # TB-413: deployment-identity members of `config.ENV_PERMITTED_KEYS` (the
-    # 12-factor allowlist) the regex picks up from the allowlist literal in
-    # `ap2/config.py`. Their focused default/override/docs coverage is the
-    # explicit scope of the blocked companion task TB-414; mirrors the
+    # TB-413/TB-414: deployment-identity members of
+    # `config.ENV_PERMITTED_KEYS` (the 12-factor allowlist) the regex picks
+    # up from the allowlist literal in `ap2/config.py`. TB-414 documents them
+    # in `init.ENV_TEMPLATE` + the `ap2-config` skill, but neither has a
+    # DEDICATED reader / focused test yet (both appear only in the allowlist
+    # literal) — forward-compat allowlist members, same shape as `AP2_DIR` /
+    # `AP2_REAL_SDK` above. A future TB that wires a real reader adds the
+    # focused coverage and graduates them off this list. Mirrors the
     # `_DOCS_DRIFT_EXEMPT_ENV_KNOBS` entries.
     "AP2_WEB_HOST",
     "AP2_SANDBOX_USER",
