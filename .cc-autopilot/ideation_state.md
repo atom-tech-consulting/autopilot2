@@ -1,17 +1,17 @@
 # Ideation State
 
-_Last updated: 2026-06-17T02:05Z by ideation cron_
+_Last updated: 2026-06-17T04:10Z by ideation cron_
 
 ## Mission alignment
 
-5 most recent Completes — TB-412 (default-install conservative-posture release
-gate + dev/codex extras pin), TB-411 (README License → PolyForm + the
+5 most recent clean Completes — TB-412 (default-install conservative-posture
+release gate + dev/codex extras pin), TB-411 (README License → PolyForm + the
 `.cc-autopilot/` self-management note), TB-410 (MANIFEST.in grafts skills/ + docs
 into the sdist), TB-409 (json_extract.py path scrub + pyproject author/repo-URL
 coherence), TB-408 (verbatim PolyForm Noncommercial 1.0.0 LICENSE + pyproject
-license/classifiers). All five are distribution-focus work and land Complete —
-recent output directly serves the Mission's "future distribution shapes
-(including a public source-available cut)."
+license/classifiers). Recent output directly serves the Mission's "future distribution shapes
+(including a public source-available cut)." (TB-413 did NOT land clean — it
+retry-exhausted → Frozen; treated under failure review, not here.)
 
 ## Current focus assessment
 
@@ -23,35 +23,45 @@ recent output directly serves the Mission's "future distribution shapes
       author/repo-URL placeholders (TB-409); MANIFEST.in ships skills/ + docs in
       the sdist with a hermetic parse test (TB-410); README License + the
       `.cc-autopilot/` note (TB-411). The two remaining concrete axis-1 gaps were
-      PROPOSED last cycle and are pending operator review: TB-415 (test-tree path
-      leak + recursive sandbox-path gate, Progress signal 1) and TB-416
-      (license/metadata coherence gate, Progress signal 2).
+      proposed and are pending operator review: TB-415 (test-tree path leak +
+      recursive sandbox-path gate, Progress signal 1) and TB-416 (license/metadata
+      coherence gate, Progress signal 2).
     - axis 2 (posture + extras): conservative fresh-install posture + all-disabled
       config load pinned, dev/codex extras + the no-`[mattermost]`-extra decision
       pinned (TB-412).
   - Gaps:
     - The two concrete regression-pin gaps (Progress signals 1 & 2) are already
       covered by TB-415 + TB-416, both awaiting `ap2 approve`.
+    - NEW this cycle: TB-413's commit 829f228 is in HEAD (git: 829f228 then
+      `0041af6 state: TB-413 → Frozen`). Its attempt-3 project-wide verify
+      (`uv run --extra dev pytest ... --ignore=smoke`) timed out at 1800s vs
+      TB-412's 285s for the IDENTICAL command. If that is a genuine suite hang
+      (not an environmental fluke during the two back-to-back 3600s agent
+      timeouts), it sits in HEAD and the project-wide verify gate that runs after
+      EVERY task will time out — which would block TB-415/TB-416 from ever passing
+      verification once approved, and all downstream distribution work. This is
+      operator-owned (see Decisions needed); ideation cannot anchor a fix honestly.
     - (deferred) sdist BUILD smoke + a real clean-room extras-resolution install
       test — both non-hermetic (network / isolated build env); unsuitable as
       per-task verifier bullets, better for operator/CI.
     - Remaining steps include operator-only work (set the real repo URL/author, push).
   - Status: `in-progress`
-  - Reasoning: has Complete TB-Ns (408-412) and the two remaining concrete gaps
-    are already proposed + awaiting review, not unaddressed.
 
 ## Non-goal risk check
 
 TB-413 (operator-added) removed the flat `AP2_*` override path + retired the
-`config_compat` shim — which cuts against the structured-config Done-when bullet
+`config_compat` shim — cutting against the structured-config Done-when bullet
 "existing `AP2_*` env names continue to work as overrides for one full release
 cycle" (goal.md L92-95). But it is operator-directed (filed `--skip-goal-alignment`)
-and operator-owned, so it is not ideation drift. None of this cycle's reasoning
-touches behavior removal, push, real-URL invention, or goal mutation. none (re:
-ideation's own actions).
+and operator-owned, so it is not ideation drift.
 
 ## Considered & deferred this cycle
 
+- **Auto-propose a fix for TB-413's suite-hang regression**: NOT proposed — the
+  root cause is undiagnosed and 829f228 is operator-owned + Frozen. A parallel
+  fix task would collide with the operator's own triage (revert vs. re-scope vs.
+  investigate); the follow-up protocol says surface, don't auto-propose, for an
+  operator-owned frozen task with no goal anchor. Surfaced under Decisions needed.
 - **sdist build smoke / extras-resolution install test**: deferred again —
   non-hermetic (network, isolated build env); cannot confirm a `--no-isolation`
   hermetic path without Bash; better suited to operator/CI. TB-410's MANIFEST.in
@@ -61,43 +71,43 @@ ideation's own actions).
   wack-a-mole pattern (TB-172/231/240: "enumerate limited cases, generalize
   poorly"). TB-415's recursive absolute-path gate already pins the one concrete
   invariant named in Progress signal 1.
-- **README quickstart/install polish**: deferred — the focus ships without it; goal.md requires only an accurate License section +
-  `.cc-autopilot/` note, both delivered by TB-411.
-- **Splitting/remediating TB-413** (retry-exhausted → Frozen): NOT auto-proposed —
-  operator-owned (`--skip-goal-alignment`, no goal anchor), and a split has no
-  honest current-focus anchor. Surfaced to operator instead (see Decisions needed).
 - **Recurring operator-rejection pattern**: vetoes target speculative
   enumerated-case linters (TB-172/231/240) and duplicate/out-of-sequence axis work
-  (TB-384). 0 proposals this cycle so nothing to rank against it; carried forward
-  as the bar for next cycle.
+  (TB-384).
 
 ## Cycle observations
 
-- TB-413 retry-exhausted → Frozen; commit 829f228 landed on attempt 3, but the
-  project-wide verify (`uv run --extra dev pytest ... --ignore=smoke`) timed out
-  (exit=None, 1800s) vs TB-412's 285s for the IDENTICAL command. The ~6× blowup
-  signals the config-loader change introduced a suite hang/regression, not merely
-  oversized scope (two prior agent-wall-clock timeouts at 3600s each compounded it).
-- TB-414 (`@blocked:TB-413`) is transitively stranded while TB-413 is Frozen.
+- git confirms 829f228 (TB-413 work) is in HEAD, immediately under the Frozen
+  state commit — so the suite-timing regression, if real, ships at HEAD now. The
+  two earlier TB-413 failures were AGENT 3600s wall-clock timeouts; only attempt 3
+  was a verify-command 1800s timeout. The back-to-back agent timeouts mean the
+  machine may have been thrashing, so a one-off slowdown can't be ruled out
+  without re-running the command — hence the operator-diagnostic ask below.
 - Both project insights are stale (>30d: validator-judge-timeout 2026-05-18,
   test-suite-slowness 2026-05-17). The test-suite-slowness insight is freshly
-  relevant given TB-413's 1800s suite timeout, but it has no tldr and was not
-  re-measured — not actionable without grounding.
+  relevant to TB-413's 1800s suite timeout but has no tldr and was not re-measured
+  — carried because it directly informs whether the HEAD regression is real, but
+  not actionable as grounding until the operator's TB-413 triage resolves it.
 
 ## Decisions needed from operator
 
-- Decision needed: TB-413 is retry-exhausted (Frozen) with commit 829f228 on disk,
-  but the full test suite now times out (1800s vs the usual ~285s), indicating its
-  config-loader change introduced a regression. Recommend the operator either
-  re-scope/split it into smaller slices (allowlist definition vs flat-override
-  removal vs compat-shim retirement vs read migration) OR investigate the suite
-  hang in 829f228 before `ap2 unfreeze TB-413`. Unblock condition: until decided,
-  TB-414 (`@blocked:TB-413`) stays stranded and ideation cannot anchor a
-  remediation (the task is operator-owned with no goal anchor).
+- Decision needed: TB-413 is retry-exhausted (Frozen) and its commit 829f228 is in
+  HEAD; attempt 3's project-wide verify timed out at 1800s vs the usual ~285s for
+  the identical command. Please run
+  `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` at HEAD to
+  confirm whether 829f228's config-loader change genuinely hangs the suite or the
+  1800s was an environmental fluke during the two back-to-back 3600s agent
+  timeouts. If it genuinely hangs: revert/re-scope 829f228 before `ap2 unfreeze
+  TB-413`, because the project-wide verify gate runs after every task and a real
+  hang will time out TB-415/TB-416 (once approved) and all downstream distribution
+  work. Unblock condition: until this is decided, TB-414 (`@blocked:TB-413`) stays
+  stranded and ideation cannot anchor a remediation (the task is operator-owned
+  with no goal anchor).
 
 ## Proposals this cycle
 
 Backlog already populated; no proposals this cycle. The two concrete remaining
-axis-1 gaps (Progress signals 1 & 2) are already covered by TB-415 + TB-416, both
-pending operator review; remaining candidates are non-hermetic (deferred) or match
-a vetoed wack-a-mole pattern.
+axis-1 gaps (Progress signals 1 & 2) are covered by TB-415 + TB-416, both pending
+operator review; the only new gap (TB-413's HEAD suite-hang risk) is operator-owned
+triage, not an ideation-anchorable proposal; remaining candidates are non-hermetic
+(deferred) or match a vetoed wack-a-mole pattern.
