@@ -333,6 +333,16 @@ Do NOT also commit empty source changes just to satisfy the daemon — the
 daemon only re-runs verification (no extra commit needed). Do NOT ALSO
 attempt the work inline. The pipeline alone is the work.
 
+## Running tests / verification — FOREGROUND only, never background-poll
+Run verification / test commands in the FOREGROUND and let them finish. Do NOT
+launch them with `run_in_background` and then poll the output file turn after
+turn — that loops, balloons the run into thousands of messages, and exhausts the
+task timeout (it has frozen a task before). While iterating, run TARGETED test
+files (the ones you are changing), not the full `ap2/tests/` suite repeatedly.
+You do not need to self-run the entire suite: after your `report_result`, the
+daemon's verifier runs the full `## Verification` suite against your working
+tree. Keep total tool calls bounded.
+
 ## What the daemon and operator handle (do NOT touch)
 These files are either daemon-managed state or operator-curated. The SDK
 will reject `Edit`/`Write` on them — they're listed in `disallowed_tools`.
