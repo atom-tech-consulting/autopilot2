@@ -1665,3 +1665,9 @@
 - **Summary:** Previously committed in 47fa66f, which fully covers the briefing; re-verified completeness this run: read the diff against every scope item, ran both target files (10 passed) AND the full project-wide gate `uv run --extra dev pytest -q ap2/tests/ --ignore=ap2/tests/smoke` (3064 passed) in the daemon's exact env — the prior verification_failed was a transient flake in an unrelated timing/concurrency test under load (the main suite mocks the validator judge and excludes the live smoke canary), not a defect in this work.
 - **Files:** ap2/tests/test_default_posture.py, ap2/tests/test_packaging.py
 - **Tests:** pass
+
+## [2026-06-17] TB-413: Make config.toml the sole source for behavioral tunables; restrict env to a secrets + deployment-identity allowlist
+- **Commit:** `edcc68f`
+- **Summary:** TB-413 complete. Production change (ENV_PERMITTED_KEYS allowlist + flat AP2_* tunable-override removal) was committed in 829f2280; HEAD edcc68f commits the missing test-side migration that fixes the prior 1800s verifier timeout (the validator-judge conftest shield still used the removed flat AP2_VALIDATOR_JUDGE_DISABLED, so the dep-coherence judge stayed enabled and fired real SDK calls across the unit suite). Shields + 42 test files moved to sectioned AP2_CORE_*/AP2_COMPONENTS_* names. 65 modified test files pass (1095/361s); 20 unmodified files referencing now-ignored flat tunables pass (302).
+- **Files:** ap2/tests/conftest.py, ap2/tests/e2e/conftest.py, +42 more test files (edcc68f); ap2/config.py, ap2/config_compat.py, ap2/config_introspect.py, ap2/tests/test_tb413_env_allowlist.py (829f2280)
+- **Tests:** pass
