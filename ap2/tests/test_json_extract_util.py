@@ -30,13 +30,20 @@ tripping a test:
   (e) no JSON object found → returns ``None``.
   (f) multiple top-level JSON objects → returns the **rightmost**.
 
-The TB-89 captured response (a real file on disk) is the integration
-check — a contract test against an actual production failure to anchor
-the fix to the operator's incident. See the module docstring on
-``ap2/json_extract.py`` for the algorithm + rationale.
+The TB-89 captured response is the integration check — a contract test
+against an actual production failure to anchor the fix to the operator's
+incident. Its location is supplied at runtime via the
+``AP2_TB89_CAPTURED_RESPONSE`` env var rather than a hard-coded absolute
+path (TB-415: a baked ``/Users/<sandbox-user>/repos/...`` path ships in
+``ap2.tests`` and leaks the sandbox operator's local checkout root —
+``ap2.tests`` is a declared package). When the env var is unset (the
+default for any clean checkout) the integration check skips and the
+synthetic brace-shadowing cases above cover the same shape. See the
+module docstring on ``ap2/json_extract.py`` for the algorithm + rationale.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -246,18 +253,25 @@ def test_end_offset_is_half_open():
 # --------------------------------------------------------------------------
 
 
-_TB89_CAPTURED_RESPONSE = Path(
-    "/Users/claude-agent/repos/post-train/.cc-autopilot/debug/"
-    "20260519T095236Z-TB-89-judge-bullet15-response.txt"
+# TB-415: sandbox-neutral source for the captured-response path. The file
+# lives in a downstream operator's debug dir, which is environment-specific;
+# point at it via `AP2_TB89_CAPTURED_RESPONSE=<path>` rather than baking the
+# sandbox operator's local `/Users/<sandbox-user>/repos/...` checkout root
+# into a shipped test module. Unset (the clean-checkout default) → `None` →
+# the integration check skips and the synthetic cases above carry coverage.
+_TB89_CAPTURED_RESPONSE_ENV = os.environ.get("AP2_TB89_CAPTURED_RESPONSE", "").strip()
+_TB89_CAPTURED_RESPONSE = (
+    Path(_TB89_CAPTURED_RESPONSE_ENV) if _TB89_CAPTURED_RESPONSE_ENV else None
 )
 
 
 @pytest.mark.skipif(
-    not _TB89_CAPTURED_RESPONSE.exists(),
+    _TB89_CAPTURED_RESPONSE is None or not _TB89_CAPTURED_RESPONSE.exists(),
     reason=(
-        "TB-89 captured response file is not present in this environment "
-        "(downstream post-train repo). The unit cases above cover the "
-        "same brace-shadowing shape synthetically."
+        "TB-89 captured response file not provided. Set "
+        "AP2_TB89_CAPTURED_RESPONSE=<path> to run this integration check "
+        "against the literal incident response; the unit cases above cover "
+        "the same brace-shadowing shape synthetically."
     ),
 )
 def test_tb89_captured_response_parses_as_pass():
