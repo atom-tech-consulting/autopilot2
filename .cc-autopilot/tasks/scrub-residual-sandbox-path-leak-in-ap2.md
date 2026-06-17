@@ -78,3 +78,10 @@ the next copy-pasted debug path from re-introducing the same leak.
 - The LICENSE / pyproject license-coherence regression gate (sibling proposal this
   cycle).
 - Any `python -m build --sdist` build smoke (deferred — non-hermetic).
+## Attempts
+
+### 2026-06-17 — blocked
+Scrub + gate are done and green (committed 94394a8): test_json_extract_util.py's baked /Users/<sandbox-user>/repos/post-train/... captured-response path is now an env-overridable AP2_TB89_CAPTURED_RESPONSE lookup (skip-guard + synthetic coverage preserved), and the new recursive gate test_no_sandbox_path_leak.py passes (15 passed, 1 skipped). BLOCKER: verification bullet 0 `! grep -rn "/Users/claude-agent/repos" ap2/ ...` is unsatisfiable as written — `grep -rn` matches 614 binary __pycache__/*.pyc files whose co_filename embeds the absolute build path (written by the running daemon AND by the project-wide verify suite that runs BEFORE the per-task bullets), so it exits 0 and `! grep` fails regardless of any source fix; the identical command with `-I` (skip binary) finds 0 text matches and passes. No durable in-repo fix exists (relocating pyc out of the tree needs PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX in the daemon's own env, which is operator-owned), so the grep bullet must add `-I`. The new gate test already encodes the correct invariant durably (skips binary, scans only shipped text source).
+BriefingFix: grep_recursive_needs_binary_skip at .cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md:64: grep -rn -> grep -rnI
+- **commit:** 94394a8
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260617T214449Z-TB-415.prompt.md`, `stream: .cc-autopilot/debug/20260617T214449Z-TB-415.stream.jsonl`, `messages: .cc-autopilot/debug/20260617T214449Z-TB-415.messages.jsonl`
