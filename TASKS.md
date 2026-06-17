@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-415** **Scrub residual sandbox-path leak in ap2/tests + regression-gate shipped source against sandbox-local absolute paths** `#autopilot` `#distribution` `#packaging` `#identity-scrub` `#regression-pin` `#tests` — Remove the hard-coded /Users/claude-agent/repos/post-train absolute path still in ap2/tests/test_json_extract_util.py and add a recursive regression gate so a sandbox-local path can't reappear in shipped source. [→ brief](.cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md)
 
 ## Pipeline Pending
 
@@ -300,3 +299,5 @@
 - [x] **TB-417** **Task prompt: forbid run_in_background busy-poll loops; mandate foreground verification (daemon verifier owns the full suite)** `#autopilot` `#prompts` `#robustness` `#task-agent` `#timeout` [→ brief](.cc-autopilot/tasks/task-prompt-forbid-run-in-background-bus.md)
 
 ## Frozen
+
+- [ ] **TB-415** **Scrub residual sandbox-path leak in ap2/tests + regression-gate shipped source against sandbox-local absolute paths** `#autopilot` `#distribution` `#packaging` `#identity-scrub` `#regression-pin` `#tests` — Remove the hard-coded /Users/claude-agent/repos/post-train absolute path still in ap2/tests/test_json_extract_util.py and add a recursive regression gate so a sandbox-local path can't reappear in shipped source. [→ brief](.cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md)
