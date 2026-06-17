@@ -48,3 +48,10 @@ task agent gets it. If we delete this, the next big task repeats the freeze.
   mitigation; separate task).
 - Changing the `## Verification` gate or how the daemon verifier runs it.
 - The per-briefing execution notes (already applied to the affected tasks).
+## Attempts
+
+### 2026-06-17 — error
+(no summary)
+- **error:** Exception: Claude Code returned an error result: success
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260617T070849Z-TB-417.prompt.md`, `stream: .cc-autopilot/debug/20260617T070849Z-TB-417.stream.jsonl`, `messages: .cc-autopilot/debug/20260617T070849Z-TB-417.messages.jsonl`

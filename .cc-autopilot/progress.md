@@ -1677,3 +1677,9 @@
 - **Summary:** Trimmed ENV_TEMPLATE + ap2-config skill to document env as secrets + deployment-identity only (config.toml + `ap2 config set` is the sole behavioral-tunable home; flat AP2_ override removed per TB-413); all targeted gate/init/docs tests pass.
 - **Files:** ap2/init.py, ap2/tests/test_init.py, ap2/tests/test_docs_drift.py, ap2/tests/test_coverage_drift.py, skills/ap2-config/SKILL.md
 - **Tests:** pass
+
+## [2026-06-17] TB-417: Task prompt: forbid run_in_background busy-poll loops; mandate foreground verification (daemon verifier owns the full suite)
+- **Commit:** `c011bd6`
+- **Summary:** Added a FOREGROUND-only execution-discipline section to build_task_prompt's _TASK_HEADER (ap2/prompts.py) forbidding run_in_background + output-file polling, steering agents to targeted test files, and noting the daemon verifier owns the full ## Verification suite; grep -qiE "run_in_background|foreground" passes and test_prompts.py is green (43 passed).
+- **Files:** ap2/prompts.py
+- **Tests:** pass
