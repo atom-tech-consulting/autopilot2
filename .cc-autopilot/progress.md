@@ -1683,3 +1683,9 @@
 - **Summary:** Added a FOREGROUND-only execution-discipline section to build_task_prompt's _TASK_HEADER (ap2/prompts.py) forbidding run_in_background + output-file polling, steering agents to targeted test files, and noting the daemon verifier owns the full ## Verification suite; grep -qiE "run_in_background|foreground" passes and test_prompts.py is green (43 passed).
 - **Files:** ap2/prompts.py
 - **Tests:** pass
+
+## [2026-06-17] TB-418: Tune ideation defaults (trigger 10 / cooldown 3600 / max_turns 200) and make ideation_scrub_model provider-aware (claude-haiku for claude, gpt-5.4-mini for codex)
+- **Commit:** `2ad36eb`
+- **Summary:** Bumped ideation defaults (trigger 3→10, cooldown 7200→3600, max_turns 100→200) across the module-locals/schema-mirrors/config constants and made ideation_scrub._resolved_model provider-aware (empty schema default → claude-haiku for the Claude backend, gpt-5.4-mini for Codex, explicit override still wins); all targeted suites green and the three `ap2 config get` checks return 10/3600/200.
+- **Files:** ap2/config.py, ap2/core_config_schema.py, ap2/ideation.py, ap2/ideation_scrub.py, ap2/tests/test_ideation_provider_defaults.py, ap2/tests/test_ideation_trigger.py, ap2/tests/test_env_knobs.py, ap2/tests/test_tb337_core_schema.py
+- **Tests:** pass

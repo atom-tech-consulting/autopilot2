@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-418** **Tune ideation defaults (trigger 10 / cooldown 3600 / max_turns 200) and make ideation_scrub_model provider-aware (claude-haiku for claude, gpt-5.4-mini for codex)** `#autopilot` `#config` `#ideation` `#defaults` `#codex` `#provider-aware` [→ brief](.cc-autopilot/tasks/tune-ideation-defaults-trigger-10-cooldo.md)
 
 ## Pipeline Pending
 
@@ -298,6 +297,7 @@
 - [x] **TB-413** **Make config.toml the sole source for behavioral tunables; restrict env to a secrets + deployment-identity allowlist** `#autopilot` `#config` `#simplification` `#env` `#toml` `#back-compat` [→ brief](.cc-autopilot/tasks/make-config-toml-the-sole-source-for-beh.md)
 - [x] **TB-414** **env-file template + ap2-config skill: document env as secrets + deployment-identity only (drop the flat AP2_ tunable examples)** `#autopilot` `#config` `#docs` `#env` `#skills` `#scaffolding` `@blocked:TB-413` [→ brief](.cc-autopilot/tasks/env-file-template-ap2-config-skill-docum.md)
 - [x] **TB-417** **Task prompt: forbid run_in_background busy-poll loops; mandate foreground verification (daemon verifier owns the full suite)** `#autopilot` `#prompts` `#robustness` `#task-agent` `#timeout` [→ brief](.cc-autopilot/tasks/task-prompt-forbid-run-in-background-bus.md)
+- [x] **TB-418** **Tune ideation defaults (trigger 10 / cooldown 3600 / max_turns 200) and make ideation_scrub_model provider-aware (claude-haiku for claude, gpt-5.4-mini for codex)** `#autopilot` `#config` `#ideation` `#defaults` `#codex` `#provider-aware` [→ brief](.cc-autopilot/tasks/tune-ideation-defaults-trigger-10-cooldo.md)
 
 ## Frozen
 
