@@ -410,3 +410,4 @@ ideation won't re-propose decisions logged here._
 - 2026-06-17T05:05:05Z — applied operator-queued update → TB-413 (goal-alignment check skipped)
 - 2026-06-17T05:05:56Z — applied operator-queued update → TB-414 (goal-alignment check skipped)
 - 2026-06-17T05:05:56Z — applied operator-queued unfreeze → TB-413
+- 2026-06-17T05:07:03Z — applied operator-queued add_backlog → TB-417 (goal-alignment check skipped)
