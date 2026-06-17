@@ -1671,3 +1671,9 @@
 - **Summary:** TB-413 complete. Production change (ENV_PERMITTED_KEYS allowlist + flat AP2_* tunable-override removal) was committed in 829f2280; HEAD edcc68f commits the missing test-side migration that fixes the prior 1800s verifier timeout (the validator-judge conftest shield still used the removed flat AP2_VALIDATOR_JUDGE_DISABLED, so the dep-coherence judge stayed enabled and fired real SDK calls across the unit suite). Shields + 42 test files moved to sectioned AP2_CORE_*/AP2_COMPONENTS_* names. 65 modified test files pass (1095/361s); 20 unmodified files referencing now-ignored flat tunables pass (302).
 - **Files:** ap2/tests/conftest.py, ap2/tests/e2e/conftest.py, +42 more test files (edcc68f); ap2/config.py, ap2/config_compat.py, ap2/config_introspect.py, ap2/tests/test_tb413_env_allowlist.py (829f2280)
 - **Tests:** pass
+
+## [2026-06-17] TB-414: env-file template + ap2-config skill: document env as secrets + deployment-identity only (drop the flat AP2_ tunable examples)
+- **Commit:** `b0de552`
+- **Summary:** Trimmed ENV_TEMPLATE + ap2-config skill to document env as secrets + deployment-identity only (config.toml + `ap2 config set` is the sole behavioral-tunable home; flat AP2_ override removed per TB-413); all targeted gate/init/docs tests pass.
+- **Files:** ap2/init.py, ap2/tests/test_init.py, ap2/tests/test_docs_drift.py, ap2/tests/test_coverage_drift.py, skills/ap2-config/SKILL.md
+- **Tests:** pass
