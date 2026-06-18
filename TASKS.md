@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-421** **Register grep_recursive_needs_binary_skip auto-unfreeze fix-shape (grep -rn -> grep -rnI) so the daemon self-heals binary-pyc false-fail bullets** `#autopilot` `#auto-unfreeze` `#fix-shapes` `#briefing` `#verification` `#robustness` [→ brief](.cc-autopilot/tasks/register-grep-recursive-needs-binary-ski.md)
 
 ## Pipeline Pending
 
