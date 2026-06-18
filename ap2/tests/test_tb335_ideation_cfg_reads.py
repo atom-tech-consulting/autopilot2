@@ -399,18 +399,32 @@ def test_scrub_model_helper_reads_sectioned_env_via_cfg(
 def test_scrub_model_helper_empty_falls_back_to_default(
     cfg, clean_env, emit_reset,
 ):
-    """Empty / whitespace-only override falls back to the module
-    default — pre-TB-335 safety carve-out preserved (a typo'd empty
-    value shouldn't route the SDK call to "").
+    """Empty / whitespace-only override falls back to the provider-aware
+    default — pre-TB-335 safety carve-out preserved (a typo'd empty value
+    shouldn't route the SDK call to ""). TB-419: with a Config in hand the
+    fallback is the resolved adapter's LIGHT tier (`claude-sonnet-4-6` under
+    the default claude backend), not the cfg-less `DEFAULT_SCRUB_MODEL`.
     """
+    from ap2.adapters import ClaudeCodeAdapter
+
     for empty in ("", "   ", "\n\t"):
         clean_env.setenv("AP2_IDEATION_SCRUB_MODEL", empty)
-        assert ideation_scrub._resolved_model(cfg) == ideation_scrub.DEFAULT_SCRUB_MODEL
+        assert (
+            ideation_scrub._resolved_model(cfg)
+            == ClaudeCodeAdapter().default_model_light
+        )
 
 
 def test_scrub_model_helper_returns_default_unset(cfg, clean_env, emit_reset):
-    """No env, no TOML → `DEFAULT_SCRUB_MODEL`."""
-    assert ideation_scrub._resolved_model(cfg) == ideation_scrub.DEFAULT_SCRUB_MODEL
+    """No env, no TOML → the resolved adapter's LIGHT tier (TB-419). With a
+    Config in hand the unset fallback follows `[agent_backends]` via the
+    adapter tier (`claude-sonnet-4-6` under the default claude backend)."""
+    from ap2.adapters import ClaudeCodeAdapter
+
+    assert (
+        ideation_scrub._resolved_model(cfg)
+        == ClaudeCodeAdapter().default_model_light
+    )
 
 
 # ---------------------------------------------------------------------------

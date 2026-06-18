@@ -260,6 +260,23 @@ class AgentAdapter(ABC):
     #: per-agent-kind selection + the auth gate.
     backend: str = ""
 
+    #: Provider default model tiers (TB-419). The adapter is ap2's provider
+    #: boundary, so "what is the heavy/light model for this backend" is
+    #: provider knowledge and belongs here rather than scattered across the
+    #: dispatch sites. HEAVY backs the primary agents (the task / ideation /
+    #: cron / status_report / mattermost dispatch, and the substantive verifier
+    #: judge via its `agent_model` path); LIGHT backs the cost-sensitive
+    #: sub-calls (the validator judge, the ideation scrub). A call site picks
+    #: the tier when its own model config is unset; an explicit `agent_model` /
+    #: `ideation_scrub_model` value (config.toml or an allowlisted env override)
+    #: always wins. New backends declare their own tiers without touching any
+    #: call site. The base leaves both empty so a backend that forgets to
+    #: declare them degrades to the backend's own native default (the
+    #: pre-TB-419 `model=None`/omitted-kwarg shape) rather than handing an
+    #: empty string to the SDK — every concrete adapter overrides both.
+    default_model_heavy: str = ""
+    default_model_light: str = ""
+
     @abstractmethod
     def normalize_options(self, options: AgentOptions) -> dict[str, Any]:
         """Options-normalization entry: map a backend-neutral

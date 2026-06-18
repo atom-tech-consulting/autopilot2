@@ -315,12 +315,16 @@ async def run_task(cfg: Config, sdk, mcp_server, task) -> None:
         stderr=_stderr_sink,
         # TB-344: no inline `default=` — the schema
         # (`CORE_CONFIG_SCHEMA["agent_model"]`) is the single source of truth
-        # for the default. TB-396: that default is now provider-neutral
-        # (`None`), and the trailing `or None` folds an explicit empty-string
-        # env (`AP2_AGENT_MODEL=""`) to `None` too, so the adapter's
-        # `if options.model is not None` guard omits the kwarg and each
-        # backend self-defaults — a codex-routed kind isn't handed a Claude id.
-        model=cfg.get_core_value("agent_model") or None,
+        # for the default (provider-neutral `None`). TB-419: the task agent is
+        # a PRIMARY agent, so when `agent_model` is unset it runs on the
+        # resolved adapter's HEAVY tier (`select_adapter("task", cfg)` →
+        # `claude-opus-4-8` / `gpt-5.5`) rather than the backend's opaque
+        # native default. An explicit `agent_model` (config.toml / allowlisted
+        # env) still wins; the trailing `or` also folds an explicit
+        # empty-string env (`AP2_AGENT_MODEL=""`) onto the heavy tier. The tier
+        # is the selected backend's own id, so no Claude id leaks to a
+        # codex-routed kind.
+        model=cfg.get_core_value("agent_model") or adapter.default_model_heavy,
         # TB-356: graceful degradation — resolves the base `agent_effort`
         # stepped down by this task's per-task downshift level (bumped only on
         # the thinking-block-immutability 400 failure class). Level 0 / kill
@@ -1351,12 +1355,16 @@ async def _run_control_agent(
         max_turns=max_turns,
         setting_sources=["project"],
         stderr=stderr_sink,
-        # TB-344: schema is the single source of truth for the
-        # agent_model default (see CORE_CONFIG_SCHEMA). TB-396: that default
-        # is provider-neutral (`None`); `or None` also folds an empty-string
-        # env to `None` so the adapter omits the kwarg and the backend
-        # self-defaults (no Claude id leaks to a codex-routed kind).
-        model=cfg.get_core_value("agent_model") or None,
+        # TB-344: schema is the single source of truth for the agent_model
+        # default (see CORE_CONFIG_SCHEMA; provider-neutral `None`). TB-419:
+        # the control surfaces (ideation / cron / status_report / mattermost)
+        # are PRIMARY agents, so when `agent_model` is unset they run on the
+        # resolved adapter's HEAVY tier (`claude-opus-4-8` / `gpt-5.5`) rather
+        # than the backend's opaque native default. An explicit `agent_model`
+        # still wins; the trailing `or` also folds an empty-string env onto the
+        # heavy tier. The tier is the selected backend's own id, so no Claude
+        # id leaks to a codex-routed kind.
+        model=cfg.get_core_value("agent_model") or adapter.default_model_heavy,
         effort=resolved_effort,
     )
 

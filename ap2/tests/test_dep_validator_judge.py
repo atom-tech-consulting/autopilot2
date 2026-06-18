@@ -431,11 +431,34 @@ def test_dep_judge_env_knob_defaults(tmp_path, monkeypatch):
     assert captured[0]["max_turns"] == tools._VALIDATOR_JUDGE_MAX_TURNS_DEFAULT
 
 
-# Real-SDK haiku model pin: the production helper targets Haiku-4.5
-# specifically. Pin the model constant so an accidental swap to
-# Opus / Sonnet (which would blow the per-call cost target) trips a
-# focused test rather than landing silently.
-def test_dep_judge_targets_haiku_model():
-    assert "haiku" in tools._VALIDATOR_JUDGE_MODEL.lower()
-    assert "opus" not in tools._VALIDATOR_JUDGE_MODEL.lower()
-    assert "sonnet" not in tools._VALIDATOR_JUDGE_MODEL.lower()
+# TB-419: the validator judge no longer hard-codes a Claude model. It is a
+# cost-sensitive sub-call, so it resolves the LIGHT tier of whichever adapter
+# backs the `validator_judge` kind. Pin that the judge targets the resolved
+# adapter's light tier (never the heavy/opus tier) so an accidental swap to the
+# heavy tier — which would blow the per-call cost target — trips a focused test.
+def test_dep_judge_targets_resolved_adapter_light_tier(tmp_path, monkeypatch):
+    from ap2.adapters import ClaudeCodeAdapter, CodexAdapter
+    from ap2.briefing_validators import _validator_judge_model
+    from ap2.config import Config
+    from ap2.init import init_project
+
+    for name in list(__import__("os").environ):
+        if name.startswith("AP2_"):
+            monkeypatch.delenv(name, raising=False)
+    init_project(tmp_path)
+    cfg = Config.load(tmp_path)
+
+    # cfg-less seam → the default Claude adapter's light tier (sonnet, NOT opus).
+    assert _validator_judge_model(None) == ClaudeCodeAdapter().default_model_light
+    assert "opus" not in _validator_judge_model(None).lower()
+
+    # Claude-routed judge → Claude light tier.
+    monkeypatch.setenv("AP2_AGENT_BACKEND_VALIDATOR_JUDGE", "claude")
+    assert _validator_judge_model(cfg) == ClaudeCodeAdapter().default_model_light
+
+    # Codex-routed judge → Codex light tier, NOT a Claude id (the leak the
+    # adapter tier avoids out of the box).
+    monkeypatch.setenv("AP2_AGENT_BACKEND_VALIDATOR_JUDGE", "codex")
+    resolved = _validator_judge_model(cfg)
+    assert resolved == CodexAdapter().default_model_light
+    assert not resolved.startswith("claude")

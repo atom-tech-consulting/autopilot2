@@ -133,7 +133,6 @@ from .briefing_validators import (  # noqa: E402
     _VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED,
     _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT,
     _VALIDATOR_JUDGE_MAX_TURNS_DEFAULT,
-    _VALIDATOR_JUDGE_MODEL,
     _VALIDATOR_JUDGE_TIMEOUT_S_DEFAULT,
 )
 from .operator_queue import (  # noqa: E402

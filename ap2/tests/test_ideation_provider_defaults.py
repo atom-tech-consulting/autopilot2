@@ -10,19 +10,21 @@ operator-directed defaults pass. Two cleavages:
       config's `get_core_value` resolution.
 
   (2) `ideation_scrub._resolved_model` is provider-aware: with no operator
-      override the unset fallback resolves by the `ideation_scrub` kind's
-      backend (`get_agent_backend("ideation_scrub")` — the SAME selector the
-      scrub dispatcher uses) — `claude-haiku-4-5-20251001` under a
+      override the unset fallback resolves to the LIGHT tier of the adapter
+      backing the `ideation_scrub` kind (TB-419:
+      `select_adapter("ideation_scrub", cfg).default_model_light` — the SAME
+      selector the scrub dispatcher uses) — `claude-sonnet-4-6` under a
       Claude-backed kind, `gpt-5.4-mini` under a Codex-backed one. The scrub
-      is a cost-floor canary, so each branch is the cheap model for its
-      provider (not the backend's full default). An explicit operator value
-      still wins regardless of backend; the provider-aware fallback only
-      governs the UNSET case.
+      is a cost-sensitive sub-call, so each branch is the adapter's light tier
+      for its provider; provider knowledge (which model is "light") lives in
+      the adapter (TB-419 supersedes TB-418's call-site backend-string-match).
+      An explicit operator value still wins regardless of backend; the
+      provider-aware fallback only governs the UNSET case.
 
 Why this matters: pre-TB-418 the scrub default was a fixed Claude string, so
-a Codex-routed project handed `claude-haiku-4-5` to Codex and had to override
-it by hand. The provider-aware default fixes that for every Codex project out
-of the box.
+a Codex-routed project handed a Claude id to Codex and had to override it by
+hand. The provider-aware default fixes that for every Codex project out of the
+box.
 """
 from __future__ import annotations
 
@@ -31,9 +33,9 @@ import os
 import pytest
 
 from ap2 import ideation_scrub
+from ap2.adapters import ClaudeCodeAdapter, CodexAdapter
 from ap2.config import Config
 from ap2.core_config_schema import CORE_CONFIG_SCHEMA
-from ap2.ideation_scrub import DEFAULT_SCRUB_MODEL, DEFAULT_SCRUB_MODEL_CODEX
 from ap2.init import init_project
 
 
@@ -89,30 +91,32 @@ def test_scrub_schema_default_is_unset():
     )
 
 
-def test_scrub_model_resolves_to_haiku_under_claude_backend(cfg, clean_env):
-    """Unset override + Claude-backed `ideation_scrub` kind → the cheap Claude
-    scrub model (`claude-haiku-4-5-20251001`)."""
+def test_scrub_model_resolves_to_claude_light_under_claude_backend(cfg, clean_env):
+    """Unset override + Claude-backed `ideation_scrub` kind → the Claude adapter's
+    LIGHT tier (`claude-sonnet-4-6`). TB-419 supersedes TB-418's haiku call-site
+    match with the adapter's declared light tier."""
     clean_env.setenv("AP2_AGENT_BACKEND_IDEATION_SCRUB", "claude")
     assert cfg.get_agent_backend("ideation_scrub") == "claude"
-    assert ideation_scrub._resolved_model(cfg) == DEFAULT_SCRUB_MODEL
-    assert ideation_scrub._resolved_model(cfg) == "claude-haiku-4-5-20251001"
+    assert ideation_scrub._resolved_model(cfg) == ClaudeCodeAdapter().default_model_light
+    assert ideation_scrub._resolved_model(cfg) == "claude-sonnet-4-6"
 
 
-def test_scrub_model_defaults_to_haiku_when_backend_unset(cfg, clean_env):
+def test_scrub_model_defaults_to_claude_light_when_backend_unset(cfg, clean_env):
     """No `[agent_backends]` mapping at all → the all-claude default backend →
-    claude-haiku. Provider-awareness isn't a codex-only special case."""
+    the Claude adapter's light tier. Provider-awareness isn't a codex-only
+    special case."""
     assert cfg.get_agent_backend("ideation_scrub") == "claude"
-    assert ideation_scrub._resolved_model(cfg) == DEFAULT_SCRUB_MODEL
+    assert ideation_scrub._resolved_model(cfg) == ClaudeCodeAdapter().default_model_light
 
 
 def test_scrub_model_resolves_to_gpt_mini_under_codex_backend(cfg, clean_env):
-    """Unset override + Codex-backed `ideation_scrub` kind → the cheap Codex
-    scrub model (`gpt-5.4-mini`), NOT the Claude id — the leak the
-    provider-aware default avoids out of the box."""
+    """Unset override + Codex-backed `ideation_scrub` kind → the Codex adapter's
+    LIGHT tier (`gpt-5.4-mini`), NOT the Claude id — the leak the provider-aware
+    default avoids out of the box."""
     clean_env.setenv("AP2_AGENT_BACKEND_IDEATION_SCRUB", "codex")
     assert cfg.get_agent_backend("ideation_scrub") == "codex"
     resolved = ideation_scrub._resolved_model(cfg)
-    assert resolved == DEFAULT_SCRUB_MODEL_CODEX
+    assert resolved == CodexAdapter().default_model_light
     assert resolved == "gpt-5.4-mini"
     assert not resolved.startswith("claude"), (
         f"a claude-* id leaked into a codex-routed scrub: {resolved!r}"

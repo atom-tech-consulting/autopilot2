@@ -414,22 +414,22 @@ def _run_control_agent_capturing_options(tmp_path, monkeypatch):
     return sdk.options_kw
 
 
-def test_agent_model_default_is_provider_neutral_none_when_env_unset(
+def test_agent_model_unset_resolves_to_adapter_heavy_tier(
     tmp_path, monkeypatch,
 ):
-    """Happy path: env unset → the provider-neutral schema default (`None`)
-    resolves, so the adapter OMITS the `model` kwarg entirely and each backend
-    self-defaults (TB-396). A regression that reintroduces a `claude-*` default
-    (the pre-TB-396 `claude-opus-4-7`) would make `model` reappear in the
-    captured options — and hand a Claude id to a codex-routed kind — so this
-    test trips."""
+    """TB-419: the control surfaces are PRIMARY agents, so env unset → the
+    resolved adapter's HEAVY tier (`claude-opus-4-8` under the default
+    all-`claude` map), NOT an omitted kwarg / backend-native default. The tier
+    is the selected backend's own id, so a codex-routed kind gets `gpt-5.5`
+    rather than a leaked Claude id. (Supersedes TB-396's `or None` omitted-kwarg
+    shape at this primary-agent dispatch site.)"""
+    from ap2.adapters import ClaudeCodeAdapter
+
     monkeypatch.delenv("AP2_AGENT_MODEL", raising=False)
     monkeypatch.delenv("AP2_CORE_AGENT_MODEL", raising=False)
     opts = _run_control_agent_capturing_options(tmp_path, monkeypatch)
-    assert "model" not in opts, (
-        f"expected the provider-neutral `None` default to omit the `model` "
-        f"kwarg, but it was set to {opts.get('model')!r}"
-    )
+    assert opts.get("model") == ClaudeCodeAdapter().default_model_heavy
+    assert opts.get("model") == "claude-opus-4-8"
 
 
 def test_agent_model_env_override_flows_through_to_sdk(tmp_path, monkeypatch):
@@ -441,26 +441,26 @@ def test_agent_model_env_override_flows_through_to_sdk(tmp_path, monkeypatch):
     assert opts["model"] == "claude-haiku-4-5-20251001"
 
 
-def test_agent_model_empty_string_env_coerces_to_none(
+def test_agent_model_empty_string_env_folds_to_adapter_heavy_tier(
     tmp_path, monkeypatch,
 ):
-    """TB-396: `AP2_AGENT_MODEL=""` coerces to `None`, NOT a forwarded empty
-    string. The dispatch sites build `cfg.get_core_value("agent_model") or
-    None`, so an empty-string env (which `get_core_value` returns verbatim)
-    folds to `None` and the adapter OMITS the `model` kwarg — each backend
-    self-defaults. This is the load-bearing distinction the schema-default
-    comment calls out: `"" is not None` is `True`, so without the `or None`
-    coercion a bare empty string would forward `model=""` and a codex turn
-    would reject it.
+    """TB-419: `AP2_AGENT_MODEL=""` folds to the resolved adapter's HEAVY tier,
+    NOT a forwarded empty string. The primary-agent dispatch sites build
+    `cfg.get_core_value("agent_model") or select_adapter(kind, cfg)
+    .default_model_heavy`, so an empty-string env (which `get_core_value`
+    returns verbatim) is falsy and the `or` selects the heavy tier
+    (`claude-opus-4-8`). This preserves the load-bearing distinction TB-396
+    called out: `"" is not None` is `True`, so without the `or` coercion a bare
+    empty string would forward `model=""` and a codex turn would reject it —
+    TB-419 just routes the unset/empty case to the heavy tier instead of an
+    omitted kwarg."""
+    from ap2.adapters import ClaudeCodeAdapter
 
-    (Pre-TB-396 this test pinned the OPPOSITE contract — empty-string
-    propagated verbatim to `ClaudeAgentOptions.model`. The TB-396 `or None`
-    coercion is the deliberate, visible flip that docstring anticipated.)"""
     monkeypatch.setenv("AP2_AGENT_MODEL", "")
     opts = _run_control_agent_capturing_options(tmp_path, monkeypatch)
-    assert "model" not in opts, (
-        f"TB-396: empty-string env must coerce to `None` (kwarg omitted), "
-        f"not forward `model=''`; got {opts.get('model')!r}"
+    assert opts.get("model") == ClaudeCodeAdapter().default_model_heavy, (
+        f"TB-419: empty-string env must fold to the heavy tier, not forward "
+        f"`model=''` or omit the kwarg; got {opts.get('model')!r}"
     )
 
 

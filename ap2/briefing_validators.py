@@ -1142,9 +1142,16 @@ _VALIDATOR_JUDGE_MAX_TOKENS_DEFAULT = 500
 # TB-249: process-once flag so the deprecated-knob warning event fires
 # exactly once per process, not once per `ap2 add` invocation.
 _VALIDATOR_JUDGE_DEPRECATED_KNOB_LOGGED: set[str] = set()
-# Haiku-4.5 is the cost-target floor for the check (≤$0.005 per briefing at
-# typical token volumes). Intentionally NOT exposed as an env knob yet.
-_VALIDATOR_JUDGE_MODEL = "claude-haiku-4-5"
+# TB-419: the validator judge no longer hard-codes a provider-specific model.
+# It is a cost-sensitive sub-call, so it runs on the LIGHT tier of whichever
+# adapter backs the `validator_judge` kind (`_validator_judge_model(cfg)` →
+# `select_adapter("validator_judge", cfg).default_model_light` —
+# `claude-sonnet-4-6` under the default Claude map, `gpt-5.4-mini` under a
+# codex-routed judge). The pre-TB-419 hard-coded haiku constant leaked a Claude
+# id to a codex-routed judge (the live `validator_judge_noisy` symptom on the
+# codex-routed gpu-bidder project); resolving the tier from the adapter (the
+# provider-knowledge boundary) fixes that class of leak for every cost-sensitive
+# call site at once.
 
 
 class _DepJudgeTimeout(Exception):
@@ -1358,6 +1365,26 @@ def _resolve_validator_judge_adapter(*, sdk=None, cfg: "Config | None" = None):
     return adapter
 
 
+def _validator_judge_model(cfg: "Config | None") -> str:
+    """Light-tier model for the validator judge's resolved backend (TB-419).
+
+    The validator judge is a cost-sensitive sub-call, so it runs on the LIGHT
+    tier of whichever adapter backs the `validator_judge` kind
+    (`select_adapter("validator_judge", cfg).default_model_light` —
+    `claude-sonnet-4-6` under the default all-`claude` map, `gpt-5.4-mini`
+    under a codex-routed judge). This supersedes TB-235's hard-coded haiku
+    constant, which handed a Claude id to a codex-routed judge → codex rejected
+    the unknown model → the judge failed.
+
+    Resolves the tier off the SAME adapter the dispatch uses
+    (`_resolve_validator_judge_adapter`), so model and backend can never
+    disagree. `cfg=None` (the `_judge_dep_coherence_default` cfg-less seam)
+    resolves the default `ClaudeCodeAdapter`'s light tier, matching the
+    all-`claude` default `select_adapter` would resolve with a Config in hand.
+    """
+    return _resolve_validator_judge_adapter(cfg=cfg).default_model_light
+
+
 def _judge_dep_coherence_default(
     *,
     briefing_text: str,
@@ -1366,6 +1393,7 @@ def _judge_dep_coherence_default(
     timeout_s: float,
     max_turns: int,
     events_file: "Path | None" = None,
+    cfg: "Config | None" = None,
 ) -> _DepJudgeOutcome:
     """Real-SDK implementation of the TB-235 dependency-coherence judge.
 
@@ -1380,6 +1408,14 @@ def _judge_dep_coherence_default(
     briefing (Goal+Scope slice), the post-em-dash description prose, and the
     task's current `@blocked:` codespan tokens; the response shape is
     `{"hard_predecessors": ["TB-N", ...], "reasoning": "<str>"}`.
+
+    TB-419: `cfg` is threaded from `_check_dependency_coherence` so the judge
+    resolves the adapter for the `validator_judge` kind's backend AND runs on
+    that adapter's LIGHT tier (`_validator_judge_model(cfg)`), instead of the
+    hard-coded `claude-haiku-4-5`. A codex-routed judge now runs on
+    `gpt-5.4-mini` rather than being handed a Claude id it would reject. Stays
+    optional (`cfg=None`) so the legacy / test seam keeps the default
+    `ClaudeCodeAdapter` light tier.
     """
     import asyncio
 
@@ -1394,11 +1430,13 @@ def _judge_dep_coherence_default(
     except Exception:
         return _DepJudgeOutcome(data=None, parse_error=None, dump_path=None)
 
-    # TB-363: resolve the AgentAdapter for the `validator_judge` kind and
-    # dispatch through it. `_judge_dep_coherence_default` carries no `cfg`, so
-    # this hits the `cfg=None` seam → a default `ClaudeCodeAdapter` wrapping
-    # the `sdk` handle imported above.
-    adapter = _resolve_validator_judge_adapter(sdk=sdk, cfg=None)
+    # TB-363 / TB-419: resolve the AgentAdapter for the `validator_judge` kind
+    # and dispatch through it. `cfg` (threaded from `_check_dependency_coherence`)
+    # selects the backend per `[agent_backends]`; under the default all-`claude`
+    # map this is a `ClaudeCodeAdapter` wrapping the `sdk` handle imported above
+    # (the cfg-less seam falls back to the same default adapter). The judge's
+    # model is the adapter's LIGHT tier (see `_ask`).
+    adapter = _resolve_validator_judge_adapter(sdk=sdk, cfg=cfg)
 
     # TB-247: tightened final-message contract (mirrors TB-236's prose-judge
     # prompt). Shorter `reasoning` = smaller surface area for JSON-escape bugs.
@@ -1454,7 +1492,12 @@ def _judge_dep_coherence_default(
         options = AgentOptions(
             permission_mode="bypassPermissions",
             max_turns=max_turns,
-            model=_VALIDATOR_JUDGE_MODEL,
+            # TB-419: the cost-sensitive judge runs on the resolved adapter's
+            # LIGHT tier (claude-sonnet-4-6 / gpt-5.4-mini), never a hard-coded
+            # Claude id — so a codex-routed judge isn't handed a model it
+            # rejects. Reads the SAME adapter `_resolve_validator_judge_adapter`
+            # chose above, so model and backend can't disagree.
+            model=adapter.default_model_light,
         )
         result = await adapter.run_to_result(prompt, AgentTools(), options)
         if result.status != "complete":
@@ -1676,6 +1719,11 @@ def _check_dependency_coherence(
             timeout_s=timeout_s,
             max_turns=max_turns,
             events_file=events_file,
+            # TB-419: thread `cfg` so the production judge resolves the
+            # `validator_judge` kind's backend and its LIGHT model tier. The
+            # `except TypeError` retry below drops this (and `events_file`) for
+            # legacy stubs that don't accept it.
+            cfg=cfg,
         )
     except _DepJudgeTimeout as exc:
         if events_file is not None:
@@ -1691,7 +1739,8 @@ def _check_dependency_coherence(
         return None
     except TypeError:
         # TB-247: pre-TB-247 test stubs don't accept the new `events_file`
-        # kwarg. Retry without it so legacy stubs stay green.
+        # kwarg (TB-419: nor the `cfg` kwarg). Retry without them so legacy
+        # stubs stay green.
         try:
             raw_ret = fn(
                 briefing_text=briefing_text,

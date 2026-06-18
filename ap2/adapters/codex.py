@@ -460,6 +460,13 @@ class CodexAdapter(AgentAdapter):
 
     backend = "codex"
 
+    #: TB-419 provider default model tiers. HEAVY (`gpt-5.5`) backs the primary
+    #: codex agents (task / ideation / cron / status_report / mattermost
+    #: dispatch when `agent_model` is unset); LIGHT (`gpt-5.4-mini`) backs the
+    #: cost-sensitive sub-calls (the validator judge, the ideation scrub).
+    default_model_heavy = "gpt-5.5"
+    default_model_light = "gpt-5.4-mini"
+
     def __init__(self, codex: Any = None) -> None:
         self._codex = codex
         #: Short-names of the tools registered by the last `build_tool_server`

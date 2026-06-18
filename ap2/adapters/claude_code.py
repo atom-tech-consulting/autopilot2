@@ -85,6 +85,14 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     backend = "claude"
 
+    #: TB-419 provider default model tiers. HEAVY (`claude-opus-4-8`) backs the
+    #: primary Claude agents (task / ideation / cron / status_report /
+    #: mattermost dispatch when `agent_model` is unset); LIGHT
+    #: (`claude-sonnet-4-6`) backs the cost-sensitive sub-calls (the validator
+    #: judge, the ideation scrub).
+    default_model_heavy = "claude-opus-4-8"
+    default_model_light = "claude-sonnet-4-6"
+
     def __init__(self, sdk: Any = None) -> None:
         self._sdk = sdk
         #: Short-names of the tools registered by the last `build_tool_server`

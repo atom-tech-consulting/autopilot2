@@ -370,7 +370,6 @@ def test_tools_module_still_exposes_dep_judge_attribute_names():
         tools._judge_dep_coherence_default is vj._judge_dep_coherence_default
     )
     assert tools._parse_dep_judge_response is vj._parse_dep_judge_response
-    assert tools._VALIDATOR_JUDGE_MODEL == vj._VALIDATOR_JUDGE_MODEL
 
 
 # ---------------------------------------------------------------------------
