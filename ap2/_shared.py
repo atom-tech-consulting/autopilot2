@@ -235,3 +235,77 @@ def parse_blocked_summary_fix_shape(summary: str) -> dict | None:
         "file": file_part,
         "line": line_no,
     }
+
+
+# ---------------------------------------------------------------------------
+# Auto-unfreeze fix-shape registry + transforms (TB-225 bootstrap set + TB-421).
+#
+# `parse_blocked_summary_fix_shape` above is deliberately shape-agnostic: it
+# structurally parses ANY `<shape>` token so that an unknown shape still
+# flows through to the auto-unfreeze applier's allowlist gate (which emits
+# `auto_unfreeze_skipped reason=shape_not_in_allowlist` for tokens the
+# operator hasn't trusted). The registry below is the human-facing
+# enumeration of the shapes the project has DEFINED a meaning for, plus the
+# per-shape line transform the applier uses.
+#
+# Most shapes apply a single literal `<from>` -> `<to>` substring
+# replacement on the named briefing line — the default path in
+# `rewrite_briefing_line_for_fix`. A shape that needs more than that (e.g.
+# idempotency handling) is special-cased in that function and listed here so
+# the registry stays the single source of truth.
+# ---------------------------------------------------------------------------
+
+#: Fix-shapes the project has defined a meaning for. The parser does NOT
+#: reject tokens outside this tuple — the `AP2_AUTO_UNFREEZE_FIX_SHAPES`
+#: allowlist is the trust gate, not this enumeration. Kept in sync with the
+#: worked examples in `skills/ap2-task/SKILL.md`'s "Reporting failures"
+#: section. `grep_recursive_needs_binary_skip` was added in TB-421.
+RECOGNIZED_FIX_SHAPES: tuple[str, ...] = (
+    "grep_missing_r_on_dir",
+    "literal_backtick_in_shell_bullet",
+    "bare_python_to_uv_run",
+    "bare_path_to_test_f",
+    "grep_recursive_needs_binary_skip",
+)
+
+
+def rewrite_briefing_line_for_fix(fix: dict, target_line: str) -> str | None:
+    """Compute the rewritten briefing line for an auto-unfreeze ``fix``, or
+    None when the transform would be a no-op (the ``from`` pattern isn't on
+    the line, the replacement changes nothing, or the line is already in its
+    fixed form).
+
+    Default transform — the four bootstrap shapes (`grep_missing_r_on_dir`,
+    `literal_backtick_in_shell_bullet`, `bare_python_to_uv_run`,
+    `bare_path_to_test_f`) all use it — is a single literal
+    ``fix["from"]`` -> ``fix["to"]`` substring replacement on the FIRST
+    occurrence in the line.
+
+    `grep_recursive_needs_binary_skip` (TB-421) is special-cased to stay
+    idempotent. The defect it heals: a recursive ``grep -rn ...`` verification
+    bullet false-fails because it descends into binary ``__pycache__/*.pyc``
+    files; the fix adds the ``-I`` (skip-binary) flag, rewriting ``grep -rn ``
+    -> ``grep -rnI ``. A naive ``<from>``/``<to>`` replace CANNOT express this
+    idempotently, because ``grep -rn`` is a substring of the already-fixed
+    ``grep -rnI`` — replacing again would double-insert the flag
+    (``grep -rnII``). So when the line already carries ``grep -rnI`` the
+    transform returns None (no-op); otherwise it rewrites the first
+    ``grep -rn `` to ``grep -rnI `` (the trailing space anchors the flag
+    cluster, leaving every other token on the line untouched).
+
+    Returns the new line on a real change, else None. The applier
+    (`ap2/components/auto_unfreeze/impl.py::_apply_auto_unfreeze_patch`)
+    treats a None / unchanged return as `briefing_mismatch` and leaves the
+    task Frozen (fail-safe).
+    """
+    if fix.get("shape") == "grep_recursive_needs_binary_skip":
+        if "grep -rnI" in target_line:
+            return None  # idempotent: the -I skip-binary flag is already present
+        new_line = target_line.replace("grep -rn ", "grep -rnI ", 1)
+        return new_line if new_line != target_line else None
+    # Default shapes: literal `<from>` -> `<to>` replacement, first occurrence.
+    frm = fix.get("from") or ""
+    if not frm or frm not in target_line:
+        return None
+    new_line = target_line.replace(frm, fix.get("to") or "", 1)
+    return new_line if new_line != target_line else None

@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import time
 
-from ap2 import events, tools
+from ap2 import _shared, events, tools
 from ap2.components.auto_approve import (
     _append_decisions_needed_bullet,
     _parse_event_ts,
@@ -375,13 +375,21 @@ def _apply_auto_unfreeze_patch(
     if line_no < 1 or line_no > len(lines):
         return "briefing_mismatch"
     target_line = lines[line_no - 1]
-    if fix["from"] not in target_line:
-        return "briefing_mismatch"
-    new_line = target_line.replace(fix["from"], fix["to"], 1)
-    if new_line == target_line:
-        # Replacement was a no-op (from == to, or from empty). Still
-        # a mismatch in spirit — refuse to spend an auto-unfreeze slot
-        # on a no-op patch.
+    # Delegate the line rewrite to the shared fix-shape registry
+    # (`ap2._shared.rewrite_briefing_line_for_fix`). Most shapes apply a
+    # single literal `from` -> `to` substring replacement; the
+    # `grep_recursive_needs_binary_skip` shape (TB-421) is special-cased
+    # there to stay idempotent — it rewrites `grep -rn ` -> `grep -rnI `
+    # (adding the binary-skip `-I` flag) but no-ops when the line already
+    # carries `grep -rnI`, since `grep -rn` is a substring of `grep -rnI`
+    # and a naive replace would double-insert the flag (`grep -rnII`).
+    new_line = _shared.rewrite_briefing_line_for_fix(fix, target_line)
+    if new_line is None or new_line == target_line:
+        # No-op: the `from` pattern wasn't on the named line, the
+        # replacement changed nothing, or the line is already in its
+        # fixed form. The agent's diagnosis is stale (e.g. the operator
+        # hand-edited the briefing mid-failure). Refuse to spend an
+        # auto-unfreeze slot — leave the task Frozen (fail-safe).
         return "briefing_mismatch"
     lines[line_no - 1] = new_line
     new_content = "".join(lines)
