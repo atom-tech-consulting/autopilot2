@@ -501,9 +501,11 @@ once the work has finished.
 
 ## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)
 The verifier runs each shell bullet via `/bin/sh -c <bullet>` in the
-project root. The four authoritative pitfalls — kept verbatim-aligned
+project root. The first four authoritative pitfalls — kept verbatim-aligned
 with the ap2-task skill's "Shell bullets — four authoring pitfalls"
-section so the ideation prompt and the skill can't drift:
+section so the ideation prompt and the skill can't drift — followed by two
+recursive-grep / count shapes (TB-420) the ideation agent keeps re-deriving
+(ideation-prompt-only; the skill keeps the longer operator form):
   - **No literal backticks in the command body** (TB-207). Markdown's
     single-backtick codespan cannot represent a literal backtick —
     mistune truncates the codespan at the inner backtick and the rest
@@ -532,7 +534,19 @@ section so the ideation prompt and the skill can't drift:
     judge against the diff, lead the suffix with `Prose:` so the
     verifier routes the bullet to the judge instead of trying to
     `exec` the filename.
+  - **Recursive grep over source dirs MUST use `-I` to skip binary
+    files** (TB-420). Plain `grep -rn PAT dir/` also matches binary
+    `__pycache__/*.pyc` (whose `co_filename` embeds the absolute build
+    path), exits 0, and false-fails a `! grep` absence bullet no matter
+    what the source actually contains — this froze a scrub task across
+    multiple retries. Use `grep -rnI PAT dir/` (or scope the walk with
+    `--include='*.py'` / `--exclude-dir=__pycache__`).
+  - **Multi-file counts: `grep -hE PAT files | wc -l`, not `grep -cE`**
+    (TB-420). `grep -cE PAT <many files>` emits one `file:N` line per
+    matched file rather than a single total, so a `-ge N` count
+    assertion compares against the wrong number; `grep -h` suppresses
+    the filename prefix so `wc -l` totals the matches.
 See skills/ap2-task/SKILL.md's "Shell bullets — four authoring pitfalls"
-section for a worked example combining all four.
+section for a worked example combining the first four.
 Prefer running concrete project commands (e.g. `uv run pytest -q`,
 `uv run python -m stoch ...`) over inventing new ones.
