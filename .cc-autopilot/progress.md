@@ -1689,3 +1689,9 @@
 - **Summary:** Bumped ideation defaults (trigger 3→10, cooldown 7200→3600, max_turns 100→200) across the module-locals/schema-mirrors/config constants and made ideation_scrub._resolved_model provider-aware (empty schema default → claude-haiku for the Claude backend, gpt-5.4-mini for Codex, explicit override still wins); all targeted suites green and the three `ap2 config get` checks return 10/3600/200.
 - **Files:** ap2/config.py, ap2/core_config_schema.py, ap2/ideation.py, ap2/ideation_scrub.py, ap2/tests/test_ideation_provider_defaults.py, ap2/tests/test_ideation_trigger.py, ap2/tests/test_env_knobs.py, ap2/tests/test_tb337_core_schema.py
 - **Tests:** pass
+
+## [2026-06-18] TB-419: Adapter-provided default models: heavy and light tiers per backend; primary agents use heavy, scrub and validator judge use light
+- **Commit:** `074dc3f`
+- **Summary:** Added adapter-declared heavy/light model tiers (Claude opus-4-8/sonnet-4-6, Codex gpt-5.5/gpt-5.4-mini); primary dispatch uses heavy when agent_model unset, validator judge + ideation scrub use the selected adapter's light tier, explicit overrides still win; full suite green (3094 passed, 1 skipped, smoke ignored).
+- **Files:** ap2/adapters/base.py, ap2/adapters/claude_code.py, ap2/adapters/codex.py, ap2/briefing_validators.py, ap2/daemon.py, ap2/ideation_scrub.py, ap2/tools.py, ap2/tests/test_adapter_default_models.py, ap2/tests/test_dep_validator_judge.py, ap2/tests/test_env_knobs.py, ap2/tests/test_ideation_provider_defaults.py, ap2/tests/test_tb316_validator_pipeline.py, ap2/tests/test_tb335_ideation_cfg_reads.py
+- **Tests:** pass

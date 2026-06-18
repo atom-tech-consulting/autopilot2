@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-419** **Adapter-provided default models: heavy and light tiers per backend; primary agents use heavy, scrub and validator judge use light** `#autopilot` `#adapters` `#models` `#provider-aware` `#codex` `#refactor` `@blocked:TB-418` [→ brief](.cc-autopilot/tasks/adapter-provided-default-models-heavy-an.md)
 
 ## Pipeline Pending
 
@@ -299,6 +298,7 @@
 - [x] **TB-414** **env-file template + ap2-config skill: document env as secrets + deployment-identity only (drop the flat AP2_ tunable examples)** `#autopilot` `#config` `#docs` `#env` `#skills` `#scaffolding` `@blocked:TB-413` [→ brief](.cc-autopilot/tasks/env-file-template-ap2-config-skill-docum.md)
 - [x] **TB-417** **Task prompt: forbid run_in_background busy-poll loops; mandate foreground verification (daemon verifier owns the full suite)** `#autopilot` `#prompts` `#robustness` `#task-agent` `#timeout` [→ brief](.cc-autopilot/tasks/task-prompt-forbid-run-in-background-bus.md)
 - [x] **TB-418** **Tune ideation defaults (trigger 10 / cooldown 3600 / max_turns 200) and make ideation_scrub_model provider-aware (claude-haiku for claude, gpt-5.4-mini for codex)** `#autopilot` `#config` `#ideation` `#defaults` `#codex` `#provider-aware` [→ brief](.cc-autopilot/tasks/tune-ideation-defaults-trigger-10-cooldo.md)
+- [x] **TB-419** **Adapter-provided default models: heavy and light tiers per backend; primary agents use heavy, scrub and validator judge use light** `#autopilot` `#adapters` `#models` `#provider-aware` `#codex` `#refactor` `@blocked:TB-418` [→ brief](.cc-autopilot/tasks/adapter-provided-default-models-heavy-an.md)
 
 ## Frozen
 
