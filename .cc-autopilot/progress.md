@@ -1707,3 +1707,9 @@
 - **Summary:** Extended ap2/ideation.default.md's "Shell-bullet pitfalls to AVOID" section with the recursive-grep `-I` binary-skip rule (skips `__pycache__/*.pyc`) and the multi-file `grep -hE | wc -l` count rule (vs broken `grep -cE`), keeping the four existing pitfalls (`!`-prefix, `-r`, no-backticks, `Prose:`) verbatim; both briefing shell checks pass and the full suite is green (3094 passed, 1 skipped).
 - **Files:** ap2/ideation.default.md
 - **Tests:** pass
+
+## [2026-06-18] TB-421: Register grep_recursive_needs_binary_skip auto-unfreeze fix-shape (grep -rn -> grep -rnI) so the daemon self-heals binary-pyc false-fail bullets
+- **Commit:** `933d863`
+- **Summary:** Registered grep_recursive_needs_binary_skip as a recognized auto-unfreeze fix-shape: a RECOGNIZED_FIX_SHAPES registry + idempotent rewrite_briefing_line_for_fix transform in ap2/_shared.py (rewrites `grep -rn ` -> `grep -rnI `, no-op when already -rnI), wired into _apply_auto_unfreeze_patch so it runs through the existing opt-in fix_shapes allowlist + caps; new test file passes (10 tests) and the full suite stays green (3104 passed, 1 skipped).
+- **Files:** ap2/_shared.py, ap2/components/auto_unfreeze/impl.py, ap2/tests/test_autounfreeze_grep_binary_skip.py
+- **Tests:** pass
