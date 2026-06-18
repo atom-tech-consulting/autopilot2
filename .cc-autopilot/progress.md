@@ -1695,3 +1695,9 @@
 - **Summary:** Added adapter-declared heavy/light model tiers (Claude opus-4-8/sonnet-4-6, Codex gpt-5.5/gpt-5.4-mini); primary dispatch uses heavy when agent_model unset, validator judge + ideation scrub use the selected adapter's light tier, explicit overrides still win; full suite green (3094 passed, 1 skipped, smoke ignored).
 - **Files:** ap2/adapters/base.py, ap2/adapters/claude_code.py, ap2/adapters/codex.py, ap2/briefing_validators.py, ap2/daemon.py, ap2/ideation_scrub.py, ap2/tools.py, ap2/tests/test_adapter_default_models.py, ap2/tests/test_dep_validator_judge.py, ap2/tests/test_env_knobs.py, ap2/tests/test_ideation_provider_defaults.py, ap2/tests/test_tb316_validator_pipeline.py, ap2/tests/test_tb335_ideation_cfg_reads.py
 - **Tests:** pass
+
+## [2026-06-18] TB-415: Scrub residual sandbox-path leak in ap2/tests + regression-gate shipped source against sandbox-local absolute paths
+- **Commit:** `94394a8`
+- **Summary:** Previously committed in 94394a8 (ancestor of HEAD) — verified completeness this run: the operator applied the BriefingFix (bullet 0 now `grep -rnI`), so all 5 verification bullets pass. Bullet 0 `! grep -rnI "/Users/claude-agent/repos" ...` returns no matches (exit 1); test_no_sandbox_path_leak.py + test_json_extract_util.py = 15 passed/1 skipped; prose confirmed via Read: the json-extract test's baked /Users/claude-agent/repos/post-train/... path is now an env-overridable AP2_TB89_CAPTURED_RESPONSE lookup (skip-guard + synthetic coverage preserved), and the recursive gate scans ap2/ (incl. ap2/tests/) + skills/ + top-level docs, allowlists the named generics, and builds the forbidden needle from ap2.sandbox.DEFAULT_USER (no self-match).
+- **Files:** ap2/tests/test_json_extract_util.py, ap2/tests/test_no_sandbox_path_leak.py
+- **Tests:** pass
