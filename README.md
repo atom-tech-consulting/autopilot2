@@ -16,13 +16,13 @@ to obtain one — the daemon reads `CLAUDE_CODE_OAUTH_TOKEN` from the env).
 
 ```bash
 # As a uv tool (recommended — isolates ap2's deps from your projects)
-uv tool install git+https://github.com/lzhang/autopilot2
+uv tool install git+https://github.com/atom-tech-consulting/autopilot2
 
 # Or in a virtualenv
-pip install git+https://github.com/lzhang/autopilot2
+pip install git+https://github.com/atom-tech-consulting/autopilot2
 
 # Editable, for development
-git clone https://github.com/lzhang/autopilot2
+git clone https://github.com/atom-tech-consulting/autopilot2
 cd autopilot2
 uv sync && uv pip install -e .
 ```
