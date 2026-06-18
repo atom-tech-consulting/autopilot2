@@ -61,7 +61,7 @@ the next copy-pasted debug path from re-introducing the same leak.
 
 ## Verification
 
-- `! grep -rn "/Users/claude-agent/repos" ap2/ skills/ README.md CHANGELOG.md ap2/architecture.md` — no shipped source or doc carries the sandbox operator's local checkout-root absolute path (passes iff absent).
+- `! grep -rnI "/Users/claude-agent/repos" ap2/ skills/ README.md CHANGELOG.md ap2/architecture.md` — no shipped source or doc carries the sandbox operator's local checkout-root absolute path (passes iff absent).
 - `uv run --extra dev pytest -q ap2/tests/test_no_sandbox_path_leak.py` — the new regression gate passes.
 - `uv run --extra dev pytest -q ap2/tests/test_json_extract_util.py` — the scrubbed json-extract test module stays green after the path fix.
 - `ap2/tests/test_no_sandbox_path_leak.py` Prose: the gate scans the shipped distribution surface (`ap2/` recursively incl. `ap2/tests/`, `skills/`, the top-level docs) for absolute paths under the sandbox operator's local repo root, allowlists the parameterized/generic example paths named in Design, and constructs the forbidden pattern non-literally so the gate file is not a self-match; judge confirms via Read.
