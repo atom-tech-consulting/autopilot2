@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-420** **Add verification-bullet shell-syntax conventions to ideation.default.md (recursive grep needs -I, !-prefix, -r, Prose:, grep -c) so ideation stops emitting broken bullets** `#autopilot` `#ideation` `#prompts` `#briefing` `#verification` `#robustness` [→ brief](.cc-autopilot/tasks/add-verification-bullet-shell-syntax-con.md)
 
 ## Pipeline Pending
 
