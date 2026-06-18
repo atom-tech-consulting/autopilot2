@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-420** **Add verification-bullet shell-syntax conventions to ideation.default.md (recursive grep needs -I, !-prefix, -r, Prose:, grep -c) so ideation stops emitting broken bullets** `#autopilot` `#ideation` `#prompts` `#briefing` `#verification` `#robustness` [→ brief](.cc-autopilot/tasks/add-verification-bullet-shell-syntax-con.md)
 
 ## Pipeline Pending
 
@@ -301,5 +300,6 @@
 - [x] **TB-418** **Tune ideation defaults (trigger 10 / cooldown 3600 / max_turns 200) and make ideation_scrub_model provider-aware (claude-haiku for claude, gpt-5.4-mini for codex)** `#autopilot` `#config` `#ideation` `#defaults` `#codex` `#provider-aware` [→ brief](.cc-autopilot/tasks/tune-ideation-defaults-trigger-10-cooldo.md)
 - [x] **TB-419** **Adapter-provided default models: heavy and light tiers per backend; primary agents use heavy, scrub and validator judge use light** `#autopilot` `#adapters` `#models` `#provider-aware` `#codex` `#refactor` `@blocked:TB-418` [→ brief](.cc-autopilot/tasks/adapter-provided-default-models-heavy-an.md)
 - [x] **TB-415** **Scrub residual sandbox-path leak in ap2/tests + regression-gate shipped source against sandbox-local absolute paths** `#autopilot` `#distribution` `#packaging` `#identity-scrub` `#regression-pin` `#tests` — Remove the hard-coded /Users/claude-agent/repos/post-train absolute path still in ap2/tests/test_json_extract_util.py and add a recursive regression gate so a sandbox-local path can't reappear in shipped source. [→ brief](.cc-autopilot/tasks/scrub-residual-sandbox-path-leak-in-ap2.md)
+- [x] **TB-420** **Add verification-bullet shell-syntax conventions to ideation.default.md (recursive grep needs -I, !-prefix, -r, Prose:, grep -c) so ideation stops emitting broken bullets** `#autopilot` `#ideation` `#prompts` `#briefing` `#verification` `#robustness` [→ brief](.cc-autopilot/tasks/add-verification-bullet-shell-syntax-con.md)
 
 ## Frozen

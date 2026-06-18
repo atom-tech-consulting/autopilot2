@@ -1701,3 +1701,9 @@
 - **Summary:** Previously committed in 94394a8 (ancestor of HEAD) — verified completeness this run: the operator applied the BriefingFix (bullet 0 now `grep -rnI`), so all 5 verification bullets pass. Bullet 0 `! grep -rnI "/Users/claude-agent/repos" ...` returns no matches (exit 1); test_no_sandbox_path_leak.py + test_json_extract_util.py = 15 passed/1 skipped; prose confirmed via Read: the json-extract test's baked /Users/claude-agent/repos/post-train/... path is now an env-overridable AP2_TB89_CAPTURED_RESPONSE lookup (skip-guard + synthetic coverage preserved), and the recursive gate scans ap2/ (incl. ap2/tests/) + skills/ + top-level docs, allowlists the named generics, and builds the forbidden needle from ap2.sandbox.DEFAULT_USER (no self-match).
 - **Files:** ap2/tests/test_json_extract_util.py, ap2/tests/test_no_sandbox_path_leak.py
 - **Tests:** pass
+
+## [2026-06-18] TB-420: Add verification-bullet shell-syntax conventions to ideation.default.md (recursive grep needs -I, !-prefix, -r, Prose:, grep -c) so ideation stops emitting broken bullets
+- **Commit:** `1ff8501`
+- **Summary:** Extended ap2/ideation.default.md's "Shell-bullet pitfalls to AVOID" section with the recursive-grep `-I` binary-skip rule (skips `__pycache__/*.pyc`) and the multi-file `grep -hE | wc -l` count rule (vs broken `grep -cE`), keeping the four existing pitfalls (`!`-prefix, `-r`, no-backticks, `Prose:`) verbatim; both briefing shell checks pass and the full suite is green (3094 passed, 1 skipped).
+- **Files:** ap2/ideation.default.md
+- **Tests:** pass
