@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-419** **Adapter-provided default models: heavy and light tiers per backend; primary agents use heavy, scrub and validator judge use light** `#autopilot` `#adapters` `#models` `#provider-aware` `#codex` `#refactor` `@blocked:TB-418` [→ brief](.cc-autopilot/tasks/adapter-provided-default-models-heavy-an.md)
 
 ## Pipeline Pending
 
