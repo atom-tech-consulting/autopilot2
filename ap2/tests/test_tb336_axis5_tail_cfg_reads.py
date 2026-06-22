@@ -529,7 +529,7 @@ def test_howto_md_documents_cost_approach_pct():
     to the skill.
     """
     skill = (
-        _REPO_ROOT / "skills/ap2-config/SKILL.md"
+        _REPO_ROOT / "ap2/skills/ap2-config/SKILL.md"
     ).read_text(encoding="utf-8")
     assert "components.auto_approve.cost_approach_pct" in skill, (
         "TB-336: the ap2-config skill's `## Config keys (TOML)` block must "

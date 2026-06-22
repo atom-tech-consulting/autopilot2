@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import getpass
 import grp
+import importlib.resources
 import os
 import platform
 import pwd
@@ -599,11 +600,26 @@ def _statusline_source() -> Path:
 
 
 def _skills_source() -> Path:
-    """Path to `<repo>/skills/` — the canonical copies of `/ap2`,
-    `/ap2-task`, and `/migrate-to-ap2` (TB-140). Live slash commands
-    read the deployed copies under `~<user>/.claude/skills/`; this is
-    the source of truth that `sync_assets` mirrors there."""
-    return Path(__file__).resolve().parent.parent / "skills"
+    """Path to the operator-skill bundles (`ap2-board-ops`, `ap2-task`,
+    `migrate-to-ap2`, …) — the source of truth that `sync_assets` mirrors
+    into `~<user>/.claude/skills/` + `~<user>/.agents/skills/`.
+
+    The tree ships as package data under `ap2/skills/`, so it is resolved
+    from the INSTALLED `ap2` package via `importlib.resources`. That works
+    in BOTH install modes — after a non-editable `uv tool install` /
+    `pip install` (where `ap2` lives in site-packages) and from an editable
+    / dev checkout — closing the TB-422 gap where the prior
+    `Path(__file__).parent.parent / "skills"` resolution only found the tree
+    in a repo clone. A repo-relative fallback covers a bare source checkout
+    that has not been installed at all."""
+    try:
+        pkg_root = Path(str(importlib.resources.files("ap2")))
+        candidate = pkg_root / "skills"
+        if candidate.is_dir():
+            return candidate
+    except (ModuleNotFoundError, TypeError, NotADirectoryError):
+        pass
+    return Path(__file__).resolve().parent / "skills"
 
 
 def _agents_md_source() -> Path:

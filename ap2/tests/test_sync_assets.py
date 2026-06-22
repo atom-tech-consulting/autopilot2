@@ -43,7 +43,7 @@ from ap2 import cli, sandbox
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SKILLS_SRC = REPO_ROOT / "skills"
+SKILLS_SRC = REPO_ROOT / "ap2" / "skills"
 # TB-401: the Codex / agentskills.io operator-reference source, deployed to
 # `~/.agents/AGENTS.md` (TB-406 retired the Claude-side howto reference, so
 # this is now the only single-file operator reference `sync_assets` deploys).

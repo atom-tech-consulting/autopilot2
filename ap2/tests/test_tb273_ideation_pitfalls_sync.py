@@ -52,7 +52,7 @@ IDEATION_PROMPT = REPO_ROOT / "ap2" / "ideation.default.md"
 # the old operator manual entirely and repointed the ideation prompt's own
 # cross-reference here, so the companion check below + the cross-reference
 # pin both read the skill (the single surviving worked-example surface).
-TASK_SKILL = REPO_ROOT / "skills" / "ap2-task" / "SKILL.md"
+TASK_SKILL = REPO_ROOT / "ap2" / "skills" / "ap2-task" / "SKILL.md"
 
 SECTION_HEADING = "## Shell-bullet pitfalls to AVOID (TB-76 — observed in prod)"
 

@@ -51,7 +51,7 @@ uv tool install git+https://github.com/atom-tech-consulting/autopilot2
 # Or in a virtualenv
 pip install git+https://github.com/atom-tech-consulting/autopilot2
 
-# Editable, for development (also required to deploy the operator skills — see below)
+# Editable, for development
 git clone https://github.com/atom-tech-consulting/autopilot2
 cd autopilot2
 uv sync && uv pip install -e .
@@ -148,17 +148,17 @@ home, keychain, or other repos.
 ```
 ap2/                          # the package — daemon, CLI, MCP tools, tests
 ├── README.md                 # operator reference + full CLI / event schema
-└── architecture.md           # design rationale, agent kinds, verification model
+├── architecture.md           # design rationale, agent kinds, verification model
+└── skills/                   # the operator manual — auto-triggered SKILL.md bundles (shipped as package data)
+    ├── ap2/                  # /ap2 <project> — daemon snapshot + reading order
+    ├── ap2-task/             # task-agent contract + briefing/verification authoring
+    ├── ap2-board-ops/        # operator CLI verbs + custom MCP tools
+    ├── ap2-config/           # configuration knobs + config keys
+    ├── ap2-observability/    # event schema, ap2 logs, ap2 status components, stats
+    ├── ap2-failure-recovery/ # how the daemon self-heals + operator triage
+    ├── ap2-ideation-goals/   # authoring goal.md + the ap2 audit walk
+    └── migrate-to-ap2/       # /migrate-to-ap2 — convert legacy TODO.md → TASKS.md
 sandboxed-user-setup.md       # OS-level sandbox-user runbook (repo root)
-skills/                       # the operator manual — auto-triggered SKILL.md bundles
-├── ap2/                      # /ap2 <project> — daemon snapshot + reading order
-├── ap2-task/                 # task-agent contract + briefing/verification authoring
-├── ap2-board-ops/            # operator CLI verbs + custom MCP tools
-├── ap2-config/               # configuration knobs + config keys
-├── ap2-observability/        # event schema, ap2 logs, ap2 status components, stats
-├── ap2-failure-recovery/     # how the daemon self-heals + operator triage
-├── ap2-ideation-goals/       # authoring goal.md + the ap2 audit walk
-└── migrate-to-ap2/           # /migrate-to-ap2 — convert legacy TODO.md → TASKS.md
 ```
 
 ## Documentation
@@ -169,14 +169,13 @@ skills/                       # the operator manual — auto-triggered SKILL.md 
   daemon loop, agent kinds, two-tier verification, sandbox model.
 - **[sandboxed-user-setup.md](sandboxed-user-setup.md)** — runbook for
   setting up the `claude-agent` sandbox user.
-- **[skills/](skills/)** — the operator manual, published as auto-triggered
-  agentskills.io `SKILL.md` bundles (CLI verbs, config knobs, event schema,
-  the task-agent contract, failure recovery, goal authoring). `ap2 sandbox
-  sync-assets` deploys them into the runtime skills roots so a Claude Code or
-  Codex session running inside an ap2-managed project picks them up
-  automatically. **Deploying the skills needs a git clone** — `sync-assets`
-  reads them from the repo's `skills/` tree, so a bare `uv tool install`
-  gives you the daemon + CLI but not the skills.
+- **[ap2/skills/](ap2/skills/)** — the operator manual, published as
+  auto-triggered agentskills.io `SKILL.md` bundles (CLI verbs, config knobs,
+  event schema, the task-agent contract, failure recovery, goal authoring). The
+  bundles ship as installed package data, so `ap2 sandbox sync-assets` deploys
+  them into the runtime skills roots after any install — including a bare `uv
+  tool install` — and a Claude Code or Codex session running inside an
+  ap2-managed project picks them up automatically.
 
 ## Tests
 

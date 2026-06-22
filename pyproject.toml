@@ -50,7 +50,12 @@ build-backend = "setuptools.build_meta"
 packages = ["ap2", "ap2.adapters", "ap2.tests", "ap2.tests.e2e", "ap2.tests.smoke"]
 
 [tool.setuptools.package-data]
-ap2 = ["*.md", "*.yaml"]
+# TB-422: ship the operator-skill bundles (`ap2/skills/<skill>/SKILL.md`) as
+# installed package data so `ap2 sandbox sync-assets` can deploy them after a
+# non-editable `uv tool install` / `pip install` — not only from a repo clone
+# or the sdist `MANIFEST.in` graft. The recursive `skills/**/*` glob carries
+# every file under each skill dir into the wheel.
+ap2 = ["*.md", "*.yaml", "skills/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["ap2/tests"]

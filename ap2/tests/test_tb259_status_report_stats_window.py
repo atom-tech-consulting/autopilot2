@@ -426,7 +426,7 @@ def test_howto_carries_tb259_cross_reference():
     """
     skill = (
         Path(__file__).resolve().parent.parent.parent
-        / "skills/ap2-observability/SKILL.md"
+        / "ap2/skills/ap2-observability/SKILL.md"
     )
     src = skill.read_text()
     assert "TB-259" in src

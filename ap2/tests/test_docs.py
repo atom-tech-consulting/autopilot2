@@ -31,7 +31,7 @@ from ap2.tools import _validate_briefing_structure
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # TB-403: goal-authoring reference now lives in this skill.
-IDEATION_GOALS_SKILL = REPO_ROOT / "skills" / "ap2-ideation-goals" / "SKILL.md"
+IDEATION_GOALS_SKILL = REPO_ROOT / "ap2" / "skills" / "ap2-ideation-goals" / "SKILL.md"
 
 
 def _current_focus_worked_example_heading(skill_text: str) -> str:

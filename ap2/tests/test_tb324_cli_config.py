@@ -524,6 +524,6 @@ def test_ap2_config_appears_in_board_ops_skill():
     `skills/ap2-board-ops/SKILL.md`, so the
     `ap2 config` rows now live there (the `test_every_cli_verb_documented`
     docs-drift gate was retargeted alongside)."""
-    skill = Path(__file__).resolve().parents[2] / "skills/ap2-board-ops/SKILL.md"
+    skill = Path(__file__).resolve().parents[2] / "ap2/skills/ap2-board-ops/SKILL.md"
     text = skill.read_text()
     assert "ap2 config" in text

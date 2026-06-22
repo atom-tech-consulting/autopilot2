@@ -52,10 +52,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # absolute path under that user's local ``repos`` checkout root.
 _FORBIDDEN_CHECKOUT_ROOT = "/Users/" + DEFAULT_USER + "/repos"
 
-# Shipped distribution surface: ``ap2/`` recursively (incl. ``ap2/tests/``),
-# ``skills/``, and the top-level docs — what setuptools packages + what a clean
-# checkout reads.
-_SCAN_DIRS = ("ap2", "skills")
+# Shipped distribution surface: ``ap2/`` recursively (incl. ``ap2/tests/`` and
+# the ``ap2/skills/`` operator manual relocated under the package in TB-422), and
+# the top-level docs — what setuptools packages + what a clean checkout reads.
+_SCAN_DIRS = ("ap2",)
 _SCAN_FILES = ("README.md", "CHANGELOG.md", "ap2/architecture.md")
 
 # Text/source suffixes we ship. Anything else (notably compiled ``*.pyc``) is

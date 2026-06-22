@@ -456,6 +456,6 @@ def test_ideation_goals_skill_carries_tb244_cross_reference():
     """
     skill = (
         Path(__file__).resolve().parents[2]
-        / "skills" / "ap2-ideation-goals" / "SKILL.md"
+        / "ap2" / "skills" / "ap2-ideation-goals" / "SKILL.md"
     )
     assert "TB-244" in skill.read_text()

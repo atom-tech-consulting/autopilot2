@@ -18,10 +18,11 @@ These tests parse `pyproject.toml` (no network resolution) and assert:
    so `pip install autopilot2` with no extras remains a working Claude install.
 
 The MANIFEST.in tests (TB-410) parse `MANIFEST.in` as text (no build) and
-assert the committed top-level `skills/` operator manual and the docs an outside
-consumer needs are grafted/included into the setuptools source distribution.
-`skills/` is not a Python package, so package-data cannot carry it — an sdist
-that omits MANIFEST.in would silently drop the operator manual.
+assert the `ap2/skills/` operator manual and the docs an outside consumer needs
+are grafted/included into the setuptools source distribution. TB-422 relocated
+the skills tree under the `ap2` package so it ships as installed package-data in
+the wheel (not only the sdist); the `graft ap2/skills` directive keeps the
+operator-manual inclusion explicit in the sdist alongside the top-level docs.
 """
 from __future__ import annotations
 
@@ -217,18 +218,19 @@ def test_manifest_exists():
 
 
 def test_manifest_grafts_skills():
-    """MANIFEST.in grafts the committed top-level skills/ operator manual.
+    """MANIFEST.in grafts the `ap2/skills/` operator manual into the sdist.
 
-    skills/ is not a Python package, so package-data cannot carry it — `graft
-    skills` is the setuptools sdist mechanism that ships the operator manual.
+    TB-422 relocated the skills tree under the `ap2` package so it ships as
+    installed package-data in the wheel; `graft ap2/skills` keeps the
+    operator-manual inclusion explicit in the sdist too.
     """
     directives = _manifest_directives()
     assert any(
-        line.split()[0] == "graft" and "skills" in line.split()[1:]
+        line.split()[0] == "graft" and "ap2/skills" in line.split()[1:]
         for line in directives
     ), (
-        "MANIFEST.in must `graft skills` so the committed top-level skills/ "
-        f"operator manual ships in the sdist; got directives {directives!r}."
+        "MANIFEST.in must `graft ap2/skills` so the relocated operator manual "
+        f"ships in the sdist; got directives {directives!r}."
     )
 
 

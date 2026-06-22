@@ -676,7 +676,7 @@ def test_howto_carries_tb245_cross_reference():
     """
     skill = (
         Path(__file__).resolve().parent.parent.parent
-        / "skills/ap2-observability/SKILL.md"
+        / "ap2/skills/ap2-observability/SKILL.md"
     )
     assert "TB-245" in skill.read_text()
 
@@ -694,7 +694,7 @@ def test_howto_validator_judge_section_names_push_surface():
     """
     skill = (
         Path(__file__).resolve().parent.parent.parent
-        / "skills/ap2-observability/SKILL.md"
+        / "ap2/skills/ap2-observability/SKILL.md"
     )
     src = skill.read_text()
     # The TB-245 paragraph must live in the TB-235 validator-judge

@@ -2,13 +2,14 @@
 #
 # setuptools' sdist reads this file to pick up files that live OUTSIDE the
 # Python packages declared in pyproject.toml's [tool.setuptools] packages list.
-# The committed top-level `skills/` tree is ap2's operator manual (agentskills.io
-# SKILL.md bundles) and is NOT a Python package, so package-data cannot carry it
-# — MANIFEST.in is the correct mechanism to ship it, and the top-level docs an
-# outside consumer needs, in a clean `python -m build --sdist`.
+# ap2's operator manual (agentskills.io SKILL.md bundles) lives at `ap2/skills/`
+# (TB-422 relocated it under the package so it ships as installed package-data in
+# the wheel, not only the sdist). package-data already carries it in the sdist,
+# but this graft makes the operator-manual inclusion explicit alongside the
+# top-level docs an outside consumer needs in a clean `python -m build --sdist`.
 
-# Operator manual: the committed top-level skills/ tree.
-graft skills
+# Operator manual: the skills tree, now under the ap2 package.
+graft ap2/skills
 
 # Top-level docs an outside consumer needs.
 include README.md

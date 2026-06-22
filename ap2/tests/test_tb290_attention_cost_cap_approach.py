@@ -741,7 +741,7 @@ def test_briefing_verification_greps_match():
     # `skills/ap2-config/SKILL.md`'s `## Configuration knobs` section, so
     # the operator-facing detector mention now lives in the config skill.
     config_skill_src = (
-        repo_root.parent / "skills" / "ap2-config" / "SKILL.md"
+        repo_root / "skills" / "ap2-config" / "SKILL.md"
     ).read_text()
     architecture_src = (repo_root / "architecture.md").read_text()
     # TB-318 (axis 5): `ap2/auto_approve.py` was relocated to

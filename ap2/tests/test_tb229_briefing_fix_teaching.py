@@ -48,13 +48,13 @@ import pytest
 # `Read` calls cheap and lets the path-vs-file checks fail loudly if
 # the layout changes.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_SKILL_MD = _REPO_ROOT / "skills" / "ap2-task" / "SKILL.md"
+_SKILL_MD = _REPO_ROOT / "ap2" / "skills" / "ap2-task" / "SKILL.md"
 _PROMPTS_PY = _REPO_ROOT / "ap2" / "prompts.py"
 # TB-398 carved the TB-225 auto-unfreeze knob documentation (with the
 # forward link to `skills/ap2-task/SKILL.md`) into the `ap2-config`
 # skill's `## Configuration knobs` section, so the
 # operator-facing half of the cross-reference now lives here.
-_CONFIG_SKILL_MD = _REPO_ROOT / "skills" / "ap2-config" / "SKILL.md"
+_CONFIG_SKILL_MD = _REPO_ROOT / "ap2" / "skills" / "ap2-config" / "SKILL.md"
 
 
 # Bootstrap shape tokens TB-225 ships in

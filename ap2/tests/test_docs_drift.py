@@ -36,7 +36,7 @@ ARCHITECTURE_PATH = AP2_DIR / "architecture.md"
 # retarget pattern. The event-type drift gate reads its coverage surface from
 # here. (TB-406 retired the file entirely; every gate below now reads its
 # owning skill — there is no `HOWTO_PATH` fallback left.)
-OBSERVABILITY_SKILL = REPO_ROOT / "skills/ap2-observability/SKILL.md"
+OBSERVABILITY_SKILL = REPO_ROOT / "ap2/skills/ap2-observability/SKILL.md"
 
 # TB-398 — the configuration domain (the `## Configuration knobs` flat
 # `AP2_*` catalogue + the `## Config keys (TOML)` typed-schema reference +
@@ -44,7 +44,7 @@ OBSERVABILITY_SKILL = REPO_ROOT / "skills/ap2-observability/SKILL.md"
 # `skills/ap2-config/SKILL.md`, the second domain carve following the
 # TB-397 canary pattern. The env-knob and config-key coverage gates read
 # their documentation surface from here instead of `HOWTO_PATH`.
-CONFIG_SKILL = REPO_ROOT / "skills/ap2-config/SKILL.md"
+CONFIG_SKILL = REPO_ROOT / "ap2/skills/ap2-config/SKILL.md"
 
 # TB-399 — the board-ops domain (the `## Custom MCP tools (reference)` tool
 # catalogue + the `## Operator CLI verbs (reference)` table) was carved out
@@ -55,7 +55,7 @@ CONFIG_SKILL = REPO_ROOT / "skills/ap2-config/SKILL.md"
 # howto-OR-architecture fallback semantics, just with the skill replacing
 # howto as the descriptive surface) so no MCP tool documented here becomes
 # uncovered mid-migration.
-BOARD_OPS_SKILL = REPO_ROOT / "skills/ap2-board-ops/SKILL.md"
+BOARD_OPS_SKILL = REPO_ROOT / "ap2/skills/ap2-board-ops/SKILL.md"
 
 # TB-402 — the failure-recovery domain (the `## Failure modes the daemon
 # recovers from` auto-recovery catalogue + the `## Operator-question
@@ -67,7 +67,7 @@ BOARD_OPS_SKILL = REPO_ROOT / "skills/ap2-board-ops/SKILL.md"
 # source-enumerated set), so there is no `HOWTO_PATH`-keyed gate to retarget
 # here — the constant registers the skill path for parity with its three
 # siblings and for any future failure-recovery coverage gate to read from.
-FAILURE_RECOVERY_SKILL = REPO_ROOT / "skills/ap2-failure-recovery/SKILL.md"
+FAILURE_RECOVERY_SKILL = REPO_ROOT / "ap2/skills/ap2-failure-recovery/SKILL.md"
 
 # TB-403 — the ideation + goal/focus-management domain (the `## Authoring
 # goal.md` operator-curated five-section reference + the `## Retrospective
@@ -83,7 +83,7 @@ FAILURE_RECOVERY_SKILL = REPO_ROOT / "skills/ap2-failure-recovery/SKILL.md"
 # that the content moved to the skill and is not duplicated back in howto.
 # `ideation.default.md` stays canonical for the daemon ideation agent's own
 # briefing-authoring conventions — the skill references but does not move them.
-IDEATION_GOALS_SKILL = REPO_ROOT / "skills/ap2-ideation-goals/SKILL.md"
+IDEATION_GOALS_SKILL = REPO_ROOT / "ap2/skills/ap2-ideation-goals/SKILL.md"
 
 
 # Claude built-ins are not autopilot MCP tools. They appear in agent

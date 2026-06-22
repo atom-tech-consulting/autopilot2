@@ -306,7 +306,7 @@ def _repo_root() -> Path:
     """Walk up from this test file to the autopilot2 repo root."""
     here = Path(__file__).resolve()
     for parent in here.parents:
-        if (parent / "skills").is_dir() and (parent / "ap2").is_dir():
+        if (parent / "ap2" / "skills").is_dir() and (parent / "ap2").is_dir():
             return parent
     raise RuntimeError("could not locate repo root from test file")
 
@@ -315,7 +315,7 @@ def test_tb135_skills_ap2_task_skill_md_requires_briefing_with_template_pointer(
     """`skills/ap2-task/SKILL.md` documents the TB-135 contract: briefing
     authoring is mandatory, with a pointer at the canonical template
     (`ap2/init.py:BRIEFING_TEMPLATE`)."""
-    skill = _repo_root() / "skills" / "ap2-task" / "SKILL.md"
+    skill = _repo_root() / "ap2" / "skills" / "ap2-task" / "SKILL.md"
     assert skill.exists()
     text = skill.read_text()
     # Must mention the new requirement explicitly.
@@ -331,7 +331,7 @@ def test_tb135_skills_migrate_to_ap2_skill_md_requires_briefing():
     `ap2 add` calls into a freshly-migrated project must carry a briefing,
     and the migration itself doesn't have to retroactively backfill old
     skeleton briefings."""
-    skill = _repo_root() / "skills" / "migrate-to-ap2" / "SKILL.md"
+    skill = _repo_root() / "ap2" / "skills" / "migrate-to-ap2" / "SKILL.md"
     assert skill.exists()
     text = skill.read_text()
     assert "--briefing-file" in text or "briefing" in text.lower()
