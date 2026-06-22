@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-422** **Ship operator skills with the installed package so sync-assets works after `uv tool install` (not only from a repo clone)** `#autopilot` `#packaging` `#skills` `#distribution` `#sandbox` `#sync-assets` [→ brief](.cc-autopilot/tasks/ship-operator-skills-with-the-installed.md)
 
 ## Pipeline Pending
 
