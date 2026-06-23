@@ -21,9 +21,11 @@ You write `goal.md` once — a Mission, a `## Done when` checklist, and a
    goal.md          you declare what "done" looks like
       │
       ▼
-   ideation         proposes goal-aligned tasks ─► Backlog (awaiting review)
-      │                                                │
-      │                                  ap2 approve ──┘
+   ideation         proposes goal-aligned tasks ─► Backlog
+      │
+      ▼
+   auto-approve     ON by default — proposals dispatch unattended
+      │             (opt out to gate each one on `ap2 approve`)
       ▼
    dispatch         a fresh agent (Claude Code / Codex) does one task
       │
@@ -35,9 +37,11 @@ You write `goal.md` once — a Mission, a `## Done when` checklist, and a
    Complete         committed to git; watch via `ap2 status` / the web UI
 ```
 
-You stay in the loop only for judgment calls — approving proposals, triaging a
-frozen task, steering `goal.md`. The rest runs unattended; relax individual
-gates (e.g. auto-approve) per surface as you build trust.
+By default the loop runs unattended end-to-end: ideation proposals are
+auto-approved and dispatched without you. You stay in the loop only for the
+judgment calls that remain — triaging a frozen task, steering `goal.md`. If you
+want a human check before each dispatch, re-insert a manual approval gate by
+opting out of auto-approve (see the quickstart below).
 
 ## Install
 
@@ -62,6 +66,15 @@ extra (e.g. `uv tool install 'autopilot2[codex] @ git+…'`).
 
 ## Quickstart
 
+> **Caution — auto-approve is ON by default.** A bare `ap2 start` is autonomous:
+> ideation proposals are approved and dispatched on their own, and each agent
+> edits files in your repo and runs shell commands **unattended**. The no-sandbox
+> quickstart below works, but on it the daemon runs as **your own user** with no
+> OS isolation. For unattended or long-running use, run ap2 under the
+> separate-user [sandbox runbook](sandboxed-user-setup.md) (its own OS user, tool
+> isolation). First time out, keep a human in the loop with the review gate or
+> dry-run shown in path (a) below.
+
 ```bash
 cd /path/to/your/repo
 ap2 init        # scaffolds goal.md, TASKS.md, and .cc-autopilot/
@@ -81,9 +94,24 @@ Then get work onto the board — two ways:
 
 ```bash
 ap2 ideate          # run an ideation cycle now (it also fires on its own)
-ap2 status          # proposals land in Backlog, marked pending-review
-ap2 approve TB-1    # approve one → the daemon dispatches, verifies, commits
+ap2 status          # proposals land in Backlog, then auto-approve + dispatch
 ```
+
+Auto-approve is **ON by default**, so proposals are approved and dispatched on
+their own — there is no manual `ap2 approve` step in the default flow. To keep a
+human review gate instead, opt out before you start (both knobs hot-reload):
+
+```bash
+# Require a manual approval per proposal (opt OUT of autonomous dispatch):
+export AP2_AUTO_APPROVE_DISABLED=1        # or [components.auto_approve] disabled = true
+
+# …or just watch the decisions first, acting on none (monitor-only):
+#   [components.auto_approve] dry_run = true   # emits would_auto_approve, dispatches nothing
+```
+
+With the gate on, `ap2 status` marks each proposal pending-review and you
+approve one with `ap2 approve TB-N` → the daemon then dispatches, verifies,
+commits.
 
 **(b) Or author a task yourself.** The briefing must carry the full structure
 the verifier expects — `## Goal` (with a `Why now:` line), `## Scope`,
