@@ -1743,3 +1743,9 @@
 - **Summary:** Added a shared renderer (render_fenced_deny_entries + merge_fenced_deny_into_settings in tools.py) deriving the .claude/settings.json permissions.deny list from the canonical TASK_AGENT_FENCED_PATHS tuple, wired ap2 init to scaffold/union-merge the committed file and project-setup to backfill clones as the sandbox user; init-generated file is byte-equal to this repo's committed settings.json and the full targeted suite (init/tools/prompts/sandbox/docs-drift + new test_fenced_deny_settings.py) passes.
 - **Files:** ap2/tools.py, ap2/init.py, ap2/sandbox.py, ap2/tests/test_fenced_deny_settings.py
 - **Tests:** pass
+
+## [2026-06-23] TB-427: Fix split-brained component enablement: `Manifest.is_enabled` ignores config.toml, so `[components.auto_approve] enabled=true` never turns the component on (status/doctor/registry disagree with the gate)
+- **Commit:** `19b8f61`
+- **Summary:** Fixed split-brained component enablement: Manifest.is_enabled now resolves one config-aware precedence (sectioned env → flat master flag → config.toml → default) shared by status/doctor/enabled_components and the auto_approve gate, so config.toml keys turn components on/off everywhere and the registry view can never disagree with the gate.
+- **Files:** ap2/registry.py, ap2/components/auto_approve/impl.py, ap2/doctor.py, ap2/cli_daemon.py, ap2/env_reload.py, ap2/tests/test_component_enable_unified.py, ap2/tests/test_queue_drain_auto_approve.py, ap2/tests/test_tb232_auto_approve_dry_run.py
+- **Tests:** pass
