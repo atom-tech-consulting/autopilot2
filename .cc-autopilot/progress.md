@@ -1767,3 +1767,9 @@
 - **Summary:** Flipped auto_approve to default-ON framework-wide (autonomous-by-default; operators opt OUT via AP2_AUTO_APPROVE_DISABLED), with legacy AP2_AUTO_APPROVE honored as a deprecated transitional override, docs/registries reconciled, and a latent test-isolation env leak in test_tb334 fixed so the full suite is green.
 - **Files:** ap2/components/auto_approve/manifest.py, ap2/components/auto_approve/impl.py, ap2/registry.py, ap2/config_compat.py, ap2/init.py, ap2/doctor.py, ap2/env_reload.py, ap2/automation_status.py, ap2/operator_queue.py, ap2/events.py, ap2/README.md, ap2/architecture.md, ap2/skills/ap2-board-ops/SKILL.md, ap2/skills/ap2-config/SKILL.md, ap2/skills/ap2-ideation-goals/SKILL.md, ap2/skills/ap2-observability/SKILL.md, ap2/tests/conftest.py, ap2/tests/test_auto_approve_default_on.py, ap2/tests/test_tb334_core_cfg_reads.py, ap2/tests/test_tb383_auto_approve_loop_pass.py, ap2/tests/e2e/test_review_gate.py, ap2/tests/e2e/test_tb142_mm_queue_routing.py, ap2/tests/e2e/test_walk_away_loop.py
 - **Tests:** pass
+
+## [2026-06-23] TB-431: Update the top-level README quickstart for auto-approve-on-by-default + the no-sandbox safety tradeoff
+- **Commit:** `bad9dae`
+- **Summary:** Rewrote the repo-root README quickstart for the TB-430 default-on flip: the "How it works" diagram/prose now show auto-approve ON by default (ideation->auto-approved->dispatch) with manual approval framed as the opt-out, path (a) drops `ap2 approve TB-1` and documents the opt-out knobs (AP2_AUTO_APPROVE_DISABLED / [components.auto_approve] disabled=true / dry_run=true, spellings cross-checked against the auto_approve manifest + ap2/README.md), and a prominent caution flags that a bare `ap2 start` runs agents unattended as your own user on the no-sandbox path with the sandbox runbook recommended for unattended use.
+- **Files:** README.md
+- **Tests:** pass
