@@ -11,6 +11,7 @@ from __future__ import annotations
 import getpass
 import grp
 import importlib.resources
+import json
 import os
 import platform
 import pwd
@@ -1149,6 +1150,16 @@ def project_setup(
     if rc != 0:
         return rc
 
+    # TB-426: defensively backfill the fenced-file `.claude/settings.json`
+    # deny list into the clone. A clone of a repo `init`-ed after TB-426
+    # already carries the committed file (so this union-merge is a no-op);
+    # a repo `init`-ed before TB-426 — like the operator's freshly stood-up
+    # project that motivated this task — gets the fence created here. Written
+    # AS the sandbox user (same sudo-as-user discipline as the git-config /
+    # channel-env writes above).
+    print()
+    _install_fenced_deny(dst, user)
+
     # Optional mattermost channel install — resolves the name via the caller's
     # own MM creds (MATTERMOST_URL/MATTERMOST_TOKEN from the human's env), then
     # writes the resolved ID into <dst>/.cc-autopilot/env so the daemon picks
@@ -1180,6 +1191,67 @@ def _install_channel_for_project(project_root: Path, user: str, channel_name: st
     print(f"resolved #{channel_name.lstrip('#')} → {channel_id} (team {team_id})")
     return install_project_channel(project_root, user, channel_id,
                                     channel_name=channel_name.lstrip("#"))
+
+
+def _install_fenced_deny(project_root: Path, user: str) -> int:
+    """Create-or-union-merge the fenced-file `permissions.deny` entries into
+    `<project_root>/.claude/settings.json`, written AS the sandbox `user`
+    (sudo tee + mkdir, same discipline as the git-config / channel-env
+    writes). The deny entries are rendered from the canonical
+    `TASK_AGENT_FENCED_PATHS` set via `tools.merge_fenced_deny_into_settings`,
+    so this clone-side fence can never drift from the SDK
+    `--disallowedTools` layer.
+
+    Idempotent: a clone that already carries the committed init-produced
+    file (whose `permissions.deny` already covers the full fenced set) is a
+    no-op. An existing-but-unparseable settings.json is left untouched
+    rather than risk clobbering operator content. Returns 0 on success
+    (including no-op), 1 on a hard write failure. The result is printed for
+    the project-setup output."""
+    from .init import CLAUDE_SETTINGS_SCHEMA
+    from .tools import merge_fenced_deny_into_settings
+
+    settings_path = project_root / ".claude" / "settings.json"
+    existing = subprocess.run(
+        ["sudo", "-u", user, "sh", "-c",
+         f"test -f {settings_path} && cat {settings_path} || true"],
+        capture_output=True, text=True,
+    ).stdout
+    if existing.strip():
+        try:
+            parsed = json.loads(existing)
+        except json.JSONDecodeError:
+            print("  .claude/settings.json: present but unparseable — left untouched")
+            return 0
+        base = parsed if isinstance(parsed, dict) else {}
+        created = False
+    else:
+        base = {"$schema": CLAUDE_SETTINGS_SCHEMA}
+        created = True
+
+    rendered = json.dumps(merge_fenced_deny_into_settings(base), indent=2) + "\n"
+    if not created and existing == rendered:
+        print("  .claude/settings.json: fenced-file deny list already present (no-op)")
+        return 0
+
+    subprocess.run(
+        ["sudo", "-u", user, "mkdir", "-p", str(settings_path.parent)],
+        check=False,
+    )
+    w = subprocess.run(
+        ["sudo", "-u", user, "tee", str(settings_path)],
+        input=rendered, text=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    if w.returncode != 0:
+        print(f"  .claude/settings.json: write failed: {w.stderr}", file=sys.stderr)
+        return 1
+    print(
+        "  .claude/settings.json: "
+        + ("created fenced-file deny list" if created
+           else "merged fenced-file deny entries")
+    )
+    return 0
 
 
 def _print_audit(res: AuditResult) -> int:

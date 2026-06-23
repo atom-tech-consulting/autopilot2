@@ -1344,3 +1344,59 @@ TASK_AGENT_FENCED_PATHS = (
     # (goal.md L187-191 "Goal.md auto-rotation" Non-goal).
     ".cc-autopilot/focus_pointer.json",
 )
+
+
+# TB-426: render the canonical `TASK_AGENT_FENCED_PATHS` tuple into Claude
+# Code `permissions.deny` entries — an `Edit(<path>)` AND a `Write(<path>)`
+# per fenced path. This is the SINGLE source the project-settings deny layer
+# derives from: `ap2 init` scaffolds a committed `.claude/settings.json`
+# `permissions.deny` block from it (so the fence travels with every clone and
+# protects local, non-sandbox `ap2 start` runs), and `ap2 sandbox
+# project-setup` defensively backfills the same entries into a clone. Both
+# call this one renderer (and the SDK `--disallowedTools` layer in
+# `daemon._task_disallowed_tools` walks the same tuple), so the two
+# enforcement layers can never drift apart.
+def render_fenced_deny_entries(
+    paths: tuple[str, ...] = TASK_AGENT_FENCED_PATHS,
+) -> list[str]:
+    """Return `[Edit(<p>), Write(<p>), ...]` for every fenced path.
+
+    Order-stable: each path yields its `Edit(...)` entry immediately
+    followed by its `Write(...)` entry, in `TASK_AGENT_FENCED_PATHS` order.
+    Nothing outside the supplied `paths` set is emitted.
+    """
+    entries: list[str] = []
+    for path in paths:
+        entries.append(f"Edit({path})")
+        entries.append(f"Write({path})")
+    return entries
+
+
+def merge_fenced_deny_into_settings(settings: dict | None) -> dict:
+    """Union the rendered fenced-file deny entries into a Claude Code
+    settings dict's `permissions.deny` list.
+
+    Returns a NEW dict (does not mutate the input): every other key is
+    preserved, and any pre-existing `permissions.deny` / `allow` / `ask`
+    entries survive. Fenced entries already present are not duplicated;
+    missing ones are appended in canonical order AFTER the existing deny
+    entries. Idempotent — a settings dict that already carries the full
+    fenced set comes back byte-equal in its `deny` list. Never clobbers a
+    user's settings; the caller serializes the result and writes it back.
+    """
+    import copy
+
+    merged = copy.deepcopy(settings) if isinstance(settings, dict) else {}
+    perms = merged.get("permissions")
+    if not isinstance(perms, dict):
+        perms = {}
+    deny = perms.get("deny")
+    existing = list(deny) if isinstance(deny, list) else []
+    seen = set(existing)
+    for entry in render_fenced_deny_entries():
+        if entry not in seen:
+            existing.append(entry)
+            seen.add(entry)
+    perms["deny"] = existing
+    merged["permissions"] = perms
+    return merged

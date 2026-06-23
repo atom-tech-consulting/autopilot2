@@ -11,6 +11,7 @@ progress.md / CLAUDE.md content (only writes if missing or appends a new
 """
 from __future__ import annotations
 
+import json
 import re
 import textwrap
 from dataclasses import dataclass, field
@@ -18,6 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from .config import AUTOPILOT_DIR_NAME
+
+
+# TB-426: JSON-schema hint stamped onto a freshly-scaffolded
+# `.claude/settings.json` so editors validate the deny-list shape. Mirrors
+# this repo's own committed `.claude/settings.json`.
+CLAUDE_SETTINGS_SCHEMA = "https://json.schemastore.org/claude-code-settings.json"
 
 
 TASKS_TEMPLATE = (
@@ -787,6 +794,12 @@ class InitReport:
     # already has an authored config.toml (parallels env_template_created
     # — never clobber); True only on first init of a fresh project.
     config_template_created: bool = False
+    # TB-426: track the `.claude/settings.json` fenced-file deny scaffold.
+    # `claude_settings_created` is True on first init (file freshly written);
+    # `claude_settings_deny_merged` is True when an existing settings.json
+    # gained the fenced deny entries via union-merge.
+    claude_settings_created: bool = False
+    claude_settings_deny_merged: bool = False
 
     def print(self) -> None:
         if self.nested_gitignore_added:
@@ -809,6 +822,12 @@ class InitReport:
         print(f"  .cc-autopilot/insights/: {'created (placeholder index)' if self.insights_dir_created else 'exists'}")
         print(f"  .cc-autopilot/env: {'created (commented template)' if self.env_template_created else 'exists (kept)'}")
         print(f"  .cc-autopilot/config.toml: {'created (schema-rendered template)' if self.config_template_created else 'exists (kept)'}")
+        if self.claude_settings_created:
+            print("  .claude/settings.json: created (fenced-file deny list)")
+        elif self.claude_settings_deny_merged:
+            print("  .claude/settings.json: merged fenced-file deny entries")
+        else:
+            print("  .claude/settings.json: deny list up to date")
         if self.claude_md_created:
             print(f"  CLAUDE.md: created (with ## Autopilot)")
         elif self.claude_md_autopilot_added:
@@ -892,6 +911,51 @@ def _ensure_claude_md_autopilot(claude_md: Path) -> tuple[bool, bool]:
     return False, True
 
 
+def _ensure_claude_settings_deny(project_root: Path) -> tuple[bool, bool]:
+    """Scaffold / union-merge `<project_root>/.claude/settings.json` so its
+    `permissions.deny` list fences every `TASK_AGENT_FENCED_PATHS` entry as an
+    `Edit`/`Write` pair (TB-426).
+
+    The deny entries are derived from the canonical fenced-paths set via the
+    shared `tools.merge_fenced_deny_into_settings` renderer (which walks
+    `TASK_AGENT_FENCED_PATHS`), so this project-settings fence can never drift
+    from the SDK `--disallowedTools` layer. When the file already exists the
+    fenced entries are UNION-merged into the existing `permissions.deny`
+    (every other key and any pre-existing deny/allow/ask entries survive) —
+    a user's settings are never clobbered. A committed `.claude/settings.json`
+    travels with every `git clone` and also protects local, non-sandbox
+    `ap2 start` runs.
+
+    Returns `(created, changed)`: `created` is True when the file was absent
+    and freshly written; `changed` is True when the write altered on-disk
+    content (a fresh file, or fenced entries added to an existing one). An
+    existing-but-unparseable settings.json is left untouched (returns
+    `(False, False)`) rather than risk clobbering operator content.
+    """
+    from .tools import merge_fenced_deny_into_settings
+
+    settings_path = project_root / ".claude" / "settings.json"
+    if not settings_path.exists():
+        created = True
+        before: str | None = None
+        base: dict = {"$schema": CLAUDE_SETTINGS_SCHEMA}
+    else:
+        created = False
+        before = settings_path.read_text()
+        try:
+            parsed = json.loads(before)
+        except json.JSONDecodeError:
+            return False, False
+        base = parsed if isinstance(parsed, dict) else {}
+
+    rendered = json.dumps(merge_fenced_deny_into_settings(base), indent=2) + "\n"
+    if before == rendered:
+        return False, False
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(rendered)
+    return created, True
+
+
 def init_project(project_root: Path) -> InitReport:
     """Scaffold ap2 gitignores, tasks dir, board template, autopilot config.
 
@@ -939,6 +1003,12 @@ def init_project(project_root: Path) -> InitReport:
         autopilot_dir / "config.toml", _config_template(),
     )
     claude_md_created, autopilot_added = _ensure_claude_md_autopilot(project_root / "CLAUDE.md")
+    # TB-426: scaffold (or union-merge into) `.claude/settings.json` a
+    # `permissions.deny` block fencing every `TASK_AGENT_FENCED_PATHS` entry
+    # as an `Edit`/`Write` pair, so a task agent can't directly edit fenced
+    # board state. The file is committed (not gitignored), so the fence
+    # travels with every clone and protects local `ap2 start` runs too.
+    claude_settings_created, claude_settings_changed = _ensure_claude_settings_deny(project_root)
 
     return InitReport(
         project_root=project_root,
@@ -954,4 +1024,6 @@ def init_project(project_root: Path) -> InitReport:
         insights_dir_created=insights_dir_created,
         env_template_created=env_template_created,
         config_template_created=config_template_created,
+        claude_settings_created=claude_settings_created,
+        claude_settings_deny_merged=(claude_settings_changed and not claude_settings_created),
     )
