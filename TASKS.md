@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-424** **Ship AGENTS.md as installed package data so sync-assets deploys it after `uv tool install` (mirror TB-422 skills fix)** `#autopilot` `#packaging` `#sandbox` `#agents-md` `#codex` `#distribution` `#sync-assets` [→ brief](.cc-autopilot/tasks/ship-agents-md-as-installed-package-data.md)
 
 ## Pipeline Pending
 
