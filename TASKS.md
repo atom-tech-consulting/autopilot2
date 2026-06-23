@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-428** **Fix config.toml bool coercion in component enablement gates: TOML `enabled = true` becomes `"True"` and fails the lowercase truthy check, so the gate silently reads False** `#autopilot` `#config` `#auto_approve` `#ideation` `#components` `#bug` `#truthy` [→ brief](.cc-autopilot/tasks/fix-config-toml-bool-coercion-in-compone.md)
 
 ## Pipeline Pending
 
