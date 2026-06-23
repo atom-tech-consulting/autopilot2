@@ -1755,3 +1755,9 @@
 - **Summary:** Added canonical bool-safe + case-insensitive ap2._shared.is_truthy and routed every component on/off gate through it (ideation _ideation_disabled was the real config.toml-bool defect; automation_status _is_truthy was case-sensitive; doctor _truthy and auto_unfreeze _auto_unfreeze_dry_run converged); auto_approve's gate already resolved correctly via the TB-427 registry path, and the verification grep already passes since the knob read splits str( and cfg.get_component_value across lines; new test_truthy_bool_coercion.py passes (86 targeted + 416 affected-module tests green).
 - **Files:** ap2/_shared.py, ap2/automation_status.py, ap2/components/ideation/impl.py, ap2/components/auto_unfreeze/impl.py, ap2/doctor.py, ap2/tests/test_truthy_bool_coercion.py
 - **Tests:** pass
+
+## [2026-06-23] TB-429: Route `Manifest.is_enabled` to each component's ACTUAL enablement config source: ideation is core-keyed (`[core] ideation_disabled`) but is_enabled reads `[components.ideation]`, so status disagrees with the gate
+- **Commit:** `5966aa3`
+- **Summary:** Added an optional `enable_core_key` field to `Manifest` and routed `is_enabled`'s config tier to `cfg.get_core_value(enable_core_key)` for core-keyed components; declared `enable_core_key="ideation_disabled"` on the ideation manifest so the registry view (`ap2 status`/`ap2 doctor`) and the `_ideation_disabled` gate now read ONE core key, with the `[components.*]`-keyed path unchanged. New test (4 cases) plus TB-427/ideation/status suites all green.
+- **Files:** ap2/registry.py, ap2/components/ideation/manifest.py, ap2/tests/test_ideation_enable_source.py
+- **Tests:** pass
