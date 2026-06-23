@@ -1737,3 +1737,9 @@
 - **Summary:** Replaced the hand-maintained [tool.setuptools] packages list with autodiscovery ([tool.setuptools.packages.find] include=["ap2","ap2.*"]) so the full ap2.components tree ships in the wheel (verified: built wheel carries 25 ap2/components/ files incl. ideation), and added ap2/tests/test_packaging_completeness.py guarding every on-disk package against omission via setuptools.find_packages (declared setuptools in the dev extra for it); new test + packaging suite pass.
 - **Files:** pyproject.toml, uv.lock, ap2/tests/test_packaging_completeness.py
 - **Tests:** pass
+
+## [2026-06-23] TB-426: Scaffold + provision the fenced-file `.claude/settings.json` deny list (ap2 init writes it committed; project-setup backfills the clone)
+- **Commit:** `9fb709b`
+- **Summary:** Added a shared renderer (render_fenced_deny_entries + merge_fenced_deny_into_settings in tools.py) deriving the .claude/settings.json permissions.deny list from the canonical TASK_AGENT_FENCED_PATHS tuple, wired ap2 init to scaffold/union-merge the committed file and project-setup to backfill clones as the sandbox user; init-generated file is byte-equal to this repo's committed settings.json and the full targeted suite (init/tools/prompts/sandbox/docs-drift + new test_fenced_deny_settings.py) passes.
+- **Files:** ap2/tools.py, ap2/init.py, ap2/sandbox.py, ap2/tests/test_fenced_deny_settings.py
+- **Tests:** pass

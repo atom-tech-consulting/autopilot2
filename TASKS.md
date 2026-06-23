@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-426** **Scaffold + provision the fenced-file `.claude/settings.json` deny list (ap2 init writes it committed; project-setup backfills the clone)** `#autopilot` `#init` `#sandbox` `#project-setup` `#fence` `#permissions` `#security` [→ brief](.cc-autopilot/tasks/scaffold-provision-the-fenced-file-claud.md)
 
 ## Pipeline Pending
 
@@ -307,5 +306,6 @@
 - [x] **TB-423** **Remove the statusline feature from repo and code (it references a deleted hooks/ script and is not required by ap2)** `#autopilot` `#sandbox` `#cleanup` `#statusline` `#cli` `#distribution` [→ brief](.cc-autopilot/tasks/remove-the-statusline-feature-from-repo.md)
 - [x] **TB-424** **Ship AGENTS.md as installed package data so sync-assets deploys it after `uv tool install` (mirror TB-422 skills fix)** `#autopilot` `#packaging` `#sandbox` `#agents-md` `#codex` `#distribution` `#sync-assets` [→ brief](.cc-autopilot/tasks/ship-agents-md-as-installed-package-data.md)
 - [x] **TB-425** **Ship the full ap2 subpackage tree in the wheel via setuptools autodiscovery (fixes `ModuleNotFoundError: ap2.components` on non-editable installs)** `#autopilot` `#packaging` `#distribution` `#pyproject` `#components` `#blocker` [→ brief](.cc-autopilot/tasks/ship-the-full-ap2-subpackage-tree-in-the.md)
+- [x] **TB-426** **Scaffold + provision the fenced-file `.claude/settings.json` deny list (ap2 init writes it committed; project-setup backfills the clone)** `#autopilot` `#init` `#sandbox` `#project-setup` `#fence` `#permissions` `#security` [→ brief](.cc-autopilot/tasks/scaffold-provision-the-fenced-file-claud.md)
 
 ## Frozen
