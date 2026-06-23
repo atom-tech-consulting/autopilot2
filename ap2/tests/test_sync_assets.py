@@ -47,7 +47,9 @@ SKILLS_SRC = REPO_ROOT / "ap2" / "skills"
 # TB-401: the Codex / agentskills.io operator-reference source, deployed to
 # `~/.agents/AGENTS.md` (TB-406 retired the Claude-side howto reference, so
 # this is now the only single-file operator reference `sync_assets` deploys).
-AGENTS_SRC = REPO_ROOT / "AGENTS.md"
+# TB-424 relocated it under the `ap2` package so it ships as installed
+# package-data in the wheel (mirrors the TB-422 skills relocation).
+AGENTS_SRC = REPO_ROOT / "ap2" / "AGENTS.md"
 
 # TB-401: the discovery-pointer stanza markers `sync_assets` manages in the
 # runtime global-instruction files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`).

@@ -602,12 +602,28 @@ def _skills_source() -> Path:
 
 
 def _agents_md_source() -> Path:
-    """Path to the repo-root `AGENTS.md` (TB-401) — the agentskills.io /
-    Codex operator reference that points a fresh agent session at the
-    operator skills. Shipped with the package so re-installing the
-    editable tool keeps the deployed `~/.agents/AGENTS.md` copy fresh.
-    `__file__` is `ap2/sandbox.py`; `parent.parent` is the repo root."""
-    return Path(__file__).resolve().parent.parent / "AGENTS.md"
+    """Path to the agentskills.io / Codex operator reference `AGENTS.md`
+    (TB-401) — the file that points a fresh Codex agent session at the
+    operator skills, deployed to `~/.agents/AGENTS.md` by `sync_assets`.
+
+    The reference ships as package data under `ap2/AGENTS.md`, so it is
+    resolved from the INSTALLED `ap2` package via `importlib.resources`. That
+    works in BOTH install modes — after a non-editable `uv tool install` /
+    `pip install` (where `ap2` lives in site-packages) and from an editable /
+    dev checkout — closing the TB-424 gap where the prior
+    `Path(__file__).parent.parent / "AGENTS.md"` resolution only found the
+    file in a repo clone, so a bare install printed "sync-assets: AGENTS.md
+    source missing" and the Codex discovery pointer couldn't be deployed
+    (mirrors the TB-422 skills-packaging fix). A repo-relative fallback covers
+    a bare source checkout that has not been installed at all."""
+    try:
+        pkg_root = Path(str(importlib.resources.files("ap2")))
+        candidate = pkg_root / "AGENTS.md"
+        if candidate.is_file():
+            return candidate
+    except (ModuleNotFoundError, TypeError, NotADirectoryError):
+        pass
+    return Path(__file__).resolve().parent / "AGENTS.md"
 
 
 # ---------------------------------------------------------------------------
@@ -615,8 +631,9 @@ def _agents_md_source() -> Path:
 #
 # `sync_assets` mirrors `<repo>/skills/*` into BOTH runtime skills roots —
 # Claude Code's `~/.claude/skills/` and the agentskills.io / Codex standard
-# `~/.agents/skills/` — deploys the Codex operator reference (repo `AGENTS.md`
-# → `~/.agents/AGENTS.md`), and MANAGES a discovery-pointer stanza in each
+# `~/.agents/skills/` — deploys the Codex operator reference (the packaged
+# `ap2/AGENTS.md` → `~/.agents/AGENTS.md`), and MANAGES a discovery-pointer
+# stanza in each
 # runtime's global instructions file so a fresh session finds the deployed
 # skills without a hand-edit. (TB-406 retired the former Claude-side
 # quick-reference deploy target: the operator manual is now wholly the
@@ -815,8 +832,8 @@ def sync_assets(
         (`~/.claude/skills/` and `~/.agents/skills/`) via per-skill
         `rsync --delete` (shared `_sync_skill_tree` helper) so
         renames/deletions propagate to both roots;
-      - deploys the Codex operator reference (repo `AGENTS.md` →
-        `~/.agents/AGENTS.md`) — the Claude side has no separate
+      - deploys the Codex operator reference (the packaged `ap2/AGENTS.md`
+        → `~/.agents/AGENTS.md`) — the Claude side has no separate
         reference file; its operator manual is the `skills/*` bundles
         (TB-406 retired the former Claude-side quick-reference target);
       - manages an idempotent `skills-discovery` pointer stanza in the

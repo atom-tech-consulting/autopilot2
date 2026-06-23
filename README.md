@@ -149,6 +149,7 @@ home, keychain, or other repos.
 ap2/                          # the package — daemon, CLI, MCP tools, tests
 ├── README.md                 # operator reference + full CLI / event schema
 ├── architecture.md           # design rationale, agent kinds, verification model
+├── AGENTS.md                 # Codex operator reference → ~/.agents/AGENTS.md (shipped as package data)
 └── skills/                   # the operator manual — auto-triggered SKILL.md bundles (shipped as package data)
     ├── ap2/                  # /ap2 <project> — daemon snapshot + reading order
     ├── ap2-task/             # task-agent contract + briefing/verification authoring
