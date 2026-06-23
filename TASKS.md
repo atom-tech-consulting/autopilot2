@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-430** **Flip auto_approve to default-on framework-wide: autonomous-by-default, operators opt OUT (was opt-in default-off)** `#autopilot` `#auto_approve` `#components` `#registry` `#config` `#posture` `#distribution` [→ brief](.cc-autopilot/tasks/flip-auto-approve-to-default-on-framewor.md)
 - [ ] **TB-431** **Update the top-level README quickstart for auto-approve-on-by-default + the no-sandbox safety tradeoff** `#autopilot` `#docs` `#readme` `#quickstart` `#auto_approve` `#distribution` `@blocked:TB-430` [→ brief](.cc-autopilot/tasks/update-the-top-level-readme-quickstart-f.md)
 
 ## Pipeline Pending
@@ -312,5 +311,6 @@
 - [x] **TB-427** **Fix split-brained component enablement: `Manifest.is_enabled` ignores config.toml, so `[components.auto_approve] enabled=true` never turns the component on (status/doctor/registry disagree with the gate)** `#autopilot` `#config` `#registry` `#auto_approve` `#components` `#bug` [→ brief](.cc-autopilot/tasks/fix-split-brained-component-enablement-m.md)
 - [x] **TB-428** **Fix config.toml bool coercion in component enablement gates: TOML `enabled = true` becomes `"True"` and fails the lowercase truthy check, so the gate silently reads False** `#autopilot` `#config` `#auto_approve` `#ideation` `#components` `#bug` `#truthy` [→ brief](.cc-autopilot/tasks/fix-config-toml-bool-coercion-in-compone.md)
 - [x] **TB-429** **Route `Manifest.is_enabled` to each component's ACTUAL enablement config source: ideation is core-keyed (`[core] ideation_disabled`) but is_enabled reads `[components.ideation]`, so status disagrees with the gate** `#autopilot` `#config` `#registry` `#ideation` `#components` `#bug` `#status-drift` [→ brief](.cc-autopilot/tasks/route-manifest-is-enabled-to-each-compon.md)
+- [x] **TB-430** **Flip auto_approve to default-on framework-wide: autonomous-by-default, operators opt OUT (was opt-in default-off)** `#autopilot` `#auto_approve` `#components` `#registry` `#config` `#posture` `#distribution` [→ brief](.cc-autopilot/tasks/flip-auto-approve-to-default-on-framewor.md)
 
 ## Frozen

@@ -1761,3 +1761,9 @@
 - **Summary:** Added an optional `enable_core_key` field to `Manifest` and routed `is_enabled`'s config tier to `cfg.get_core_value(enable_core_key)` for core-keyed components; declared `enable_core_key="ideation_disabled"` on the ideation manifest so the registry view (`ap2 status`/`ap2 doctor`) and the `_ideation_disabled` gate now read ONE core key, with the `[components.*]`-keyed path unchanged. New test (4 cases) plus TB-427/ideation/status suites all green.
 - **Files:** ap2/registry.py, ap2/components/ideation/manifest.py, ap2/tests/test_ideation_enable_source.py
 - **Tests:** pass
+
+## [2026-06-23] TB-430: Flip auto_approve to default-on framework-wide: autonomous-by-default, operators opt OUT (was opt-in default-off)
+- **Commit:** `88c620c`
+- **Summary:** Flipped auto_approve to default-ON framework-wide (autonomous-by-default; operators opt OUT via AP2_AUTO_APPROVE_DISABLED), with legacy AP2_AUTO_APPROVE honored as a deprecated transitional override, docs/registries reconciled, and a latent test-isolation env leak in test_tb334 fixed so the full suite is green.
+- **Files:** ap2/components/auto_approve/manifest.py, ap2/components/auto_approve/impl.py, ap2/registry.py, ap2/config_compat.py, ap2/init.py, ap2/doctor.py, ap2/env_reload.py, ap2/automation_status.py, ap2/operator_queue.py, ap2/events.py, ap2/README.md, ap2/architecture.md, ap2/skills/ap2-board-ops/SKILL.md, ap2/skills/ap2-config/SKILL.md, ap2/skills/ap2-ideation-goals/SKILL.md, ap2/skills/ap2-observability/SKILL.md, ap2/tests/conftest.py, ap2/tests/test_auto_approve_default_on.py, ap2/tests/test_tb334_core_cfg_reads.py, ap2/tests/test_tb383_auto_approve_loop_pass.py, ap2/tests/e2e/test_review_gate.py, ap2/tests/e2e/test_tb142_mm_queue_routing.py, ap2/tests/e2e/test_walk_away_loop.py
+- **Tests:** pass
