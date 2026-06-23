@@ -53,6 +53,15 @@ the core-config cluster (`core_config_schema.CORE_CONFIG_SCHEMA`, read via
 there is no `[components.ideation]` sub-table for the TB-322 parity walk
 to require here. A future TB can migrate them to per-component config.
 
+Because the enablement knob is core-keyed, `enable_core_key=
+"ideation_disabled"` (TB-429) tells `Manifest.is_enabled` to resolve its
+config tier from `[core] ideation_disabled` (via `cfg.get_core_value`)
+instead of the absent `[components.ideation].disabled` key. Without it
+the registry view fell through to "enabled" after a `[core]
+ideation_disabled = true` config edit while the gate (which reads the
+core key) correctly stopped ideating — status disagreed with the gate.
+The declaration makes both surfaces read ONE signal.
+
 The registry discovers this subpackage via `pkgutil.iter_modules` over
 `ap2/components/` — no hardcoded list in `ap2.registry` mentions
 "ideation". Import-direction: core resolves the component via the registry
@@ -70,6 +79,17 @@ MANIFEST = Manifest(
     name="ideation",
     env_flag="AP2_IDEATION_DISABLED",
     default_enabled=True,
+    # TB-429: ideation's enable/disable knob is CORE-keyed, not
+    # `[components.ideation]`-keyed. Its `config_schema` is intentionally
+    # empty (see below) and the gate reads `[core] ideation_disabled` via
+    # `cfg.get_core_value("ideation_disabled")` (`impl._ideation_disabled`).
+    # Declaring `enable_core_key` routes `Manifest.is_enabled`'s config
+    # tier to that SAME core key (suppress-polarity, matching
+    # `default_enabled=True`), so `ap2 status` / `ap2 doctor` / the
+    # registry view resolve from the exact source the gate reads — they
+    # can no longer disagree after a `[core] ideation_disabled = true`
+    # config edit.
+    enable_core_key="ideation_disabled",
     hook_points={
         # The natural empty-board trigger gate (TB-391). Signature:
         # `async def run_ideation_tick(cfg, sdk) -> None`.

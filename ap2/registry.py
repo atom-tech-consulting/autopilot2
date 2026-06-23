@@ -230,6 +230,22 @@ class Manifest:
     # auto_approve, validator_judge) continue to load until TB-322
     # fills in their per-component schemas (axis 3).
     config_schema: dict[str, ConfigKey] = field(default_factory=dict)
+    # TB-429: optional override declaring that this component's
+    # enable/disable signal lives in the CORE config cluster
+    # (`[core] <enable_core_key>`, read via `cfg.get_core_value`) rather
+    # than the default per-component `[components.<name>]`
+    # `enabled`/`disabled` key. Defaults to None → the component-scoped
+    # `_enable_config_key()` key is used (the existing, unchanged path
+    # for every `[components.*]`-keyed component). Ideation sets it to
+    # `"ideation_disabled"` so `is_enabled`'s config tier reads the SAME
+    # core key its self-gate (`_ideation_disabled` →
+    # `cfg.get_core_value("ideation_disabled")`) reads — the registry
+    # view (`ap2 status` / `ap2 doctor`) can no longer disagree with the
+    # gate for a core-keyed component. Polarity is still carried by
+    # `default_enabled` (suppress for ideation), so the core key name is
+    # a suppress-polarity `*_disabled` knob, consistent with the
+    # convention at the top of this module.
+    enable_core_key: Optional[str] = None
 
     def _enable_config_key(self) -> str:
         """The per-component config key carrying this manifest's
@@ -270,14 +286,21 @@ class Manifest:
              shell-pinned flat kill switch / opt-in toggle still flips
              status/doctor/registry, preserving pre-TB-427 behavior.
           3. config.toml — only when env tiers 1+2 are silent, via the
-             gate's accessor `cfg.get_component_value(name, key)` (which
-             at this point resolves to its config.toml snapshot →
-             default, env having been ruled out above). This is the new
-             surface TB-427 adds: `[components.<name>] enabled = true` /
-             `disabled = true` now actually turns the component on/off.
+             gate's accessor (which at this point resolves to its
+             config.toml snapshot → default, env having been ruled out
+             above). The accessor is chosen by the component's DECLARED
+             enablement source (TB-429): a `[components.*]`-keyed
+             component reads `cfg.get_component_value(name, key)`
+             (`[components.<name>] enabled`/`disabled`); a core-keyed
+             component (one that sets `enable_core_key`, e.g. ideation →
+             `ideation_disabled`) reads `cfg.get_core_value(
+             enable_core_key)` (`[core] <enable_core_key>`) — the SAME
+             core key its own self-gate reads, so the two can never
+             disagree. TB-427 added the `[components.<name>]` surface;
+             TB-429 extends the unification to core-keyed components.
 
-        Env beats config.toml (tiers 1+2 before tier 3), matching
-        `get_component_value`'s own precedence so both layers agree.
+        Env beats config.toml (tiers 1+2 before tier 3), matching the
+        accessor's own precedence so both layers agree.
 
         `cfg` is duck-typed (`hasattr(cfg, "get_component_value")`) so a
         dummy `cfg` (some tick-hook unit tests pass `object()`) or
@@ -297,9 +320,18 @@ class Manifest:
         # Tier 2: the flat operational master flag, read directly.
         if raw == "":
             raw = env.get(self.env_flag, "")
-        # Tier 3: config.toml (env silent) via the gate's accessor.
-        if raw == "" and cfg is not None and hasattr(cfg, "get_component_value"):
-            val = cfg.get_component_value(self.name, key, default="")
+        # Tier 3: config.toml (env silent) via the gate's accessor. The
+        # accessor is routed to the component's DECLARED enablement
+        # source (TB-429): a core-keyed component (`enable_core_key` set,
+        # e.g. ideation) reads `cfg.get_core_value(enable_core_key)`; the
+        # default `[components.<name>]` path reads
+        # `cfg.get_component_value(name, key)`.
+        if raw == "" and cfg is not None:
+            val = None
+            if self.enable_core_key is not None and hasattr(cfg, "get_core_value"):
+                val = cfg.get_core_value(self.enable_core_key, default="")
+            elif hasattr(cfg, "get_component_value"):
+                val = cfg.get_component_value(self.name, key, default="")
             raw = "" if val is None else val
         is_truthy = str(raw).strip().lower() not in (
             "", "0", "false", "no", "off",
