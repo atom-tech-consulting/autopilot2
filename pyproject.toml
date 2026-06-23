@@ -25,7 +25,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.0"]
+# `setuptools` is a test-only dependency here (not a runtime dep): the TB-425
+# packaging-completeness gate (`ap2/tests/test_packaging_completeness.py`) calls
+# `setuptools.find_packages` to compute the package set the wheel's find-config
+# ships. Modern uv venvs don't seed setuptools, so it must be declared for the
+# `uv run --extra dev pytest` env to import it.
+dev = ["pytest>=9.0", "setuptools>=68"]
 # Opt-in second backend. `claude-agent-sdk` (above) is the always-installed
 # base, so a bare `pip install autopilot2` / `uv sync` stays Claude-only. The
 # codex backend lazily `import openai_codex` (via the ap2.adapters codex loader)
@@ -46,8 +51,17 @@ Repository = "https://github.com/atom-tech-consulting/autopilot2"
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["ap2", "ap2.adapters", "ap2.tests", "ap2.tests.e2e", "ap2.tests.smoke"]
+[tool.setuptools.packages.find]
+# TB-425: autodiscover the full `ap2` package tree instead of a hand-maintained
+# `packages = [...]` list. The old manual list silently omitted the entire
+# `ap2.components.*` tree (extracted during the components refactor but never
+# added back), so a non-editable `uv tool install` / `pip install` shipped a
+# wheel without `ap2.components`. `Registry.discover()` imports it at startup,
+# so on the install path `ap2 init` / `ap2 start` crashed with
+# `ModuleNotFoundError: No module named 'ap2.components'` (editable checkouts
+# masked it by resolving from the repo tree). `include = ["ap2", "ap2.*"]` ships
+# every current subpackage and picks up any future extraction automatically.
+include = ["ap2", "ap2.*"]
 
 [tool.setuptools.package-data]
 # TB-422: ship the operator-skill bundles (`ap2/skills/<skill>/SKILL.md`) as
