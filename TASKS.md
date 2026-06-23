@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-429** **Route `Manifest.is_enabled` to each component's ACTUAL enablement config source: ideation is core-keyed (`[core] ideation_disabled`) but is_enabled reads `[components.ideation]`, so status disagrees with the gate** `#autopilot` `#config` `#registry` `#ideation` `#components` `#bug` `#status-drift` [→ brief](.cc-autopilot/tasks/route-manifest-is-enabled-to-each-compon.md)
 
 ## Pipeline Pending
 
