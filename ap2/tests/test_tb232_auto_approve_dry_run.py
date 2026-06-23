@@ -203,10 +203,20 @@ def test_blocked_review_codespan_preserved_in_dry_run_mode(
     future regression that accidentally strips review in dry-run
     mode (e.g. by reordering the dry-run check inside the gate or
     flipping its truthiness sense) trips here with a precise
-    diff-shaped error."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "true")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    diff-shaped error.
+
+    TB-427: arm via the sectioned `AP2_COMPONENTS_AUTO_APPROVE_*`
+    knobs (matching the rest of this file's cases). The flat
+    `AP2_AUTO_APPROVE` / `AP2_AUTO_APPROVE_DRY_RUN` names this case used
+    pre-TB-427 are config-tunables outside `ENV_PERMITTED_KEYS`, so the
+    config-aware gate ignores them — the case had been passing only
+    because auto-approve never actually armed (disabled, not dry-run),
+    which masked the codespan-preservation behavior it claims to pin.
+    With enablement now resolving from the sectioned knob it genuinely
+    arms, dry-runs, and preserves the codespan."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "true")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     res = tools.do_board_edit(
         cfg,

@@ -159,10 +159,16 @@ def auto_approve_audit(cfg: Config | None = None) -> AuditResult:
             f"got {type(cfg).__name__}",
         )
     res = AuditResult()
+    # TB-427: resolve auto-approve enablement through the registry's
+    # single source of truth (`Manifest.is_enabled`) so `ap2 doctor`
+    # agrees with `ap2 status` / the gate and performs NO raw
+    # `AP2_AUTO_APPROVE` env read here. With `cfg` the read is
+    # config-aware (sectioned env → config.toml → default); with
+    # `cfg=None` it is the legacy env-only flat-flag read.
+    from ap2.registry import default_registry
+
+    enabled = default_registry().get("auto_approve").is_enabled(cfg=cfg)
     if cfg is not None:
-        enabled_raw = str(
-            cfg.get_component_value("auto_approve", "enabled", default="") or "",
-        )
         per_task_raw = str(
             cfg.get_component_value(
                 "auto_approve", "per_task_token_cap", default="",
@@ -177,16 +183,13 @@ def auto_approve_audit(cfg: Config | None = None) -> AuditResult:
         )
     else:
         # Legacy fallback (TB-332 back-compat shape): pre-cfg callers
-        # still get the env-read behavior. `os.getenv` (not
-        # `os.environ.get`) keeps the cross-package grep gate clean —
-        # the canonical NEW-read path is `cfg.get_component_value`, so
-        # this fallback is written in the functionally-equivalent
-        # `os.getenv` shape that the TB-332 absence-check excludes by
-        # construction.
-        enabled_raw = os.getenv("AP2_AUTO_APPROVE", "")
+        # still get the env-read behavior for the cost-cap tunables.
+        # `os.getenv` (not `os.environ.get`) keeps the cross-package grep
+        # gate clean — the canonical NEW-read path is
+        # `cfg.get_component_value`.
         per_task_raw = os.getenv("AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", "")
         window_raw = os.getenv("AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP", "")
-    if not _truthy(enabled_raw):
+    if not enabled:
         res.add(
             "INFO",
             "auto-approve disabled (AP2_AUTO_APPROVE unset) — "

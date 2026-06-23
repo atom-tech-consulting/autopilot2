@@ -122,10 +122,15 @@ def _resolve_component_view(cfg: Config) -> tuple[list[dict], str, list[str]]:
 
     # Fallback: re-resolve locally (no live daemon to read from). Labelled
     # by the caller so the operator knows this is NOT the daemon's view.
+    # TB-427: resolve config-aware (`cfg`) so a `[components.<name>]`
+    # config.toml key (or sectioned env) is reflected in `ap2 status` —
+    # matching the component's gate. The divergence check above stays
+    # env-only on purpose: it detects a daemon shell-pin that disagrees
+    # with the operator's file, which is an os.environ-vs-file question.
     rows = [
         {
             "name": m.name,
-            "enabled": m.is_enabled(),
+            "enabled": m.is_enabled(cfg=cfg),
             "env_flag": m.env_flag,
             "env_flag_description": m.env_flag_description(),
             "default_enabled": m.default_enabled,

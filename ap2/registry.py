@@ -231,8 +231,19 @@ class Manifest:
     # fills in their per-component schemas (axis 3).
     config_schema: dict[str, ConfigKey] = field(default_factory=dict)
 
-    def is_enabled(self, env: Optional[dict] = None) -> bool:
-        """Resolve this manifest's enabled state against `env` (TB-319).
+    def _enable_config_key(self) -> str:
+        """The per-component config key carrying this manifest's
+        enable/disable signal, matching the polarity convention
+        (TB-427): suppress-polarity (`default_enabled=True`) reads the
+        `disabled` key; require-polarity (`default_enabled=False`) reads
+        the `enabled` key. This is the same key the component's own
+        config-aware self-gate (`cfg.get_component_value(name, key)`)
+        consults, so the registry view and the gate read ONE key.
+        """
+        return "disabled" if self.default_enabled else "enabled"
+
+    def is_enabled(self, env: Optional[dict] = None, cfg=None) -> bool:
+        """Resolve this manifest's enabled state (TB-319 / TB-427).
 
         Single source of truth for the polarity convention codified at
         the top of this module (`env_flag is None` → `default_enabled`;
@@ -243,22 +254,60 @@ class Manifest:
         enumeration (TB-319) share one implementation — a future
         polarity edit ripples through both surfaces without drift.
 
-        `env` defaults to `os.environ` when None so callers can pass a
-        synthetic mapping in tests without monkeypatching the process
-        env. Reads via `.get(name, "")` so a missing key is the same
-        empty-string falsy as `os.environ.get(name, "")` in the
-        original `Registry._is_enabled` body.
+        TB-427 — ONE config-aware precedence, resolved in three tiers so
+        the registry layer (status / doctor / `enabled_components`), the
+        TB-379 shell-pin snapshot, AND the component's own self-gate all
+        read the SAME enable/disable signal and can never disagree:
+
+          1. sectioned env `AP2_COMPONENTS_<NAME>_<KEY>` — the spelling
+             `Config.get_component_value` honors as its top tier.
+          2. the flat operational env flag (`self.env_flag`, e.g.
+             `AP2_AUTO_APPROVE` / `AP2_JANITOR_DISABLED`), read DIRECTLY
+             from `env`. TB-413 keeps these flat tunable names out of
+             `ENV_PERMITTED_KEYS`, so `get_component_value` would ignore
+             them; this tier re-permits the specific on/off master flags
+             for the *enablement* read (briefing option A) — a
+             shell-pinned flat kill switch / opt-in toggle still flips
+             status/doctor/registry, preserving pre-TB-427 behavior.
+          3. config.toml — only when env tiers 1+2 are silent, via the
+             gate's accessor `cfg.get_component_value(name, key)` (which
+             at this point resolves to its config.toml snapshot →
+             default, env having been ruled out above). This is the new
+             surface TB-427 adds: `[components.<name>] enabled = true` /
+             `disabled = true` now actually turns the component on/off.
+
+        Env beats config.toml (tiers 1+2 before tier 3), matching
+        `get_component_value`'s own precedence so both layers agree.
+
+        `cfg` is duck-typed (`hasattr(cfg, "get_component_value")`) so a
+        dummy `cfg` (some tick-hook unit tests pass `object()`) or
+        `cfg=None` cleanly skips tier 3 and resolves from env alone —
+        the env-only path the TB-319 synthetic-env unit tests and the
+        TB-379 shell-pin snapshot depend on. All env reads use
+        `.get(name, "")` so a missing key is the same empty-string falsy
+        as `os.environ.get(name, "")`.
         """
-        if env is None:
-            env = os.environ
         if self.env_flag is None:
             return self.default_enabled
-        raw = env.get(self.env_flag, "")
-        is_truthy = raw.strip().lower() not in ("", "0", "false", "no", "off")
+        if env is None:
+            env = os.environ
+        key = self._enable_config_key()
+        # Tier 1: sectioned env (the name get_component_value honors).
+        raw = env.get(f"AP2_COMPONENTS_{self.name.upper()}_{key.upper()}", "")
+        # Tier 2: the flat operational master flag, read directly.
+        if raw == "":
+            raw = env.get(self.env_flag, "")
+        # Tier 3: config.toml (env silent) via the gate's accessor.
+        if raw == "" and cfg is not None and hasattr(cfg, "get_component_value"):
+            val = cfg.get_component_value(self.name, key, default="")
+            raw = "" if val is None else val
+        is_truthy = str(raw).strip().lower() not in (
+            "", "0", "false", "no", "off",
+        )
         if self.default_enabled:
-            # env_flag DISABLES (kill switch / suppress polarity).
+            # env_flag / `disabled` key DISABLES (kill switch / suppress).
             return not is_truthy
-        # env_flag ENABLES (opt-in toggle / require polarity).
+        # env_flag / `enabled` key ENABLES (opt-in toggle / require).
         return is_truthy
 
     def env_flag_description(self, env: Optional[dict] = None) -> str:
@@ -322,37 +371,42 @@ class Registry:
         return self._by_name[component]
 
     def enabled_components(self, cfg=None) -> list[Manifest]:
-        """Components whose env_flag indicates enabled state (goal.md L121).
+        """Components whose enabled-state is on (goal.md L121).
 
         Polarity rule:
           - `env_flag is None`                 → component is always on
                                                  (subject to `default_enabled`).
-          - `env_flag set, default_enabled=True`  → truthy env var DISABLES.
-          - `env_flag set, default_enabled=False` → truthy env var ENABLES.
+          - `env_flag set, default_enabled=True`  → truthy signal DISABLES.
+          - `env_flag set, default_enabled=False` → truthy signal ENABLES.
 
-        `cfg` is accepted for forward compatibility (axis 2 may want
-        per-cfg overrides) but is unused today — we read directly from
-        `os.environ` so a hot-reloaded env file (TB-271) takes effect on
-        the next discovery pass.
+        TB-427: `cfg` is now threaded through to `Manifest.is_enabled`
+        so the enabled-walk is config-aware — a `[components.<name>]`
+        config.toml key (or sectioned env) turns a component on/off, and
+        this filter agrees with the component's own gate. With `cfg=None`
+        the walk reads `os.environ` directly (env-only), so a
+        hot-reloaded env file (TB-271) takes effect on the next
+        discovery pass exactly as before.
         """
         out: list[Manifest] = []
         for m in self.components:
-            if self._is_enabled(m):
+            if self._is_enabled(m, cfg):
                 out.append(m)
         return out
 
     @staticmethod
-    def _is_enabled(m: Manifest) -> bool:
+    def _is_enabled(m: Manifest, cfg=None) -> bool:
         """Polarity-respecting enabled check (delegates to `Manifest.is_enabled`).
 
         TB-319: the polarity rule's body moved onto `Manifest.is_enabled`
         so both the registry walk (here) and the new `ap2 status`
-        `## Components` enumeration share one implementation. The
-        existing TB-309 canary tests still call
-        `Registry._is_enabled(janitor_manifest)` directly — preserved
-        as a thin staticmethod shim so the call shape is unchanged.
+        `## Components` enumeration share one implementation. TB-427
+        threads an optional `cfg` so the check is config-aware when a
+        Config is available. The existing TB-309 canary tests still call
+        `Registry._is_enabled(janitor_manifest)` directly (no `cfg`) —
+        preserved as a thin staticmethod shim so the call shape is
+        unchanged.
         """
-        return m.is_enabled()
+        return m.is_enabled(cfg=cfg)
 
     def hook(self, name: str, *, component: str) -> Callable:
         """Look up a single registered hook by hook-point name + component.

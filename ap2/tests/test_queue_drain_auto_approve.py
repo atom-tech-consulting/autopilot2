@@ -307,11 +307,20 @@ def test_drain_add_backlog_freeze_threshold_trip_blocks_strip(
     *visibly* honors freeze-paused in its return value; real mode
     returns `"strip"` and defers enforcement to the dispatch-time gate
     in `_tick`, which a queue-drain unit test can't observe in
-    isolation."""
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_DRY_RUN", "1")
-    monkeypatch.setenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
-    monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    isolation.
+
+    TB-427: arm via the sectioned `AP2_COMPONENTS_AUTO_APPROVE_*` knobs
+    (matching the sibling cases above). The flat `AP2_AUTO_APPROVE*`
+    names this case used pre-TB-427 are config-tunables outside
+    `ENV_PERMITTED_KEYS`, so the config-aware gate ignores them — the
+    case had been passing only because auto-approve never armed
+    (disabled, not freeze-paused), masking the freeze-pause behavior it
+    pins. The freeze threshold's default is already 3, so the seeded
+    three failures trip the pause once the feature genuinely arms."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "3")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
     # Seed three consecutive task_complete-with-retry-exhausted failures
     # so `_auto_approve_paused` returns True. Mirrors the seeding pattern

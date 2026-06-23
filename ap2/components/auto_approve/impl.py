@@ -69,34 +69,38 @@ AUTO_APPROVE_DEFAULT_GATE_TAGS: tuple[str, ...] = (
 
 
 def _is_auto_approve_enabled(cfg: "Config | None" = None) -> bool:
-    """True iff `AP2_AUTO_APPROVE` is set to a truthy value.
+    """True iff the auto-approve component resolves to enabled.
 
-    Truthy values: `"1"`, `"true"`, `"yes"` (case-sensitive, leading/trailing
-    whitespace stripped). Default unset → False (current behavior; every
-    ideation-proposed task carries `@blocked:review` and waits for
-    `ap2 approve`).
+    TB-427: this gate now delegates to the registry's single source of
+    truth — `Manifest.is_enabled(cfg=cfg)` for the `auto_approve`
+    component — so the gate's view can never disagree with the registry
+    layer (`ap2 status` `## Components`, `ap2 doctor`,
+    `enabled_components`). One resolver, one precedence (sectioned env
+    `AP2_COMPONENTS_<NAME>_<KEY>` → the flat `AP2_AUTO_APPROVE` master
+    flag → config.toml → default):
 
-    Resolution shape (TB-332 cross-package migration; preserved across the
-    TB-383 relocation): same cfg-kwarg-with-TypeError-guard pattern as the
-    sibling `automation_status._is_auto_approve_dry_run` helper. Default
-    ``cfg=None`` preserves the legacy env-read fallback so pre-TB-332
-    callers (TB-223 unit tests) see bit-for-bit identical behavior.
+      - with `cfg`: `[components.auto_approve] enabled = true` in
+        config.toml (or the sectioned env, or the flat flag) all arm the
+        feature — env beats config.toml, matching the registry view;
+      - with `cfg=None`: the same resolution minus the config.toml tier
+        (the env-only read the TB-223 unit contract depends on, where
+        `should_auto_approve(tags)` is called without a Config).
+
+    The truthy parse is the registry's falsy-enumeration
+    (`"", "0", "false", "no", "off"` → off; anything else → on), unifying
+    what counts as "set" across the gate and `ap2 status`.
+
+    Keeps the TB-332 cfg-kwarg-with-TypeError-guard so a non-Config
+    `cfg` is still rejected loudly rather than silently mis-resolving.
     """
     if cfg is not None and not isinstance(cfg, Config):
         raise TypeError(
             "_is_auto_approve_enabled(cfg=...) expects a Config instance; "
             f"got {type(cfg).__name__}",
         )
-    if cfg is not None:
-        raw = str(
-            cfg.get_component_value("auto_approve", "enabled", default="") or "",
-        )
-    else:
-        # Legacy fallback (TB-332 back-compat shape — `os.getenv` for
-        # cross-package grep-gate hygiene; the canonical NEW-read path
-        # is `cfg.get_component_value`).
-        raw = os.getenv("AP2_AUTO_APPROVE", "")
-    return raw.strip() in ("1", "true", "yes")
+    from ap2.registry import default_registry
+
+    return default_registry().get("auto_approve").is_enabled(cfg=cfg)
 
 
 def _auto_approve_gate_tags(cfg: "Config | None" = None) -> frozenset[str]:
