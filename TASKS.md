@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-428** **Fix config.toml bool coercion in component enablement gates: TOML `enabled = true` becomes `"True"` and fails the lowercase truthy check, so the gate silently reads False** `#autopilot` `#config` `#auto_approve` `#ideation` `#components` `#bug` `#truthy` [→ brief](.cc-autopilot/tasks/fix-config-toml-bool-coercion-in-compone.md)
 
 ## Pipeline Pending
 
@@ -309,5 +308,6 @@
 - [x] **TB-425** **Ship the full ap2 subpackage tree in the wheel via setuptools autodiscovery (fixes `ModuleNotFoundError: ap2.components` on non-editable installs)** `#autopilot` `#packaging` `#distribution` `#pyproject` `#components` `#blocker` [→ brief](.cc-autopilot/tasks/ship-the-full-ap2-subpackage-tree-in-the.md)
 - [x] **TB-426** **Scaffold + provision the fenced-file `.claude/settings.json` deny list (ap2 init writes it committed; project-setup backfills the clone)** `#autopilot` `#init` `#sandbox` `#project-setup` `#fence` `#permissions` `#security` [→ brief](.cc-autopilot/tasks/scaffold-provision-the-fenced-file-claud.md)
 - [x] **TB-427** **Fix split-brained component enablement: `Manifest.is_enabled` ignores config.toml, so `[components.auto_approve] enabled=true` never turns the component on (status/doctor/registry disagree with the gate)** `#autopilot` `#config` `#registry` `#auto_approve` `#components` `#bug` [→ brief](.cc-autopilot/tasks/fix-split-brained-component-enablement-m.md)
+- [x] **TB-428** **Fix config.toml bool coercion in component enablement gates: TOML `enabled = true` becomes `"True"` and fails the lowercase truthy check, so the gate silently reads False** `#autopilot` `#config` `#auto_approve` `#ideation` `#components` `#bug` `#truthy` [→ brief](.cc-autopilot/tasks/fix-config-toml-bool-coercion-in-compone.md)
 
 ## Frozen

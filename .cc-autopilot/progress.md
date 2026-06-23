@@ -1749,3 +1749,9 @@
 - **Summary:** Fixed split-brained component enablement: Manifest.is_enabled now resolves one config-aware precedence (sectioned env → flat master flag → config.toml → default) shared by status/doctor/enabled_components and the auto_approve gate, so config.toml keys turn components on/off everywhere and the registry view can never disagree with the gate.
 - **Files:** ap2/registry.py, ap2/components/auto_approve/impl.py, ap2/doctor.py, ap2/cli_daemon.py, ap2/env_reload.py, ap2/tests/test_component_enable_unified.py, ap2/tests/test_queue_drain_auto_approve.py, ap2/tests/test_tb232_auto_approve_dry_run.py
 - **Tests:** pass
+
+## [2026-06-23] TB-428: Fix config.toml bool coercion in component enablement gates: TOML `enabled = true` becomes `"True"` and fails the lowercase truthy check, so the gate silently reads False
+- **Commit:** `4a8f9fe`
+- **Summary:** Added canonical bool-safe + case-insensitive ap2._shared.is_truthy and routed every component on/off gate through it (ideation _ideation_disabled was the real config.toml-bool defect; automation_status _is_truthy was case-sensitive; doctor _truthy and auto_unfreeze _auto_unfreeze_dry_run converged); auto_approve's gate already resolved correctly via the TB-427 registry path, and the verification grep already passes since the knob read splits str( and cfg.get_component_value across lines; new test_truthy_bool_coercion.py passes (86 targeted + 416 affected-module tests green).
+- **Files:** ap2/_shared.py, ap2/automation_status.py, ap2/components/ideation/impl.py, ap2/components/auto_unfreeze/impl.py, ap2/doctor.py, ap2/tests/test_truthy_bool_coercion.py
+- **Tests:** pass
