@@ -347,7 +347,7 @@ ap2/
 ├── result.py             # parse RESULT block (status/commit/summary/files/cron)
 ├── retry.py              # retry counter (fcntl-locked .json)
 ├── rollback.py           # linear_rollback_to + helpers (TB-110 + TB-111 + TB-115)
-├── sandbox.py            # claude-agent setup, project-clone, MM creds, statusline
+├── sandbox.py            # claude-agent setup, project-clone, MM creds
 ├── state_commit.py       # _commit_state_files (TB-263 split out of daemon.py), _filter_state_paths,
 │                         # _snapshot_state_paths — the "state: TB-N → <section>" commit author
 ├── status_report.py      # status-report cron-job body (the Mattermost digest)
@@ -491,7 +491,7 @@ Pre-TB-115's two-task split (launch + auto-created Backlog validation with `(blo
 `ap2 sandbox` creates a separate OS user (default `claude-agent`) with:
 - Its own home directory (`/Users/claude-agent` on macOS).
 - A NOPASSWD sudoers grant for the human user to run `ap2 sandbox …` and `sudo -u claude-agent -i …`.
-- Its own `.claude/` config tree (statusline, settings, OAuth token in `~/.zshenv`).
+- Its own `.claude/` config tree (settings, OAuth token in `~/.zshenv`).
 - `~/repos/<project>/` clones of each managed project.
 
 The daemon runs as `claude-agent`. Its tools can't reach the human's `~/.ssh`, keychain, git config, or other repos. Mattermost creds and Anthropic OAuth token live in `~claude-agent/.zshenv` so non-GUI shells (the daemon's `Popen`) get them — the macOS keychain is locked for non-GUI sessions, so token-via-keychain doesn't work.

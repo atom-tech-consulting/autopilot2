@@ -33,10 +33,10 @@ the missing CLI-handler layer where:
     the user passed via argparse, the AuditResult printed for the
     operator, and `rc=0` iff every check is OK/INFO/WARN (not FAIL).
   - `cmd_user_setup` runs `_resolve_mm_url_token(args)` and wires
-    `skip_token` / `skip_statusline` / `assume_yes` / `mm_url` / `mm_token`
+    `skip_token` / `assume_yes` / `mm_url` / `mm_token`
     into `user_setup(...)`. The handler is the only place where
-    `getattr(args, "skip_token", False)` / `getattr(args, "skip_statusline",
-    False)` resolve the optional argparse flags into the helper kwargs.
+    `getattr(args, "skip_token", False)` resolves the optional argparse
+    flag into the helper kwargs.
   - `cmd_project_setup` adapts `args.source` → `Path`, threads
     `--user`/`--yes`/`--mm-channel`/`--git-name`/`--git-email`, and
     falls back to `DEFAULT_GIT_NAME`/`DEFAULT_GIT_EMAIL` when either
@@ -207,7 +207,6 @@ def test_cmd_sandbox_user_audit_flags_credential_env(monkeypatch, tmp_path, caps
 #             args.user,
 #             assume_yes=args.yes,
 #             skip_token=getattr(args, "skip_token", False),
-#             skip_statusline=getattr(args, "skip_statusline", False),
 #             mm_url=mm_url,
 #             mm_token=mm_token,
 #         )
@@ -228,10 +227,8 @@ def test_cmd_sandbox_user_setup_happy_path(monkeypatch, capsys):
     `getattr(args, "skip_*", False)` defaults — the helper-level
     `test_user_setup_already_exists` doesn't exercise these adapter bits."""
     monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
-    # Statusline + sync-assets (skills + howto, TB-276) are run
-    # unconditionally on the already-exists path; stub them so we don't
-    # shell out.
-    monkeypatch.setattr(sandbox, "install_statusline", lambda u: 0)
+    # sync-assets (skills + howto, TB-276) runs unconditionally on the
+    # already-exists path; stub it so we don't shell out.
     monkeypatch.setattr(
         sandbox, "sync_assets",
         lambda u=None, *, sbuser=False, apply=False, dest=None: 0,
@@ -241,7 +238,6 @@ def test_cmd_sandbox_user_setup_happy_path(monkeypatch, capsys):
         user="claude-agent",
         yes=True,                # assume_yes → bypass the interactive token prompt
         skip_token=True,
-        skip_statusline=True,
         # _resolve_mm_url_token reads these:
         mm_url=None,
         mm_token=None,
@@ -257,8 +253,6 @@ def test_cmd_sandbox_user_setup_happy_path(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "already exists" in out
-    # skip_statusline → nudge for later install printed.
-    assert "ap2 sandbox install-statusline claude-agent" in out
     # mm creds absent → MM install nudge printed (not the install confirmation).
     assert "ap2 sandbox install-mm claude-agent" in out
     # Verify nudge always appears at the end.
@@ -271,7 +265,6 @@ def test_cmd_sandbox_user_setup_threads_mm_creds(monkeypatch, capsys):
     Pin so a refactor that bypasses the resolver (e.g. reads
     args.mm_url/args.mm_token directly) drops the env-fallback path."""
     monkeypatch.setattr(sandbox, "_user_exists", lambda u: True)
-    monkeypatch.setattr(sandbox, "install_statusline", lambda u: 0)
     monkeypatch.setattr(
         sandbox, "sync_assets",
         lambda u=None, *, sbuser=False, apply=False, dest=None: 0,
@@ -293,7 +286,6 @@ def test_cmd_sandbox_user_setup_threads_mm_creds(monkeypatch, capsys):
         user="claude-agent",
         yes=True,
         skip_token=True,
-        skip_statusline=True,
         mm_url=None,
         mm_token=None,
         mm_url_env="MY_MM_URL",
@@ -308,7 +300,6 @@ def test_cmd_sandbox_user_setup_threads_mm_creds(monkeypatch, capsys):
     assert captured["mm_token"] == "tok-from-env"
     assert captured["assume_yes"] is True
     assert captured["skip_token"] is True
-    assert captured["skip_statusline"] is True
 
 
 def test_cmd_sandbox_user_setup_unsupported_os(monkeypatch, capsys):
@@ -327,7 +318,6 @@ def test_cmd_sandbox_user_setup_unsupported_os(monkeypatch, capsys):
         user="claude-agent",
         yes=True,
         skip_token=True,
-        skip_statusline=True,
         mm_url=None,
         mm_token=None,
         mm_url_env=None,

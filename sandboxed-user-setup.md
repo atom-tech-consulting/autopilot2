@@ -52,7 +52,6 @@ is the authoritative reference; the quick map:
 ap2 sandbox user-audit [user]                        # credential deny-list check
 ap2 sandbox user-setup [user] [-y]                   # create the OS user (prompts before sudo)
 ap2 sandbox install-token [user]                     # write CLAUDE_CODE_OAUTH_TOKEN → ~user/.zshenv
-ap2 sandbox install-statusline [user]                # install the statusline + wire ~user/.claude/settings.json
 ap2 sandbox install-mm [user]                        # write MATTERMOST_URL + MATTERMOST_TOKEN → ~user/.zshenv
 ap2 sandbox install-channel <project> <channel>      # resolve #channel → ID, write to <project>/.cc-autopilot/env
 ap2 sandbox sync-assets [user] [--sbuser] [--apply]  # deploy <repo>/skills/* into the runtime skills roots (+ Codex AGENTS.md)

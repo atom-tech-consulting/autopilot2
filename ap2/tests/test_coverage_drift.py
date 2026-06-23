@@ -460,10 +460,11 @@ def test_cli_verb_gate_catches_missing_verb(monkeypatch):
 # were removed when TB-213 landed.
 #
 # TB-214 closed the four sandbox install-* verbs (ap2 sandbox install-channel,
-# install-howto, install-mm, install-statusline) by landing
-# `ap2/tests/test_tb214_sandbox_install_verbs.py` — the substring drift gate
-# now resolves all four via that real test module rather than this comment
-# block. The four matching shim rows were removed when TB-214 landed.
+# install-howto, install-mm, and the since-removed cosmetic per-user UI verb)
+# by landing `ap2/tests/test_tb214_sandbox_install_verbs.py` — the substring
+# drift gate now resolves the surviving verbs via that real test module rather
+# than this comment block. The four matching shim rows were removed when
+# TB-214 landed.
 #
 # TB-215 closed the four sandbox audit/setup verbs (ap2 sandbox project-audit,
 # project-setup, user-audit, user-setup) by landing

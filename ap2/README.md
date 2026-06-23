@@ -84,10 +84,9 @@ The daemon is designed to run as a separate OS user (`claude-agent` by default) 
 
 | Command | Purpose |
 |---|---|
-| `ap2 sandbox user-setup [user]` | Create the sandbox user (prompts before sudo). `--skip-token`, `--skip-statusline`, `--mm-url-env`, `--mm-token-env`. |
+| `ap2 sandbox user-setup [user]` | Create the sandbox user (prompts before sudo). `--skip-token`, `--mm-url-env`, `--mm-token-env`. |
 | `ap2 sandbox user-audit [user]` | Verify the user exists and has no creds. |
 | `ap2 sandbox install-token [user]` | Write `CLAUDE_CODE_OAUTH_TOKEN` to `~user/.zshenv`. |
-| `ap2 sandbox install-statusline [user]` | Copy the statusline script + wire it into `~user/.claude/settings.json`. |
 | `ap2 sandbox sync-assets [user] [--sbuser] [--apply] [--dest DIR]` | Deploy `<repo>/skills/*` into both runtime skills roots (`~/.claude/skills/`, `~/.agents/skills/`) plus the Codex `AGENTS.md` reference (TB-276 unified the prior `sync-skills` + `install-howto` verbs; TB-406 retired the `ap2-howto.md` deploy — the operator manual is wholly the skill bundles). Default mode `sudo`s as the positional user; `--sbuser` writes to the current user's `$HOME` without sudo. Default is dry-run; `--apply` to copy. |
 | `ap2 sandbox install-mm [user]` | Write `MATTERMOST_URL` + `MATTERMOST_TOKEN` to `~user/.zshenv`. |
 | `ap2 sandbox install-channel <project> <channel>` | Resolve `#channel` → ID, write to `<project>/.cc-autopilot/env`. |

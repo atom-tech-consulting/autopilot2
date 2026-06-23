@@ -3,23 +3,22 @@ verbs that TB-209's `test_coverage_drift.py` docstring (prior to this
 change, L415-418 of the comment-block shim) tags as TB-205-shape coverage
 debt.
 
-The three remaining verbs — `ap2 sandbox install-channel`,
-`ap2 sandbox install-mm`, `ap2 sandbox install-statusline` — are the
-operator's first-touch wiring surface on a fresh project (statusline +
-MM creds + MM channel). The fourth original verb, `ap2 sandbox
-install-howto`, was retired in TB-276 — it folded into the unified
-`ap2 sandbox sync-assets` verb (skills + howto deploy in one shot, with
-a `--sbuser` non-sudo mode); its replacement coverage lives in
-`test_sync_assets.py`. Each remaining verb is the only path to wire one
-of those subsystems, and prior to TB-214 none of the CLI handlers
-(`sandbox.cmd_install_channel`, `sandbox.cmd_install_mm`,
-`sandbox.cmd_install_statusline`) had a single test reference under
-`ap2/tests/` — only the substring drift gate's comment-block
-enumeration kept the gate green. A future refactor of the `cmd_install_*`
-handlers (e.g. swapping the `_resolve_mm_url_token` precedence, dropping
-the `_user_exists` precheck, changing the project-root validation) could
-silently break operator onboarding while the drift gate stays green via
-the shim.
+The two remaining verbs — `ap2 sandbox install-channel`,
+`ap2 sandbox install-mm` — are the operator's first-touch wiring surface
+on a fresh project (MM creds + MM channel). Two original verbs were
+since retired: `ap2 sandbox install-howto` folded into the unified
+`ap2 sandbox sync-assets` verb in TB-276 (skills + howto deploy in one
+shot, with a `--sbuser` non-sudo mode; its replacement coverage lives in
+`test_sync_assets.py`), and the cosmetic per-user UI helper was dropped
+in TB-423. Each remaining verb is the only path to wire one of those
+subsystems, and prior to TB-214 none of the CLI handlers
+(`sandbox.cmd_install_channel`, `sandbox.cmd_install_mm`) had a single
+test reference under `ap2/tests/` — only the substring drift gate's
+comment-block enumeration kept the gate green. A future refactor of the
+`cmd_install_*` handlers (e.g. swapping the `_resolve_mm_url_token`
+precedence, dropping the `_user_exists` precheck, changing the
+project-root validation) could silently break operator onboarding while
+the drift gate stays green via the shim.
 
 This module mirrors TB-205's `test_env_knobs.py` / TB-210's
 `test_tb210_env_knobs.py` / TB-213's `test_tb213_daemon_lifecycle_verbs.py`
@@ -30,7 +29,7 @@ internals, side-effects asserted on stubbed `subprocess.run` captures +
 return codes + stderr.
 
 The existing `test_sandbox.py` module already pins the lower-level
-`install_statusline` / `install_mm_credentials` / `install_project_channel`
+`install_mm_credentials` / `install_project_channel`
 helpers; this module adds the missing CLI-handler layer where the
 operator-visible verb dispatch + argparse-wired args + env-var resolution
 live (e.g. `cmd_install_mm` wraps `install_mm_credentials` but also runs
@@ -38,16 +37,7 @@ live (e.g. `cmd_install_mm` wraps `install_mm_credentials` but also runs
 exits with rc=1 on missing creds BEFORE the helper sees a thing — a path
 the helper-level tests can't cover).
 
-  1. `ap2 sandbox install-channel` — `sandbox.cmd_install_channel`:
-      validates that `args.project` is an ap2 project root (has a
-      `.cc-autopilot/` dir), then routes to
-      `_install_channel_for_project(root, args.user, args.channel)` which
-      reads MM creds from the CALLER's env (NOT the sandbox user's),
-      resolves the channel name to an ID via the MM API, and writes the
-      ID into `<project>/.cc-autopilot/env`. Error paths: not-an-ap2-root
-      → rc 1, missing MM creds in caller env → rc 1.
-
-  2. `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`:
+  1. `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`:
       runs `_resolve_mm_url_token(args)` (precedence: `--mm-url`/`--mm-token`
       → `--mm-url-env`/`--mm-token-env` → caller's MATTERMOST_URL /
       MATTERMOST_TOKEN env), then `install_mm_credentials(args.user, url,
@@ -56,24 +46,26 @@ the helper-level tests can't cover).
       already-tests-clean if you hand it both creds directly. Error path:
       missing creds → rc 1 with stderr nudge.
 
-  3. `ap2 sandbox install-statusline` — `sandbox.cmd_install_statusline`:
-      thin wrapper over `install_statusline(args.user)`. Copies
-      `hooks/statusline-command.sh` into `~<user>/.claude/` and merges
-      `statusLine: {type: command, command: "bash <abspath>"}` into
-      `~<user>/.claude/settings.json`. Error paths: user missing → rc 1,
-      statusline-source missing → rc 1.
+  2. `ap2 sandbox install-channel` — `sandbox.cmd_install_channel`:
+      validates that `args.project` is an ap2 project root (has a
+      `.cc-autopilot/` dir), then routes to
+      `_install_channel_for_project(root, args.user, args.channel)` which
+      reads MM creds from the CALLER's env (NOT the sandbox user's),
+      resolves the channel name to an ID via the MM API, and writes the
+      ID into `<project>/.cc-autopilot/env`. Error paths: not-an-ap2-root
+      → rc 1, missing MM creds in caller env → rc 1.
 
 Test-function names follow the convention `test_cmd_sandbox_install_<verb>_<aspect>`
 (e.g. `test_cmd_sandbox_install_channel_happy_path`,
 `test_cmd_sandbox_install_mm_missing_creds`). The auto-verifier bullets
-in the briefing grep for `def test_cmd_sandbox_install_(channel|mm|statusline)`
+in the briefing grep for `def test_cmd_sandbox_install_(channel|mm)`
 across this file + `test_sandbox.py` + `test_cli.py`; the minimum is
-≥3 test functions matching that pattern (one happy-path per verb), which
+≥2 test functions matching that pattern (one happy-path per verb), which
 this module satisfies on its own.
 
 Removing the matching rows from `test_coverage_drift.py`'s
 discovered-at-landing comment block (`#   - ap2 sandbox install-channel`
-/ `install-mm` / `install-statusline`) is paired with this file landing
+/ `install-mm`) is paired with this file landing
 — the comment-block shim was a "test mention waiting to happen" entry,
 redundant once a real test references the verb name. The 4 sandbox
 audit/setup rows (project-audit/-setup, user-audit/-setup) stay in the
@@ -85,7 +77,6 @@ comment-block shim):
 
     "ap2 sandbox install-channel"
     "ap2 sandbox install-mm"
-    "ap2 sandbox install-statusline"
 """
 from __future__ import annotations
 
@@ -100,12 +91,12 @@ from ap2.cli import main as cli_main
 
 
 # ---------------------------------------------------------------------------
-# Shared fixtures: subprocess.run stubs + a minimal sandbox-user home + a
-# fake howto/statusline source. The cmd_install_* handlers all ignore the
-# `cfg` argument (`# noqa: ARG001`), so the tests pass `None` for cfg
-# UNLESS they go through `cli_main(["sandbox", ...])`, which constructs a
-# real Config from --project. The cli_main tests use a temp project init
-# helper that mirrors test_cli.py's `_project` pattern.
+# Shared fixtures: subprocess.run stubs + a minimal sandbox-user home. The
+# cmd_install_* handlers all ignore the `cfg` argument (`# noqa: ARG001`),
+# so the tests pass `None` for cfg UNLESS they go through
+# `cli_main(["sandbox", ...])`, which constructs a real Config from
+# --project. The cli_main tests use a temp project init helper that
+# mirrors test_cli.py's `_project` pattern.
 # ---------------------------------------------------------------------------
 
 
@@ -121,8 +112,8 @@ def _wire_user_home(monkeypatch, tmp_path: Path) -> Path:
 
 def _capture_run(monkeypatch, *, settings_text: str = "{}", tee_rc: int = 0):
     """Build a subprocess.run stub that captures every tee/chmod/mkdir/sh
-    invocation and returns the requested settings.json body for the
-    statusline merge probe. Returns the capture list."""
+    invocation and returns the requested settings.json body for any merge
+    probe. Returns the capture list."""
     captures: list[tuple[tuple[str, ...], str]] = []
 
     def fake_run(argv, *a, **kw):
@@ -142,92 +133,7 @@ def _capture_run(monkeypatch, *, settings_text: str = "{}", tee_rc: int = 0):
 
 
 # ===========================================================================
-# (1) `ap2 sandbox install-statusline` — `sandbox.cmd_install_statusline`
-#
-# Handler at `ap2/sandbox.py`:
-#     def cmd_install_statusline(cfg, args) -> int:  # noqa: ARG001
-#         return install_statusline(args.user)
-#
-# Thin wrapper. We pin BOTH the happy-path dispatch (the helper writes
-# script + settings.json, returns 0) AND the user-missing error branch
-# (rc=1, stderr names the user). The lower-level
-# `test_install_statusline_*` tests in `test_sandbox.py` cover the
-# helper's internals; here we pin the CLI-handler layer that resolves
-# argparse → helper-call.
-# ===========================================================================
-
-
-def test_cmd_sandbox_install_statusline_happy_path(monkeypatch, tmp_path, capsys):
-    """`cmd_install_statusline(cfg, Namespace(user=...))` invokes the
-    helper, which writes the script + settings.json under the user's
-    home and returns 0. Pins the public contract: handler returns 0,
-    settings.json carries the merged `statusLine` key, the script tee
-    targets the right path."""
-    home = _wire_user_home(monkeypatch, tmp_path)
-    src = tmp_path / "statusline-command.sh"
-    src.write_text("#!/bin/bash\necho hi\n")
-    monkeypatch.setattr(sandbox, "_statusline_source", lambda: src)
-    captures = _capture_run(monkeypatch, settings_text="")
-
-    rc = sandbox.cmd_install_statusline(None, Namespace(user="claude-agent"))
-
-    assert rc == 0
-    # Two tee writes expected: the script + settings.json.
-    tee_writes = [(argv, body) for argv, body in captures if "tee" in argv]
-    paths = [argv[argv.index("tee") + 1] for argv, _ in tee_writes]
-    assert str(home / ".claude" / "statusline-command.sh") in paths
-    assert str(home / ".claude" / "settings.json") in paths
-    # settings.json body carries the merged statusLine key.
-    settings_body = next(
-        body for argv, body in tee_writes
-        if argv[argv.index("tee") + 1].endswith("settings.json")
-    )
-    import json as _json
-    parsed = _json.loads(settings_body)
-    assert parsed["statusLine"]["type"] == "command"
-    assert parsed["statusLine"]["command"].endswith("statusline-command.sh")
-
-
-def test_cmd_sandbox_install_statusline_missing_user(monkeypatch, capsys):
-    """Error path: `cmd_install_statusline` against an unknown user
-    returns 1 and writes "does not exist" to stderr. Pin so a refactor
-    that drops the `_user_exists` precheck silently surfaces — without
-    the precheck, the handler would barrel into `sudo -u <nope> ...`
-    invocations that fail with cryptic sudo errors."""
-    monkeypatch.setattr(sandbox, "_user_exists", lambda u: False)
-
-    rc = sandbox.cmd_install_statusline(None, Namespace(user="ghost"))
-
-    assert rc == 1
-    assert "does not exist" in capsys.readouterr().err
-
-
-def test_cmd_sandbox_install_statusline_missing_source(monkeypatch, tmp_path, capsys):
-    """Error path: when `_statusline_source()` returns a non-existent
-    path, the handler returns 1 BEFORE attempting any sudo write.
-    Catches a regression where `hooks/statusline-command.sh` gets
-    renamed/moved without updating `_statusline_source`."""
-    _wire_user_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        sandbox, "_statusline_source", lambda: tmp_path / "nonexistent.sh",
-    )
-    called: list[list[str]] = []
-
-    def fake_run(argv, *a, **kw):
-        called.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    rc = sandbox.cmd_install_statusline(None, Namespace(user="claude-agent"))
-
-    assert rc == 1
-    assert "statusline source missing" in capsys.readouterr().err
-    # Defensive: no `sudo -u <user> tee` write should have fired.
-    assert not any("tee" in argv for argv in called)
-
-
-# ===========================================================================
-# (2) `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`
+# (1) `ap2 sandbox install-mm` — `sandbox.cmd_install_mm`
 #
 # Handler at `ap2/sandbox.py`:
 #     def cmd_install_mm(cfg, args) -> int:        # noqa: ARG001
@@ -339,7 +245,7 @@ def test_cmd_sandbox_install_mm_missing_creds(monkeypatch, capsys):
 
 
 # ===========================================================================
-# (3) `ap2 sandbox install-channel` — `sandbox.cmd_install_channel`
+# (2) `ap2 sandbox install-channel` — `sandbox.cmd_install_channel`
 #
 # Handler at `ap2/sandbox.py`:
 #     def cmd_install_channel(cfg, args) -> int:   # noqa: ARG001
@@ -460,40 +366,39 @@ def test_cmd_sandbox_install_channel_missing_mm_env(monkeypatch, tmp_path, capsy
 # or renames an argparse field could break the verb dispatch without
 # tripping the per-verb tests. This end-to-end test pins the
 # argv → parser.parse_args → args.func(cfg, args) chain for one verb
-# (install-statusline, the simplest signature: just `user`), so a
-# parser-level regression surfaces here. The other three verbs share
-# the same `args.func = sandbox.cmd_install_<verb>` wiring shape — if
-# this test passes, the parser is correctly wiring the install-* group.
+# (install-mm), so a parser-level regression surfaces here. The other
+# verb shares the same `args.func = sandbox.cmd_install_<verb>` wiring
+# shape — if this test passes, the parser is correctly wiring the
+# install-* group.
 # ===========================================================================
 
 
-def test_cli_main_dispatches_to_install_statusline(monkeypatch, tmp_path):
-    """`cli_main(["--project", <root>, "sandbox", "install-statusline",
-    "claude-agent"])` should route through `build_parser` and end up
-    invoking `sandbox.cmd_install_statusline` with the user from argv."""
+def test_cli_main_dispatches_to_install_mm(monkeypatch, tmp_path):
+    """`cli_main(["--project", <root>, "sandbox", "install-mm",
+    "claude-agent", "--mm-url", ..., "--mm-token", ...])` should route
+    through `build_parser` and end up invoking `sandbox.cmd_install_mm`
+    with the user from argv."""
     from ap2.init import init_project
 
     project = tmp_path / "proj"
     init_project(project)
 
     home = _wire_user_home(monkeypatch, tmp_path)
-    src = tmp_path / "statusline-command.sh"
-    src.write_text("script")
-    monkeypatch.setattr(sandbox, "_statusline_source", lambda: src)
-    _capture_run(monkeypatch, settings_text="")
+    _capture_run(monkeypatch)
 
     seen: list[str] = []
 
-    real_handler = sandbox.cmd_install_statusline
+    real_handler = sandbox.cmd_install_mm
 
     def spy(cfg, args):
         seen.append(args.user)
         return real_handler(cfg, args)
-    monkeypatch.setattr(sandbox, "cmd_install_statusline", spy)
+    monkeypatch.setattr(sandbox, "cmd_install_mm", spy)
 
     rc = cli_main([
         "--project", str(project),
-        "sandbox", "install-statusline", "claude-agent",
+        "sandbox", "install-mm", "claude-agent",
+        "--mm-url", "https://mm.example.com", "--mm-token", "tok-xyz",
     ])
 
     assert rc == 0
