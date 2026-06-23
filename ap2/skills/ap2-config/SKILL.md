@@ -346,26 +346,37 @@ operators who haven't opted in. Cross-references `goal.md`'s
 bottleneck: a representative ap2 session approves 10-20 tasks per
 cycle, which contradicts the Mission's "walk away for a week without
 intervention" promise. The trio is layered so an operator can dial
-trust precisely: `AP2_AUTO_APPROVE` is the master switch,
+trust precisely: `AP2_AUTO_APPROVE_DISABLED` is the master kill switch,
 `AP2_AUTO_APPROVE_GATE_TAGS` is the per-shape opt-out (operator names
 tag categories that retain manual review even in auto-approve mode),
 and `AP2_AUTO_APPROVE_FREEZE_THRESHOLD` is the systemic-regression
 circuit-breaker (auto-promote halts when consecutive task failures
 land in Frozen).
 
-- `AP2_AUTO_APPROVE` — master switch. **Unset by default.** When set
-  to a truthy value (`1` / `true` / `yes`, matching
-  `AP2_IDEATION_DISABLED`'s convention), ideation-authored
-  `add_backlog` rows omit the `@blocked:review` codespan so the
-  daemon's next-tick auto-promote dispatches the task immediately. The
-  operator decision-log entry in `ap2 logs` still surfaces what
-  auto-approval shipped (the `auto_approved` event — see the
-  **ap2-observability** skill's `## Event schema`), so the audit trail is
-  preserved for offline review.
-  Off-by-default keeps the legacy approve-every-task behavior in place
-  for operators who haven't verified the upstream gates (briefing
-  structural validation, goal-alignment validation, per-task
-  verification, retry budget, rollback).
+- `AP2_AUTO_APPROVE_DISABLED` — master kill switch. **Unset by default
+  → auto-approve is ON (TB-430 flipped auto-approve to
+  autonomous-by-default).** When unset, ideation-authored `add_backlog`
+  rows omit the `@blocked:review` codespan so the daemon's next-tick
+  auto-promote dispatches the task immediately. Set to a truthy value
+  (`1` / `true` / `yes`, matching the `*_DISABLED` kill-switch
+  convention of janitor / cron / ideation / auto_unfreeze) to OPT OUT
+  and restore operator-in-the-loop (`@blocked:review`) semantics — the
+  legacy approve-every-task behavior for operators who haven't verified
+  the upstream gates (briefing structural validation, goal-alignment
+  validation, per-task verification, retry budget, rollback). The
+  sectioned form is `AP2_COMPONENTS_AUTO_APPROVE_DISABLED`. The operator
+  decision-log entry in `ap2 logs` still surfaces what auto-approval
+  shipped (the `auto_approved` event — see the **ap2-observability**
+  skill's `## Event schema`), so the audit trail is preserved for
+  offline review.
+- `AP2_AUTO_APPROVE` — **deprecated** (pre-TB-430 opt-in master switch).
+  Still honored as a transitional override for existing deployments:
+  a truthy value forces auto-approve ON, a falsy value (`0` / `false` /
+  `no` / `off`) forces it OFF — both emit a one-time `DeprecationWarning`
+  pointing at `AP2_AUTO_APPROVE_DISABLED`. Migrate by deleting
+  `AP2_AUTO_APPROVE` (keeps the new default-ON posture) or, to stay
+  opted out, replacing `AP2_AUTO_APPROVE=0` with
+  `AP2_AUTO_APPROVE_DISABLED=1`.
 - `AP2_AUTO_APPROVE_DRY_RUN` — TB-232 monitor-only on-ramp. **Unset
   by default.** When set to a truthy value alongside
   `AP2_AUTO_APPROVE=1`, the auto-approve gate chain (tags +
@@ -1432,9 +1443,12 @@ channel; `immediate_push` opts into per-event Mattermost posts.
 
 ### `[components.auto_approve]` — autonomous board-edit gate (TB-223)
 
-Walk-away semantics: when enabled, ideation-authored backlog adds
-auto-promote without operator review. The token caps + freeze
-threshold provide the hard stop / cost ceiling pair.
+Walk-away semantics: ideation-authored backlog adds auto-promote
+without operator review. TB-430 flipped this gate to **default-ON**
+(autonomous-by-default); operators opt OUT via the suppress-polarity
+kill switch `components.auto_approve.disabled` (or
+`AP2_AUTO_APPROVE_DISABLED`). The token caps + freeze threshold provide
+the hard stop / cost ceiling pair.
 
 - `components.auto_approve.cost_approach_pct` — int, default `75`
   (hot-reloadable). Pre-trip approach percentage for the rolling-24h
@@ -1445,14 +1459,19 @@ threshold provide the hard stop / cost ceiling pair.
   before the post-trip `auto_approve_paused` surface fires. Values
   >= 100 are clamped to 99 (the trip line is owned by the post-trip
   detector). Mirrors `AP2_AUTO_APPROVE_COST_APPROACH_PCT`.
+- `components.auto_approve.disabled` — bool, default `false`
+  (hot-reloadable). Suppress-polarity kill switch for autonomous
+  board-edit auto-approval. TB-430 flipped auto-approve to default-ON
+  (autonomous-by-default); set this to `true` to opt OUT and keep
+  operator-in-the-loop (`@blocked:review`) semantics. Mirrors
+  `AP2_AUTO_APPROVE_DISABLED` (sectioned form
+  `AP2_COMPONENTS_AUTO_APPROVE_DISABLED`). The legacy `AP2_AUTO_APPROVE`
+  env knob is still honored as a transitional override (both polarities)
+  with a one-time deprecation warning pointing here.
 - `components.auto_approve.dry_run` — bool, default `false`
   (hot-reloadable). Monitor-only mode (TB-232): runs the
   gate-evaluation path and emits `would_auto_approve` instead of
   applying the queued board-edit. Mirrors `AP2_AUTO_APPROVE_DRY_RUN`.
-- `components.auto_approve.enabled` — bool, default `false`
-  (hot-reloadable). Opt-in master switch for autonomous board-edit
-  auto-approval (TB-223). Default off so a fresh install keeps
-  operator-in-the-loop semantics. Mirrors `AP2_AUTO_APPROVE`.
 - `components.auto_approve.freeze_threshold` — int, default `3`
   (hot-reloadable). Number of consecutive failed `task_complete`
   events that trips the auto-approve circuit-breaker (TB-223). 0 or

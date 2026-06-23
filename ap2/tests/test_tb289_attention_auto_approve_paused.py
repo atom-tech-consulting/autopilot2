@@ -192,15 +192,16 @@ def test_detector_misses_when_pause_reason_is_none(cfg: Config):
 def test_detector_misses_when_auto_approve_disabled(
     cfg: Config, monkeypatch,
 ):
-    """`AP2_AUTO_APPROVE=0` (or unset) with no halt-class signal →
-    pause_reason is None → no Attention bullet. Disabled is NOT
-    paused — these are distinct operator-facing states. Pin the
-    distinction so a refactor that conflates "disabled" with
-    "paused" (e.g. by surfacing every `auto_approve_enabled=False`
-    project) doesn't drown the operator's first-touch surface in
-    permanently-quiet projects.
+    """Auto-approve opted OUT with no halt-class signal → pause_reason
+    is None → no Attention bullet. Disabled is NOT paused — these are
+    distinct operator-facing states. Pin the distinction so a refactor
+    that conflates "disabled" with "paused" (e.g. by surfacing every
+    `auto_approve_enabled=False` project) doesn't drown the operator's
+    first-touch surface in permanently-quiet projects. TB-430:
+    auto-approve is default-on, so "disabled" is reached via the
+    suppress-polarity kill switch `AP2_COMPONENTS_AUTO_APPROVE_DISABLED=1`.
     """
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "0")
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     now = _dt.datetime(2026, 5, 26, 12, 0, 0, tzinfo=_dt.timezone.utc)
     state = collect_auto_approve_state(cfg, now=now)
     assert state["auto_approve_enabled"] is False

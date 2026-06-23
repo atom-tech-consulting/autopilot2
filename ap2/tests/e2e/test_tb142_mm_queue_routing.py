@@ -52,13 +52,23 @@ def _git_init(cwd: Path) -> None:
     _git(["commit", "-m", "baseline"], cwd)
 
 
-def test_mm_handler_queue_routes_around_state_violation(e2e_project):
+def test_mm_handler_queue_routes_around_state_violation(e2e_project, monkeypatch):
     """Active task running. Mid-run, the MM handler appends `add_backlog`
     + `approve` to the operator queue (the queue-routed equivalent of
     `board_edit` calls). Task agent completes via report_result. We
     assert the running task is NOT rolled back, both queue ops apply at
     next tick, and the approved task becomes dispatchable.
+
+    TB-430: auto-approve is now default-ON, which would let the
+    PRE_DISPATCH loop pass strip TB-50's `@blocked:review` on tick 1 —
+    before the operator's queued `approve` op ever drains. That collapses
+    this test's premise (the gate must hold until the OPERATOR-routed
+    approve applies). This test pins QUEUE ROUTING, not auto-approve, so
+    we opt OUT of auto-approve to keep the review gate operator-driven;
+    the dedicated default-on coverage lives in
+    `test_auto_approve_default_on.py` / `test_tb383_auto_approve_loop_pass.py`.
     """
+    monkeypatch.setenv("AP2_AUTO_APPROVE_DISABLED", "1")
     cfg = e2e_project(ready_task=("TB-5", "running while operator types"))
     _git_init(cfg.project_root)
 

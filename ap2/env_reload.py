@@ -103,13 +103,20 @@ HOT_RELOADABLE_KNOBS: frozenset[str] = frozenset({
     "AP2_IDEATION_SCRUB_MODEL",
     # Auto-approve / auto-unfreeze thresholds (all read from os.environ
     # at decision-time inside `auto_approve.py` / `auto_unfreeze.py`).
-    # TB-427: auto-approve ENABLEMENT now resolves through the registry's
-    # single source of truth (`Manifest.is_enabled`), which reads the
-    # sectioned `AP2_COMPONENTS_<NAME>_<KEY>` env override → the flat
-    # `AP2_AUTO_APPROVE` master flag → config.toml. The flat flag below
-    # stays hot-reloadable because it is still tier-2 of that resolution
-    # (and the canonical knob for the env-only paths: a `cfg=None` gate
-    # call and the daemon's shell-pin effective-config snapshot).
+    # TB-427/TB-430: auto-approve ENABLEMENT now resolves through the
+    # registry's single source of truth (`Manifest.is_enabled`), which
+    # reads the sectioned `AP2_COMPONENTS_<NAME>_<KEY>` env override →
+    # the flat master flag → config.toml → legacy override. TB-430
+    # flipped auto-approve to default-on / opt-out: the flat master
+    # switch is now the suppress-polarity kill switch
+    # `AP2_AUTO_APPROVE_DISABLED` (tier-2 of that resolution). The legacy
+    # require-polarity `AP2_AUTO_APPROVE` is retained as a hot-reloadable
+    # transitional back-compat override (final tier). Both stay
+    # hot-reloadable so a `.cc-autopilot/env` edit toggling either takes
+    # effect on the next tick without a daemon restart (and they remain
+    # the canonical knobs for the env-only paths: a `cfg=None` gate call
+    # and the daemon's shell-pin effective-config snapshot).
+    "AP2_AUTO_APPROVE_DISABLED",
     "AP2_AUTO_APPROVE",
     "AP2_AUTO_APPROVE_DRY_RUN",
     "AP2_AUTO_APPROVE_GATE_TAGS",

@@ -121,16 +121,18 @@ def test_status_text_auto_approve_enabled_renders_enabled(
 def test_status_text_auto_approve_disabled_with_validator_failures_renders_disabled(
     cfg: Config, capsys, monkeypatch,
 ):
-    """`AP2_AUTO_APPROVE` unset + `validator_judge_fail` events in the
+    """Auto-approve opted OUT + `validator_judge_fail` events in the
     24h window → text-render top line is `auto-approve: disabled
     (validator-judge 24h: N fail, M timeout)`. Pre-TB-250 this branch
     printed `auto-approve: enabled (24h: 0 approved, 0 auto-unfrozen)`,
     falsely claiming the knob was on. The regression-pin for the
-    exact bug observed in the wild (~2026-05-17).
+    exact bug observed in the wild (~2026-05-17). TB-430: auto-approve is
+    default-on, so the disabled top-line is reached via the kill switch.
     """
     from ap2.cli import cmd_status
 
     _clear_auto_env(monkeypatch)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
 
     # Seed two fails to make the count distinguishable from 0.
     events.append(cfg.events_file, "validator_judge_fail", error="boom-a")
@@ -157,10 +159,13 @@ def test_status_text_auto_approve_disabled_with_validator_timeout_renders_disabl
     alone also justify rendering the State-B block (the `_has_24h_activity`
     aggregator counts both flavors). Counts surface separately in the
     label so an operator can tell a flaky API (mostly timeouts) from a
-    model / parse regression (mostly fails) at the top line."""
+    model / parse regression (mostly fails) at the top line. TB-430:
+    auto-approve is default-on, so the disabled top-line is reached via
+    the kill switch."""
     from ap2.cli import cmd_status
 
     _clear_auto_env(monkeypatch)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
 
     events.append(
         cfg.events_file, "validator_judge_timeout",
@@ -183,16 +188,18 @@ def test_status_text_auto_approve_disabled_with_validator_timeout_renders_disabl
 def test_status_text_auto_approve_disabled_no_activity_suppresses_block(
     cfg: Config, capsys, monkeypatch,
 ):
-    """`AP2_AUTO_APPROVE` unset + events.jsonl empty → no
-    `auto-approve:` line at all. Pins the TB-227 default-off behavior:
-    fresh / pre-opt-in projects don't grow a perpetual zero-line.
-    Pre-TB-250 this was already correct (the block was suppressed);
-    pinning it explicitly so the State-B branch's introduction doesn't
-    accidentally leak into the no-activity case (e.g. a refactor that
-    forgot the outer-`if` guard)."""
+    """Auto-approve opted OUT + events.jsonl empty → no `auto-approve:`
+    line at all. Pins the TB-227 suppress-when-off behavior: opted-out
+    silent projects don't grow a perpetual zero-line. Pre-TB-250 this was
+    already correct (the block was suppressed); pinning it explicitly so
+    the State-B branch's introduction doesn't accidentally leak into the
+    no-activity case (e.g. a refactor that forgot the outer-`if` guard).
+    TB-430: auto-approve is default-on, so "off" is reached via the kill
+    switch."""
     from ap2.cli import cmd_status
 
     _clear_auto_env(monkeypatch)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
 
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
@@ -256,11 +263,13 @@ def test_status_json_auto_approve_enabled_unchanged_under_disabled(
     directly, never branches off `_has_24h_activity`). Pinning the
     invariant so a future refactor that tries to "harmonize" the
     text and JSON renderings doesn't accidentally regress the JSON
-    contract to match the buggy text behavior.
+    contract to match the buggy text behavior. TB-430: auto-approve is
+    default-on, so the disabled posture is reached via the kill switch.
     """
     from ap2.cli import cmd_status
 
     _clear_auto_env(monkeypatch)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
 
     events.append(cfg.events_file, "validator_judge_fail", error="x")
 

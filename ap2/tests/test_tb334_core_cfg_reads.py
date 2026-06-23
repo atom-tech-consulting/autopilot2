@@ -129,6 +129,30 @@ def emit_reset():
     reset_env_deprecated_emit_for_tests()
 
 
+@pytest.fixture
+def restore_environ():
+    """Snapshot `os.environ` and restore it byte-for-byte on teardown.
+
+    TB-430: `Config._load_env_path(_REPO_ROOT)` runs the real repo's
+    `.cc-autopilot/env` through `config.load_project_env`, which mutates
+    `os.environ` DIRECTLY (`os.environ[key] = val` for any key not already
+    set) rather than via `monkeypatch`. That bypasses both `monkeypatch`'s
+    teardown and the `clean_env` fixture (which only records keys PRESENT
+    at strip-time), so an absent-then-file-sourced knob like the repo's
+    `AP2_AUTO_APPROVE=0` would leak into every later test in the session —
+    flipping the now-default-ON auto-approve OFF for unrelated suites
+    (tb361 / tb383). A full snapshot/restore is the only thing that undoes
+    a direct `os.environ` write, so wrap the one test that loads the real
+    repo env in it.
+    """
+    import os
+
+    snapshot = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(snapshot)
+
+
 # ---------------------------------------------------------------------------
 # (1) Grep-shape — zero remaining direct env reads in the migrated files.
 # ---------------------------------------------------------------------------
@@ -412,10 +436,15 @@ def test_get_core_value_helper_present_on_config():
     assert sig.parameters["default"].kind == inspect.Parameter.KEYWORD_ONLY
 
 
-def test_config_carries_core_config_field():
+def test_config_carries_core_config_field(restore_environ):
     """The `Config` dataclass must expose a `core_config` attribute
     (the TB-334 plumbing addition) for the helper's cfg-snapshot layer
     to consult. Defaults to empty dict on the env-path branch.
+
+    Uses `restore_environ` because `_load_env_path(_REPO_ROOT)` sources
+    the real repo's `.cc-autopilot/env` into `os.environ` directly (see
+    the fixture docstring) — without the snapshot/restore the repo's
+    `AP2_AUTO_APPROVE=0` would leak into later default-ON suites.
     """
     cfg = Config._load_env_path(_REPO_ROOT)
     assert isinstance(getattr(cfg, "core_config", None), dict), (

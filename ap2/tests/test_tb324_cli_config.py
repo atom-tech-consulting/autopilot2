@@ -147,21 +147,26 @@ def test_list_json_carries_structured_rows(tmp_path, clean_env, capsys):
 def test_list_source_attribution_recognizes_env_override(
     tmp_path, clean_env, capsys
 ):
-    """Setting `AP2_COMPONENTS_AUTO_APPROVE_ENABLED=1` flips the
-    `components.auto_approve.enabled` row's source to `env-override`.
+    """Setting `AP2_COMPONENTS_AUTO_APPROVE_DISABLED=1` flips the
+    `components.auto_approve.disabled` row's source to `env-override`.
 
     TB-413: the flat `AP2_AUTO_APPROVE` tunable override is removed
     (the runtime resolver ignores it, so `_attribute_source` no longer
     credits it as `env-override`); the sectioned env is the surviving
-    structured-override path the attribution must recognize."""
+    structured-override path the attribution must recognize.
+
+    TB-430: auto_approve flipped to suppress-polarity (default-on,
+    `disabled` key) — the sectioned override is now
+    `AP2_COMPONENTS_AUTO_APPROVE_DISABLED` and the row path is
+    `components.auto_approve.disabled`."""
     cfg = _project(tmp_path)
-    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     rc = cmd_config_list(cfg, Namespace(json=True))
     assert rc == 0
     out = capsys.readouterr().out
     rows = json.loads(out)
     by_path = {r["path"]: r for r in rows}
-    assert by_path["components.auto_approve.enabled"]["source"] == (
+    assert by_path["components.auto_approve.disabled"]["source"] == (
         "env-override"
     )
 

@@ -156,29 +156,32 @@ def test_board_edit_lands_blocked_review_regardless_of_knob(
 # ===========================================================================
 
 
-def test_loop_pass_noop_when_knob_unset(cfg: Config, monkeypatch):
-    """With `AP2_AUTO_APPROVE` unset, the loop pass is a no-op: the
-    `@blocked:review` codespan survives and no `auto_approved` fires."""
-    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
+def test_loop_pass_noop_when_opted_out(cfg: Config, monkeypatch):
+    """With auto-approve opted OUT (`AP2_COMPONENTS_AUTO_APPROVE_DISABLED=1`),
+    the loop pass is a no-op: the `@blocked:review` codespan survives and no
+    `auto_approved` fires. TB-430: auto-approve is default-on, so the no-op
+    posture is reached by opting OUT, not by leaving the knob unset."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
 
-    tb_id = _add_review_proposal(cfg, title="knob off")
+    tb_id = _add_review_proposal(cfg, title="opted out")
     run_auto_approve_pass(cfg)
 
     assert "@blocked:review" in _line(cfg, tb_id), (
-        "loop pass must NOT strip review when AP2_AUTO_APPROVE is unset"
+        "loop pass must NOT strip review when auto-approve is opted out"
     )
     evts = events.tail(cfg.events_file, 50)
     assert [e for e in evts if e.get("type") == "auto_approved"] == []
 
 
-def test_loop_pass_strips_when_knob_set_and_gates_pass(
+def test_loop_pass_strips_when_default_on_and_gates_pass(
     cfg: Config, monkeypatch,
 ):
-    """With `AP2_AUTO_APPROVE=1` and a non-gate-tagged proposal, the loop
-    pass strips `@blocked:review` and emits `auto_approved` (`task=`,
-    `knob=`) — the exact payload the pre-TB-383 proposal-time site
-    produced, just from the between-runs site."""
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    """Default-on (TB-430) with a non-gate-tagged proposal: the loop pass
+    strips `@blocked:review` and emits `auto_approved` (`task=`, `knob=`)
+    — the exact payload the pre-TB-383 proposal-time site produced, just
+    from the between-runs site. The `knob` is the suppress-key (`disabled`)
+    raw value, `""` for the default-on / not-opted-out posture."""
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
@@ -200,7 +203,7 @@ def test_loop_pass_strips_when_knob_set_and_gates_pass(
     ]
     assert len(auto) == 1, auto
     assert auto[0]["task"] == tb_id
-    assert auto[0]["knob"] == "1"
+    assert auto[0]["knob"] == ""
 
 
 def test_loop_pass_retains_review_for_gate_tagged_proposal(
@@ -259,7 +262,7 @@ def test_loop_pass_dry_run_emits_once_and_preserves_codespan(
     the task stays in the pass's candidate set — the dedup gate ensures the
     event fires exactly ONCE across repeated passes (preserving the
     pre-TB-383 emit-once semantics + the 24h dry-run counter)."""
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
@@ -277,7 +280,8 @@ def test_loop_pass_dry_run_emits_once_and_preserves_codespan(
     ]
     assert len(would) == 1, would
     assert would[0]["task"] == tb_id
-    assert would[0]["knob"] == "1"
+    # TB-430: knob = suppress-key (`disabled`) raw value, "" default-on.
+    assert would[0]["knob"] == ""
     assert would[0]["dry_run"] is True
     assert [
         e for e in events.tail(cfg.events_file, 50)

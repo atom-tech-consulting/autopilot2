@@ -150,15 +150,14 @@ def auto_approve_audit(cfg: Config | None = None) -> AuditResult:
     time. WARN, not FAIL: operator authority preserved per goal.md
     L184-186 — doctor warns, doesn't refuse to run.
 
-    Resolution shape (TB-332 cross-package migration): same
-    cfg-kwarg-with-TypeError-guard pattern as the sibling
-    `automation_status` helpers. When ``cfg`` is passed, the three
-    auto_approve knobs (`enabled`, `per_task_token_cap`,
-    `window_token_cap`) resolve via
-    ``cfg.get_component_value("auto_approve", <key>)``; the
-    flat-env back-compat path keeps shell-export operators on
-    bit-for-bit identical behavior. Default ``cfg=None`` preserves the
-    pre-TB-332 env-only fallback so existing test fixtures (TB-234)
+    Resolution shape (TB-332 cross-package migration; TB-430): the
+    enablement bit resolves via the registry's single source of truth
+    (`Manifest.is_enabled`, default-on / opt-out per TB-430); the two
+    cap knobs (`per_task_token_cap`, `window_token_cap`) resolve via
+    ``cfg.get_component_value("auto_approve", <key>)`` when ``cfg`` is
+    passed; the flat-env back-compat path keeps shell-export operators
+    on bit-for-bit identical behavior. Default ``cfg=None`` preserves
+    the pre-TB-332 env-only fallback so existing test fixtures (TB-234)
     don't change shape.
     """
     if cfg is not None and not isinstance(cfg, Config):
@@ -167,12 +166,16 @@ def auto_approve_audit(cfg: Config | None = None) -> AuditResult:
             f"got {type(cfg).__name__}",
         )
     res = AuditResult()
-    # TB-427: resolve auto-approve enablement through the registry's
-    # single source of truth (`Manifest.is_enabled`) so `ap2 doctor`
-    # agrees with `ap2 status` / the gate and performs NO raw
-    # `AP2_AUTO_APPROVE` env read here. With `cfg` the read is
-    # config-aware (sectioned env → config.toml → default); with
-    # `cfg=None` it is the legacy env-only flat-flag read.
+    # TB-427/TB-430: resolve auto-approve enablement through the
+    # registry's single source of truth (`Manifest.is_enabled`) so
+    # `ap2 doctor` agrees with `ap2 status` / the gate and performs NO
+    # raw env read here. auto-approve is default-on / opt-out (TB-430):
+    # the read resolves the suppress-polarity kill switch
+    # `AP2_AUTO_APPROVE_DISABLED` (or `[components.auto_approve]
+    # disabled`) plus the legacy `AP2_AUTO_APPROVE` back-compat tier.
+    # With `cfg` the read is config-aware (sectioned env → flat kill
+    # switch → config.toml → legacy override → default-on); with
+    # `cfg=None` it is the env-only resolution.
     from ap2.registry import default_registry
 
     enabled = default_registry().get("auto_approve").is_enabled(cfg=cfg)
@@ -200,8 +203,11 @@ def auto_approve_audit(cfg: Config | None = None) -> AuditResult:
     if not enabled:
         res.add(
             "INFO",
-            "auto-approve disabled (AP2_AUTO_APPROVE unset) — "
-            "manual approve required per task",
+            "auto-approve disabled (opted out via "
+            "AP2_AUTO_APPROVE_DISABLED=1 or [components.auto_approve] "
+            "disabled=true) — manual approve required per task. "
+            "Note: auto-approve is default-on (TB-430); this is an "
+            "explicit opt-out.",
         )
         return res
 

@@ -107,11 +107,12 @@ def _rewrite_last_event_ts(cfg: Config, ts: str) -> None:
 
 
 def test_collect_state_shape_when_knob_off_and_no_activity(cfg: Config, monkeypatch):
-    """Default state — knob unset, no events.jsonl activity. Every key
-    in the contract is present with the documented type. Pin against a
-    refactor that drops a key or returns `None` where an int is
+    """Opted-out state — auto-approve disabled (TB-430: default-on, so
+    "off" is reached via the kill switch), no events.jsonl activity.
+    Every key in the contract is present with the documented type. Pin
+    against a refactor that drops a key or returns `None` where an int is
     documented."""
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
     monkeypatch.delenv("AP2_AUTO_UNFREEZE_DRY_RUN", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_FREEZE_THRESHOLD", raising=False)
@@ -531,14 +532,15 @@ def test_collect_state_window_resume_idx_scopes_window_tokens(
 def test_cli_status_omits_auto_approve_line_when_off_and_silent(
     cfg: Config, capsys, monkeypatch,
 ):
-    """Knob off AND all 24h counters zero → the `auto-approve:` text
-    line is OMITTED entirely (mirrors TB-189's classifications
-    omit-on-empty pattern). Fresh / pre-opt-in projects don't grow a
-    perpetual zero-line.
+    """Opted-out (auto-approve disabled) AND all 24h counters zero → the
+    `auto-approve:` text line is OMITTED entirely (mirrors TB-189's
+    classifications omit-on-empty pattern). Projects that opt OUT and stay
+    silent don't grow a perpetual zero-line. TB-430: auto-approve is
+    default-on, so "off" is reached via the kill switch.
     """
     from ap2.cli import cmd_status
 
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     rc = cmd_status(cfg, Namespace(json=False))
     assert rc == 0
     out = capsys.readouterr().out
@@ -670,14 +672,16 @@ def test_cli_status_json_carries_pause_reason_when_paused(
 def test_web_home_omits_automation_card_when_off_and_silent(
     cfg: Config, monkeypatch,
 ):
-    """Pre-opt-in project (knob off + no 24h activity) → the Automation
-    card is OMITTED entirely from the home page so fresh projects
-    don't grow a perpetual `auto-approve: off` card. Server-side
-    omission (not CSS-hidden), per the same pattern as
-    `_render_pending_queue` / `_render_operator_decisions`."""
+    """Opted-out project (auto-approve disabled + no 24h activity) → the
+    Automation card is OMITTED entirely from the home page so opted-out
+    silent projects don't grow a perpetual `auto-approve: off` card.
+    Server-side omission (not CSS-hidden), per the same pattern as
+    `_render_pending_queue` / `_render_operator_decisions`. TB-430:
+    auto-approve is default-on, so "off" is reached via the kill
+    switch."""
     from ap2 import web
 
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     html = web._render_home(cfg)
     # The `<div class="automation-status` marker (with the open `class=`
     # attribute prefix) only appears when the renderer emits the card.

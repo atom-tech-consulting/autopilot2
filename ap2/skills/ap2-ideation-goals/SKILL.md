@@ -253,8 +253,9 @@ shipped-task impact verdicts), and complementary to both: `ap2 audit`
 surfaces the list of unreviewed-shipped tasks since the last walk and
 routes per-task decisions back through those existing verbs.
 
-**When to reach for it.** Under `AP2_AUTO_APPROVE=1` (the focus item's
-unblock-condition for the walk-away promise), every auto-approved task
+**When to reach for it.** With auto-approve active (default-on since
+TB-430 — the focus item's unblock-condition for the walk-away promise;
+opt OUT via `AP2_AUTO_APPROVE_DISABLED=1`), every auto-approved task
 ships without operator-in-the-loop review at dispatch time, so
 retrospective review is the operator's ONLY judgment surface. Without
 `ap2 audit`, the surface is fragmented across `ap2 status`,

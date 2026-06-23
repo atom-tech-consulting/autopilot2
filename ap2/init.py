@@ -371,7 +371,8 @@ _TEMPLATE_EXEMPT_KNOBS: frozenset[str] = frozenset({
     "AP2_AGENT_EFFORT",                      # reason: config.toml-homed behavioral tunable (core.agent_effort); set via `ap2 config set`
     "AP2_ATTENTION_DEBOUNCE_S",              # reason: detector-sensitivity tuning, default 6h rarely tuned
     "AP2_ATTENTION_IMMEDIATE_PUSH",          # reason: config.toml-homed behavioral tunable (components.attention.immediate_push); set via `ap2 config set`
-    "AP2_AUTO_APPROVE",                      # reason: opt-in main toggle; operators flip via shell export after sampling the dry-run audit surface
+    "AP2_AUTO_APPROVE",                      # reason: DEPRECATED legacy master flag (TB-430); auto-approve is now default-on / opt-out — retained env-only as a transitional back-compat override, kept out of the per-project template
+    "AP2_AUTO_APPROVE_DISABLED",             # reason: suppress-polarity master kill switch (TB-430); auto-approve is default-on, operators opt OUT via shell export, not the per-project template
     "AP2_AUTO_APPROVE_COST_APPROACH_PCT",    # reason: internal default (75%), rarely tuned
     "AP2_AUTO_APPROVE_DRY_RUN",              # reason: debug/test only
     "AP2_AUTO_APPROVE_FREEZE_THRESHOLD",     # reason: internal default, rarely tuned

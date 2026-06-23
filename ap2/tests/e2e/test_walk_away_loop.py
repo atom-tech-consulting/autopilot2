@@ -191,10 +191,11 @@ def test_auto_approve_dispatches_ideation_proposal_without_operator(
 ):
     cfg = walk_away_cfg
 
-    # Knob set + freeze threshold zeroed out so the circuit-breaker
-    # doesn't accidentally fire on this clean run (no prior failure
-    # window exists, but explicit is safer than implicit).
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    # TB-430: auto-approve is default-ON (autonomous by default; operators
+    # opt OUT). No knob is needed to ARM the loop pass — a bare env
+    # auto-approves. We still zero the freeze threshold so the
+    # circuit-breaker doesn't accidentally fire on this clean run (no prior
+    # failure window exists, but explicit is safer than implicit).
     monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_FREEZE_THRESHOLD", "0")
     # Enable ideation + short cooldown so step-4 fires on tick 1.
     monkeypatch.delenv("AP2_CORE_IDEATION_DISABLED", raising=False)
@@ -330,9 +331,12 @@ def test_auto_approve_dispatches_ideation_proposal_without_operator(
         f"tick 2: exactly one `auto_approved` event must fire for "
         f"{expected_tb} (from the loop pass); got: {auto_evts}"
     )
-    # The knob field captures the env value at strip time — pins the
-    # TB-223 payload contract (unchanged across the TB-383 relocation).
-    assert auto_evts[0]["knob"] == "1"
+    # The knob field records the suppress-polarity master switch
+    # (`[components.auto_approve] disabled`) resolved at strip time. TB-430
+    # flipped auto-approve to default-on / opt-out, so the untouched
+    # (not-opted-out) state is the empty string — the loop pass armed by
+    # default, not by an `enabled` knob.
+    assert auto_evts[0]["knob"] == ""
 
     board = Board.load(cfg.tasks_file)
     loc = board.find(expected_tb)

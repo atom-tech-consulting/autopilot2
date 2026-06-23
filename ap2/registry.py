@@ -246,6 +246,21 @@ class Manifest:
     # a suppress-polarity `*_disabled` knob, consistent with the
     # convention at the top of this module.
     enable_core_key: Optional[str] = None
+    # TB-430: optional DEPRECATED flat env flag from a PRIOR polarity of
+    # this manifest, honored as a transitional back-compat override of
+    # the current default so an existing deployment that still sets the
+    # old name does not silently change behavior on upgrade. Carries the
+    # OPPOSITE polarity of `env_flag` from the manifest's previous life:
+    # auto_approve flipped default-off→default-on (require→suppress), so
+    # its `legacy_env_flag` (`AP2_AUTO_APPROVE`) is REQUIRE-polarity
+    # (`=1` enables, `=0`/falsy disables). Resolved as a final tier in
+    # `is_enabled`, consulted ONLY when none of the current knobs (tiers
+    # 1–3: sectioned env / flat `env_flag` / config.toml) are set, so the
+    # modern knobs always win and the legacy flag merely overrides the
+    # bare default. Defaults to None → no legacy alias (every other
+    # manifest). The owning component is responsible for emitting a
+    # one-time deprecation note when it observes the legacy flag set.
+    legacy_env_flag: Optional[str] = None
 
     def _enable_config_key(self) -> str:
         """The per-component config key carrying this manifest's
@@ -302,6 +317,16 @@ class Manifest:
         Env beats config.toml (tiers 1+2 before tier 3), matching the
         accessor's own precedence so both layers agree.
 
+        TB-430 — a FINAL legacy tier follows tiers 1–3: if a manifest
+        declares `legacy_env_flag` (a deprecated flat flag from a PRIOR
+        polarity, e.g. auto_approve's `AP2_AUTO_APPROVE`) and that flag
+        is EXPLICITLY present in `env` while every current knob is silent,
+        its require-polarity truthy value is returned directly (`=1`
+        enables, `=0`/falsy disables). This honors an un-migrated
+        deployment's old flag as a transitional override of the bare
+        default WITHOUT letting it shadow the modern knobs. A
+        not-present legacy flag falls through to the manifest default.
+
         `cfg` is duck-typed (`hasattr(cfg, "get_component_value")`) so a
         dummy `cfg` (some tick-hook unit tests pass `object()`) or
         `cfg=None` cleanly skips tier 3 and resolves from env alone —
@@ -333,6 +358,18 @@ class Manifest:
             elif hasattr(cfg, "get_component_value"):
                 val = cfg.get_component_value(self.name, key, default="")
             raw = "" if val is None else val
+        # Tier 4 (TB-430): a DEPRECATED legacy flat flag from a prior
+        # polarity, consulted only when tiers 1–3 are all silent. It is
+        # require-polarity regardless of the current `default_enabled`
+        # (auto_approve was default-off/opt-in before the flip), so when
+        # it is EXPLICITLY present in env we resolve it here and return
+        # directly rather than feeding the current-polarity branch below.
+        if raw == "" and self.legacy_env_flag is not None:
+            legacy_raw = env.get(self.legacy_env_flag, None)
+            if legacy_raw is not None:
+                return str(legacy_raw).strip().lower() not in (
+                    "", "0", "false", "no", "off",
+                )
         is_truthy = str(raw).strip().lower() not in (
             "", "0", "false", "no", "off",
         )

@@ -24,12 +24,14 @@ What this regression covers:
       `ap2/components/auto_approve/__init__.py` and the flat module
       `ap2/auto_approve.py` is gone.
   (b) The manifest at `ap2/components/auto_approve/manifest.py`
-      registers `name="auto_approve"`, `env_flag="AP2_AUTO_APPROVE"`,
-      `default_enabled=False` (TB-320 wired the existing
-      require-polarity master switch the daemon already self-gates on
-      onto the manifest so the registry / `ap2 status` render the
-      on/off state correctly), and exposes the full daemon-alias
-      surface in its `hook_points` dict.
+      registers `name="auto_approve"`,
+      `env_flag="AP2_AUTO_APPROVE_DISABLED"`, `default_enabled=True`,
+      and `legacy_env_flag="AP2_AUTO_APPROVE"` (TB-430 flipped the
+      master switch to suppress-polarity / default-on so the registry /
+      `ap2 status` render the on/off state correctly; the legacy
+      require-polarity flag is honored as a transitional override),
+      and exposes the full daemon-alias surface in its `hook_points`
+      dict.
   (c) Importing `ap2.daemon` does not raise, and each rebound alias
       on the daemon module evaluates to the EXACT object the
       registry exposes via
@@ -186,11 +188,15 @@ def test_env_knobs_preserved_verbatim():
 
 def test_manifest_registry_shape():
     """`default_registry().get("auto_approve")` returns a Manifest with
-    `name="auto_approve"`, `env_flag="AP2_AUTO_APPROVE"` (TB-320
-    wired in the operator-facing require-polarity gate),
-    `default_enabled=False` (opt-in / require-polarity — matches
-    TB-223's existing semantics where `AP2_AUTO_APPROVE=1` is
-    required to enable autonomous approve).
+    `name="auto_approve"`, `env_flag="AP2_AUTO_APPROVE_DISABLED"`,
+    `default_enabled=True`, and `legacy_env_flag="AP2_AUTO_APPROVE"`.
+
+    TB-430 flipped auto-approve to default-ON / opt-OUT: the master
+    switch is now the suppress-polarity `AP2_AUTO_APPROVE_DISABLED`
+    (matching the `AP2_*_DISABLED` convention of janitor / cron /
+    ideation / auto_unfreeze), and the legacy require-polarity
+    `AP2_AUTO_APPROVE` is honored only as a transitional override via
+    the manifest's `legacy_env_flag` tier.
     """
     registry = Registry.discover()
     manifest = registry.get("auto_approve")
@@ -198,15 +204,19 @@ def test_manifest_registry_shape():
         f"TB-318: manifest name should be 'auto_approve'; got "
         f"{manifest.name!r}"
     )
-    assert manifest.env_flag == "AP2_AUTO_APPROVE", (
-        f"TB-320: manifest `env_flag` should be 'AP2_AUTO_APPROVE' "
-        f"(the operator-facing master switch the daemon already "
-        f"self-gates on); got {manifest.env_flag!r}"
+    assert manifest.env_flag == "AP2_AUTO_APPROVE_DISABLED", (
+        f"TB-430: manifest `env_flag` should be the suppress-polarity "
+        f"'AP2_AUTO_APPROVE_DISABLED' kill switch; got {manifest.env_flag!r}"
     )
-    assert manifest.default_enabled is False, (
-        f"TB-320: manifest `default_enabled` should be False "
-        f"(require-polarity / opt-in — matches TB-223 semantics); "
+    assert manifest.default_enabled is True, (
+        f"TB-430: manifest `default_enabled` should be True "
+        f"(default-on / opt-out — autonomous by default); "
         f"got {manifest.default_enabled!r}"
+    )
+    assert manifest.legacy_env_flag == "AP2_AUTO_APPROVE", (
+        f"TB-430: manifest `legacy_env_flag` should be the deprecated "
+        f"require-polarity 'AP2_AUTO_APPROVE' (transitional override); "
+        f"got {manifest.legacy_env_flag!r}"
     )
 
 

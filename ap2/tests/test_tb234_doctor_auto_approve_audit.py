@@ -38,13 +38,19 @@ def _texts(res) -> list[str]:
     return [txt for _, txt in res.messages]
 
 
-def test_auto_approve_unset_emits_info_only(monkeypatch: pytest.MonkeyPatch):
+def test_auto_approve_opted_out_emits_info_only(monkeypatch: pytest.MonkeyPatch):
+    """TB-430: auto-approve is default-ON, so the INFO-only (no
+    misconfiguration nudge) path is reached by explicitly opting OUT via
+    the suppress-polarity kill switch `AP2_AUTO_APPROVE_DISABLED=1` — an
+    operator who turned auto-approve off shouldn't see a cost-cap WARN
+    for caps that no longer matter."""
     _clean_env(monkeypatch)
+    monkeypatch.setenv("AP2_AUTO_APPROVE_DISABLED", "1")
     res = auto_approve_audit()
     assert _levels(res) == ["INFO"]
-    assert "AP2_AUTO_APPROVE" in res.messages[0][1]
+    assert "AP2_AUTO_APPROVE_DISABLED" in res.messages[0][1]
     assert "disabled" in res.messages[0][1].lower()
-    # No WARN: an operator who hasn't opted in shouldn't see a misconfiguration nudge.
+    # No WARN: an operator who opted out shouldn't see a misconfiguration nudge.
     assert "WARN" not in _levels(res)
     assert res.ok
 

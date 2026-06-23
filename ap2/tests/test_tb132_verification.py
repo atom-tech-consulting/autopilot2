@@ -160,11 +160,11 @@ def test_ap2_add_blocked_csv_writes_codespan_not_description(tmp_path, monkeypat
     (TB-131): ``cmd_add`` queues; the test drains exactly as the daemon
     tick would; assertions then run against the post-drain board.
 
-    TB-293: `AP2_AUTO_APPROVE` is unset for this test so the queue-drain
-    auto-approve gate (now mirrored from the direct path) doesn't
-    strip the `review` token. The codespan-rendering behavior under
-    test is the pre-auto-approve baseline; the auto-approve interaction
-    is pinned separately in `test_queue_drain_auto_approve.py`.
+    TB-293/TB-430: auto-approve is opted OUT (default-on since TB-430)
+    so the queue-drain auto-approve gate doesn't strip the `review`
+    token. The codespan-rendering behavior under test is the
+    auto-approve-off baseline; the auto-approve-on interaction is pinned
+    separately in `test_queue_drain_auto_approve.py`.
     """
     from argparse import Namespace
 
@@ -173,6 +173,7 @@ def test_ap2_add_blocked_csv_writes_codespan_not_description(tmp_path, monkeypat
     from ap2.config import Config
     from ap2.init import init_project
 
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
     init_project(tmp_path)

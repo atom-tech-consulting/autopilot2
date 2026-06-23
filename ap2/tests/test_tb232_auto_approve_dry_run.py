@@ -127,12 +127,12 @@ def _unwrap(res: dict) -> dict:
 def test_would_auto_approve_event_fires_when_dry_run_set(
     cfg: Config, monkeypatch,
 ):
-    """With both `AP2_AUTO_APPROVE=1` AND `AP2_AUTO_APPROVE_DRY_RUN=1`
+    """Default-on (TB-430) with `AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN=1`
     set, an ideation-shaped `add_backlog` call (a) emits a
     `would_auto_approve` event with `dry_run=True`, (b) does NOT emit
     an `auto_approved` event, (c) leaves the row's `@blocked:review`
     codespan intact (operator-manual `ap2 approve` still required)."""
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
     # Don't set AP2_AUTO_APPROVE_GATE_TAGS — default is
     # `#breaking-change,#high-risk` which the `#autopilot` tag below
@@ -163,7 +163,8 @@ def test_would_auto_approve_event_fires_when_dry_run_set(
         f"expected exactly one `would_auto_approve` event; got: {evts}"
     )
     assert would_evts[0]["task"] == tb_id
-    assert would_evts[0]["knob"] == "1"
+    # TB-430: knob = suppress-key (`disabled`) raw value, "" default-on.
+    assert would_evts[0]["knob"] == ""
     assert would_evts[0]["dry_run"] is True, (
         f"`dry_run=True` discriminator field required so downstream "
         f"consumers can distinguish simulated decisions from real "
@@ -262,13 +263,13 @@ def test_blocked_review_codespan_preserved_in_dry_run_mode(
 def test_real_auto_approve_unaffected_when_dry_run_unset(
     cfg: Config, monkeypatch,
 ):
-    """With `AP2_AUTO_APPROVE=1` only (dry-run unset), the existing
-    TB-223 behavior holds: review token stripped + `auto_approved`
-    event emitted + no `would_auto_approve` event. Pins the
-    no-regression guarantee on the non-dry-run path — confirms the
-    dry-run check sits behind a real boolean, not a flag that always
-    suppresses the real path."""
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    """Default-on (TB-430) with dry-run unset, the existing TB-223
+    behavior holds: review token stripped + `auto_approved` event
+    emitted + no `would_auto_approve` event. Pins the no-regression
+    guarantee on the non-dry-run path — confirms the dry-run check sits
+    behind a real boolean, not a flag that always suppresses the real
+    path."""
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
@@ -293,7 +294,7 @@ def test_real_auto_approve_unaffected_when_dry_run_unset(
     assert loc is not None
     line = board.sections[loc[0]][loc[1]]
     assert "@blocked:review" not in line, (
-        f"non-dry-run AP2_AUTO_APPROVE=1 must strip `@blocked:review` "
+        f"non-dry-run default-on auto-approve must strip `@blocked:review` "
         f"(TB-223 behavior); got: {line!r}"
     )
 
@@ -302,7 +303,8 @@ def test_real_auto_approve_unaffected_when_dry_run_unset(
     auto_evts = [e for e in evts if e.get("type") == "auto_approved"]
     assert len(auto_evts) == 1, evts
     assert auto_evts[0]["task"] == tb_id
-    assert auto_evts[0]["knob"] == "1"
+    # TB-430: knob = suppress-key (`disabled`) raw value, "" default-on.
+    assert auto_evts[0]["knob"] == ""
 
     # And `would_auto_approve` does NOT fire — the dry-run path is
     # mutually exclusive with the real path on a given proposal.

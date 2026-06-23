@@ -186,9 +186,9 @@ Event-type catalog: emitters across `ap2/*.py` call `events.append(events_file,
     `_EMITTED_ONCE: set[str]` (guarded by a `threading.Lock`) records
     each flat name's first hit, so a daemon read at startup +
     re-checks on later config reloads stay silent past the first.
-    Payload: `flat` (the deprecated env name — e.g. `AP2_AUTO_APPROVE`),
+    Payload: `flat` (the deprecated env name — e.g. `AP2_AUTO_APPROVE_DRY_RUN`),
     `sectioned` (its replacement path — e.g.
-    `components.auto_approve.enabled`), `process_pid` (the emitter's
+    `components.auto_approve.dry_run`), `process_pid` (the emitter's
     PID — distinguishes events from a multi-daemon operator setup
     sharing one project events file across forks/relaunches). The
     audit trail makes the operator's migration path discoverable in

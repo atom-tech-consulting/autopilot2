@@ -15,7 +15,9 @@ TB-428 routes every component on/off gate through ONE canonical helper,
 string forms. This pins:
 
   - the `auto_approve` enable gate (`_is_auto_approve_enabled`) reads a
-    TOML bool / string form correctly;
+    TOML bool / string form correctly — TB-430 flipped it to the
+    suppress-polarity `disabled` key (default-on / opt-out), so a truthy
+    `disabled` value now reads as OFF;
   - the `ideation` disable gate (`_ideation_disabled`) does the same;
   - the canonical helper itself is bool-safe + case-insensitive while
     preserving the `1`/`true`/`yes` vocabulary and the unset→False default.
@@ -61,25 +63,28 @@ def cfg(tmp_path, clean_env):
 # ---------------------------------------------------------------------------
 
 
-def test_auto_approve_enabled_gate_reads_toml_bool_true(cfg):
-    """`[components.auto_approve] enabled = true` parses to the Python bool
-    `True`; the gate must read that as enabled (the silently-False bug)."""
-    cfg.components_config = {"auto_approve": {"enabled": True}}
-    assert _is_auto_approve_enabled(cfg) is True
-
-
-def test_auto_approve_enabled_gate_reads_toml_bool_false(cfg):
-    """The Python bool `False` (TOML `enabled = false`) reads as disabled."""
-    cfg.components_config = {"auto_approve": {"enabled": False}}
+def test_auto_approve_disabled_gate_reads_toml_bool_true(cfg):
+    """`[components.auto_approve] disabled = true` parses to the Python bool
+    `True`; the suppress-polarity gate (TB-430) must read that as DISABLED
+    — the capital-T coercion path the lowercase-only membership test
+    silently dropped pre-TB-428."""
+    cfg.components_config = {"auto_approve": {"disabled": True}}
     assert _is_auto_approve_enabled(cfg) is False
 
 
-@pytest.mark.parametrize("val", ["true", "True", "1", "yes"])
-def test_auto_approve_enabled_gate_reads_string_truthy_case_insensitive(cfg, val):
-    """String forms (incl. the capital-T `"True"` that the lowercase-only
-    membership test silently dropped) all engage the gate."""
-    cfg.components_config = {"auto_approve": {"enabled": val}}
+def test_auto_approve_disabled_gate_reads_toml_bool_false(cfg):
+    """The Python bool `False` (TOML `disabled = false`) reads as ENABLED
+    (TB-430 default-on — opt-out not engaged)."""
+    cfg.components_config = {"auto_approve": {"disabled": False}}
     assert _is_auto_approve_enabled(cfg) is True
+
+
+@pytest.mark.parametrize("val", ["true", "True", "1", "yes"])
+def test_auto_approve_disabled_gate_reads_string_truthy_case_insensitive(cfg, val):
+    """String forms (incl. the capital-T `"True"` that the lowercase-only
+    membership test silently dropped) all engage the suppress gate → OFF."""
+    cfg.components_config = {"auto_approve": {"disabled": val}}
+    assert _is_auto_approve_enabled(cfg) is False
 
 
 # ---------------------------------------------------------------------------

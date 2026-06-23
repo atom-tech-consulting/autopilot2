@@ -117,6 +117,7 @@ All `AP2_*` variables can be set in shell, in `<project>/.cc-autopilot/env` (KEY
 | `AP2_AUTO_DIAGNOSE_IDLE_THRESHOLD_S` | `10800` (3h) | Idle time before the watchdog posts auto-diagnose. |
 | `AP2_AUTO_DIAGNOSE_COOLDOWN_S` | `21600` (6h) | Cooldown between auto-diagnose fires. |
 | `AP2_IDEATION_DISABLED` | (unset) | Set `1`/`true`/`yes` to disable empty-board ideation. |
+| `AP2_AUTO_APPROVE_DISABLED` | (unset) | **Opt-OUT** kill switch for auto-approve. Auto-approve is **ON by default** (TB-430 — see the posture note below); set `1`/`true`/`yes` (or `[components.auto_approve] disabled = true`) to opt OUT and require a manual `ap2 approve` per ideation proposal. The legacy require-polarity `AP2_AUTO_APPROVE` flag is deprecated but still honored as a transitional override (`=1` keeps on, `=0` opts out). |
 | `AP2_IDEATION_COOLDOWN_S` | `7200` (2h) | Cooldown between ideation fires. |
 | `AP2_IDEATION_TRIGGER_TASK_COUNT` | `3` | Fire ideation when the Ready+Backlog count is BELOW this threshold (Active is still a hard gate — concurrent task-agent + control-agent SDK runs are not allowed) (TB-160). Set to `1` for the legacy "fire only when the working queue is fully empty" behavior; raise it (e.g. `5`) for projects with very fluid scope. Invalid (non-int, non-positive) values fall back to the default. |
 | `AP2_IDEATION_MAX_TURNS` | `100` | Max turns per ideation run. |
@@ -127,6 +128,8 @@ All `AP2_*` variables can be set in shell, in `<project>/.cc-autopilot/env` (KEY
 | `AP2_MM_TEAM_ID` | (unset) | Mattermost team ID (used by sandbox install-channel). |
 | `CLAUDE_CODE_OAUTH_TOKEN` | (required) | SDK auth. Daemon refuses to start without it. |
 | `MATTERMOST_URL` / `MATTERMOST_TOKEN` | (optional) | Mattermost integration. |
+
+> **Autonomous-by-default posture (TB-430 — behavior change).** ap2 **auto-approves by default**: a fresh `uv tool install` (and the public source-available distribution) ships with auto-approve **ON**, so ideation proposals are dispatched without waiting for a manual `ap2 approve`. This reverses the previous opt-in default-off posture. Operators who want operator-in-the-loop dispatch must **opt OUT** by setting the suppress-polarity kill switch `AP2_AUTO_APPROVE_DISABLED=1` (or `[components.auto_approve] disabled = true`), matching the `AP2_JANITOR_DISABLED` / `AP2_CRON_DISABLED` / `AP2_IDEATION_DISABLED` convention. The safety gate chain (gate tags, freeze-threshold circuit breaker, per-task / rolling-window token caps, dry-run) is **unchanged** — only the master on/off default flipped. The legacy `AP2_AUTO_APPROVE` flag is deprecated but still honored as a transitional override (it emits a one-time deprecation note steering you at `AP2_AUTO_APPROVE_DISABLED`).
 
 ### CLAUDE.md `## Autopilot` section
 

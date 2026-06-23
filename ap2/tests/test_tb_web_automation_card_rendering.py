@@ -120,9 +120,11 @@ def test_web_card_renders_disabled_when_off_but_validator_activity_present(
     Pre-TB-256 this branch printed `enabled — circuit healthy`,
     falsely claiming the knob was on. The regression-pin for the
     exact bug observed by the operator (2026-05-18) on the web
-    home after TB-250 fixed the CLI mirror.
+    home after TB-250 fixed the CLI mirror. TB-430: auto-approve is
+    default-on, so the disabled card is reached via the kill switch.
     """
     _clear_auto_env(monkeypatch)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
 
     # Seed four fails to make the count distinguishable from 0.
     for i in range(4):
@@ -158,9 +160,11 @@ def test_web_card_suppressed_when_off_and_no_activity(
     block was suppressed); pinning it explicitly so the State-B
     branch's introduction doesn't accidentally leak into the
     no-activity case (e.g. a refactor that forgot the outer-`if`
-    guard).
+    guard). TB-430: auto-approve is default-on, so "off" is reached via
+    the kill switch.
     """
     _clear_auto_env(monkeypatch)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
 
     rendered = web._render_automation_card(cfg)
     assert rendered == "", rendered

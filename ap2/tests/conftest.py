@@ -106,6 +106,27 @@ if not os.environ.get("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", "").strip():
 os.environ.setdefault("AP2_COMPONENTS_VALIDATOR_JUDGE_DISABLED", "1")
 
 
+# TB-430: auto_approve flipped to default-ON (autonomous by default;
+# operators opt OUT). Its legacy require-polarity flag `AP2_AUTO_APPROVE`
+# is DEPRECATED — but a live deployment's daemon shell often still
+# exports it from a pre-flip rollout (e.g. `AP2_AUTO_APPROVE=0`). Left
+# ambient, that deprecated flag flows through `Manifest.is_enabled`'s
+# tier-4 legacy path and silently DISABLES auto-approve for the entire
+# unit-test session — masking the post-flip default-on posture every
+# auto_approve test now asserts, and diverging from a clean CI (where the
+# flag is unset, so the default-on manifest wins). Pop it at conftest
+# import time so the session always sees the true TB-430 baseline.
+#
+# Unlike the validator-judge shield above (which `setdefault`s a value to
+# preserve operator intent), this is an unconditional pop: the flag is
+# deprecated, its ambient presence is pure test pollution, and the
+# modern surface (`AP2_AUTO_APPROVE_DISABLED` /
+# `[components.auto_approve] disabled`) is the supported opt-out. Tests
+# that exercise the legacy back-compat path set `AP2_AUTO_APPROVE`
+# explicitly via `monkeypatch.setenv` (auto-restored after the test).
+os.environ.pop("AP2_AUTO_APPROVE", None)
+
+
 # --- TB-266: cross-module CLI test helpers --------------------------------
 #
 # Used by every cli-prefixed test sibling (`test_cli_daemon.py`,

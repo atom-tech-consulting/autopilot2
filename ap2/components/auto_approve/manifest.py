@@ -145,22 +145,34 @@ def _tick_hook(cfg, sdk) -> None:
 
 MANIFEST = Manifest(
     name="auto_approve",
-    # TB-320: wire the existing opt-in master knob `AP2_AUTO_APPROVE`
-    # (TB-223's require-polarity gate the daemon's tick-hook code at
-    # `daemon._tick` self-gates on via `os.environ.get` reads inside
-    # `operator_queue.py` / `board_edits.py` / `ideation.py`) onto the
-    # manifest so the registry / `ap2 status` render the on/off state
-    # correctly and the registry-level briefing-validator filter picks
-    # it up. `default_enabled=False` → require-polarity per
+    # TB-430: auto-approve is now DEFAULT-ON framework-wide — the
+    # framework is autonomous-by-default and operators opt OUT (was the
+    # TB-223/TB-320 opt-in default-off posture). The master switch is
+    # therefore a SUPPRESS-polarity kill switch `AP2_AUTO_APPROVE_DISABLED`
+    # (matching the `AP2_JANITOR_DISABLED` / `AP2_CRON_DISABLED` /
+    # `AP2_IDEATION_DISABLED` convention): `default_enabled=True` →
     # `registry.Manifest.is_enabled`'s "env_flag set + default_enabled
-    # False → truthy enables" branch (`ap2/registry.py:189-194`); the
-    # operator opts into the autonomous-approve behavior by setting
-    # `AP2_AUTO_APPROVE=1` (the existing semantics). Internal
-    # self-gating stays in place — manifest wiring is informational
-    # at the registry layer, not a replacement for the per-call-site
-    # truthy parse the existing code performs.
-    env_flag="AP2_AUTO_APPROVE",
-    default_enabled=False,
+    # True → truthy DISABLES" branch. Operators silence autonomous
+    # board-edit approval by setting `AP2_AUTO_APPROVE_DISABLED=1` (or
+    # `[components.auto_approve] disabled = true`).
+    #
+    # Back-compat (TB-430): a deployment that still sets the legacy
+    # require-polarity flag `AP2_AUTO_APPROVE` is honored as a
+    # transitional override of the new default — `AP2_AUTO_APPROVE=1`
+    # keeps it on, `AP2_AUTO_APPROVE=0` opts out — via `legacy_env_flag`
+    # below (resolved as a final tier in `is_enabled`, only when none of
+    # the new knobs are set). `impl._is_auto_approve_enabled` emits a
+    # one-time deprecation note steering operators at
+    # `AP2_AUTO_APPROVE_DISABLED` / `[components.auto_approve] disabled`.
+    #
+    # Internal self-gating stays in place — manifest wiring is the single
+    # source of truth the per-call-site enablement reads delegate to via
+    # `_is_auto_approve_enabled`, not a replacement for the gate chain
+    # (tags / freeze-threshold / token caps / dry-run), which is
+    # UNCHANGED by this flip — only the master on/off DEFAULT moved.
+    env_flag="AP2_AUTO_APPROVE_DISABLED",
+    legacy_env_flag="AP2_AUTO_APPROVE",
+    default_enabled=True,
     hook_points={
         "tick_hook": _tick_hook,
         # TB-318: expose every symbol `daemon.py`'s pre-migration alias
@@ -205,15 +217,16 @@ MANIFEST = Manifest(
     dependencies=[],
     # TB-322 (axis 3): per-component `config_schema` declarations for
     # the auto-approve knobs the component logically owns
-    # (`AP2_AUTO_APPROVE`, `AP2_AUTO_APPROVE_DRY_RUN`,
+    # (`AP2_AUTO_APPROVE_DISABLED`, `AP2_AUTO_APPROVE_DRY_RUN`,
     # `AP2_AUTO_APPROVE_FREEZE_THRESHOLD`,
     # `AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP`,
     # `AP2_AUTO_APPROVE_WINDOW_TOKEN_CAP`).
     # The three threshold/cap knobs (`FREEZE_THRESHOLD`,
     # `PER_TASK_TOKEN_CAP`, `WINDOW_TOKEN_CAP`) are read via
     # `os.environ.get` in `ap2/components/auto_approve/__init__.py`
-    # (call sites L85 / L269 / L287); the master switch
-    # `AP2_AUTO_APPROVE` and the dry-run knob `AP2_AUTO_APPROVE_DRY_RUN`
+    # (call sites L85 / L269 / L287); the master kill switch
+    # `AP2_AUTO_APPROVE_DISABLED` (TB-430; suppress-polarity, default-on)
+    # and the dry-run knob `AP2_AUTO_APPROVE_DRY_RUN`
     # are read elsewhere today (daemon.py / operator_queue.py /
     # board_edits.py / ideation.py) but are listed here because the
     # briefing's per-component-ownership contract puts them on this
@@ -222,15 +235,20 @@ MANIFEST = Manifest(
     # in `env_reload.HOT_RELOADABLE_KNOBS`, so `hot_reloadable=True`
     # across the board.
     config_schema={
-        "enabled": ConfigKey(
-            name="enabled",
+        "disabled": ConfigKey(
+            name="disabled",
             type=bool,
             default=False,
             description=(
-                "Opt-in master switch for autonomous board-edit "
-                "auto-approval (TB-223). Default off so a fresh "
-                "install keeps operator-in-the-loop semantics. "
-                "Mirrors `AP2_AUTO_APPROVE`; in `HOT_RELOADABLE_KNOBS`."
+                "Suppress-polarity kill switch for autonomous "
+                "board-edit auto-approval (TB-430). Default `false` → "
+                "auto-approve is ON; the framework is "
+                "autonomous-by-default and operators opt OUT by setting "
+                "this to `true` (or `AP2_AUTO_APPROVE_DISABLED=1`). "
+                "Mirrors `AP2_AUTO_APPROVE_DISABLED`; in "
+                "`HOT_RELOADABLE_KNOBS`. (The legacy require-polarity "
+                "`AP2_AUTO_APPROVE` env flag is still honored as a "
+                "transitional override — see `legacy_env_flag`.)"
             ),
             hot_reloadable=True,
         ),

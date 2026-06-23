@@ -215,8 +215,11 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     switch is no longer a component env flag either):
       - `AP2_JANITOR_DISABLED` → `"1"` (kill switch; janitor default-on).
       - `AP2_MM_CHANNELS` → `""` (opt-in; mattermost default-off).
-      - `AP2_AUTO_APPROVE` → `""` (opt-in; auto_approve default-off,
-        TB-320 wiring of TB-223's require-polarity gate).
+      - `AP2_AUTO_APPROVE_DISABLED` → `"1"` (kill switch; auto_approve
+        default-on after TB-430 flipped it from require-polarity opt-in
+        to suppress-polarity opt-out). The legacy `AP2_AUTO_APPROVE`
+        flag is env-only back-compat, NOT a manifest `env_flag`, so it
+        does NOT appear in the enumeration.
       - `AP2_AUTO_UNFREEZE_DISABLED` → `"1"` (kill switch;
         auto_unfreeze default-on, TB-320 new knob).
 
@@ -235,6 +238,9 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     # (mirroring janitor / cron / auto_unfreeze) — its `AP2_IDEATION_DISABLED`
     # env_flag joins the disabled-env-flag dict at truthy "1".
     assert flags.get("AP2_IDEATION_DISABLED") == "1", flags
+    # TB-430: auto_approve flipped to suppress-polarity (default-on);
+    # its kill switch `AP2_AUTO_APPROVE_DISABLED` maps to truthy "1".
+    assert flags.get("AP2_AUTO_APPROVE_DISABLED") == "1", flags
     # TB-345: focus_advance is no longer a component, so its former
     # kill switch must NOT appear in the disabled-env-flag dict.
     assert "AP2_FOCUS_AUTO_ADVANCE_DISABLED" not in flags, flags
@@ -248,8 +254,11 @@ def test_enumerate_disabled_env_flags_walks_every_env_flag():
     # env_flag — so it MUST NOT appear in the disabled-env-flag dict.
     assert "AP2_MM_CHANNELS" not in flags, flags
 
-    # Opt-in toggles map to empty string (clear from env).
-    assert flags.get("AP2_AUTO_APPROVE") == "", flags
+    # TB-430: the legacy `AP2_AUTO_APPROVE` flag is back-compat env-only,
+    # NOT a manifest `env_flag` (the manifest now carries
+    # `AP2_AUTO_APPROVE_DISABLED`), so it must NOT appear in the
+    # enumeration — only manifest `env_flag` values are walked.
+    assert "AP2_AUTO_APPROVE" not in flags, flags
 
     # `attention/` and `communication/` are the `env_flag=None` always-on
     # components (TB-389 added communication). They MUST NOT appear in the
@@ -625,7 +634,12 @@ def test_disabled_env_fixture_restores_default_registry_on_teardown(
     # to a channel adapter), not a component env_flag — so it is NOT in
     # the disabled-env-flag dict anymore.
     assert "AP2_MM_CHANNELS" not in disabled_env
-    assert "AP2_AUTO_APPROVE" in disabled_env
+    # TB-430: auto_approve's manifest env_flag is now the suppress-style
+    # `AP2_AUTO_APPROVE_DISABLED`; the legacy `AP2_AUTO_APPROVE` flag is
+    # env-only back-compat, not a manifest env_flag, so the enumeration
+    # carries the DISABLED knob, not the legacy one.
+    assert "AP2_AUTO_APPROVE_DISABLED" in disabled_env
+    assert "AP2_AUTO_APPROVE" not in disabled_env
     assert "AP2_AUTO_UNFREEZE_DISABLED" in disabled_env
     # TB-345: focus_advance's former kill switch is no longer a
     # component env flag, so it must NOT appear in the dict.
@@ -641,25 +655,29 @@ def test_disabled_env_fixture_restores_default_registry_on_teardown(
 
 
 def test_tb320_auto_approve_independent_disable():
-    """TB-320: setting `AP2_AUTO_APPROVE` to an empty / unset state
-    flips the `auto_approve` manifest's `is_enabled(env)` to False
-    independently of every other component's env knob.
+    """TB-430: setting `AP2_AUTO_APPROVE_DISABLED=1` flips the
+    `auto_approve` manifest's `is_enabled(env)` to False independently
+    of every other component's env knob.
 
-    Pins the manifest's TB-320 wiring of TB-223's require-polarity
-    gate: `env_flag="AP2_AUTO_APPROVE"`, `default_enabled=False`.
-    The `is_enabled` check uses a synthetic env mapping (not
-    monkeypatching the process env) so the assertion is hermetic and
-    confirms the polarity decision lives in `Manifest.is_enabled`
-    itself rather than in any test-time env state.
+    Pins the post-TB-430 suppress-polarity wiring:
+    `env_flag="AP2_AUTO_APPROVE_DISABLED"`, `default_enabled=True`
+    (kill-switch polarity, mirroring `AP2_JANITOR_DISABLED` /
+    `AP2_AUTO_UNFREEZE_DISABLED` / `AP2_IDEATION_DISABLED`). The
+    `is_enabled` check uses a synthetic env mapping (not monkeypatching
+    the process env) so the assertion is hermetic and confirms the
+    polarity decision lives in `Manifest.is_enabled` itself rather than
+    in any test-time env state. The legacy `AP2_AUTO_APPROVE` back-compat
+    tier is pinned separately in test_auto_approve_default_on.py.
     """
     registry = Registry.discover()
     manifest = registry.get("auto_approve")
-    assert manifest.env_flag == "AP2_AUTO_APPROVE", manifest
-    assert manifest.default_enabled is False, manifest
-    # Opt-in / require-polarity: unset → disabled.
-    assert manifest.is_enabled(env={}) is False
-    # Truthy → enabled (round-trip the polarity).
-    assert manifest.is_enabled(env={"AP2_AUTO_APPROVE": "1"}) is True
+    assert manifest.env_flag == "AP2_AUTO_APPROVE_DISABLED", manifest
+    assert manifest.default_enabled is True, manifest
+    assert manifest.legacy_env_flag == "AP2_AUTO_APPROVE", manifest
+    # Kill switch / suppress-polarity: truthy → disabled.
+    assert manifest.is_enabled(env={"AP2_AUTO_APPROVE_DISABLED": "1"}) is False
+    # Unset → enabled (round-trip the polarity; default-on).
+    assert manifest.is_enabled(env={}) is True
 
 
 def test_tb320_auto_unfreeze_independent_disable():

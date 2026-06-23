@@ -17,13 +17,20 @@ uses (`Config.get_component_value`), so for every component:
     `get_component_value` agree, and
   - the component's gate view can never disagree with `is_enabled`.
 
-Covered across the env-only / config-only / neither / both matrix for a
-require-polarity component (`auto_approve`, `default_enabled=False`,
-`enabled` key) and a suppress-polarity component (`janitor`,
+Covered across the env-only / config-only / neither / both matrix for two
+suppress-polarity components (`auto_approve` and `janitor`, both
 `default_enabled=True`, `disabled` key). "Env master flag" here is the
 sectioned `AP2_COMPONENTS_<NAME>_<KEY>` name — the spelling
 `get_component_value` honors, so the registry layer and the config
 accessor are exercised against ONE knob.
+
+TB-430: `auto_approve` flipped from require-polarity (opt-in,
+`default_enabled=False`, `enabled` key) to suppress-polarity (default-on /
+opt-out, `default_enabled=True`, `disabled` key). After the flip no
+require-polarity component remains, so the require-polarity branch of
+`Manifest.is_enabled` is covered by the synthetic manifests in
+`test_tb319_status_components.py`; this file pins the cross-surface
+agreement invariant for the real suppress-polarity components.
 """
 from __future__ import annotations
 
@@ -87,9 +94,13 @@ def _assert_all_agree(cfg: Config, name: str, key: str, expected: bool):
     )
     # The config accessor's raw signal, run through the polarity
     # convention, must reproduce is_enabled — proving they share a source.
+    # Polarity is read from the manifest's `default_enabled`: suppress
+    # (default_enabled=True, `disabled` key) → truthy signal means OFF;
+    # require (default_enabled=False, `enabled` key) → truthy means ON.
     raw = cfg.get_component_value(name, key, default="")
     signal_truthy = _truthy(raw)
-    derived = (not signal_truthy) if name == "janitor" else signal_truthy
+    suppress_polarity = default_registry().get(name).default_enabled
+    derived = (not signal_truthy) if suppress_polarity else signal_truthy
     assert derived is expected, (
         f"{name}: get_component_value({key!r})={raw!r} → {derived}, "
         f"expected {expected}"
@@ -101,14 +112,15 @@ def _assert_all_agree(cfg: Config, name: str, key: str, expected: bool):
 # ---------------------------------------------------------------------------
 
 
-def test_auto_approve_config_toml_key_alone_enables(tmp_path, clean_env):
-    """`[components.auto_approve] enabled = true` in config.toml (no env)
-    turns auto_approve ON across is_enabled / enabled_components /
-    get_component_value — the headline split TB-427 fixes."""
-    cfg = _load(tmp_path, "[components.auto_approve]\nenabled = true\n")
-    _assert_all_agree(cfg, "auto_approve", "enabled", expected=True)
+def test_auto_approve_config_toml_key_alone_disables(tmp_path, clean_env):
+    """`[components.auto_approve] disabled = true` in config.toml (no env)
+    turns auto_approve OFF across is_enabled / enabled_components /
+    get_component_value — the headline split TB-427 fixes, exercised on
+    the TB-430 suppress-polarity (`disabled`) key."""
+    cfg = _load(tmp_path, "[components.auto_approve]\ndisabled = true\n")
+    _assert_all_agree(cfg, "auto_approve", "disabled", expected=False)
     # …and the gate agrees with the registry view.
-    assert _is_auto_approve_enabled(cfg) is True
+    assert _is_auto_approve_enabled(cfg) is False
     assert _is_auto_approve_enabled(cfg) is _is_enabled(cfg, "auto_approve")
 
 
@@ -124,13 +136,13 @@ def test_janitor_config_toml_key_alone_disables(tmp_path, clean_env):
 # ---------------------------------------------------------------------------
 
 
-def test_auto_approve_sectioned_env_alone_enables(tmp_path, clean_env):
-    """`AP2_COMPONENTS_AUTO_APPROVE_ENABLED=1` (no config.toml key) turns
-    auto_approve ON across every surface — and the gate agrees."""
+def test_auto_approve_sectioned_env_alone_disables(tmp_path, clean_env):
+    """`AP2_COMPONENTS_AUTO_APPROVE_DISABLED=1` (no config.toml key) turns
+    auto_approve OFF across every surface — and the gate agrees."""
     cfg = _load(tmp_path, "")
-    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
-    _assert_all_agree(cfg, "auto_approve", "enabled", expected=True)
-    assert _is_auto_approve_enabled(cfg) is True
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
+    _assert_all_agree(cfg, "auto_approve", "disabled", expected=False)
+    assert _is_auto_approve_enabled(cfg) is False
     assert _is_auto_approve_enabled(cfg) is _is_enabled(cfg, "auto_approve")
 
 
@@ -149,9 +161,9 @@ def test_janitor_sectioned_env_alone_disables(tmp_path, clean_env):
 
 def test_defaults_when_neither_env_nor_config_set(tmp_path, clean_env):
     cfg = _load(tmp_path, "")
-    # auto_approve (require polarity) defaults OFF.
-    _assert_all_agree(cfg, "auto_approve", "enabled", expected=False)
-    assert _is_auto_approve_enabled(cfg) is False
+    # auto_approve (suppress polarity, TB-430 default-on) defaults ON.
+    _assert_all_agree(cfg, "auto_approve", "disabled", expected=True)
+    assert _is_auto_approve_enabled(cfg) is True
     # janitor (suppress polarity) defaults ON.
     _assert_all_agree(cfg, "janitor", "disabled", expected=True)
 
@@ -164,13 +176,13 @@ def test_defaults_when_neither_env_nor_config_set(tmp_path, clean_env):
 def test_sectioned_env_overrides_config_toml_and_all_surfaces_agree(
     tmp_path, clean_env,
 ):
-    """With config.toml saying OFF and the sectioned env saying ON, the
-    env wins (precedence) and every surface — including the gate —
-    follows it in lockstep."""
-    cfg = _load(tmp_path, "[components.auto_approve]\nenabled = false\n")
-    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
-    _assert_all_agree(cfg, "auto_approve", "enabled", expected=True)
-    assert _is_auto_approve_enabled(cfg) is True
+    """With config.toml saying ON (`disabled = false`) and the sectioned
+    env saying OFF (`...DISABLED=1`), the env wins (precedence) and every
+    surface — including the gate — follows it in lockstep."""
+    cfg = _load(tmp_path, "[components.auto_approve]\ndisabled = false\n")
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
+    _assert_all_agree(cfg, "auto_approve", "disabled", expected=False)
+    assert _is_auto_approve_enabled(cfg) is False
 
 
 # ---------------------------------------------------------------------------
@@ -181,11 +193,11 @@ def test_sectioned_env_overrides_config_toml_and_all_surfaces_agree(
 @pytest.mark.parametrize(
     "toml_body,env",
     [
-        ("", None),                                              # neither
-        ("[components.auto_approve]\nenabled = true\n", None),   # config only
-        ("", "1"),                                               # env only
-        ("[components.auto_approve]\nenabled = false\n", "1"),   # both (env wins)
-        ("[components.auto_approve]\nenabled = true\n", "0"),    # both (env wins off)
+        ("", None),                                               # neither
+        ("[components.auto_approve]\ndisabled = true\n", None),   # config only (off)
+        ("", "1"),                                                # env only (off)
+        ("[components.auto_approve]\ndisabled = false\n", "1"),   # both (env wins off)
+        ("[components.auto_approve]\ndisabled = true\n", "0"),    # both (env wins on)
     ],
 )
 def test_auto_approve_gate_never_disagrees_with_is_enabled(
@@ -193,7 +205,7 @@ def test_auto_approve_gate_never_disagrees_with_is_enabled(
 ):
     cfg = _load(tmp_path, toml_body)
     if env is not None:
-        clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", env)
+        clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", env)
     assert _is_auto_approve_enabled(cfg) is _is_enabled(cfg, "auto_approve"), (
         "the auto_approve gate and Manifest.is_enabled must resolve to the "
         f"same value (toml={toml_body!r}, env={env!r})"

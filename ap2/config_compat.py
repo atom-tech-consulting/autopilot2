@@ -5,8 +5,8 @@ L317-329). This module ships three load-bearing surfaces:
 
   1. `FLAT_TO_SECTIONED` — the operator-facing contract mapping every
      existing flat `AP2_*` env knob (as audited 2026-05-28) to its
-     sectioned counterpart (e.g. `AP2_AUTO_APPROVE` →
-     `components.auto_approve.enabled`, `AP2_TICK_S` →
+     sectioned counterpart (e.g. `AP2_AUTO_APPROVE_DRY_RUN` →
+     `components.auto_approve.dry_run`, `AP2_TICK_S` →
      `core.tick_interval_s`). The map is retained as the operator-facing
      name→path contract (and the reverse-lookup table the cfg helpers
      walk), but TB-413 gates the flat-env OVERRIDE it grants to the
@@ -124,7 +124,14 @@ FLAT_TO_SECTIONED: dict[str, str] = {
     "AP2_IDEATION_COOLDOWN_S": "core.ideation_cooldown_s",
     "AP2_IDEATION_SCRUB_MODEL": "core.ideation_scrub_model",
     # --- auto_approve component ---------------------------------------------
-    "AP2_AUTO_APPROVE": "components.auto_approve.enabled",
+    # TB-430: auto-approve flipped to default-on / opt-out. The master
+    # switch is now the suppress-polarity `disabled` knob (mirrors
+    # `AP2_AUTO_UNFREEZE_DISABLED` → `components.auto_unfreeze.disabled`).
+    # The legacy require-polarity `AP2_AUTO_APPROVE` flag has no current
+    # schema key (the `enabled` ConfigKey was removed) and is resolved
+    # env-only via the registry's `legacy_env_flag` tier — it lives in
+    # `_KNOBS_STAYING_ENV_ONLY` below, not here.
+    "AP2_AUTO_APPROVE_DISABLED": "components.auto_approve.disabled",
     "AP2_AUTO_APPROVE_DRY_RUN": "components.auto_approve.dry_run",
     "AP2_AUTO_APPROVE_GATE_TAGS": "components.auto_approve.gate_tags",
     "AP2_AUTO_APPROVE_FREEZE_THRESHOLD": "components.auto_approve.freeze_threshold",
@@ -225,6 +232,16 @@ FLAT_TO_SECTIONED: dict[str, str] = {
 #     AP2_VERIFY_JUDGE_EFFORT / AP2_VERIFY_JUDGE_MAX_TURNS — are core
 #     knobs, read via `cfg.get_core_value`, not component keys.)
 #     They stay env-only until a future TB introduces a structured schema.
+#   - Deprecated legacy master flags with no current schema key:
+#     `AP2_AUTO_APPROVE` (TB-430). auto-approve flipped to default-on /
+#     opt-out — the live master switch is `AP2_AUTO_APPROVE_DISABLED`
+#     (in FLAT_TO_SECTIONED → `components.auto_approve.disabled`). The
+#     legacy require-polarity name is retained ONLY as a transitional
+#     back-compat override, resolved env-only via the registry's
+#     `legacy_env_flag` tier (same direct-`env`-read shape as the cron
+#     kill switch). Its old `enabled` ConfigKey was removed, so it has
+#     no sectioned TOML counterpart and never migrates — it stays
+#     env-only until the back-compat window closes.
 #   - Future placeholders (`AP2_DIR`, `AP2_REAL_SDK`) named in goal.md
 #     L358 are listed for forward-compatibility — neither is currently
 #     read in source, but the goal.md cut-line documents them as
@@ -258,6 +275,18 @@ _KNOBS_STAYING_ENV_ONLY: frozenset[str] = frozenset({
     # AP2_VERIFY_JUDGE_EFFORT / AP2_VERIFY_JUDGE_MAX_TURNS — remain core
     # knobs read via `cfg.get_core_value`.)
     "AP2_VERIFY_JUDGE_DISABLED",
+    # TB-430 DEPRECATED legacy auto-approve master flag. auto-approve
+    # flipped to default-on / opt-out: the live master switch is the
+    # suppress-polarity `AP2_AUTO_APPROVE_DISABLED` (in FLAT_TO_SECTIONED
+    # → `components.auto_approve.disabled`). The legacy require-polarity
+    # `AP2_AUTO_APPROVE` is retained ONLY as a transitional back-compat
+    # override, resolved env-only via the registry's `legacy_env_flag`
+    # tier (`Manifest.is_enabled` reads it directly from `env`, same
+    # shape as `AP2_CRON_DISABLED`'s `env_flag` read). It has NO current
+    # `[components.auto_approve]` schema key (the `enabled` ConfigKey was
+    # removed by TB-430) and never migrates to TOML — operators migrate
+    # to the new knob. Stays env-only until the back-compat window closes.
+    "AP2_AUTO_APPROVE",
     # Forward-compatibility placeholders per goal.md L358 (sandbox user
     # identity + SDK-mode escape hatch). Not currently read in source;
     # listed here so a future addition stays env-only by default.

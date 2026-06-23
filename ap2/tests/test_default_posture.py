@@ -11,18 +11,21 @@ The conservative posture, pinned here against the default merged config
 (no env overrides): every operator-bypassing behavior is off/inert while
 the loop stays whole —
 
-  1. `auto_approve` is OFF — no autonomous board-edit approval; every
-     ideation proposal is born `@blocked:review` and waits for
-     `ap2 approve`.
-  2. `attention.immediate_push` is OFF — the status-report cron stays the
+  1. `attention.immediate_push` is OFF — the status-report cron stays the
      routine push surface; the daemon does not push to a channel
      unprompted on every `attention_raised`.
-  3. No communication channel is configured — `AP2_MM_CHANNELS` unset →
+  2. No communication channel is configured — `AP2_MM_CHANNELS` unset →
      the communication component's channel registry is empty (no
      outbound destination).
-  4. `auto_unfreeze` carries no `fix_shapes` allowlist — the
+  3. `auto_unfreeze` carries no `fix_shapes` allowlist — the
      briefing-shape auto-heal sweep is a no-op until the operator opts in
      by naming trusted shapes.
+
+TB-430 deliberately removed `auto_approve` from this gate: it flipped to
+default-ON (autonomous-by-default; operators opt OUT via
+`AP2_AUTO_APPROVE_DISABLED`), so an enabled auto_approve is now the
+shipped default rather than an operator-bypassing surprise. The gate
+below covers only the behaviors that remain off-by-default.
 
 The same file also asserts that an all-components-disabled config (via the
 shared `enumerate_disabled_env_flags()` helper the minimal-kernel e2e
@@ -33,9 +36,9 @@ posture matches the conservative default above.
 This test does NOT disable or change any default value; it reads the
 posture the schema already ships and locks it as a gate. The posture
 reads route through each component's canonical resolver
-(`_is_auto_approve_enabled`, `_is_attention_immediate_push_enabled`,
-`channel_registry`, `_auto_unfreeze_allowlist`) so a drift in any
-resolver's default trips this gate.
+(`_is_attention_immediate_push_enabled`, `channel_registry`,
+`_auto_unfreeze_allowlist`) so a drift in any resolver's default trips
+this gate.
 """
 from __future__ import annotations
 
@@ -44,7 +47,6 @@ from pathlib import Path
 import pytest
 
 from ap2.components.attention.impl import _is_attention_immediate_push_enabled
-from ap2.components.auto_approve import _is_auto_approve_enabled
 from ap2.components.auto_unfreeze.impl import _auto_unfreeze_allowlist
 from ap2.components.communication import channel_registry
 from ap2.config import Config
@@ -57,14 +59,11 @@ from ap2.registry import (
 from ap2.tests.test_components_disabled import enumerate_disabled_env_flags
 
 
-# Every env knob (flat + sectioned) that could override one of the four
+# Every env knob (flat + sectioned) that could override one of the three
 # posture surfaces. Cleared by the `clean_posture_env` fixture so the
 # assertions exercise the DEFAULT merged config ("no env overrides") even
 # when the test runner's environment carries an operator-tuned value.
 _POSTURE_ENV_KNOBS: tuple[str, ...] = (
-    # auto_approve master switch (flat + sectioned).
-    "AP2_AUTO_APPROVE",
-    "AP2_COMPONENTS_AUTO_APPROVE_ENABLED",
     # attention immediate-push toggle (flat + sectioned).
     "AP2_ATTENTION_IMMEDIATE_PUSH",
     "AP2_COMPONENTS_ATTENTION_IMMEDIATE_PUSH",
@@ -94,41 +93,31 @@ def clean_posture_env(monkeypatch):
 
 
 def _assert_conservative_posture(cfg: Config) -> None:
-    """Assert `cfg` resolves the four operator-bypassing behaviors to
+    """Assert `cfg` resolves the three operator-bypassing behaviors to
     off/inert — the conservative default a fresh install must ship.
 
     Shared between the default-merged-config gate and the fresh-`ap2
     init` gate so both pin the identical posture contract from one place.
-    """
-    # 1. auto_approve OFF — no autonomous board-edit approval.
-    assert _is_auto_approve_enabled(cfg) is False, (
-        "default posture must leave auto_approve disabled — a fresh "
-        "install keeps operator-in-the-loop (@blocked:review) semantics."
-    )
-    # The manifest default is require-polarity (opt-in): a synthetic empty
-    # env keeps the component disabled. Hermetic pin independent of the
-    # process env (catches a default_enabled flip at the manifest layer).
-    auto_approve = Registry.discover().get("auto_approve")
-    assert auto_approve.is_enabled(env={}) is False, (
-        "auto_approve manifest must be opt-in (default_enabled=False) so a "
-        "fresh install is operator-in-the-loop by default."
-    )
 
-    # 2. attention.immediate_push OFF — no unprompted channel push.
+    TB-430 dropped `auto_approve` from this gate: it is now default-ON
+    (operators opt OUT via `AP2_AUTO_APPROVE_DISABLED`), so an enabled
+    auto_approve is the shipped default, not a posture regression.
+    """
+    # 1. attention.immediate_push OFF — no unprompted channel push.
     assert _is_attention_immediate_push_enabled(cfg) is False, (
         "default posture must leave attention.immediate_push off — the "
         "status-report cron stays the routine push surface for fresh "
         "installs."
     )
 
-    # 3. No communication channel configured — empty channel registry.
+    # 2. No communication channel configured — empty channel registry.
     assert channel_registry(cfg) == [], (
         "default posture must configure no communication channel "
         "(AP2_MM_CHANNELS unset → empty channel registry → no outbound "
         "destination)."
     )
 
-    # 4. auto_unfreeze carries no fix_shapes allowlist — sweep is inert.
+    # 3. auto_unfreeze carries no fix_shapes allowlist — sweep is inert.
     assert _auto_unfreeze_allowlist(cfg) == frozenset(), (
         "default posture must ship no auto_unfreeze fix_shapes — the "
         "briefing-shape auto-heal sweep stays a no-op until the operator "

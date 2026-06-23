@@ -45,10 +45,18 @@ def _seed_review_gated(cfg, *, task_id="TB-50", title="ideation proposal"):
     board.save()
 
 
-def test_tick_does_not_promote_review_gated_backlog(e2e_project):
+def test_tick_does_not_promote_review_gated_backlog(e2e_project, monkeypatch):
     """A `@blocked:review` task in Backlog stays in Backlog across a
     tick — auto-promotion's `_is_blocker_satisfied("review")` is False.
+
+    TB-430: auto-approve is now default-ON, so the PRE_DISPATCH loop pass
+    would strip `@blocked:review` and let the task promote. This test
+    pins the MANUAL-review path (the gate holds until an operator
+    approves), so we opt OUT of auto-approve; the default-on strip is
+    covered by `test_approve_then_tick_promotes_and_dispatches`'s sibling
+    suite and `test_tb383_auto_approve_loop_pass.py`.
     """
+    monkeypatch.setenv("AP2_AUTO_APPROVE_DISABLED", "1")
     cfg = e2e_project()
     _seed_review_gated(cfg, task_id="TB-50")
 

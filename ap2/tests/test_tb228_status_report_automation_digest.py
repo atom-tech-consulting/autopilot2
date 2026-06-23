@@ -114,15 +114,17 @@ def _previous_status_report_idx(cfg: Config) -> int:
 def test_section_absent_when_knob_off_and_all_counters_zero(
     cfg: Config, monkeypatch,
 ):
-    """Pre-opt-in project (knob unset + no automation-loop events) →
-    the renderer returns "" so a fresh project doesn't grow a perpetual
-    "0 since last report" bullet on the cron post.
+    """Opted-out project (auto-approve disabled + no automation-loop
+    events) → the renderer returns "" so an opted-out silent project
+    doesn't grow a perpetual "0 since last report" bullet on the cron
+    post. TB-430: auto-approve is default-on, so "off" is reached via the
+    kill switch.
 
     Pin against a refactor that flips the omit-on-empty rule to
-    "always render with zeros" — that would mean every fresh project
+    "always render with zeros" — that would mean every silent project
     starts emitting noise.
     """
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     # No automation-loop events have ever been emitted; events file is
     # either empty or carries only the bootstrap noise.
     section = render_automation_loop_activity_section(
@@ -140,8 +142,9 @@ def test_run_status_report_omits_section_when_knob_off_and_quiet(
     """End-to-end: the routine doesn't append the digest to
     `state_extras` when the renderer returns "". Pins the omit-on-
     empty rule at the wiring level so a refactor that always appends
-    (even an empty string) regresses cleanly."""
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    (even an empty string) regresses cleanly. TB-430: auto-approve is
+    default-on, so "off" is reached via the kill switch."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     monkeypatch.delenv("AP2_MM_REPORT_CHANNEL", raising=False)
     monkeypatch.delenv("AP2_MM_CHANNELS", raising=False)
 

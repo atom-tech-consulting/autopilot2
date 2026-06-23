@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import re as _re
 import time
+import warnings
 from datetime import datetime
 
 from ap2 import events, ideation
@@ -68,20 +69,60 @@ AUTO_APPROVE_DEFAULT_GATE_TAGS: tuple[str, ...] = (
 )
 
 
+_LEGACY_FLAG_DEPRECATION_WARNED = False
+
+
+def _maybe_warn_legacy_auto_approve_flag() -> None:
+    """Emit a one-time deprecation note if the legacy require-polarity
+    `AP2_AUTO_APPROVE` env flag is EXPLICITLY set (TB-430).
+
+    auto-approve flipped to default-on / opt-out: the master knob is now
+    the suppress-polarity `AP2_AUTO_APPROVE_DISABLED` (or
+    `[components.auto_approve] disabled`). The legacy flag is still
+    honored as a transitional override (see `registry.Manifest`'s
+    `legacy_env_flag` tier), but we steer operators at the new spelling
+    once per process so the override doesn't silently outlive the
+    migration window.
+    """
+    global _LEGACY_FLAG_DEPRECATION_WARNED
+    if _LEGACY_FLAG_DEPRECATION_WARNED:
+        return
+    # `os.getenv` (not `os.environ.get`) keeps the TB-338 cut-line gate
+    # clean — the canonical resolution reads the flag via the registry's
+    # `env`-param tier; this is the deprecation-note side-channel only.
+    if os.getenv("AP2_AUTO_APPROVE", None) is None:
+        return
+    _LEGACY_FLAG_DEPRECATION_WARNED = True
+    warnings.warn(
+        "AP2_AUTO_APPROVE is deprecated (TB-430): auto-approve is now "
+        "default-on / opt-out. The env value is still honored as a "
+        "transitional override, but migrate to the suppress-polarity "
+        "kill switch AP2_AUTO_APPROVE_DISABLED (set =1 to opt OUT) or "
+        "[components.auto_approve] disabled = true in config.toml.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
 def _is_auto_approve_enabled(cfg: "Config | None" = None) -> bool:
     """True iff the auto-approve component resolves to enabled.
 
-    TB-427: this gate now delegates to the registry's single source of
+    TB-427: this gate delegates to the registry's single source of
     truth — `Manifest.is_enabled(cfg=cfg)` for the `auto_approve`
     component — so the gate's view can never disagree with the registry
     layer (`ap2 status` `## Components`, `ap2 doctor`,
-    `enabled_components`). One resolver, one precedence (sectioned env
-    `AP2_COMPONENTS_<NAME>_<KEY>` → the flat `AP2_AUTO_APPROVE` master
-    flag → config.toml → default):
+    `enabled_components`).
 
-      - with `cfg`: `[components.auto_approve] enabled = true` in
-        config.toml (or the sectioned env, or the flat flag) all arm the
-        feature — env beats config.toml, matching the registry view;
+    TB-430: auto-approve is now DEFAULT-ON (autonomous-by-default,
+    operators opt OUT). One resolver, one precedence (sectioned env
+    `AP2_COMPONENTS_<NAME>_<KEY>` → the flat suppress-polarity
+    `AP2_AUTO_APPROVE_DISABLED` kill switch → `[components.auto_approve]
+    disabled` in config.toml → the legacy require-polarity
+    `AP2_AUTO_APPROVE` override → default ON):
+
+      - with `cfg`: `[components.auto_approve] disabled = true` in
+        config.toml (or the sectioned env, or the flat kill switch)
+        opt OUT — env beats config.toml, matching the registry view;
       - with `cfg=None`: the same resolution minus the config.toml tier
         (the env-only read the TB-223 unit contract depends on, where
         `should_auto_approve(tags)` is called without a Config).
@@ -98,6 +139,7 @@ def _is_auto_approve_enabled(cfg: "Config | None" = None) -> bool:
             "_is_auto_approve_enabled(cfg=...) expects a Config instance; "
             f"got {type(cfg).__name__}",
         )
+    _maybe_warn_legacy_auto_approve_flag()
     from ap2.registry import default_registry
 
     return default_registry().get("auto_approve").is_enabled(cfg=cfg)
@@ -1038,8 +1080,13 @@ def run_auto_approve_pass(cfg: Config) -> None:
     if not any(_has_review(t) for t in board0.iter_tasks("Backlog")):
         return
 
+    # TB-430: auto-approve flipped to default-on / opt-out, so the
+    # operative master switch is the suppress-polarity `disabled` knob.
+    # Record its resolved config value on the audit event (empty string
+    # for the untouched default-on state) — the event still pins the
+    # operator-visible master-switch value, just under its new key.
     knob = str(
-        cfg.get_component_value("auto_approve", "enabled", default="") or "",
+        cfg.get_component_value("auto_approve", "disabled", default="") or "",
     )
     stripped_any = False
     with locked_board(cfg.tasks_file) as board:

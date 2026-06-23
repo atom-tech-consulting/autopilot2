@@ -193,20 +193,23 @@ def test_unset_knob_preserves_blocked_review_codespan(cfg: Config, monkeypatch):
 def test_set_knob_strips_blocked_review_and_emits_audit_event(
     cfg: Config, monkeypatch,
 ):
-    """`AP2_AUTO_APPROVE=1` → after the `auto_approve` loop pass runs, the
-    proposed row lands in Backlog WITHOUT the `@blocked:review` codespan,
+    """Default-on (TB-430): with no opt-out knob set, the `auto_approve`
+    loop pass strips the `@blocked:review` codespan from the proposed row
     and an `auto_approved` event fires with `task=TB-N` and `knob=`
-    capturing the env value. TB-383: `board_edit` is policy-free (the row
-    is born `@blocked:review`); the loop pass (`run_auto_approve_pass`)
-    does the strip between agent runs, exactly as the daemon's
-    PRE_DISPATCH walk drives it. The next-tick auto-promote will pick the
-    task up immediately because no review gate remains.
+    capturing the suppress-key (`disabled`) raw value — `""` for the
+    default-on / not-opted-out posture. TB-383: `board_edit` is
+    policy-free (the row is born `@blocked:review`); the loop pass
+    (`run_auto_approve_pass`) does the strip between agent runs, exactly
+    as the daemon's PRE_DISPATCH walk drives it. The next-tick
+    auto-promote will pick the task up immediately because no review gate
+    remains.
 
-    TB-413: the flat `AP2_AUTO_APPROVE` tunable override is removed
-    (config.toml is the sole source); to inject the enable for this
-    downstream-behavior test we set the SECTIONED env name, which still
-    overrides at `cfg.get_component_value` resolution time."""
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    TB-430: auto-approve flipped to default-on / opt-out, so the feature
+    is ON without any env injection. Strip the opt-out knobs explicitly
+    for hermeticity (the conftest already pops the legacy
+    `AP2_AUTO_APPROVE`)."""
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
 
     res = tools.do_board_edit(
         cfg,
@@ -232,8 +235,8 @@ def test_set_knob_strips_blocked_review_and_emits_audit_event(
     section, idx = loc
     line = board.sections[section][idx]
     assert "@blocked:review" not in line, (
-        "AP2_AUTO_APPROVE=1 must strip `@blocked:review` from the row; "
-        f"got: {line!r}"
+        "default-on auto-approve must strip `@blocked:review` from the "
+        f"row; got: {line!r}"
     )
     # Stripping `review` from a `blocked_on` that contained only that
     # token should leave no `@blocked:` codespan at all (`_approve_review_token`-shape
@@ -247,7 +250,9 @@ def test_set_knob_strips_blocked_review_and_emits_audit_event(
     auto_evts = [e for e in evts if e.get("type") == "auto_approved"]
     assert len(auto_evts) == 1, evts
     assert auto_evts[0]["task"] == tb_id
-    assert auto_evts[0]["knob"] == "1"
+    # TB-430: the audit payload captures the suppress-key (`disabled`)
+    # raw value; default-on / not-opted-out resolves to "".
+    assert auto_evts[0]["knob"] == ""
 
 
 def test_set_knob_with_mixed_blockers_only_strips_review(
@@ -396,22 +401,39 @@ def test_should_auto_approve_helper_directly(monkeypatch):
     """Direct unit pin on `should_auto_approve(tags)` so a refactor that
     changes the helper signature surfaces clearly instead of cascading
     through the loop-pass integration. TB-383: the tags policy relocated
-    from `ideation` into the `auto_approve` component."""
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
-    assert should_auto_approve(["#anything"]) is False
-    assert should_auto_approve(None) is False
+    from `ideation` into the `auto_approve` component.
 
-    monkeypatch.setenv("AP2_AUTO_APPROVE", "1")
+    TB-430: auto-approve is now default-on / opt-out. With no env knob
+    set, the master switch is ON, so a non-gated tag list auto-approves;
+    a gate-tag still retains review. Opting OUT via the suppress kill
+    switch `AP2_AUTO_APPROVE_DISABLED=1` (or the legacy `AP2_AUTO_APPROVE=0`
+    back-compat override) flips every shape to False."""
+    # Clean env → default-on (conftest already pops the legacy flag).
+    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DISABLED", raising=False)
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     monkeypatch.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
     # Default gate-tags exclude #autopilot → auto-approve.
     assert should_auto_approve(["#autopilot"]) is True
     # Default gate-tags include #breaking-change → retain review.
     assert should_auto_approve(["#breaking-change"]) is False
-    # No tags at all → auto-approve (operator opted in, no gate hit).
+    # No tags at all → auto-approve (default-on, no gate hit).
     assert should_auto_approve([]) is True
     assert should_auto_approve(None) is True
     # Bare tag without `#` prefix still matches the gate.
     assert should_auto_approve(["breaking-change"]) is False
+
+    # Opt OUT via the suppress kill switch → every shape is False.
+    monkeypatch.setenv("AP2_AUTO_APPROVE_DISABLED", "1")
+    assert should_auto_approve(["#autopilot"]) is False
+    assert should_auto_approve(None) is False
+    monkeypatch.delenv("AP2_AUTO_APPROVE_DISABLED", raising=False)
+
+    # Legacy back-compat: an un-migrated `AP2_AUTO_APPROVE=0` still opts
+    # OUT via the registry's transitional `legacy_env_flag` tier.
+    monkeypatch.setenv("AP2_AUTO_APPROVE", "0")
+    assert should_auto_approve(["#autopilot"]) is False
+    assert should_auto_approve(None) is False
 
 
 # ===========================================================================

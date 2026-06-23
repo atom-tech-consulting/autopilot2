@@ -133,9 +133,9 @@ its sectioned counterpart on the loaded `Config`; one-shot per process
 per knob — module-level `_EMITTED_ONCE: set[str]` guarded by a
 `threading.Lock` records each flat name's first hit, so a daemon read
 at startup + re-checks on later config reloads stay silent past the
-first; payload `flat` (the deprecated env name — e.g. `AP2_AUTO_APPROVE`),
+first; payload `flat` (the deprecated env name — e.g. `AP2_AUTO_APPROVE_DRY_RUN`),
 `sectioned` (its replacement path — e.g.
-`components.auto_approve.enabled`), `process_pid` (so a multi-daemon
+`components.auto_approve.dry_run`), `process_pid` (so a multi-daemon
 operator setup can attribute the event to its emitter); the
 audit trail makes the migration discoverable in `events.jsonl` —
 a fresh ap2 upgrade surfaces every still-set legacy knob at first

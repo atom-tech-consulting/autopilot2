@@ -93,8 +93,8 @@ def _is_truthy(raw: object) -> bool:
     reference the `_is_truthy` name.
 
     TB-332: accepts a non-string value (typed bool from a cfg TOML
-    snapshot — `[components.auto_approve] enabled = false` populates
-    `cfg.components_config["auto_approve"]["enabled"]` as Python's
+    snapshot — `[components.auto_approve] disabled = false` populates
+    `cfg.components_config["auto_approve"]["disabled"]` as Python's
     bool `False`) — the shared helper short-circuits on a real bool.
     Pre-TB-428 this wrapper's membership test was case-SENSITIVE, so a
     string `"True"` (e.g. a sectioned-env `AP2_COMPONENTS_..._ENABLED=True`)
@@ -611,7 +611,13 @@ def collect_auto_approve_state(
     Keys (always present, machine consumers can rely on the shape
     regardless of knob-state):
 
-      - `auto_approve_enabled` (bool) — `AP2_AUTO_APPROVE` truthy.
+      - `auto_approve_enabled` (bool) — resolved via the registry's
+        single source of truth (`Manifest.is_enabled`). TB-430:
+        auto-approve is default-on / opt-out, so this is `True` unless
+        the operator set the suppress-polarity kill switch
+        `AP2_AUTO_APPROVE_DISABLED` (or `[components.auto_approve]
+        disabled`), with the legacy `AP2_AUTO_APPROVE` honored as a
+        transitional override.
       - `auto_approve_paused`  (bool) — auto-promote is currently
         halted by any of the four halt conditions (TB-223 freeze
         threshold OR TB-224 per-task / window / task_error).
@@ -692,18 +698,19 @@ def collect_auto_approve_state(
     Pure / no I/O beyond reading `cfg.events_file`; safe to call from
     either CLI or web request handlers without taking the board lock.
     """
-    # TB-332 axis-5 cross-package migration: read every auto_approve
-    # knob via `cfg.get_component_value(...)` instead of direct
-    # `os.environ.get(...)`. Same precedence (sectioned env > flat env
-    # > cfg snapshot > default) so the operator's `AP2_AUTO_APPROVE*`
-    # env exports keep working unchanged via the
-    # `FLAT_TO_SECTIONED` reverse-lookup. `_is_truthy` was extended
-    # (above) to short-circuit on a typed bool (the cfg TOML snapshot
-    # path may hand us `True`/`False` directly per the manifest's
-    # `enabled` ConfigKey type=bool, default=False).
-    enabled = _is_truthy(
-        cfg.get_component_value("auto_approve", "enabled", default=""),
-    )
+    # TB-430: resolve the master enable/disable signal through the
+    # registry's single source of truth (`Manifest.is_enabled`) rather
+    # than reading a single config key directly. auto-approve flipped to
+    # default-on / opt-out, so the enablement key moved from `enabled`
+    # (require-polarity) to `disabled` (suppress-polarity) AND a legacy
+    # `AP2_AUTO_APPROVE` back-compat tier now participates — delegating
+    # to `is_enabled(cfg=cfg)` keeps this status surface in lockstep
+    # with `_is_auto_approve_enabled`, `ap2 status` `## Components`, and
+    # `ap2 doctor` (one resolver, one precedence: sectioned env > flat
+    # kill switch > cfg snapshot > legacy override > default-on).
+    from ap2.registry import default_registry
+
+    enabled = default_registry().get("auto_approve").is_enabled(cfg=cfg)
     threshold = _freeze_threshold(cfg)
     per_task_cap = _positive_int_cap(
         "AP2_AUTO_APPROVE_PER_TASK_TOKEN_CAP", cfg,

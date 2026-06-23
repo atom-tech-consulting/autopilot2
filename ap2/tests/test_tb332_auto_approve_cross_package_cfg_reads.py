@@ -53,6 +53,7 @@ from ap2.components import auto_approve
 from ap2.config import Config
 from ap2.config_compat import (
     FLAT_TO_SECTIONED,
+    _KNOBS_STAYING_ENV_ONLY,
     reset_env_deprecated_emit_for_tests,
 )
 from ap2.init import init_project
@@ -270,15 +271,15 @@ def test_ideation_should_auto_approve_cfg_reads_match_env(
     cfg, clean_env, emit_reset,
 ):
     """`auto_approve.should_auto_approve(tags, cfg)` honors both the master
-    switch (`AP2_AUTO_APPROVE`) and the per-shape gate
-    (`AP2_AUTO_APPROVE_GATE_TAGS`) read via cfg. Same gate logic as the
-    pre-TB-332 env-only helper.
+    switch (TB-430: the suppress-polarity `AP2_AUTO_APPROVE_DISABLED`) and
+    the per-shape gate (`AP2_AUTO_APPROVE_GATE_TAGS`) read via cfg. Same
+    gate logic as the pre-TB-332 env-only helper, post-flip polarity.
     """
-    # Master switch off → False regardless of tags.
-    clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
+    # Opted OUT (suppress-polarity disable) → False regardless of tags.
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     assert auto_approve.should_auto_approve(["#anything"], cfg) is False
-    # Master switch on, default gate tags → #breaking-change blocks.
-    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    # Default-ON (opt-out cleared), default gate tags → #breaking-change blocks.
+    clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
     assert auto_approve.should_auto_approve(["#breaking-change"], cfg) is False
     assert auto_approve.should_auto_approve(["#autopilot"], cfg) is True
@@ -310,15 +311,18 @@ def test_collect_auto_approve_state_cfg_reads_match_env(
 def test_doctor_auto_approve_audit_cfg_reads_match_env(
     cfg, clean_env, emit_reset,
 ):
-    """`doctor.auto_approve_audit(cfg)` reads via cfg. With master
-    switch off → INFO-only. With master on + no caps → 3 WARN lines.
-    Same shape the TB-234 env-only tests pin on `auto_approve_audit()`.
+    """`doctor.auto_approve_audit(cfg)` reads via cfg. TB-430: auto-approve
+    is default-ON, so with no caps configured → 3 WARN lines; opting OUT
+    via `AP2_COMPONENTS_AUTO_APPROVE_DISABLED` → INFO-only. Same shape the
+    TB-234 env-only tests pin on `auto_approve_audit()`, post-flip polarity.
     """
-    clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", raising=False)
+    # Opted OUT → INFO-only.
+    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     res = doctor.auto_approve_audit(cfg)
     assert [lvl for lvl, _ in res.messages] == ["INFO"]
 
-    clean_env.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    # Default-ON + no caps → 3 WARN lines.
+    clean_env.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     res = doctor.auto_approve_audit(cfg)
     levels = [lvl for lvl, _ in res.messages]
     assert levels.count("WARN") == 3, levels
@@ -369,25 +373,36 @@ def test_positive_int_cap_default_none_falls_back_to_env(clean_env):
 
 
 def test_ideation_should_auto_approve_default_none_falls_back_to_env(clean_env):
-    """`auto_approve.should_auto_approve(tags)` (no cfg) reads
-    `AP2_AUTO_APPROVE` + `AP2_AUTO_APPROVE_GATE_TAGS` via the env-
-    fallback branch. Pins the TB-223 `test_should_auto_approve_helper_
-    directly` contract.
+    """`auto_approve.should_auto_approve(tags)` (no cfg) reads the env
+    layer directly via the registry's env tiers + `AP2_AUTO_APPROVE_GATE_TAGS`.
+    TB-430: auto-approve is default-ON when no opt-out env is set; the
+    legacy require-polarity `AP2_AUTO_APPROVE=0` and the new suppress-
+    polarity `AP2_AUTO_APPROVE_DISABLED=1` both opt OUT.
     """
     clean_env.delenv("AP2_AUTO_APPROVE", raising=False)
-    assert auto_approve.should_auto_approve(["#anything"]) is False
-    assert auto_approve.should_auto_approve(None) is False
-    clean_env.setenv("AP2_AUTO_APPROVE", "1")
+    clean_env.delenv("AP2_AUTO_APPROVE_DISABLED", raising=False)
     clean_env.delenv("AP2_AUTO_APPROVE_GATE_TAGS", raising=False)
+    # Default-ON: auto-approve unless a gate-tag hits.
     assert auto_approve.should_auto_approve(["#autopilot"]) is True
+    assert auto_approve.should_auto_approve(None) is True
     assert auto_approve.should_auto_approve(["#breaking-change"]) is False
+    # Legacy require-polarity opt-out (transitional back-compat).
+    clean_env.setenv("AP2_AUTO_APPROVE", "0")
+    assert auto_approve.should_auto_approve(["#autopilot"]) is False
+    clean_env.delenv("AP2_AUTO_APPROVE", raising=False)
+    # New suppress-polarity opt-out.
+    clean_env.setenv("AP2_AUTO_APPROVE_DISABLED", "1")
+    assert auto_approve.should_auto_approve(["#autopilot"]) is False
 
 
 def test_doctor_auto_approve_audit_default_none_falls_back_to_env(clean_env):
-    """`doctor.auto_approve_audit()` (no cfg) reads env directly via
-    the back-compat branch. Pins the TB-234 contract.
+    """`doctor.auto_approve_audit()` (no cfg) reads env directly via the
+    registry's env tiers. TB-430: auto-approve is default-ON, so opting
+    OUT via the suppress-polarity `AP2_AUTO_APPROVE_DISABLED=1` yields the
+    INFO-only line. Pins the TB-234 contract, post-flip polarity.
     """
     clean_env.delenv("AP2_AUTO_APPROVE", raising=False)
+    clean_env.setenv("AP2_AUTO_APPROVE_DISABLED", "1")
     res = doctor.auto_approve_audit()
     assert [lvl for lvl, _ in res.messages] == ["INFO"]
 
@@ -453,7 +468,12 @@ def test_should_auto_approve_rejects_non_config_positional():
 @pytest.mark.parametrize(
     "flat, sectioned",
     [
-        ("AP2_AUTO_APPROVE", "components.auto_approve.enabled"),
+        # TB-430: the master switch flipped to the suppress-polarity
+        # `AP2_AUTO_APPROVE_DISABLED` → `components.auto_approve.disabled`.
+        # The legacy require-polarity `AP2_AUTO_APPROVE` is now env-only
+        # (in `_KNOBS_STAYING_ENV_ONLY`, NOT `FLAT_TO_SECTIONED`) — pinned
+        # by `test_legacy_auto_approve_flag_is_env_only` below.
+        ("AP2_AUTO_APPROVE_DISABLED", "components.auto_approve.disabled"),
         ("AP2_AUTO_APPROVE_DRY_RUN", "components.auto_approve.dry_run"),
         ("AP2_AUTO_APPROVE_GATE_TAGS", "components.auto_approve.gate_tags"),
         (
@@ -486,4 +506,23 @@ def test_flat_to_sectioned_pins_the_seven_migrated_knobs(
         f"TB-332: `FLAT_TO_SECTIONED[{flat!r}]` must map to "
         f"{sectioned!r} for the auto_approve cross-package reverse-"
         f"lookup back-compat path; got {FLAT_TO_SECTIONED.get(flat)!r}"
+    )
+
+
+def test_legacy_auto_approve_flag_is_env_only():
+    """TB-430: the DEPRECATED legacy master flag `AP2_AUTO_APPROVE` is
+    resolved env-only (the registry's `legacy_env_flag` tier), so it must
+    NOT appear in `FLAT_TO_SECTIONED` (which would dead-map it to the
+    retired `components.auto_approve.enabled` key) — it belongs in
+    `_KNOBS_STAYING_ENV_ONLY`, the same category as the other
+    deployment-shell master switches (`AP2_CRON_DISABLED`, etc.).
+    """
+    assert "AP2_AUTO_APPROVE" not in FLAT_TO_SECTIONED, (
+        "TB-430: legacy `AP2_AUTO_APPROVE` must not map through "
+        "FLAT_TO_SECTIONED — it is env-only (registry legacy tier)."
+    )
+    assert "AP2_AUTO_APPROVE" in _KNOBS_STAYING_ENV_ONLY, (
+        "TB-430: legacy `AP2_AUTO_APPROVE` must be declared in "
+        "`_KNOBS_STAYING_ENV_ONLY` so the TB-338 cut-line gate accepts "
+        "its env-only resolution."
     )

@@ -111,12 +111,13 @@ def _queue_and_drain(cfg: Config, payload: dict) -> str:
 def test_drain_add_backlog_with_review_strips_when_auto_approve_on(
     cfg: Config, monkeypatch,
 ):
-    """With `AP2_AUTO_APPROVE=1` and all gates passing, draining an
+    """Default-on (TB-430) with all gates passing: draining an
     `add_backlog` op whose meta carries `blocked=review` strips the
     review token from the landed task and emits `auto_approved` with
-    `task=TB-N` + `knob=1`. Mirrors `do_board_edit`'s TB-223 set-knob
-    case at the queue-drain surface."""
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    `task=TB-N` + `knob=""` (the suppress-key `disabled` raw value for the
+    default-on / not-opted-out posture). Mirrors `do_board_edit`'s TB-223
+    set-knob case at the queue-drain surface."""
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", raising=False)
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
@@ -132,8 +133,8 @@ def test_drain_add_backlog_with_review_strips_when_auto_approve_on(
     section, idx = loc
     line = board.sections[section][idx]
     assert "@blocked:review" not in line, (
-        f"AP2_AUTO_APPROVE=1 + queue-drain must strip `@blocked:review`; "
-        f"got: {line!r}"
+        f"default-on auto-approve + queue-drain must strip "
+        f"`@blocked:review`; got: {line!r}"
     )
     # The review-only blocker should leave NO `@blocked:` codespan
     # behind (matches `_approve_review_token` clean-line behavior).
@@ -146,26 +147,28 @@ def test_drain_add_backlog_with_review_strips_when_auto_approve_on(
     auto = [e for e in evts if e.get("type") == "auto_approved"]
     assert len(auto) == 1, evts
     assert auto[0]["task"] == tb_id
-    assert auto[0]["knob"] == "1"
+    assert auto[0]["knob"] == ""
 
 
 # ===========================================================================
-# (2) Knob unset → review token preserved + no event fires.
+# (2) Opted out → review token preserved + no event fires.
 # ===========================================================================
 
 
-def test_drain_add_backlog_with_review_preserves_when_auto_approve_unset(
+def test_drain_add_backlog_with_review_preserves_when_opted_out(
     cfg: Config, monkeypatch,
 ):
-    """Default behavior (`AP2_AUTO_APPROVE` unset): the queue-drain
-    handler must NOT strip the review token, and no `auto_approved`
-    event fires. Pins the safe default so a future refactor that
-    silently flips the knob trips here."""
-    monkeypatch.delenv("AP2_AUTO_APPROVE", raising=False)
+    """Opted OUT (`AP2_COMPONENTS_AUTO_APPROVE_DISABLED=1`): the
+    queue-drain handler must NOT strip the review token, and no
+    `auto_approved` event fires. TB-430: auto-approve is default-on, so
+    the preserve posture is reached by opting OUT, not by leaving the knob
+    unset. Pins the opt-out so a future refactor that ignores the kill
+    switch trips here."""
+    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", "1")
     monkeypatch.delenv("AP2_AUTO_APPROVE_DRY_RUN", raising=False)
 
     tb_id = _queue_and_drain(cfg, {
-        "title": "queue-drained default-mode add",
+        "title": "queue-drained opted-out add",
         "blocked_on": "review",
         "tags": ["#autopilot"],
     })
@@ -176,16 +179,16 @@ def test_drain_add_backlog_with_review_preserves_when_auto_approve_unset(
     section, idx = loc
     line = board.sections[section][idx]
     assert "@blocked:review" in line, (
-        f"`AP2_AUTO_APPROVE` unset must preserve `@blocked:review` on "
-        f"the queue-drained row; got: {line!r}"
+        f"opting out must preserve `@blocked:review` on the queue-drained "
+        f"row; got: {line!r}"
     )
 
     evts = events.tail(cfg.events_file, 50)
     assert [e for e in evts if e.get("type") == "auto_approved"] == [], (
-        "AP2_AUTO_APPROVE unset must NOT emit auto_approved events"
+        "opted-out auto-approve must NOT emit auto_approved events"
     )
     assert [e for e in evts if e.get("type") == "would_auto_approve"] == [], (
-        "AP2_AUTO_APPROVE unset must NOT emit would_auto_approve events"
+        "opted-out auto-approve must NOT emit would_auto_approve events"
     )
 
 
@@ -197,11 +200,11 @@ def test_drain_add_backlog_with_review_preserves_when_auto_approve_unset(
 def test_drain_add_backlog_dry_run_emits_simulated_event(
     cfg: Config, monkeypatch,
 ):
-    """With `AP2_AUTO_APPROVE=1` AND `AP2_AUTO_APPROVE_DRY_RUN=1`, the
-    queue-drain handler keeps the review token but emits a
+    """Default-on (TB-430) with `AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN=1`,
+    the queue-drain handler keeps the review token but emits a
     `would_auto_approve` event with `dry_run=True`. Mirrors
     `do_board_edit`'s TB-232 dry-run on-ramp at the queue surface."""
-    monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_ENABLED", "1")
+    monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_DISABLED", raising=False)
     monkeypatch.setenv("AP2_COMPONENTS_AUTO_APPROVE_DRY_RUN", "1")
     monkeypatch.delenv("AP2_COMPONENTS_AUTO_APPROVE_GATE_TAGS", raising=False)
 
@@ -225,7 +228,8 @@ def test_drain_add_backlog_dry_run_emits_simulated_event(
     would = [e for e in evts if e.get("type") == "would_auto_approve"]
     assert len(would) == 1, evts
     assert would[0]["task"] == tb_id
-    assert would[0]["knob"] == "1"
+    # TB-430: knob = suppress-key (`disabled`) raw value, "" default-on.
+    assert would[0]["knob"] == ""
     assert would[0]["dry_run"] is True
     # And `auto_approved` does NOT fire — dry-run path stays
     # simulation-only.

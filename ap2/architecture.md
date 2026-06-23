@@ -76,8 +76,9 @@ The loop subsystems that used to be flat top-level modules wired into `_tick` by
 **`env_flag` polarity.** `Manifest.is_enabled()` is the single source of truth (shared by the registry's enabled-walk and the `ap2 status` `## Components` enumeration):
 
 - `env_flag is None` → always-on (subject to `default_enabled`). Only `attention` and `communication` are always-on today.
-- `env_flag` set with `default_enabled=True` → the env var is a **kill switch** (suppress polarity): a truthy value DISABLES. The conventional shape is `*_DISABLED` (e.g. `AP2_JANITOR_DISABLED`, `AP2_CRON_DISABLED`, `AP2_AUTO_UNFREEZE_DISABLED`).
-- `env_flag` set with `default_enabled=False` → the env var is an **opt-in toggle** (require polarity): a truthy value ENABLES (e.g. `AP2_AUTO_APPROVE`).
+- `env_flag` set with `default_enabled=True` → the env var is a **kill switch** (suppress polarity): a truthy value DISABLES. The conventional shape is `*_DISABLED` (e.g. `AP2_JANITOR_DISABLED`, `AP2_CRON_DISABLED`, `AP2_AUTO_UNFREEZE_DISABLED`, and — since TB-430 flipped auto-approve to autonomous-by-default — `AP2_AUTO_APPROVE_DISABLED`).
+- `env_flag` set with `default_enabled=False` → the env var is an **opt-in toggle** (require polarity): a truthy value ENABLES. No production component ships this polarity today (TB-430 was the last opt-in flip); the require branch is exercised by the synthetic manifests in `test_tb319_status_components.py`.
+- `legacy_env_flag` (optional) → a deprecated flat flag from a PRIOR polarity, honored as a transitional override only when every current knob is silent. `auto_approve` declares `AP2_AUTO_APPROVE` here so an un-migrated deployment's old opt-in flag keeps working (`=1` on, `=0` off) with a one-time `DeprecationWarning` steering at `AP2_AUTO_APPROVE_DISABLED`.
 
 **Import-direction CI gate.** Core never statically imports `ap2/components/` — a component may import core freely (component → core), but core → component is forbidden. `tests/test_core_import_direction.py` AST-walks every `.py` under `ap2/` (except `ap2/components/` and `ap2/tests/`) and fails the build on any `Import` / `ImportFrom` referencing `ap2.components`. The only exempt path is `registry.py`, whose discovery uses dynamic `importlib.import_module(...)` (a `Call`, not a static import, so the gate is quiet by construction). This is what keeps the cleavage from eroding silently and is the prerequisite for an eventual OSS cut.
 
@@ -263,7 +264,7 @@ ap2/
 │   │                     # cost_cap_approach conditions; emits attention_raised events (one per fresh
 │   │                     # condition) + optional immediate MM push (always-on; env_flag=None)
 │   ├── auto_approve/      # evaluate_auto_approve_decision + the promote-time gate chain (Phase.PRE_DISPATCH
-│   │                     # pass); opt-in via AP2_AUTO_APPROVE (default_enabled=False)
+│   │                     # pass); default-on / opt-OUT via AP2_AUTO_APPROVE_DISABLED (default_enabled=True, TB-430)
 │   ├── auto_unfreeze/     # _maybe_auto_unfreeze sweep consuming `BriefingFix:` lines (Phase.PRE_DISPATCH);
 │   │                     # kill switch AP2_AUTO_UNFREEZE_DISABLED
 │   ├── cron/             # the cron SCHEDULER (Phase.CRON_DISPATCH): load_jobs → due_jobs → resolve each

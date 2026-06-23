@@ -1457,13 +1457,15 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
                     # the direct path. Then emit `auto_approved` with
                     # the same payload shape `do_board_edit` uses.
                     # TB-332 axis-5 cross-package migration: read the
-                    # `AP2_AUTO_APPROVE` knob via
-                    # `cfg.get_component_value("auto_approve", "enabled")`
+                    # master-switch knob via
+                    # `cfg.get_component_value("auto_approve", "disabled")`
                     # so the event-payload string shape preserves the
                     # downstream-parser contract (TB-223 / TB-232
                     # audit consumers expect the raw env-style value).
+                    # TB-430: the master switch is now the suppress-polarity
+                    # `disabled` knob (auto-approve is default-on / opt-out).
                     _approve_review_token(board, task_id)
-                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
+                    _knob = cfg.get_component_value("auto_approve", "disabled", default="")
                     events.append(
                         cfg.events_file,
                         "auto_approved",
@@ -1476,10 +1478,10 @@ def _apply_operator_op(cfg: Config, board: Board, rec: dict) -> None:
                     # WRITE step. The `@blocked:review` codespan
                     # survives so the task still requires operator
                     # `ap2 approve`. Mirrors the direct-path payload
-                    # (`dry_run=True` discriminator). TB-332: same
+                    # (`dry_run=True` discriminator). TB-332/TB-430: same
                     # `cfg.get_component_value("auto_approve",
-                    # "enabled")` read path as the strip branch above.
-                    _knob = cfg.get_component_value("auto_approve", "enabled", default="")
+                    # "disabled")` read path as the strip branch above.
+                    _knob = cfg.get_component_value("auto_approve", "disabled", default="")
                     events.append(
                         cfg.events_file,
                         "would_auto_approve",
