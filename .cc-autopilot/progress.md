@@ -1725,3 +1725,9 @@
 - **Summary:** Removed the vestigial statusline sandbox feature (install_statusline/_statusline_source/cmd_install_statusline, the install-statusline verb, the --skip-statusline flag + user-setup step, and all doc/test references); full non-smoke suite green (3101 passed, 1 skipped), `ap2 sandbox --help` no longer lists install-statusline, and `grep -rIn statusline ap2/` is clean.
 - **Files:** ap2/sandbox.py, ap2/cli.py, ap2/README.md, ap2/architecture.md, ap2/skills/ap2-board-ops/SKILL.md, ap2/tests/test_sandbox.py, ap2/tests/test_tb214_sandbox_install_verbs.py, ap2/tests/test_tb215_sandbox_audit_setup_verbs.py, ap2/tests/test_coverage_drift.py, sandboxed-user-setup.md
 - **Tests:** pass
+
+## [2026-06-23] TB-424: Ship AGENTS.md as installed package data so sync-assets deploys it after `uv tool install` (mirror TB-422 skills fix)
+- **Commit:** `430b49b`
+- **Summary:** Relocated AGENTS.md to ap2/AGENTS.md and switched _agents_md_source() to importlib.resources resolution (with editable fallback) so sync-assets deploys it after a bare uv tool install, mirroring TB-422; verified ap2/AGENTS.md ships in the built wheel via the existing *.md package-data glob.
+- **Files:** ap2/AGENTS.md, ap2/sandbox.py, ap2/tests/test_agents_md_packaging.py, ap2/tests/test_sync_assets.py, ap2/README.md, README.md
+- **Tests:** pass
