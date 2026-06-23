@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-425** **Ship the full ap2 subpackage tree in the wheel via setuptools autodiscovery (fixes `ModuleNotFoundError: ap2.components` on non-editable installs)** `#autopilot` `#packaging` `#distribution` `#pyproject` `#components` `#blocker` [→ brief](.cc-autopilot/tasks/ship-the-full-ap2-subpackage-tree-in-the.md)
 
 ## Pipeline Pending
 
