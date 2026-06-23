@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-423** **Remove the statusline feature from repo and code (it references a deleted hooks/ script and is not required by ap2)** `#autopilot` `#sandbox` `#cleanup` `#statusline` `#cli` `#distribution` [→ brief](.cc-autopilot/tasks/remove-the-statusline-feature-from-repo.md)
 
 ## Pipeline Pending
 
@@ -304,5 +303,6 @@
 - [x] **TB-420** **Add verification-bullet shell-syntax conventions to ideation.default.md (recursive grep needs -I, !-prefix, -r, Prose:, grep -c) so ideation stops emitting broken bullets** `#autopilot` `#ideation` `#prompts` `#briefing` `#verification` `#robustness` [→ brief](.cc-autopilot/tasks/add-verification-bullet-shell-syntax-con.md)
 - [x] **TB-421** **Register grep_recursive_needs_binary_skip auto-unfreeze fix-shape (grep -rn -> grep -rnI) so the daemon self-heals binary-pyc false-fail bullets** `#autopilot` `#auto-unfreeze` `#fix-shapes` `#briefing` `#verification` `#robustness` [→ brief](.cc-autopilot/tasks/register-grep-recursive-needs-binary-ski.md)
 - [x] **TB-422** **Ship operator skills with the installed package so sync-assets works after `uv tool install` (not only from a repo clone)** `#autopilot` `#packaging` `#skills` `#distribution` `#sandbox` `#sync-assets` [→ brief](.cc-autopilot/tasks/ship-operator-skills-with-the-installed.md)
+- [x] **TB-423** **Remove the statusline feature from repo and code (it references a deleted hooks/ script and is not required by ap2)** `#autopilot` `#sandbox` `#cleanup` `#statusline` `#cli` `#distribution` [→ brief](.cc-autopilot/tasks/remove-the-statusline-feature-from-repo.md)
 
 ## Frozen
