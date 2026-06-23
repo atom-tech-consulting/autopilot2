@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-423** **Remove the statusline feature from repo and code (it references a deleted hooks/ script and is not required by ap2)** `#autopilot` `#sandbox` `#cleanup` `#statusline` `#cli` `#distribution` [→ brief](.cc-autopilot/tasks/remove-the-statusline-feature-from-repo.md)
 
 ## Pipeline Pending
 
