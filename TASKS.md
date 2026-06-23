@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-426** **Scaffold + provision the fenced-file `.claude/settings.json` deny list (ap2 init writes it committed; project-setup backfills the clone)** `#autopilot` `#init` `#sandbox` `#project-setup` `#fence` `#permissions` `#security` [→ brief](.cc-autopilot/tasks/scaffold-provision-the-fenced-file-claud.md)
 
 ## Pipeline Pending
 
