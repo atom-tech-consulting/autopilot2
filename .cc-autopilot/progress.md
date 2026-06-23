@@ -1731,3 +1731,9 @@
 - **Summary:** Relocated AGENTS.md to ap2/AGENTS.md and switched _agents_md_source() to importlib.resources resolution (with editable fallback) so sync-assets deploys it after a bare uv tool install, mirroring TB-422; verified ap2/AGENTS.md ships in the built wheel via the existing *.md package-data glob.
 - **Files:** ap2/AGENTS.md, ap2/sandbox.py, ap2/tests/test_agents_md_packaging.py, ap2/tests/test_sync_assets.py, ap2/README.md, README.md
 - **Tests:** pass
+
+## [2026-06-23] TB-425: Ship the full ap2 subpackage tree in the wheel via setuptools autodiscovery (fixes `ModuleNotFoundError: ap2.components` on non-editable installs)
+- **Commit:** `8016e0c`
+- **Summary:** Replaced the hand-maintained [tool.setuptools] packages list with autodiscovery ([tool.setuptools.packages.find] include=["ap2","ap2.*"]) so the full ap2.components tree ships in the wheel (verified: built wheel carries 25 ap2/components/ files incl. ideation), and added ap2/tests/test_packaging_completeness.py guarding every on-disk package against omission via setuptools.find_packages (declared setuptools in the dev extra for it); new test + packaging suite pass.
+- **Files:** pyproject.toml, uv.lock, ap2/tests/test_packaging_completeness.py
+- **Tests:** pass

@@ -66,3 +66,10 @@ resolves from the repo tree, so it only surfaces on the install path real users 
 - The skills / AGENTS.md package-data globs (TB-422/424; already correct — leave them).
 - Any runtime/registry code change — `ap2.components` imports fine in editable
   checkouts; the defect is purely the wheel's package manifest.
+## Attempts
+
+### 2026-06-23 — error
+(no summary)
+- **error:** Exception: Claude Code returned an error result: success
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260623T064012Z-TB-425.prompt.md`, `stream: .cc-autopilot/debug/20260623T064012Z-TB-425.stream.jsonl`, `messages: .cc-autopilot/debug/20260623T064012Z-TB-425.messages.jsonl`
