@@ -9,6 +9,7 @@
 ## Backlog
 
 - [ ] **TB-430** **Flip auto_approve to default-on framework-wide: autonomous-by-default, operators opt OUT (was opt-in default-off)** `#autopilot` `#auto_approve` `#components` `#registry` `#config` `#posture` `#distribution` [→ brief](.cc-autopilot/tasks/flip-auto-approve-to-default-on-framewor.md)
+- [ ] **TB-431** **Update the top-level README quickstart for auto-approve-on-by-default + the no-sandbox safety tradeoff** `#autopilot` `#docs` `#readme` `#quickstart` `#auto_approve` `#distribution` `@blocked:TB-430` [→ brief](.cc-autopilot/tasks/update-the-top-level-readme-quickstart-f.md)
 
 ## Pipeline Pending
 

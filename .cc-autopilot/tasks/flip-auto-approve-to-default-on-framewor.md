@@ -83,3 +83,10 @@ must not silently break existing deployments that set the old `AP2_AUTO_APPROVE`
 - The countdown sandbox project's own config (operator-managed; after this ships +
   deploys, its pinned `AP2_AUTO_APPROVE=1` env hack becomes unnecessary).
 - goal.md edits (fenced; operator-owned).
+## Attempts
+
+### 2026-06-23 — timeout
+(no summary)
+- **timeout_s:** 3600
+- **stderr_tail:** 
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260623T185441Z-TB-430.prompt.md`, `stream: .cc-autopilot/debug/20260623T185441Z-TB-430.stream.jsonl`, `messages: .cc-autopilot/debug/20260623T185441Z-TB-430.messages.jsonl`
