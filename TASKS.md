@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-427** **Fix split-brained component enablement: `Manifest.is_enabled` ignores config.toml, so `[components.auto_approve] enabled=true` never turns the component on (status/doctor/registry disagree with the gate)** `#autopilot` `#config` `#registry` `#auto_approve` `#components` `#bug` [→ brief](.cc-autopilot/tasks/fix-split-brained-component-enablement-m.md)
 
 ## Pipeline Pending
 
