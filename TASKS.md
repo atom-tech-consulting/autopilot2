@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-430** **Flip auto_approve to default-on framework-wide: autonomous-by-default, operators opt OUT (was opt-in default-off)** `#autopilot` `#auto_approve` `#components` `#registry` `#config` `#posture` `#distribution` [→ brief](.cc-autopilot/tasks/flip-auto-approve-to-default-on-framewor.md)
 
 ## Pipeline Pending
 
