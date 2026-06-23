@@ -50,7 +50,7 @@ import os
 import sys
 import time
 
-from ap2 import events, goal
+from ap2 import _shared, events, goal
 from ap2 import ideation as _ideation_core
 from ap2 import ideation_halt as _ideation_halt_core
 from ap2.config import Config
@@ -156,12 +156,19 @@ def _ideation_disabled(cfg: "Config | None" = None) -> bool:
     flat-env > TOML-snapshot > schema-default precedence chain. TB-346
     dropped the redundant inline ``default=""`` so the resolver's
     schema-default backstop (``CORE_CONFIG_SCHEMA["ideation_disabled"]``
-    → ``False``) is the single source of truth; behavior is unchanged
-    because the unset path already falsy-collapses to ``""`` below.
-    Truthy parse preserves the historical shape
-    ``.strip() in ("1", "true", "yes")`` (case-sensitive — matches
-    `_is_auto_approve_enabled` and the pre-TB-335 inline read at the
-    `_maybe_ideate` entry point).
+    → ``False``) is the single source of truth.
+
+    TB-428: the truthy parse now routes through the canonical
+    ``ap2._shared.is_truthy`` (bool-safe + case-insensitive) instead of
+    the pre-TB-428 ``str(... or "").strip() in ("1", "true", "yes")``
+    shape. That old shape stringified BEFORE a lowercase-only membership
+    test, so a TOML ``[core] ideation_disabled = true`` — which
+    ``get_core_value`` returns as the Python bool ``True`` — became
+    ``str(True)`` → ``"True"`` and silently failed the lowercase set,
+    reading the gate as NOT disabled even though the operator set the
+    documented key. The shared helper short-circuits a real bool and
+    lowercases string forms, so both ``True`` and ``"True"`` now engage
+    the gate. The truthy vocabulary and unset→False default are unchanged.
 
     Default ``cfg=None`` preserves the legacy env-read fallback so
     test callers that ``monkeypatch.setenv("AP2_IDEATION_DISABLED",
@@ -174,14 +181,12 @@ def _ideation_disabled(cfg: "Config | None" = None) -> bool:
             f"got {type(cfg).__name__}",
         )
     if cfg is not None:
-        raw = str(
-            cfg.get_core_value("ideation_disabled") or "",
-        )
+        raw = cfg.get_core_value("ideation_disabled")
     else:
         # Legacy fallback (TB-335 back-compat shape — `os.getenv` for
         # cross-package grep-gate hygiene; see `_cooldown_s`).
-        raw = os.getenv("AP2_IDEATION_DISABLED", "") or ""
-    return raw.strip() in ("1", "true", "yes")
+        raw = os.getenv("AP2_IDEATION_DISABLED")
+    return _shared.is_truthy(raw)
 
 
 # ============================================================================

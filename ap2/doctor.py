@@ -124,10 +124,18 @@ def _parse_positive_int(raw: str) -> int:
     return v if v > 0 else 0
 
 
-def _truthy(raw: str) -> bool:
-    """Same shape as the daemon's `_truthy` env parse for
-    `AP2_AUTO_APPROVE` (`1` / `true` / `yes`, case-insensitive)."""
-    return (raw or "").strip().lower() in ("1", "true", "yes")
+def _truthy(raw: object) -> bool:
+    """Bool-safe, case-insensitive truthy parse for the auto-approve /
+    auto-unfreeze audits (`1` / `true` / `yes`).
+
+    TB-428: delegates to the canonical `ap2._shared.is_truthy` so every
+    component gate shares ONE parse. Behavior here is unchanged (this
+    audit already lowercased + its callers stringified the cfg value),
+    but routing through the shared helper keeps doctor on the same
+    implementation as the live gates it pre-flights."""
+    from ._shared import is_truthy
+
+    return is_truthy(raw)
 
 
 def auto_approve_audit(cfg: Config | None = None) -> AuditResult:

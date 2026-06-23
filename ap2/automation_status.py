@@ -30,7 +30,7 @@ import json as _json
 import os
 from typing import TYPE_CHECKING
 
-from . import events
+from . import _shared, events
 from .adapters.base import AgentUsage
 
 if TYPE_CHECKING:
@@ -84,24 +84,23 @@ _PAUSE_REASON_ACK_VERB: dict[str, str] = {
 
 
 def _is_truthy(raw: object) -> bool:
-    """Same truthy-set as `ideation._is_auto_approve_enabled` (TB-223).
+    """Same truthy-set as the other component on/off gates (TB-223).
 
-    Aliased here rather than imported to keep this module's import graph
-    free of `ap2.ideation` (which pulls in board / events / goal —
-    overkill for a status aggregator that the CLI and web both import
-    on every request).
+    TB-428: delegates to the canonical `ap2._shared.is_truthy` so every
+    component gate shares ONE bool-safe + case-insensitive parse and the
+    behavior can't drift between modules again. This wrapper is kept (as
+    a thin forward) because several call sites + a TB-332 test docstring
+    reference the `_is_truthy` name.
 
     TB-332: accepts a non-string value (typed bool from a cfg TOML
     snapshot — `[components.auto_approve] enabled = false` populates
     `cfg.components_config["auto_approve"]["enabled"]` as Python's
-    bool `False`). The pre-migration env-only contract handed this
-    helper either a string or `None`; the cfg-read path may hand it a
-    typed bool — short-circuit to the bool's value to preserve the
-    pre-migration "is the operator-tunable truthy" semantics.
+    bool `False`) — the shared helper short-circuits on a real bool.
+    Pre-TB-428 this wrapper's membership test was case-SENSITIVE, so a
+    string `"True"` (e.g. a sectioned-env `AP2_COMPONENTS_..._ENABLED=True`)
+    silently read False; the shared helper lowercases first, fixing that.
     """
-    if isinstance(raw, bool):
-        return raw
-    return (raw or "").strip() in ("1", "true", "yes")
+    return _shared.is_truthy(raw)
 
 
 def _is_auto_approve_dry_run(cfg: "Config | None" = None) -> bool:

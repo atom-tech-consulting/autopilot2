@@ -172,10 +172,12 @@ def _auto_unfreeze_dry_run(cfg: Config) -> bool:
     real patching.
 
     Default unset → False (current TB-225 behavior; byte-identical to
-    pre-TB-233 when the knob has never been set). Permissive parse
-    mirrors the boolean shape used by `_is_truthy` in
-    `automation_status.py` so operators tuning the autopilot env file
-    see one consistent convention across knobs.
+    pre-TB-233 when the knob has never been set). TB-428: the truthy
+    parse now routes through the canonical `ap2._shared.is_truthy`
+    (bool-safe + case-insensitive) so every component gate shares ONE
+    implementation. This helper was already bool-safe + lowercasing, so
+    behavior is unchanged — the change only converges it onto the
+    shared helper so the gate can't drift from its siblings.
 
     Resolution shape (TB-327): routes through
     `cfg.get_component_value("auto_unfreeze", "dry_run")` so the flat
@@ -184,12 +186,7 @@ def _auto_unfreeze_dry_run(cfg: Config) -> bool:
     `[components.auto_unfreeze] dry_run = true` TOML value flows
     through the same call when no env override is live.
     """
-    raw = cfg.get_component_value("auto_unfreeze", "dry_run")
-    if isinstance(raw, bool):
-        return raw
-    if raw is None:
-        return False
-    return str(raw).strip().lower() in ("1", "true", "yes")
+    return _shared.is_truthy(cfg.get_component_value("auto_unfreeze", "dry_run"))
 
 
 def _auto_unfreeze_max_per_task(cfg: Config) -> int:

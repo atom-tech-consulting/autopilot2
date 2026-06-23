@@ -116,6 +116,34 @@ def short(v: Any, limit: int) -> str:
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
+def is_truthy(raw: object) -> bool:
+    """Canonical bool-safe, case-insensitive truthy parse for component
+    on/off gates (TB-428).
+
+    A real ``bool`` short-circuits to itself — that is the shape a
+    ``config.toml`` ``enabled = true`` takes once parsed:
+    ``cfg.get_component_value(...)`` (and ``get_core_value``) hand the
+    gate back Python's ``True`` / ``False``, NOT the string ``"true"``.
+    The pre-TB-428 per-module copies stringified first
+    (``str(True)`` → ``"True"``) and then ran a lowercase-only membership
+    test, so the capital-T form silently fell out of the truthy set and
+    the gate read ``False`` even though the operator had set the
+    documented key. Here a bool is honored directly, and anything else is
+    stringified, stripped, lowercased, and tested against the permissive
+    ``{"1", "true", "yes"}`` set — so ``"True"`` now reads truthy and
+    ``None`` / ``""`` / unset collapse to ``False``.
+
+    Unifies the five drifting copies (``auto_approve`` / ``ideation`` /
+    ``auto_unfreeze`` / ``doctor`` / ``automation_status``) so the
+    behavior can't diverge again. The truthy vocabulary
+    (``1`` / ``true`` / ``yes``) and the unset→False default are
+    UNCHANGED; this only ADDS bool-safety + case-insensitivity.
+    """
+    if isinstance(raw, bool):
+        return raw
+    return str(raw or "").strip().lower() in ("1", "true", "yes")
+
+
 def now() -> str:
     """Return the current UTC time as an ISO-8601 string with `Z` suffix.
 
