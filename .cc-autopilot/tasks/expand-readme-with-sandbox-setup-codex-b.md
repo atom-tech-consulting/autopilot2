@@ -47,3 +47,10 @@ Why now: the project is mid-execution on its current focus — **cut a public so
 - Touching `ap2/README.md` (the package-internal operator reference) — this task is the top-level README only.
 - Adding diagrams or screenshots — text-only additions.
 - Changing the existing "## How it works" loop diagram or the auto-approve safety callout — leave them as-is.
+## Attempts
+
+### 2026-06-24 — verification_failed
+(no summary)
+- **kind:** per_task
+- **failed_criteria:** [fail] `README.md` Prose: the new Components section lists each currently-registered loop-level daemon component (ideation, dis
+- **Debug dumps:** `prompt: .cc-autopilot/debug/20260624T051440Z-TB-432.prompt.md`, `stream: .cc-autopilot/debug/20260624T051440Z-TB-432.stream.jsonl`, `messages: .cc-autopilot/debug/20260624T051440Z-TB-432.messages.jsonl`
