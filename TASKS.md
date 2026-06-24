@@ -8,6 +8,7 @@
 
 ## Backlog
 
+- [ ] **TB-432** **Expand README with sandbox setup, Codex backend, and components sections** `#docs` `#onboarding` `#readme` `#distribution` [→ brief](.cc-autopilot/tasks/expand-readme-with-sandbox-setup-codex-b.md)
 
 ## Pipeline Pending
 
