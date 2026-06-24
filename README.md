@@ -271,11 +271,14 @@ guide (default suite + real-SDK smokes).
 
 ## License
 
-Licensed under the **PolyForm Noncommercial License 1.0.0** — see
-[LICENSE](LICENSE). This is a source-available, noncommercial license: you may
-read, run, modify, and share the code for any noncommercial purpose, but it is
-**not** OSI-approved open source and does not permit commercial use. See
-<https://polyformproject.org/licenses/noncommercial/1.0.0> for the full terms.
+Licensed under the **Functional Source License, Version 1.1, MIT Future
+License** (`FSL-1.1-MIT`) — see [LICENSE](LICENSE). This is a source-available
+license: you may use, copy, modify, and redistribute the code for any purpose
+**except a Competing Use** (offering it to others as a commercial product or
+service that substitutes for ap2). Internal use, non-commercial education and
+research, and professional services are expressly permitted. Two years after
+each version is released, that version converts to the **MIT license**. See
+<https://fsl.software> for background.
 
 > **Note on the committed `.cc-autopilot/` tree.** This repository ships its own
 > `.cc-autopilot/` directory (board, tasks, progress, events) because ap2

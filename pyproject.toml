@@ -4,7 +4,7 @@ version = "0.3.0"
 description = "External Python daemon that drives a Claude Code project through a list of tasks. Each unit of work runs as a fresh Claude Agent SDK query; shared state lives on disk."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "PolyForm Noncommercial License 1.0.0" }
+license = { text = "FSL-1.1-MIT" }
 authors = [{ name = "Atom Tech Consulting", email = "ap2@atomtechconsulting.com" }]
 classifiers = [
     "Development Status :: 4 - Beta",
