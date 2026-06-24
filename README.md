@@ -171,6 +171,79 @@ For long-running work (>5 min) and OS-level isolation, see the
 run as a separate OS user (`claude-agent`) so its tools can't reach your
 home, keychain, or other repos.
 
+## Sandbox setup
+
+For unattended or long-running use, run ap2 as a dedicated, credential-isolated
+OS user rather than your own account. Two `ap2 sandbox` subcommands do the
+provisioning:
+
+```bash
+# 1. Create the locked-down OS user (the positional defaults to `claude-agent`).
+#    Prints the exact sudo plan and prompts before running it, then prompts to
+#    install CLAUDE_CODE_OAUTH_TOKEN into the user's ~/.zshenv.
+ap2 sandbox user-setup claude-agent
+
+# 2. Clone your repo into that user's ~/repos/ — the isolated working copy the
+#    daemon drives (it commits there, never in your own tree).
+ap2 sandbox project-setup /path/to/your/repo --user claude-agent
+```
+
+`user-setup` provisions a passwordless, login-disabled account whose home holds
+none of your keys, keychain, or other repos, so an agent's shell tools can't
+reach beyond the sandbox. `project-setup` gives that user its own clone. The
+companion verbs — `user-audit`, `project-audit`, `install-token`, `install-mm`,
+`install-channel`, `sync-assets` — verify the isolation and deploy
+credentials/assets (`ap2 sandbox --help` lists them all). The end-to-end runbook
+(launchd/systemd units, resource limits, the audit checklist) lives in
+[sandboxed-user-setup.md](sandboxed-user-setup.md).
+
+## Codex backend
+
+Every agent dispatch uses the Claude Code backend (`query()`) by default, authed
+by the `CLAUDE_CODE_OAUTH_TOKEN` from Install. ap2 can also route individual
+agent kinds to **OpenAI Codex**. Install the `[codex]` extra, then pick the
+backend per kind:
+
+```bash
+# Install the optional backend
+uv tool install 'autopilot2[codex] @ git+https://github.com/atom-tech-consulting/autopilot2'
+
+# Route a kind to codex via env override (highest precedence)…
+export AP2_AGENT_BACKEND_TASK=codex          # task agents run on codex; others stay claude
+
+# …or persist it in .cc-autopilot/config.toml:
+#   [agent_backends]
+#   task = "codex"
+```
+
+Selection is per **agent kind** (`task`, `ideation`, `status_report`, `cron`,
+`mattermost`, plus the judge/scrub kinds); any unset kind falls back to
+`claude`. Auth follows the resolved backend: claude-backed kinds need
+`CLAUDE_CODE_OAUTH_TOKEN`; codex-backed kinds need **either** `OPENAI_API_KEY`
+(metered OpenAI billing) **or** a codex ChatGPT-login session on disk
+(`$CODEX_HOME/auth.json`, default `~/.codex/auth.json`). The daemon-start auth
+gate checks whichever credentials your backend set implies. Keep the default
+Claude backend unless you specifically want OpenAI models for a kind, or want to
+split work across both providers.
+
+## Components
+
+The daemon loop runs a handful of cooperating components — the same names you
+see in `ap2 status` and the web UI:
+
+- **ideation** — proposes goal-aligned tasks from `goal.md` into Backlog (`ap2 ideate`; `ideation_*` events).
+- **dispatch** — runs each ready task as a fresh agent (`run_task`); the Active line in `ap2 status`, `task_solve` / `task_complete` events.
+- **verifier** — runs the task's `## Verification` bullets (shell bullets + prose judge) plus the project-wide test gate; `task_verify` events.
+- **auto-approve** — promotes Backlog proposals to dispatch unattended (the `auto-approve:` status line; opt out to gate each on `ap2 approve`).
+- **operator queue** — applies operator-staged board ops each tick; the `operator_queue_drained` lines in `ap2 status` / events.
+- **status report** — cron-scheduled board-snapshot agent (the `status-report` job and its events).
+- **janitor** — cron-scheduled repo-hygiene scan; surfaces findings in `events.jsonl`.
+- **web UI** — the read-only dashboard at `http://127.0.0.1:8729/` (the `web:` line; `AP2_WEB_DISABLED=1` to opt out).
+- **Mattermost handler** — answers inbound chat ops when a channel is wired up (the communication component).
+
+See [ap2/architecture.md](ap2/architecture.md) for the full component model
+(the registry, manifests, and tick phases behind these names).
+
 ## What's in this repo
 
 ```
