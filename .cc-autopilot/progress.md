@@ -1773,3 +1773,9 @@
 - **Summary:** Rewrote the repo-root README quickstart for the TB-430 default-on flip: the "How it works" diagram/prose now show auto-approve ON by default (ideation->auto-approved->dispatch) with manual approval framed as the opt-out, path (a) drops `ap2 approve TB-1` and documents the opt-out knobs (AP2_AUTO_APPROVE_DISABLED / [components.auto_approve] disabled=true / dry_run=true, spellings cross-checked against the auto_approve manifest + ap2/README.md), and a prominent caution flags that a bare `ap2 start` runs agents unattended as your own user on the no-sandbox path with the sandbox runbook recommended for unattended use.
 - **Files:** README.md
 - **Tests:** pass
+
+## [2026-06-24] TB-432: Expand README with sandbox setup, Codex backend, and components sections
+- **Commit:** `6be8daa`
+- **Summary:** Fixed the failing TB-432 retry: reworked the README Components section so it enumerates the seven actual registry-discovered components by their manifest names (attention, auto_approve, auto_unfreeze, communication, cron, ideation, janitor — matching ap2 status's ## Components block and architecture.md), then lists dispatch/verifier/operator queue/status report/web UI separately as core loop stages rather than mislabeling them as components; all six grep verification bullets pass and every human-facing name the prose bullet enumerates is still covered.
+- **Files:** README.md
+- **Tests:** pass

@@ -8,7 +8,6 @@
 
 ## Backlog
 
-- [ ] **TB-432** **Expand README with sandbox setup, Codex backend, and components sections** `#docs` `#onboarding` `#readme` `#distribution` [→ brief](.cc-autopilot/tasks/expand-readme-with-sandbox-setup-codex-b.md)
 
 ## Pipeline Pending
 
@@ -313,5 +312,6 @@
 - [x] **TB-429** **Route `Manifest.is_enabled` to each component's ACTUAL enablement config source: ideation is core-keyed (`[core] ideation_disabled`) but is_enabled reads `[components.ideation]`, so status disagrees with the gate** `#autopilot` `#config` `#registry` `#ideation` `#components` `#bug` `#status-drift` [→ brief](.cc-autopilot/tasks/route-manifest-is-enabled-to-each-compon.md)
 - [x] **TB-430** **Flip auto_approve to default-on framework-wide: autonomous-by-default, operators opt OUT (was opt-in default-off)** `#autopilot` `#auto_approve` `#components` `#registry` `#config` `#posture` `#distribution` [→ brief](.cc-autopilot/tasks/flip-auto-approve-to-default-on-framewor.md)
 - [x] **TB-431** **Update the top-level README quickstart for auto-approve-on-by-default + the no-sandbox safety tradeoff** `#autopilot` `#docs` `#readme` `#quickstart` `#auto_approve` `#distribution` `@blocked:TB-430` [→ brief](.cc-autopilot/tasks/update-the-top-level-readme-quickstart-f.md)
+- [x] **TB-432** **Expand README with sandbox setup, Codex backend, and components sections** `#docs` `#onboarding` `#readme` `#distribution` [→ brief](.cc-autopilot/tasks/expand-readme-with-sandbox-setup-codex-b.md)
 
 ## Frozen
