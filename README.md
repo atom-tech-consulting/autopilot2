@@ -228,18 +228,27 @@ split work across both providers.
 
 ## Components
 
-The daemon loop runs a handful of cooperating components — the same names you
-see in `ap2 status` and the web UI:
+Most of the daemon tick is built from **components** — opt-in subpackages
+discovered through a registry (`ap2/components/<name>/manifest.py`, no hardcoded
+list in core). These seven are exactly the names `ap2 status`'s `## Components`
+block enumerates, each with its own enable/disable knob:
 
-- **ideation** — proposes goal-aligned tasks from `goal.md` into Backlog (`ap2 ideate`; `ideation_*` events).
-- **dispatch** — runs each ready task as a fresh agent (`run_task`); the Active line in `ap2 status`, `task_solve` / `task_complete` events.
+- **ideation** — proposes goal-aligned tasks from `goal.md` into Backlog (`Phase.IDEATION`; `ideation_*` events; `ap2 ideate`).
+- **auto_approve** — promotes Backlog proposals to dispatch unattended; ON by default, opt out with `AP2_AUTO_APPROVE_DISABLED` (the `auto-approve:` status line).
+- **auto_unfreeze** — re-dispatches a frozen task when its briefing carries a known fix-shape, instead of waiting for `ap2 unfreeze` (`Phase.PRE_DISPATCH`).
+- **cron** — the scheduler: fires due jobs and emits the `cron_*` lifecycle events (the `cron: N jobs` line in `ap2 status`).
+- **janitor** — a repo-hygiene scan run as a cron job; surfaces findings in `events.jsonl`.
+- **communication** — owns inbound + outbound chat; the **Mattermost handler** answers operator ops in a wired-up channel, and outbound `ap2.notify` deliveries flow here (always-on).
+- **attention** — emits operator-attention signals (`task_stuck` / `task_frozen` / …) — the "decisions needed" lines in `ap2 status` (always-on).
+
+A few more loop participants are core stages and surfaces (not registry
+components), but you meet them in `ap2 status` and the web UI all the same:
+
+- **dispatch** — runs each ready task as a fresh agent (`run_task`); the Active line, `task_solve` / `task_complete` events.
 - **verifier** — runs the task's `## Verification` bullets (shell bullets + prose judge) plus the project-wide test gate; `task_verify` events.
-- **auto-approve** — promotes Backlog proposals to dispatch unattended (the `auto-approve:` status line; opt out to gate each on `ap2 approve`).
-- **operator queue** — applies operator-staged board ops each tick; the `operator_queue_drained` lines in `ap2 status` / events.
-- **status report** — cron-scheduled board-snapshot agent (the `status-report` job and its events).
-- **janitor** — cron-scheduled repo-hygiene scan; surfaces findings in `events.jsonl`.
+- **operator queue** — applies operator-staged board ops each tick (the `operator_queue_drained` lines).
+- **status report** — a cron job (behind the `cron` component) that posts a board snapshot (the `status-report` job and its events).
 - **web UI** — the read-only dashboard at `http://127.0.0.1:8729/` (the `web:` line; `AP2_WEB_DISABLED=1` to opt out).
-- **Mattermost handler** — answers inbound chat ops when a channel is wired up (the communication component).
 
 See [ap2/architecture.md](ap2/architecture.md) for the full component model
 (the registry, manifests, and tick phases behind these names).
