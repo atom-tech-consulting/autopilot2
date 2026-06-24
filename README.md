@@ -43,6 +43,40 @@ judgment calls that remain — triaging a frozen task, steering `goal.md`. If yo
 want a human check before each dispatch, re-insert a manual approval gate by
 opting out of auto-approve (see the quickstart below).
 
+## Agent skills (agent-first operation)
+
+ap2 is **agent-first**: its operator manual ships as auto-triggered
+agentskills.io `SKILL.md` bundles, not just CLI man pages. The intended way to
+drive the board is to talk to a **Claude Code or Codex** session — it loads the
+right skill on its own and runs the verbs for you, so you never memorize CLI
+flags or briefing structure.
+
+The skills live as installed package data, so one command deploys them:
+
+```bash
+ap2 sandbox sync-assets        # copies the SKILL.md bundles into the runtime skills roots
+```
+
+Once `sync-assets` has run — after any install, including a bare `uv tool
+install` — a Claude Code or Codex session opened inside an ap2-managed project
+picks the bundles up automatically. No per-task setup, no flag-hunting: you ask
+in plain language and the agent reads the matching skill and operates ap2 for
+you. For example:
+
+- *"What's frozen and why?"* → the agent loads `ap2-failure-recovery`, reads the
+  board, and explains the freeze + the fix-shape.
+- *"Queue a task to extract the parser in foo.py."* → it loads `ap2-task`,
+  authors a briefing with the structure the verifier expects, and runs `ap2 add`.
+- *"Is the daemon healthy?"* → it loads `ap2-observability` and reads
+  `ap2 status` / the event stream for you.
+
+The bundles cover the whole operator surface — daemon snapshot (`/ap2`), the
+task-agent contract (`ap2-task`), board ops (`ap2-board-ops`), config
+(`ap2-config`), observability (`ap2-observability`), failure recovery
+(`ap2-failure-recovery`), goal authoring (`ap2-ideation-goals`), and legacy
+migration (`migrate-to-ap2`). See [What's in this repo](#whats-in-this-repo) for
+the per-bundle map and [ap2/skills/](ap2/skills/) for the bundles themselves.
+
 ## Install
 
 Requires Python 3.11+ and an Anthropic OAuth token (`claude setup-token`
@@ -73,33 +107,36 @@ extra (e.g. `uv tool install 'autopilot2[codex] @ git+…'`).
 > OS isolation. For unattended or long-running use, run ap2 under the
 > separate-user [sandbox runbook](sandboxed-user-setup.md) (its own OS user, tool
 > isolation). First time out, keep a human in the loop with the review gate or
-> dry-run shown in path (a) below.
+> dry-run shown below.
 
 ```bash
 cd /path/to/your/repo
 ap2 init        # scaffolds goal.md, TASKS.md, and .cc-autopilot/
 
-# 1. Declare the goal — the step that matters most. Edit goal.md: a Mission
-#    line, a `## Done when` checklist, and a `## Current focus`. ap2 reads it
-#    every cycle to decide what to propose and when the goal is met.
-$EDITOR goal.md
-
 export CLAUDE_CODE_OAUTH_TOKEN=...   # required — obtain via `claude setup-token`
 ap2 start                            # daemon starts in the background
+
+# Deploy the operator skills so you can drive ap2 agent-first (see "Agent skills"
+# below) — a Claude Code or Codex session in this project then picks them up.
+ap2 sandbox sync-assets
 ```
 
-Then get work onto the board — two ways:
+Now do the rest **agent-first**: open a Claude Code or Codex session in the repo
+and let it drive.
 
-**(a) Let ap2 propose it from `goal.md`** (the autonomous path):
+- **Declare the goal** — the step that matters most. Ask the agent to draft
+  `goal.md` (a Mission line, a `## Done when` checklist, a `## Current focus`)
+  from a sentence or two about what you're building; it loads `ap2-ideation-goals`
+  and writes it in the shape ap2 reads each cycle. Review and tweak.
+- **Let ap2 propose work** — the autonomous path. `ap2 ideate` runs an ideation
+  cycle now (it also fires on its own); proposals land in Backlog, and because
+  auto-approve is **ON by default** they're approved and dispatched without you.
+- **Or queue a one-off task** — just ask the agent ("queue a task to …"); it
+  loads `ap2-task` and authors a briefing in the structure the verifier expects,
+  then runs `ap2 add`. No template to copy by hand.
 
-```bash
-ap2 ideate          # run an ideation cycle now (it also fires on its own)
-ap2 status          # proposals land in Backlog, then auto-approve + dispatch
-```
-
-Auto-approve is **ON by default**, so proposals are approved and dispatched on
-their own — there is no manual `ap2 approve` step in the default flow. To keep a
-human review gate instead, opt out before you start (both knobs hot-reload):
+To keep a human review gate instead of autonomous dispatch, opt out before you
+start (both knobs hot-reload):
 
 ```bash
 # Require a manual approval per proposal (opt OUT of autonomous dispatch):
@@ -112,43 +149,6 @@ export AP2_AUTO_APPROVE_DISABLED=1        # or [components.auto_approve] disable
 With the gate on, `ap2 status` marks each proposal pending-review and you
 approve one with `ap2 approve TB-N` → the daemon then dispatches, verifies,
 commits.
-
-**(b) Or author a task yourself.** The briefing must carry the full structure
-the verifier expects — `## Goal` (with a `Why now:` line), `## Scope`,
-`## Design`, `## Verification` (auto-verifiable bullets only), and
-`## Out of scope`. The title comes from the `# H1`:
-
-```bash
-cat > /tmp/refactor-foo.md <<'EOF'
-# Refactor the foo helper
-
-Tags: #refactor
-
-## Goal
-Extract the inline string parsing in `foo()` into a tested helper.
-
-Why now: the parser is duplicated across three call sites and silently drops
-malformed input — this closes that correctness gap before more callers copy it.
-
-## Scope
-- `src/foo.py` (extract the parser), `tests/test_foo.py` (cover it).
-
-## Design
-Move the parse block into `parse_foo(s) -> Foo`; callers use the helper.
-
-## Verification
-- `uv run pytest -q tests/test_foo.py` — the helper's tests pass.
-
-## Out of scope
-- Refactoring the downstream callers.
-EOF
-ap2 add --briefing-file /tmp/refactor-foo.md --skip-goal-alignment
-```
-
-> `--skip-goal-alignment` lets the example run without matching your `goal.md`.
-> For a goal-aligned task, drop it and make the `## Goal` body cite your
-> `## Current focus`. The `ap2-task` skill and `ap2/architecture.md` document
-> the full briefing + `## Verification` bullet rules.
 
 Then watch it run:
 
@@ -166,36 +166,12 @@ entirely with `AP2_WEB_DISABLED=1` (CI/headless). The standalone `ap2 web`
 command stays available for browsing past events when the daemon is not
 running.
 
-For long-running work (>5 min) and OS-level isolation, see the
-[sandbox runbook](sandboxed-user-setup.md) — the daemon is designed to
-run as a separate OS user (`claude-agent`) so its tools can't reach your
-home, keychain, or other repos.
-
-## Sandbox setup
-
-For unattended or long-running use, run ap2 as a dedicated, credential-isolated
-OS user rather than your own account. Two `ap2 sandbox` subcommands do the
-provisioning:
-
-```bash
-# 1. Create the locked-down OS user (the positional defaults to `claude-agent`).
-#    Prints the exact sudo plan and prompts before running it, then prompts to
-#    install CLAUDE_CODE_OAUTH_TOKEN into the user's ~/.zshenv.
-ap2 sandbox user-setup claude-agent
-
-# 2. Clone your repo into that user's ~/repos/ — the isolated working copy the
-#    daemon drives (it commits there, never in your own tree).
-ap2 sandbox project-setup /path/to/your/repo --user claude-agent
-```
-
-`user-setup` provisions a passwordless, login-disabled account whose home holds
-none of your keys, keychain, or other repos, so an agent's shell tools can't
-reach beyond the sandbox. `project-setup` gives that user its own clone. The
-companion verbs — `user-audit`, `project-audit`, `install-token`, `install-mm`,
-`install-channel`, `sync-assets` — verify the isolation and deploy
-credentials/assets (`ap2 sandbox --help` lists them all). The end-to-end runbook
-(launchd/systemd units, resource limits, the audit checklist) lives in
-[sandboxed-user-setup.md](sandboxed-user-setup.md).
+For unattended or long-running work (>5 min) and OS-level isolation, run ap2 as
+a dedicated, credential-isolated OS user (`claude-agent`) rather than your own
+account — its shell tools then can't reach your home, keychain, or other repos.
+The [sandbox setup guide](sandboxed-user-setup.md) walks through it end to end
+(the `ap2 sandbox` provisioning verbs, keeping the daemon running, and verifying
+the isolation).
 
 ## Codex backend
 
